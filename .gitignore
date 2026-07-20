@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.*
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Build & Cache Directories
+.next/
+out/
+build/
+dist/
+.pytest_cache/
+__pycache__/
+*.pyc
+chroma_data/
+
+# Local Configs & Keys
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+*.key
+
+# System & Temp Files
+.DS_Store
+Thumbs.db
+backend/temp/
+frontend/public/downloads/*.pdf
+frontend/public/downloads/*.json
+scratch/
+test_*.pdf
+test_*.json
+test_mangal.pdf
+test_mangal_bold.pdf
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

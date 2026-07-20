@@ -1,0 +1,99 @@
+class GeminiService {
+    static async chat(message, history = [], fileContent = null, mode = 'project') {
+        try {
+            const API_KEY = process.env.GEMINI_API_KEY;
+            if (!API_KEY || API_KEY === 'your_gemini_key') {
+                console.error('❌ GEMINI API Key not found or still default!');
+                return 'Gemini API key set nahi hai. .env file check karo.';
+            }
+
+            const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+            
+            // Build Gemini contents array containing history
+            const contents = [];
+            
+            if (history && history.length > 0) {
+                history.forEach(item => {
+                    contents.push({
+                        role: item.role === 'assistant' ? 'model' : 'user',
+                        parts: [{ text: item.content || '' }]
+                    });
+                });
+            }
+            
+            const currentParts = [{ text: message }];
+            if (fileContent) {
+                currentParts.unshift({ text: `File content: ${fileContent}` });
+            }
+            
+            contents.push({
+                role: 'user',
+                parts: currentParts
+            });
+            
+            console.log('🔄 Calling Gemini API...');
+            
+            let systemPrompt = '';
+            if (mode === 'chat') {
+                systemPrompt = `You are AI Dost, a friendly and helpful general coding assistant.
+You are in General Chat Mode.
+- Answer queries, generate images, explain concepts, or write standalone scripts.
+- Speak in a friendly, conversational tone.
+- Do NOT talk about the workspace editor, "Apply Code" buttons, project files, sandbox execution, or Monaco panels. Keep the conversation focused purely on general chat and coding help in the chat itself.
+- PDF Generation: If the user asks you to generate, write, or export a PDF document or research paper, write the content of the PDF and wrap it inside the custom tags '[GENERATE_PDF: Title of Document]' and '[/GENERATE_PDF]'. For example: '[GENERATE_PDF: History of Bihar]\nBihar has a rich history...\n[/GENERATE_PDF]'. The platform will automatically compile it and give the user a clickable download button link.
+Always present yourself as AI Dost, and respond in the user's preferred language (Hindi, Hinglish, English, etc.).`;
+            } else {
+                systemPrompt = `You are AI Dost, a powerful, state-of-the-art engineering companion and collaborative coding environment.
+You are in Project Workspace Mode.
+Here is what you can do and what features are available to the user on this platform:
+1. Multi-file Monaco Code Editor: Write, edit, and read files seamlessly in real-time.
+2. File Explorer: Create, rename, and delete nested files and folders dynamically in a tree structure.
+3. Isolated Code Execution Sandbox: Execute Python, Node.js, and Go scripts securely inside Docker containers with immediate console log outputs.
+4. Intelligent AI Code suggestions: Provide context-aware autocompletions (powered by Hugging Face models) in real-time.
+5. Real-Time Collaboration: Support multi-user collaborative editing, cursor tracking, and presence syncing over raw WebSockets channels.
+6. Git-like Version History: Auto-save snapshots and provide detailed file revision histories.
+7. Profile Settings: Customize themes (vs-dark, vs-light), confidence thresholds, and user credentials.
+8. Image Generation: If the user asks you to generate, draw, or make an image, instruct them to type the command '/image <description>' (for example, '/image a futuristic coding setup') directly into the chat input, and the platform will generate and display the image inline automatically!
+9. Code Integration: If you write or update code, write it inside a markdown code block (e.g. \`\`\`python ... \`\`\`). Remind the user they can click the "Apply Code" button on your message to insert the code directly into their active editor file!
+10. PDF Generation: If the user asks you to generate, write, or export a PDF document or research paper, write the content of the PDF and wrap it inside the custom tags '[GENERATE_PDF: Title of Document]' and '[/GENERATE_PDF]'. For example: '[GENERATE_PDF: History of Bihar]\nBihar has a rich history...\n[/GENERATE_PDF]'. The platform will automatically compile it and give the user a clickable download button link.
+Always present yourself as AI Dost, speak in a friendly and professional tone, and respond in the user's preferred language (Hindi, Hinglish, English, etc.).`;
+            }
+
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    contents: contents,
+                    systemInstruction: {
+                        parts: [{
+                            text: systemPrompt
+                        }]
+                    }
+                })
+            });
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('❌ Gemini API Error:', response.status, errorText);
+                return `Gemini API error (${response.status}): ${errorText}`;
+            }
+
+            const data = await response.json();
+            console.log('✅ Gemini response received');
+
+            if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0]) {
+                return data.candidates[0].content.parts[0].text;
+            } else {
+                console.error('❌ Unexpected Gemini API response structure:', data);
+                return 'Gemini returned an unexpected response. Please try again.';
+            }
+        } catch (error) {
+            console.error('❌ Gemini Service Error:', error.message);
+            return 'Gemini service me error: ' + error.message;
+        }
+    }
+}
+
+module.exports = GeminiService;

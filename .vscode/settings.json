@@ -1,0 +1,4 @@
+{
+    "chat.sessionSync.enabled": true,
+    "chat.planAgent.defaultModel": "deepseek-r1:8b (ollama)"
+}

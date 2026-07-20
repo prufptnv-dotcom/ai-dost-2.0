@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Dost - Your Personal AI Assistant</title>
+    <link rel="stylesheet" href="css/style.css">
+
+    <!-- PDF.js for PDF Reading -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+
+    <!-- Mammoth for DOCX Reading -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.0/mammoth.browser.min.js"></script>
+
+</head>
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <button class="new-chat-btn" onclick="createNewChat()">
+                + New Chat
+            </button>
+        </div>
+        
+        <!-- Chat History -->
+        <div class="chat-history" id="chatHistory">
+            <!-- Yahan pehle ke chats dikhenge -->
+        </div>
+        
+        <!-- User Info -->
+        <div class="user-info">
+            <div class="user-avatar">👤</div>
+            <span>My Account</span>
+        </div>
+    </div>
+
+    <!-- Main Chat Area -->
+    <div class="main-content">
+        <!-- Header -->
+        <header class="chat-header">
+            <button class="sidebar-toggle" onclick="toggleSidebar()">☰</button>
+            <h1>AI Dost</h1>
+            <div class="header-actions">
+                <!-- Dark Mode Toggle -->
+                <button class="theme-toggle" onclick="toggleTheme()">
+                    <span class="light-icon">☀️</span>
+                    <span class="dark-icon">🌙</span>
+                </button>
+                <!-- Settings -->
+                <button class="settings-btn">⚙️</button>
+            </div>
+        </header>
+
+        <!-- Chat Container -->
+        <div class="chat-container" id="chatContainer">
+            <!-- Welcome Screen -->
+            <div class="welcome-screen" id="welcomeScreen">
+                <h2>AI Dost - Your Personal Assistant</h2>
+                <p>Chat, Code, Create, Analyze - All in One Place</p>
+                
+                <!-- Feature Cards -->
+                <div class="feature-grid">
+                    <div class="feature-card" onclick="startChat('code')">
+                        <span class="icon">💻</span>
+                        <h3>Code Helper</h3>
+                        <p>Debug, write, explain code</p>
+                    </div>
+                    <div class="feature-card" onclick="startChat('write')">
+                        <span class="icon">✍️</span>
+                        <h3>Content Writer</h3>
+                        <p>Blogs, scripts, stories</p>
+                    </div>
+                    <div class="feature-card" onclick="startChat('image')">
+                        <span class="icon">🎨</span>
+                        <h3>Image Creator</h3>
+                        <p>Generate amazing images</p>
+                    </div>
+                    <div class="feature-card" onclick="startChat('analyze')">
+                        <span class="icon">📊</span>
+                        <h3>File Analyzer</h3>
+                        <p>PDF, DOCS, Images</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Messages Area -->
+            <div class="messages" id="messages"></div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="input-area">
+            <!-- File Upload Button -->
+            <div class="input-actions">
+                <label for="fileUpload" class="file-upload-btn">
+                    📎
+                    <input type="file" id="fileUpload" multiple hidden
+                        accept=".pdf,.doc,.docx,.txt,.jpg,.png,.webp"
+                        onchange="handleFileUpload(event)">
+                </label>
+                
+                <!-- Voice Input Button -->
+                <button class="voice-btn" id="voiceBtn" onclick="toggleVoiceInput()">
+                    🎤
+                </button>
+                
+                <!-- Web Search Toggle -->
+                <button class="web-search-btn" id="webSearchBtn" onclick="toggleWebSearch()">
+                    🌐
+                </button>
+            </div>
+
+            <!-- Text Input -->
+            <div class="input-box">
+                <textarea 
+                    id="userInput" 
+                    placeholder="Message AI Dost..." 
+                    rows="1"
+                    onkeydown="handleKeyPress(event)"
+                ></textarea>
+                <button class="send-btn" onclick="sendMessage()">
+                    <span>↑</span>
+                </button>
+            </div>
+
+            <!-- AI Model Selector -->
+            <div class="model-selector">
+                <select id="aiModel" onchange="changeModel()">
+                    <option value="auto">Auto (Best)</option>
+                    <option value="groq">Groq (Fastest)</option>
+                    <option value="gemini">Gemini (Google)</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="huggingface">Hugging Face (Free)</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/storage.js"></script>
+    <script src="js/theme.js"></script>
+    <script src="js/voice.js"></script>
+    <script src="js/fileHandler.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

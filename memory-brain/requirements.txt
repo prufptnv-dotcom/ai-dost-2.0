@@ -1,0 +1,35 @@
+# FastAPI Core
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# Database
+motor==3.3.2          # Async MongoDB driver for FastAPI
+pymongo[srv]==4.6.1    # MongoDB client
+redis==5.0.1           # Redis for caching
+hiredis==2.3.2         # Faster Redis parser (C wrapper)
+
+# Vector Database
+chromadb==0.4.22       # Local vector store
+sentence-transformers>=2.7.0  # Embeddings generation
+numpy==1.26.4          # Ensure compatibility with older chromadb
+
+# Validation
+pydantic==2.5.3        # Data validation
+pydantic-settings==2.1.0  # Env variables
+
+# Utilities
+python-dotenv==1.0.0   # .env file reader
+httpx==0.26.0          # Async HTTP client
+python-multipart==0.0.6  # File upload support
+
+# Development
+pytest==8.0.0
+pytest-asyncio>=0.23.5
+black>=24.0.0          # Code formatting
+
+# Authentication
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Sandbox Execution
+docker==7.0.0

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Direct API Test</title>
+</head>
+<body>
+    <h1>Direct API Testing (No Backend)</h1>
+    
+    <div>
+        <h2>Test Groq Directly</h2>
+        <textarea id="groqMessage" rows="3" cols="50">Hello, how are you?</textarea><br>
+        <input id="groqKey" type="password" placeholder="Enter your GROQ API key"><br>
+        <button onclick="testGroqDirect()">Test Groq Direct</button>
+        <pre id="groqResult"></pre>
+    </div>
+    
+    <div>
+        <h2>Test Pollinations AI (Free Images)</h2>
+        <input id="imagePrompt" placeholder="Enter image prompt"><br>
+        <button onclick="testImage()">Generate Image</button>
+        <div id="imageResult"></div>
+    </div>
+
+    <script>
+        async function testGroqDirect() {
+            const key = document.getElementById('groqKey').value;
+            const message = document.getElementById('groqMessage').value;
+            
+            const result = document.getElementById('groqResult');
+            result.textContent = 'Loading...';
+            
+            try {
+                const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + key,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: 'mixtral-8x7b-32768',
+                        messages: [{ role: 'user', content: message }]
+                    })
+                });
+                
+                const data = await response.json();
+                result.textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                result.textContent = 'Error: ' + error.message;
+            }
+        }
+        
+        function testImage() {
+            const prompt = document.getElementById('imagePrompt').value;
+            const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`;
+            
+            document.getElementById('imageResult').innerHTML = 
+                `<img src="${url}" style="max-width: 500px;">`;
+        }
+    </script>
+</body>
+</html>
