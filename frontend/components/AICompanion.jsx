@@ -696,8 +696,31 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
     let apiPrompt = textInput;
 
     if (attachedFile) {
+      const getContextLimit = (model) => {
+        switch (model) {
+          case 'groq':
+          case 'deepseek':
+            return 25000;
+          case 'gemini':
+            return 300000;
+          default:
+            return 25000;
+        }
+      };
+
+      const limit = getContextLimit(selectedModel);
+      let fileContent = attachedFile.content || '';
+      
+      if (fileContent.length > limit) {
+        fileContent = fileContent.substring(0, limit) + `\n\n...[Content truncated for model context window limits. Total original length: ${fileContent.length.toLocaleString()} characters]...`;
+        showToast({
+          type: 'warning',
+          message: `File content truncated to ${limit.toLocaleString()} characters to fit AI context window.`
+        });
+      }
+
       displayPrompt = `📎 [Attached: ${attachedFile.name}]\n${textInput}`;
-      apiPrompt = `[Uploaded ${attachedFile.type} file: ${attachedFile.name}]\nContent:\n${attachedFile.content}\n\nUser request: ${textInput}`;
+      apiPrompt = `[Uploaded ${attachedFile.type} file: ${attachedFile.name}]\nContent:\n${fileContent}\n\nUser request: ${textInput}`;
     }
 
     setMessages(prev => [...prev, { text: displayPrompt, sender: 'user', query: textInput || 'General Search' }]);
