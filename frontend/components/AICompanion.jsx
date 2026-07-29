@@ -110,13 +110,13 @@ function MessageContent({ text, onWriteCode, query = '' }) {
           return <div key={i} className="whitespace-pre-wrap break-words">{formatTextWithCitations(part.content, query)}</div>;
         } else {
           return (
-            <div key={i} className="my-2 rounded-lg overflow-hidden border border-secondary/20 bg-black/40 font-mono text-xs">
-              <div className="flex justify-between items-center px-3 py-1.5 bg-secondary/5 border-b border-secondary/15 text-text-secondary">
-                <span>{part.language || 'code'}</span>
+            <div key={i} className="my-2 rounded-xl overflow-hidden border border-white/[0.08] bg-[#0c0c10] font-mono text-xs shadow-inner">
+              <div className="flex justify-between items-center px-3 py-1.5 bg-white/[0.02] border-b border-white/[0.08] text-text-secondary select-none">
+                <span className="capitalize text-[10px] font-bold text-primary">{part.language || 'code'}</span>
                 {onWriteCode && (
                   <button
                     onClick={() => onWriteCode(part.content)}
-                    className="px-2 py-0.5 bg-primary text-bg-default font-bold rounded text-[10px] hover:bg-opacity-80 transition cursor-pointer"
+                    className="px-2 py-0.5 bg-primary/10 border border-primary/20 text-primary font-bold rounded-lg text-[9px] hover:bg-primary hover:text-bg-default transition cursor-pointer"
                   >
                     Apply Code
                   </button>
@@ -1072,7 +1072,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
   };
 
   return (
-    <div className="h-full flex flex-col bg-bg-default rounded-xl border border-secondary/10 overflow-hidden relative">
+    <div className="h-full flex flex-col bg-bg-default/40 backdrop-blur-xl rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden relative animate-fadeIn animate-pulseGlow">
       {/* Fullscreen Document Page View */}
       {activePage && (
         <AIPageView 

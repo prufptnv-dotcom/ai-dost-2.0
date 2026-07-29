@@ -183,7 +183,7 @@ const ProjectWorkspace = () => {
           {/* Center: Workspace Explorer & Monaco Editor */}
           <div className="flex-1 flex gap-6 h-full overflow-hidden min-w-0">
             {/* Internal Project Explorer Panel */}
-            <div className="w-60 bg-bg-hover border border-secondary/10 rounded-xl p-4 shrink-0 flex flex-col h-full overflow-hidden">
+            <div className="w-60 bg-bg-default/45 backdrop-blur-xl border border-white/[0.08] rounded-2xl p-4 shrink-0 flex flex-col h-full overflow-hidden shadow-2xl">
               <FileExplorer 
                 files={projectFiles}
                 currentFile={currentFile}

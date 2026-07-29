@@ -1,14 +1,16 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
 :root {
   --color-primary: #00f5ff;
   --color-secondary: #a000e3;
-  --color-bg-default: #121212;
-  --color-bg-hover: #1a1a1a;
-  --color-text-primary: #ffffff;
-  --color-text-secondary: #b3b3b3;
-  --background: #121212;
-  --foreground: #ffffff;
+  --color-bg-default: #0a0a0c;
+  --color-bg-hover: #121216;
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #94a3b8;
+  --background: #060608;
+  --foreground: #f8fafc;
+  --font-sans: 'Outfit', 'Plus Jakarta Sans', system-ui, sans-serif;
 }
 
 body.light-theme {
@@ -17,7 +19,7 @@ body.light-theme {
   --color-bg-hover: #f1f5f9;
   --color-text-primary: #0f172a;
   --color-text-secondary: #64748b;
-  --background: #f8fafc;
+  --background: #ffffff;
   --foreground: #0f172a;
 }
 
@@ -35,11 +37,33 @@ body.light-theme {
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: 'Inter UI', sans-serif;
+  font-family: var(--font-sans);
   margin: 0;
   padding: 0;
   overflow-x: hidden;
   transition: background-color 0.3s ease, color 0.3s ease;
+  background-image: 
+    radial-gradient(at 0% 0%, rgba(160, 0, 227, 0.05) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(0, 245, 255, 0.04) 0px, transparent 50%);
+}
+
+/* Premium Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 15px rgba(0, 245, 255, 0.05); }
+  50% { box-shadow: 0 0 25px rgba(0, 245, 255, 0.15); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-pulseGlow {
+  animation: pulseGlow 3s infinite ease-in-out;
 }
 
 /* Custom progress bar styles */

@@ -564,9 +564,9 @@ const CodeEditor = ({ initialCode = '', currentFile = '', projectFiles = [], lan
   };
 
   return (
-    <div className="flex flex-col h-full w-full bg-bg-default border border-secondary/10 rounded-xl overflow-hidden relative">
-      <div className="flex items-center p-3 border-b border-secondary/10 bg-bg-hover">
-        <div className="text-xs text-text-secondary font-semibold bg-bg-default border border-secondary/20 px-3 py-2 rounded-lg flex items-center gap-1.5 select-text">
+    <div className="flex flex-col h-full w-full bg-bg-default/45 backdrop-blur-xl border border-white/[0.08] rounded-2xl shadow-2xl overflow-hidden relative animate-fadeIn">
+      <div className="flex items-center p-3 border-b border-white/[0.08] bg-white/[0.02]">
+        <div className="text-xs text-text-secondary font-semibold bg-bg-default/40 border border-white/[0.08] px-3 py-2 rounded-lg flex items-center gap-1.5 select-text">
           <span className="w-2 h-2 rounded-full bg-success animate-pulse" />
           Language: <span className="capitalize font-bold text-primary">{selectedLanguage}</span>
         </div>

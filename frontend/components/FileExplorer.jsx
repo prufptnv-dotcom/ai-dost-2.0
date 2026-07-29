@@ -136,14 +136,14 @@ const FileExplorer = ({ files = [], currentFile = '', onSelectFile, onDeleteFile
           <input 
             type="text" 
             placeholder="src/index.js"
-            className="flex-1 bg-bg-default border border-secondary/30 p-1.5 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-primary text-text-primary"
+            className="flex-1 bg-bg-default/40 border border-white/[0.08] p-1.5 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-primary text-text-primary"
             value={newFileName}
             onChange={(e) => setNewFileName(e.target.value)}
             autoFocus
           />
           <button 
             type="submit" 
-            className="p-1.5 rounded bg-primary text-bg-default hover:bg-opacity-80 text-xs font-semibold cursor-pointer"
+            className="p-1.5 rounded-lg bg-primary/10 border border-primary/20 text-primary hover:bg-primary hover:text-bg-default text-xs font-semibold cursor-pointer transition"
           >
             Add
           </button>
