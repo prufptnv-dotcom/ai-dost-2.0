@@ -20,6 +20,7 @@ const Header = () => {
   const [customGroqKey, setCustomGroqKey] = useState('');
   const [customDeepSeekKey, setCustomDeepSeekKey] = useState('');
   const [customNvidiaKey, setCustomNvidiaKey] = useState('');
+  const [customOpenRouterKey, setCustomOpenRouterKey] = useState('');
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme');
@@ -35,6 +36,7 @@ const Header = () => {
     const savedGroqKey = localStorage.getItem('customGroqKey') || '';
     const savedDeepSeekKey = localStorage.getItem('customDeepSeekKey') || '';
     const savedNvidiaKey = localStorage.getItem('customNvidiaKey') || '';
+    const savedOpenRouterKey = localStorage.getItem('customOpenRouterKey') || '';
     
     setAutoSaveInterval(savedAutoSave);
     setAutocompleteOn(savedAutocomplete);
@@ -42,6 +44,7 @@ const Header = () => {
     setCustomGroqKey(savedGroqKey);
     setCustomDeepSeekKey(savedDeepSeekKey);
     setCustomNvidiaKey(savedNvidiaKey);
+    setCustomOpenRouterKey(savedOpenRouterKey);
   }, []);
 
   const toggleTheme = () => {
@@ -63,6 +66,7 @@ const Header = () => {
     localStorage.setItem('customGroqKey', customGroqKey);
     localStorage.setItem('customDeepSeekKey', customDeepSeekKey);
     localStorage.setItem('customNvidiaKey', customNvidiaKey);
+    localStorage.setItem('customOpenRouterKey', customOpenRouterKey);
     setShowSettings(false);
   };
   
@@ -263,6 +267,17 @@ const Header = () => {
                     placeholder="AI-Dost default key will be used if empty"
                     value={customNvidiaKey}
                     onChange={(e) => setCustomNvidiaKey(e.target.value)}
+                    className="bg-bg-hover text-text-primary border border-secondary/30 rounded-lg p-2 focus:outline-none focus:ring-1 focus:ring-primary text-xs"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-semibold text-text-secondary">OpenRouter API Key</label>
+                  <input
+                    type="password"
+                    placeholder="AI-Dost default key will be used if empty"
+                    value={customOpenRouterKey}
+                    onChange={(e) => setCustomOpenRouterKey(e.target.value)}
                     className="bg-bg-hover text-text-primary border border-secondary/30 rounded-lg p-2 focus:outline-none focus:ring-1 focus:ring-primary text-xs"
                   />
                 </div>

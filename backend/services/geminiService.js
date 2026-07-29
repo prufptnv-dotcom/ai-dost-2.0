@@ -7,7 +7,7 @@ class GeminiService {
                 return 'Gemini API key set nahi hai. settings icon pe click karke apni custom key enter karein.';
             }
 
-            const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+            const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
             
             // Build Gemini contents array containing history
             const contents = [];

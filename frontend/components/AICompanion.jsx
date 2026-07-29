@@ -786,7 +786,8 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         gemini: localStorage.getItem('customGeminiKey') || '',
         groq: localStorage.getItem('customGroqKey') || '',
         deepseek: localStorage.getItem('customDeepSeekKey') || '',
-        nvidia: localStorage.getItem('customNvidiaKey') || ''
+        nvidia: localStorage.getItem('customNvidiaKey') || '',
+        openrouter: localStorage.getItem('customOpenRouterKey') || ''
       };
 
       const requestPayload = {
@@ -935,6 +936,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
             <option value="gemini">♊ Gemini Flash</option>
             <option value="deepseek">🐳 DeepSeek V3</option>
             <option value="nvidia">💚 NVIDIA NIM</option>
+            <option value="openrouter">🪐 OpenRouter</option>
             {localModels.length > 0 && (
               <optgroup label="💻 Local Models (Ollama)">
                 {localModels.map(m => (

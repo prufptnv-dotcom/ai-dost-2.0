@@ -5,6 +5,7 @@ const GeminiService = require('../services/geminiService');
 const DeepSeekService = require('../services/deepseekService');
 const HuggingFaceService = require('../services/huggingfaceService');
 const NvidiaService = require('../services/nvidiaService');
+const OpenRouterService = require('../services/openrouterService');
 
 // Local models list endpoint
 router.get('/local-models', async (req, res) => {
@@ -124,6 +125,11 @@ router.post('/', async (req, res) => {
                 case 'deepseek': {
                     const dsMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${message}` : message;
                     response = await DeepSeekService.chat(dsMsg, cleanHistory, customKeys?.deepseek);
+                    break;
+                }
+                case 'openrouter': {
+                    const orMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${message}` : message;
+                    response = await OpenRouterService.chat(orMsg, cleanHistory, customKeys?.openrouter);
                     break;
                 }
                 case 'huggingface': {
