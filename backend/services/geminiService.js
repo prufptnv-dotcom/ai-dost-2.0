@@ -1,10 +1,10 @@
 class GeminiService {
-    static async chat(message, history = [], fileContent = null, mode = 'project') {
+    static async chat(message, history = [], fileContent = null, mode = 'project', customApiKey = null) {
         try {
-            const API_KEY = process.env.GEMINI_API_KEY;
+            const API_KEY = customApiKey || process.env.GEMINI_API_KEY;
             if (!API_KEY || API_KEY === 'your_gemini_key') {
                 console.error('❌ GEMINI API Key not found or still default!');
-                return 'Gemini API key set nahi hai. .env file check karo.';
+                return 'Gemini API key set nahi hai. settings icon pe click karke apni custom key enter karein.';
             }
 
             const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;

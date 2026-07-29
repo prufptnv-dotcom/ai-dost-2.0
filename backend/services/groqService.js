@@ -1,11 +1,11 @@
 class GroqService {
-    static async chat(message, history = [], mode = 'project') {
+    static async chat(message, history = [], mode = 'project', customApiKey = null) {
         try {
-            const API_KEY = process.env.GROQ_API_KEY;
+            const API_KEY = customApiKey || process.env.GROQ_API_KEY;
             
             if (!API_KEY || API_KEY === 'gsk_your_key_here') {
                 console.error('❌ GROQ API Key not found or still default!');
-                return 'API key set nahi hai. .env file check karo.';
+                return 'Groq API key set nahi hai. settings icon pe click karke apni custom key enter karein.';
             }
             console.log('🔄 Calling Groq API...');
             

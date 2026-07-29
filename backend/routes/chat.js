@@ -8,7 +8,7 @@ const HuggingFaceService = require('../services/huggingfaceService');
 // Main chat endpoint
 router.post('/', async (req, res) => {
     try {
-        const { message, model, section, fileContent, history, mode } = req.body;
+        const { message, model, section, fileContent, history, mode, customKeys } = req.body;
         
         // Clean history: remove extra parameters like timestamp and map role 'ai' to 'assistant'
         const cleanHistory = (history || [])
@@ -24,15 +24,15 @@ router.post('/', async (req, res) => {
         switch(model) {
             case 'groq': {
                 const groqMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${message}` : message;
-                response = await GroqService.chat(groqMsg, cleanHistory, mode);
+                response = await GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq);
                 break;
             }
             case 'gemini':
-                response = await GeminiService.chat(message, cleanHistory, fileContent, mode);
+                response = await GeminiService.chat(message, cleanHistory, fileContent, mode, customKeys?.gemini);
                 break;
             case 'deepseek': {
                 const dsMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${message}` : message;
-                response = await DeepSeekService.chat(dsMsg, cleanHistory, mode);
+                response = await DeepSeekService.chat(dsMsg, cleanHistory, customKeys?.deepseek);
                 break;
             }
             case 'huggingface': {
@@ -42,7 +42,7 @@ router.post('/', async (req, res) => {
             }
             default:
                 // Auto-select best model
-                response = await autoSelectModel(message, section, fileContent, cleanHistory, mode);
+                response = await autoSelectModel(message, section, fileContent, cleanHistory, mode, customKeys);
         }
         
         res.json({
@@ -61,26 +61,26 @@ router.post('/', async (req, res) => {
 });
 
 // Auto select best AI model
-async function autoSelectModel(message, section, fileContent, cleanHistory, mode) {
+async function autoSelectModel(message, section, fileContent, cleanHistory, mode, customKeys = null) {
     // Coding ke liye Groq best hai
     if (section === 'coding') {
         const groqMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${message}` : message;
-        return await GroqService.chat(groqMsg, cleanHistory, mode);
+        return await GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq);
     }
     // Writing ke liye Gemini (with fallback to Groq if key fails)
     else if (section === 'writing') {
-        const response = await GeminiService.chat(message, cleanHistory, fileContent, mode);
+        const response = await GeminiService.chat(message, cleanHistory, fileContent, mode, customKeys?.gemini);
         if (response.startsWith('Gemini API error') || response.startsWith('Gemini service me error') || response.includes('key set nahi hai')) {
             console.log('⚠️ Gemini failed, falling back to Groq');
             const groqMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${message}` : message;
-            return await GroqService.chat(groqMsg, cleanHistory, mode);
+            return await GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq);
         }
         return response;
     }
     // Default to Groq (Since DeepSeek has insufficient balance)
     else {
         const groqMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${message}` : message;
-        return await GroqService.chat(groqMsg, cleanHistory, mode);
+        return await GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq);
     }
 }
 

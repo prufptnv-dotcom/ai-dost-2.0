@@ -766,10 +766,17 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         content: msg.text || ''
       }));
 
+      const customKeys = {
+        gemini: localStorage.getItem('customGeminiKey') || '',
+        groq: localStorage.getItem('customGroqKey') || '',
+        deepseek: localStorage.getItem('customDeepSeekKey') || ''
+      };
+
       const requestPayload = {
         message: apiPrompt,
         mode: mode,
-        history: historyPayload
+        history: historyPayload,
+        customKeys: customKeys
       };
       
       if (selectedModel !== 'auto') {

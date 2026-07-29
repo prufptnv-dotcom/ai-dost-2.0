@@ -1,11 +1,11 @@
 class DeepSeekService {
-    static async chat(message, history = []) {
+    static async chat(message, history = [], customApiKey = null) {
         try {
-            const API_KEY = process.env.DEEPSEEK_API_KEY;
+            const API_KEY = customApiKey || process.env.DEEPSEEK_API_KEY;
             
             if (!API_KEY || API_KEY === 'your_deepseek_key') {
                 console.error('❌ DEEPSEEK API Key not found or still default!');
-                return 'DeepSeek API key set nahi hai. .env file check karo.';
+                return 'DeepSeek API key set nahi hai. settings icon pe click karke apni custom key enter karein.';
             }
 
             const API_URL = 'https://api.deepseek.com/v1/chat/completions';

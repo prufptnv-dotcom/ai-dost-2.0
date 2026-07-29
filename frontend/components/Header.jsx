@@ -16,7 +16,9 @@ const Header = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [autoSaveInterval, setAutoSaveInterval] = useState('10');
   const [autocompleteOn, setAutocompleteOn] = useState(true);
-  const [customKey, setCustomKey] = useState('');
+  const [customGeminiKey, setCustomGeminiKey] = useState('');
+  const [customGroqKey, setCustomGroqKey] = useState('');
+  const [customDeepSeekKey, setCustomDeepSeekKey] = useState('');
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme');
@@ -28,11 +30,15 @@ const Header = () => {
     // Load config states from localStorage
     const savedAutoSave = localStorage.getItem('autoSave') || '10';
     const savedAutocomplete = localStorage.getItem('autocomplete') !== 'false';
-    const savedKey = localStorage.getItem('customGeminiKey') || '';
+    const savedGeminiKey = localStorage.getItem('customGeminiKey') || '';
+    const savedGroqKey = localStorage.getItem('customGroqKey') || '';
+    const savedDeepSeekKey = localStorage.getItem('customDeepSeekKey') || '';
     
     setAutoSaveInterval(savedAutoSave);
     setAutocompleteOn(savedAutocomplete);
-    setCustomKey(savedKey);
+    setCustomGeminiKey(savedGeminiKey);
+    setCustomGroqKey(savedGroqKey);
+    setCustomDeepSeekKey(savedDeepSeekKey);
   }, []);
 
   const toggleTheme = () => {
@@ -50,7 +56,9 @@ const Header = () => {
   const saveSettings = () => {
     localStorage.setItem('autoSave', autoSaveInterval);
     localStorage.setItem('autocomplete', autocompleteOn ? 'true' : 'false');
-    localStorage.setItem('customGeminiKey', customKey);
+    localStorage.setItem('customGeminiKey', customGeminiKey);
+    localStorage.setItem('customGroqKey', customGroqKey);
+    localStorage.setItem('customDeepSeekKey', customDeepSeekKey);
     setShowSettings(false);
   };
   
@@ -207,16 +215,42 @@ const Header = () => {
                 />
               </div>
 
-              {/* Custom API Key */}
-              <div className="flex flex-col gap-1.5">
-                <label className="font-semibold text-text-primary">🔑 Custom Gemini API Key (Optional)</label>
-                <input
-                  type="password"
-                  placeholder="AI-Dost default keys will be used if empty"
-                  value={customKey}
-                  onChange={(e) => setCustomKey(e.target.value)}
-                  className="bg-bg-hover text-text-primary border border-secondary/30 rounded-lg p-2 focus:outline-none focus:ring-1 focus:ring-primary text-xs"
-                />
+              {/* Custom API Keys */}
+              <div className="flex flex-col gap-2.5 pt-2 border-t border-secondary/10">
+                <div className="text-xs font-bold text-primary uppercase tracking-wider">🔑 Custom API Keys (Optional)</div>
+                
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-semibold text-text-secondary">Gemini API Key</label>
+                  <input
+                    type="password"
+                    placeholder="AI-Dost default key will be used if empty"
+                    value={customGeminiKey}
+                    onChange={(e) => setCustomGeminiKey(e.target.value)}
+                    className="bg-bg-hover text-text-primary border border-secondary/30 rounded-lg p-2 focus:outline-none focus:ring-1 focus:ring-primary text-xs"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-semibold text-text-secondary">Groq API Key</label>
+                  <input
+                    type="password"
+                    placeholder="AI-Dost default key will be used if empty"
+                    value={customGroqKey}
+                    onChange={(e) => setCustomGroqKey(e.target.value)}
+                    className="bg-bg-hover text-text-primary border border-secondary/30 rounded-lg p-2 focus:outline-none focus:ring-1 focus:ring-primary text-xs"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-semibold text-text-secondary">DeepSeek API Key</label>
+                  <input
+                    type="password"
+                    placeholder="AI-Dost default key will be used if empty"
+                    value={customDeepSeekKey}
+                    onChange={(e) => setCustomDeepSeekKey(e.target.value)}
+                    className="bg-bg-hover text-text-primary border border-secondary/30 rounded-lg p-2 focus:outline-none focus:ring-1 focus:ring-primary text-xs"
+                  />
+                </div>
               </div>
             </div>
 
