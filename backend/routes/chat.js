@@ -16,13 +16,16 @@ router.get('/local-models', async (req, res) => {
         const data = await response.json();
         
         const formattedModels = (data.models || []).map(m => {
-            const sizeInGB = (m.size / (1024 * 1024 * 1024)).toFixed(2);
+            const sizeInGB = m.size / (1024 * 1024 * 1024);
             let weight = 'Lightweight';
             let category = 'Light (Fast)';
+            
             const paramSize = m.details?.parameter_size || '';
+            let paramNum = 0;
             if (paramSize) {
                 const num = parseFloat(paramSize);
                 if (!isNaN(num)) {
+                    paramNum = num;
                     if (num >= 10) {
                         weight = 'Heavy';
                         category = 'Heavy (Needs GPU)';
@@ -32,12 +35,23 @@ router.get('/local-models', async (req, res) => {
                     }
                 }
             }
+
+            // Guard RTX 4050 (6GB VRAM): Incompatible if parameters > 9.0B or file size > 5.6 GB
+            let isCompatible = true;
+            let warning = '';
+            if (paramNum > 9.0 || sizeInGB > 5.6) {
+                isCompatible = false;
+                warning = '⚠️ Exceeds 6GB VRAM';
+            }
+
             return {
                 id: `local:${m.name}`,
                 name: m.name,
-                size: `${sizeInGB} GB`,
+                size: `${sizeInGB.toFixed(2)} GB`,
                 weight: weight,
                 category: category,
+                isCompatible: isCompatible,
+                warning: warning,
                 details: m.details
             };
         });

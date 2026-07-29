@@ -938,8 +938,13 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
             {localModels.length > 0 && (
               <optgroup label="💻 Local Models (Ollama)">
                 {localModels.map(m => (
-                  <option key={m.id} value={m.id}>
-                    💻 {m.name} ({m.size} - {m.category})
+                  <option 
+                    key={m.id} 
+                    value={m.id}
+                    disabled={!m.isCompatible}
+                    className={!m.isCompatible ? 'opacity-40 line-through text-text-secondary' : ''}
+                  >
+                    💻 {m.name} ({m.size} - {m.isCompatible ? m.category : '⚠️ Requires >6GB VRAM (Disabled)'})
                   </option>
                 ))}
               </optgroup>
