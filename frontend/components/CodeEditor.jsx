@@ -50,12 +50,110 @@ const CodeEditor = ({ initialCode = '', currentFile = '', projectFiles = [], lan
   const [suggestions, setSuggestions] = useState([]);
   const [suggestionPos, setSuggestionPos] = useState(null);
   
+  // AI Selection Edit states
+  const [showAiEdit, setShowAiEdit] = useState(false);
+  const [aiEditPrompt, setAiEditPrompt] = useState('');
+  const [isGeneratingEdit, setIsGeneratingEdit] = useState(false);
+  const [originalCodeSelection, setOriginalCodeSelection] = useState('');
+  const [proposedCodeSelection, setProposedCodeSelection] = useState('');
+  const [aiEditModel, setAiEditModel] = useState('groq');
+
   const { showToast } = useToast();
   const { socket, sendMessage } = useSocket();
   
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
   const suggestionTimeoutRef = useRef(null);
+
+  const handleOpenAiEdit = () => {
+    if (!editorRef.current) {
+      showToast({ type: 'warning', message: 'Editor mount hone ka wait karein!' });
+      return;
+    }
+    const selection = editorRef.current.getSelection();
+    if (!selection || selection.isEmpty()) {
+      showToast({ type: 'warning', message: 'Kripya editor me code select karein jise AI se edit karwana hai!' });
+      return;
+    }
+    const model = editorRef.current.getModel();
+    const selectedText = model.getValueInRange(selection);
+    
+    setOriginalCodeSelection(selectedText);
+    setProposedCodeSelection('');
+    setAiEditPrompt('');
+    setShowAiEdit(true);
+  };
+
+  const handleGenerateAiEdit = async () => {
+    if (!aiEditPrompt.trim()) return;
+    setIsGeneratingEdit(true);
+    try {
+      const customKeys = {
+        gemini: localStorage.getItem('customGeminiKey') || '',
+        groq: localStorage.getItem('customGroqKey') || '',
+        deepseek: localStorage.getItem('customDeepSeekKey') || '',
+        nvidia: localStorage.getItem('customNvidiaKey') || '',
+        openrouter: localStorage.getItem('customOpenRouterKey') || ''
+      };
+
+      const systemInstruction = `You are a precise code refactoring assistant. Modify the following code based on the instructions. Return ONLY the modified code. DO NOT include markdown code blocks (\`\`\`), explanation, or other text.`;
+      
+      const payload = {
+        message: `${systemInstruction}\n\nInstructions: ${aiEditPrompt}\n\nCode to modify:\n${originalCodeSelection}`,
+        model: aiEditModel,
+        mode: 'chat',
+        customKeys: customKeys
+      };
+
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success && data.reply) {
+        let cleanCode = data.reply;
+        if (cleanCode.startsWith('```')) {
+          const firstNewline = cleanCode.indexOf('\n');
+          if (firstNewline !== -1) {
+            cleanCode = cleanCode.substring(firstNewline + 1);
+          }
+          if (cleanCode.endsWith('```')) {
+            cleanCode = cleanCode.substring(0, cleanCode.length - 3);
+          }
+        }
+        setProposedCodeSelection(cleanCode.trim());
+      } else {
+        showToast({ type: 'error', message: data.error || 'Failed to edit code.' });
+      }
+    } catch (error) {
+      console.error('AI Edit failed:', error);
+      showToast({ type: 'error', message: 'Network error occurred while calling AI.' });
+    } finally {
+      setIsGeneratingEdit(false);
+    }
+  };
+
+  const handleApplyAiEdit = () => {
+    if (!editorRef.current || !monacoRef.current) return;
+    const selection = editorRef.current.getSelection();
+    if (!selection) return;
+
+    const range = new monacoRef.current.Range(
+      selection.startLineNumber,
+      selection.startColumn,
+      selection.endLineNumber,
+      selection.endColumn
+    );
+
+    const id = { major: 1, minor: 1 };
+    const text = proposedCodeSelection || originalCodeSelection;
+    const op = { identifier: id, range: range, text: text, forceMoveMarkers: true };
+
+    editorRef.current.executeEdits("ai-edit", [op]);
+    setShowAiEdit(false);
+    showToast({ type: 'success', message: 'AI Code Refactor successfully applied!' });
+  };
 
   useEffect(() => {
     setCode(initialCode);
@@ -481,6 +579,13 @@ const CodeEditor = ({ initialCode = '', currentFile = '', projectFiles = [], lan
         </div>
         <div className="flex items-center ml-auto space-x-2">
           <button 
+            className="flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold border border-secondary/30 text-text-secondary hover:bg-secondary/10 hover:border-primary/50 transition cursor-pointer"
+            onClick={handleOpenAiEdit}
+            title="🪄 AI Refactor Selection"
+          >
+            <span>🪄 AI Edit</span>
+          </button>
+          <button 
             className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold border transition cursor-pointer ${
               showPreview
                 ? 'bg-primary/20 border-primary text-primary' 
@@ -542,6 +647,91 @@ const CodeEditor = ({ initialCode = '', currentFile = '', projectFiles = [], lan
               setSuggestionPos(null);
             }}
           />
+
+          {showAiEdit && (
+            <div className="absolute inset-0 bg-black/90 backdrop-blur-md z-45 flex flex-col p-6 overflow-y-auto select-text text-text-primary">
+              <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-4">
+                <div className="flex items-center gap-2 text-primary font-bold text-sm">
+                  <span>🪄 AI Code Refactor & Edit</span>
+                </div>
+                <button 
+                  onClick={() => setShowAiEdit(false)}
+                  className="text-text-secondary hover:text-text-primary text-xs cursor-pointer"
+                >
+                  ✕ Close
+                </button>
+              </div>
+
+              <div className="flex-1 flex flex-col gap-4">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-text-secondary">Model:</span>
+                  <select 
+                    value={aiEditModel}
+                    onChange={(e) => setAiEditModel(e.target.value)}
+                    className="bg-bg-default text-text-primary border border-secondary/30 rounded p-1 text-[11px] outline-none font-semibold cursor-pointer"
+                  >
+                    <option value="groq">🦙 Groq (Llama 3)</option>
+                    <option value="gemini">♊ Gemini 2.0 Flash</option>
+                    <option value="deepseek">🐳 DeepSeek V3</option>
+                    <option value="nvidia">💚 NVIDIA NIM</option>
+                    <option value="openrouter">🪐 OpenRouter</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs text-text-secondary font-semibold">Instructions:</label>
+                  <textarea
+                    rows="3"
+                    value={aiEditPrompt}
+                    onChange={(e) => setAiEditPrompt(e.target.value)}
+                    placeholder="Enter instructions (e.g., 'optimize this loop', 'convert this to JavaScript', 'add try-catch block'...)"
+                    className="bg-bg-hover border border-secondary/30 text-text-primary rounded-lg p-2.5 text-xs outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 resize-none font-sans"
+                  />
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    onClick={handleGenerateAiEdit}
+                    disabled={isGeneratingEdit || !aiEditPrompt.trim()}
+                    className="px-4 py-2 bg-primary text-bg-default hover:bg-primary/80 disabled:opacity-50 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer"
+                  >
+                    {isGeneratingEdit ? 'Analyzing & Coding...' : '🪄 Generate Code'}
+                  </button>
+                </div>
+
+                {proposedCodeSelection && (
+                  <div className="flex-1 flex flex-col gap-2 min-h-[250px] mt-2">
+                    <div className="text-xs text-success font-semibold">✨ Proposed Replacement Code:</div>
+                    <div className="flex-1 grid grid-cols-2 gap-4 border border-secondary/15 rounded-lg overflow-hidden h-[250px] bg-bg-default">
+                      <div className="flex flex-col h-full overflow-hidden">
+                        <div className="bg-red-500/10 border-b border-red-500/20 px-3 py-1.5 text-[10px] text-red-400 font-bold select-none shrink-0">Original Code</div>
+                        <pre className="flex-1 p-3 bg-red-950/5 text-red-200 text-xs overflow-auto font-mono whitespace-pre text-left">{originalCodeSelection}</pre>
+                      </div>
+                      <div className="flex flex-col h-full border-l border-secondary/15 overflow-hidden">
+                        <div className="bg-success/10 border-b border-success/20 px-3 py-1.5 text-[10px] text-success font-bold select-none shrink-0">Proposed Code</div>
+                        <pre className="flex-1 p-3 bg-success-950/5 text-success-200 text-xs overflow-auto font-mono whitespace-pre text-left">{proposedCodeSelection}</pre>
+                      </div>
+                    </div>
+                    
+                    <div className="flex justify-end gap-3 mt-3">
+                      <button
+                        onClick={() => setProposedCodeSelection('')}
+                        className="px-4 py-2 border border-secondary/20 hover:bg-bg-hover text-text-secondary rounded-lg text-xs font-bold transition cursor-pointer"
+                      >
+                        Reset
+                      </button>
+                      <button
+                        onClick={handleApplyAiEdit}
+                        className="px-4 py-2 bg-success text-bg-default hover:bg-success/80 rounded-lg text-xs font-bold transition cursor-pointer shadow-md shadow-success/20"
+                      >
+                        Apply Changes
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {showPreview && (
