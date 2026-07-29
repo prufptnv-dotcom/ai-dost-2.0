@@ -568,6 +568,16 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
   const [activePage, setActivePage] = useState(null);
   const [attachedFile, setAttachedFile] = useState(null);
   const fileInputRef = useRef(null);
+  const [uploadedDocs, setUploadedDocs] = useState([]);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [viewingDoc, setViewingDoc] = useState(null);
+
+  // Voice Call States
+  const [isVoiceCallActive, setIsVoiceCallActive] = useState(false);
+  const [voiceCallStatus, setVoiceCallStatus] = useState('Connecting...');
+  const [voiceCallText, setVoiceCallText] = useState('');
+  const isVoiceCallActiveRef = useRef(false);
+  const callRecognitionRef = useRef(null);
 
   // Speech Recognition & Synthesis states
   const [isListening, setIsListening] = useState(false);
@@ -649,8 +659,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
     }
   };
 
-  const speakText = (text) => {
-    if (!speakOutput) return;
+  const speakText = (text, onFinishedCallback = null) => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel(); // Mute ongoing audio
 
@@ -669,7 +678,154 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         utterance.voice = hindiVoice;
       }
 
+      if (onFinishedCallback) {
+        utterance.onend = () => {
+          onFinishedCallback();
+        };
+      }
+
       window.speechSynthesis.speak(utterance);
+    }
+  };
+
+  const startListeningForCall = () => {
+    if (typeof window === 'undefined') return;
+    window.speechSynthesis.cancel();
+    
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      showToast({ type: 'error', message: 'Speech recognition is not supported in this browser.' });
+      return;
+    }
+
+    setVoiceCallStatus("Listening...");
+
+    const callRec = new SpeechRecognition();
+    callRec.continuous = false;
+    callRec.interimResults = false;
+    callRec.lang = 'hi-IN';
+
+    callRec.onstart = () => {
+      console.log('Voice Call Mic active');
+    };
+
+    callRec.onresult = (event) => {
+      const text = event.results[0][0].transcript;
+      console.log('Spoken:', text);
+      triggerVoiceCallTurn(text);
+    };
+
+    callRec.onerror = (e) => {
+      console.error('Call mic error:', e);
+      if (isVoiceCallActiveRef.current) {
+        setTimeout(() => {
+          if (isVoiceCallActiveRef.current) startListeningForCall();
+        }, 1200);
+      }
+    };
+
+    callRec.onend = () => {
+      console.log('Call mic end');
+    };
+
+    callRec.start();
+    callRecognitionRef.current = callRec;
+  };
+
+  const triggerVoiceCallTurn = async (spokenText) => {
+    if (!spokenText.trim()) return;
+    setVoiceCallStatus("Thinking...");
+    setVoiceCallText(`You: "${spokenText}"`);
+
+    try {
+      const historyPayload = messages.map(msg => ({
+        role: msg.sender === 'ai' ? 'assistant' : 'user',
+        content: msg.text || ''
+      }));
+
+      const customKeys = {
+        gemini: localStorage.getItem('customGeminiKey') || '',
+        groq: localStorage.getItem('customGroqKey') || '',
+        deepseek: localStorage.getItem('customDeepSeekKey') || '',
+        nvidia: localStorage.getItem('customNvidiaKey') || '',
+        openrouter: localStorage.getItem('customOpenRouterKey') || ''
+      };
+
+      const payload = {
+        message: spokenText,
+        mode: mode,
+        history: historyPayload,
+        customKeys: customKeys
+      };
+
+      if (selectedModel !== 'auto') {
+        payload.model = selectedModel;
+      }
+
+      if (mode === 'project' && currentCode) {
+        payload.fileContent = currentCode;
+        payload.section = 'coding';
+      }
+
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+
+      if (data.success && data.reply) {
+        setMessages(prev => [
+          ...prev, 
+          { sender: 'user', text: spokenText, timestamp: new Date().toLocaleTimeString() },
+          { sender: 'ai', text: data.reply, timestamp: new Date().toLocaleTimeString() }
+        ]);
+
+        setVoiceCallText(data.reply);
+        setVoiceCallStatus("Speaking...");
+        
+        speakText(data.reply, () => {
+          if (isVoiceCallActiveRef.current) {
+            startListeningForCall();
+          }
+        });
+      } else {
+        setVoiceCallText("Server returned an error. Please try again.");
+        setVoiceCallStatus("Error");
+        setTimeout(() => {
+          if (isVoiceCallActiveRef.current) startListeningForCall();
+        }, 3000);
+      }
+    } catch (err) {
+      console.error(err);
+      setVoiceCallText("Network connection failed.");
+      setVoiceCallStatus("Error");
+      setTimeout(() => {
+        if (isVoiceCallActiveRef.current) startListeningForCall();
+      }, 3000);
+    }
+  };
+
+  const handleToggleVoiceCall = () => {
+    if (isVoiceCallActive) {
+      isVoiceCallActiveRef.current = false;
+      setIsVoiceCallActive(false);
+      if (callRecognitionRef.current) {
+        callRecognitionRef.current.abort();
+      }
+      window.speechSynthesis.cancel();
+      showToast({ type: 'info', message: 'Voice call ended.' });
+    } else {
+      isVoiceCallActiveRef.current = true;
+      setIsVoiceCallActive(true);
+      setVoiceCallText("Connecting to AI-Dost voice server...");
+      setVoiceCallStatus("Connecting...");
+      
+      speakText("Haan dost, mai sun raha hoon. Aap bolna shuru kijiye.", () => {
+        if (isVoiceCallActiveRef.current) {
+          startListeningForCall();
+        }
+      });
     }
   };
 
@@ -685,12 +841,20 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
     const isImage = file.type.startsWith('image/');
     
     reader.onload = (event) => {
-      setAttachedFile({
+      const fileData = {
         name: file.name,
         content: event.target.result,
-        type: isImage ? 'image' : 'text'
+        type: isImage ? 'image' : 'text',
+        size: (file.size / 1024).toFixed(1) + ' KB',
+        timestamp: new Date().toLocaleTimeString()
+      };
+      
+      setAttachedFile(fileData);
+      setUploadedDocs(prev => {
+        if (prev.some(d => d.name === file.name)) return prev;
+        return [...prev, fileData];
       });
-      showToast({ type: 'success', message: `Attached: ${file.name}` });
+      showToast({ type: 'success', message: `Attached and added to Document Library: ${file.name}` });
     };
 
     if (isImage) {
@@ -901,6 +1065,69 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         />
       )}
 
+      {isVoiceCallActive && (
+        <div className="absolute inset-0 bg-black/95 backdrop-blur-xl z-50 flex flex-col items-center justify-between p-8 text-center text-text-primary select-none animate-fadeIn">
+          {/* Header */}
+          <div className="flex flex-col items-center gap-1 mt-4">
+            <div className="text-xs text-text-secondary tracking-widest font-bold uppercase">AI-Dost Voice Room</div>
+            <div className="text-xs bg-primary/10 border border-primary/20 text-primary px-3 py-1 rounded-full flex items-center gap-1.5 font-semibold animate-pulse">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+              {voiceCallStatus}
+            </div>
+          </div>
+
+          {/* Dynamic Waveform Visualizer */}
+          <div className="flex items-center justify-center relative w-48 h-48 my-auto">
+            {voiceCallStatus === 'Listening...' && (
+              <>
+                <div className="absolute w-44 h-44 rounded-full bg-primary/5 border border-primary/10 animate-ping" />
+                <div className="absolute w-36 h-36 rounded-full bg-primary/10 border border-primary/20 animate-pulse duration-1000" />
+              </>
+            )}
+            {voiceCallStatus === 'Thinking...' && (
+              <div className="absolute w-36 h-36 rounded-full border border-dashed border-warning/40 animate-spin duration-3000" />
+            )}
+            {voiceCallStatus === 'Speaking...' && (
+              <>
+                <div className="absolute w-40 h-40 rounded-full bg-success/5 border border-success/15 animate-ping duration-1500" />
+                <div className="absolute w-32 h-32 rounded-full bg-success/10 border border-success/30 animate-pulse" />
+              </>
+            )}
+            
+            {/* Center Circle */}
+            <div className={`w-28 h-28 rounded-full flex items-center justify-center shadow-2xl transition-all duration-500 border ${
+              voiceCallStatus === 'Listening...' ? 'bg-primary/20 border-primary text-primary shadow-primary/20' :
+              voiceCallStatus === 'Thinking...' ? 'bg-warning/20 border-warning text-warning shadow-warning/20' :
+              voiceCallStatus === 'Speaking...' ? 'bg-success/20 border-success text-success shadow-success/20' :
+              'bg-white/5 border-white/10 text-text-secondary'
+            }`}>
+              <span className="text-4xl">
+                {voiceCallStatus === 'Listening...' ? '🎙️' :
+                 voiceCallStatus === 'Thinking...' ? '🧠' :
+                 voiceCallStatus === 'Speaking...' ? '🗣️' :
+                 '📞'}
+              </span>
+            </div>
+          </div>
+
+          {/* Transcript Display Bubble */}
+          <div className="w-full max-w-sm bg-white/[0.03] border border-white/[0.08] p-4 rounded-2xl min-h-[90px] flex items-center justify-center mb-6 select-text">
+            <p className="text-xs italic text-text-secondary leading-relaxed max-h-[80px] overflow-y-auto w-full select-text">
+              {voiceCallText || 'Speak now... AI-Dost is listening.'}
+            </p>
+          </div>
+
+          {/* Footer Actions */}
+          <button
+            onClick={handleToggleVoiceCall}
+            className="w-14 h-14 bg-danger hover:bg-danger/80 text-bg-default rounded-full flex items-center justify-center shadow-xl shadow-danger/20 transition-transform active:scale-95 cursor-pointer text-xl shrink-0"
+            title="End Voice Call"
+          >
+            <span>🛑</span>
+          </button>
+        </div>
+      )}
+
       {assistantTab && (
         <AIAssistantModal 
           activeTab={assistantTab}
@@ -910,6 +1137,92 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
             showToast({ type: 'success', message: 'Prompt ready! Click send to query AI-Dost.' });
           }}
         />
+      )}
+
+      {showLibrary && (
+        <div className="absolute inset-0 bg-black/90 backdrop-blur-md z-40 flex flex-col p-6 overflow-y-auto select-text text-text-primary">
+          <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-4 shrink-0">
+            <div className="flex items-center gap-2 text-primary font-bold text-sm">
+              <span>🗂️ RAG Document Library</span>
+            </div>
+            <button 
+              onClick={() => setShowLibrary(false)}
+              className="text-text-secondary hover:text-text-primary text-xs cursor-pointer"
+            >
+              ✕ Close
+            </button>
+          </div>
+
+          <div className="flex-1 flex flex-col gap-4">
+            {uploadedDocs.length === 0 ? (
+              <div className="text-center py-12 text-text-secondary text-xs">
+                No documents uploaded yet. Use the paperclip icon in chat to attach books or text files!
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2.5">
+                {uploadedDocs.map((doc, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-3 bg-white/[0.03] border border-white/[0.08] rounded-xl hover:border-primary/30 transition text-left">
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <div className="text-xs font-bold text-text-primary flex items-center gap-1.5 truncate">
+                        <span>📄 {doc.name}</span>
+                        <span className="text-[9px] bg-primary/10 text-primary border border-primary/20 px-1.5 py-0.5 rounded font-normal capitalize shrink-0">
+                          {doc.type}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-text-secondary flex items-center gap-2">
+                        <span>Size: {doc.size}</span>
+                        <span>•</span>
+                        <span>Added: {doc.timestamp}</span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => setViewingDoc(doc)}
+                        className="px-3 py-1.5 bg-primary/10 border border-primary/20 hover:bg-primary hover:text-bg-default text-primary text-[10px] font-bold rounded-lg transition cursor-pointer"
+                      >
+                        📖 View Doc
+                      </button>
+                      <button
+                        onClick={() => {
+                          setUploadedDocs(prev => prev.filter(d => d.name !== doc.name));
+                          showToast({ type: 'info', message: `${doc.name} removed from library.` });
+                        }}
+                        className="p-1.5 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded transition cursor-pointer"
+                        title="Remove Document"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {viewingDoc && (
+        <div className="absolute inset-0 bg-black/95 backdrop-blur-md z-50 flex flex-col p-6 overflow-hidden select-text text-text-primary">
+          <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-4 shrink-0">
+            <div className="flex items-center gap-2 text-primary font-bold text-sm truncate font-sans">
+              <span>📖 Reading: {viewingDoc.name}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] bg-success/15 text-success border border-success/20 px-2 py-0.5 rounded-full font-bold select-none">RAG Indexed</span>
+              <button 
+                onClick={() => setViewingDoc(null)}
+                className="text-text-secondary hover:text-text-primary text-xs cursor-pointer"
+              >
+                ✕ Back to Library
+              </button>
+            </div>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto bg-white/[0.02] border border-white/[0.08] rounded-xl p-5 font-sans text-xs leading-relaxed text-left w-full select-text whitespace-pre-wrap">
+            {viewingDoc.content}
+          </div>
+        </div>
       )}
       
       {/* Header */}
@@ -952,6 +1265,16 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
               </optgroup>
             )}
           </select>
+          <button
+            onClick={() => setShowLibrary(true)}
+            className="bg-primary/10 border border-primary/20 hover:bg-primary hover:text-bg-default text-primary text-[10px] px-2 py-0.5 rounded font-bold transition flex items-center gap-1 cursor-pointer select-none"
+            title="Open RAG Document Library"
+          >
+            <span>🗂️ Library</span>
+            {uploadedDocs.length > 0 && (
+              <span className="bg-primary text-bg-default text-[8px] px-1 rounded-full">{uploadedDocs.length}</span>
+            )}
+          </button>
           <span className="text-[10px] bg-success/15 text-success border border-success/20 px-2 py-0.5 rounded-full font-bold">Active</span>
         </div>
       </div>
@@ -1103,6 +1426,19 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
             title={isListening ? "Listening... (Click to stop)" : "Speech Input (Click to speak)"}
           >
             {isListening ? <FaMicrophoneSlash /> : <FaMicrophone />}
+          </button>
+
+          {/* Real-time Voice Call Button */}
+          <button
+            onClick={handleToggleVoiceCall}
+            className={`p-2 rounded-lg transition-colors cursor-pointer text-sm shrink-0 flex items-center justify-center ${
+              isVoiceCallActive
+                ? 'bg-danger/25 text-danger border border-danger/40 animate-pulse'
+                : 'text-text-secondary hover:text-text-primary'
+            }`}
+            title={isVoiceCallActive ? "End Voice Call" : "📞 Voice Call AI-Dost"}
+          >
+            <span>📞</span>
           </button>
 
           {/* Paperclip attachment button */}
