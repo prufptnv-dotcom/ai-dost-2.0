@@ -67,7 +67,13 @@ router.get('/local-models', async (req, res) => {
 // Main chat endpoint
 router.post('/', async (req, res) => {
     try {
-        const { message, model, section, fileContent, history, mode, customKeys } = req.body;
+        const { message, model, section, fileContent, history, mode, customKeys, uploadedDocs } = req.body;
+        
+        let processedMessage = message;
+        if (uploadedDocs && uploadedDocs.length > 0) {
+            const docsContext = uploadedDocs.map(doc => `--- START OF DOCUMENT: ${doc.name} ---\n${doc.content}\n--- END OF DOCUMENT: ${doc.name} ---`).join('\n\n');
+            processedMessage = `Knowledge Base / Document Library Context:\n${docsContext}\n\nUser Message:\n${message}`;
+        }
         
         // Clean history: remove extra parameters like timestamp and map role 'ai' to 'assistant'
         const cleanHistory = (history || [])
@@ -81,7 +87,7 @@ router.post('/', async (req, res) => {
         
         if (model && model.startsWith('local:')) {
             const localModelName = model.substring(6);
-            const localMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${message}` : message;
+            const localMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
             
             console.log(`🔄 Routing request to local model: ${localModelName}`);
             const localPayload = {
@@ -110,36 +116,36 @@ router.post('/', async (req, res) => {
             // Choose AI model based on selection
             switch(model) {
                 case 'groq': {
-                    const groqMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${message}` : message;
+                    const groqMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
                     response = await GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq);
                     break;
                 }
                 case 'gemini':
-                    response = await GeminiService.chat(message, cleanHistory, fileContent, mode, customKeys?.gemini);
+                    response = await GeminiService.chat(processedMessage, cleanHistory, fileContent, mode, customKeys?.gemini);
                     break;
                 case 'nvidia': {
-                    const nvMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${message}` : message;
+                    const nvMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
                     response = await NvidiaService.chat(nvMsg, cleanHistory, customKeys?.nvidia);
                     break;
                 }
                 case 'deepseek': {
-                    const dsMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${message}` : message;
+                    const dsMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
                     response = await DeepSeekService.chat(dsMsg, cleanHistory, customKeys?.deepseek);
                     break;
                 }
                 case 'openrouter': {
-                    const orMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${message}` : message;
+                    const orMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
                     response = await OpenRouterService.chat(orMsg, cleanHistory, customKeys?.openrouter);
                     break;
                 }
                 case 'huggingface': {
-                    const hfMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${message}` : message;
+                    const hfMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
                     response = await HuggingFaceService.chat(hfMsg);
                     break;
                 }
                 default:
                     // Auto-select best model
-                    response = await autoSelectModel(message, section, fileContent, cleanHistory, mode, customKeys);
+                    response = await autoSelectModel(processedMessage, section, fileContent, cleanHistory, mode, customKeys);
             }
         }
         

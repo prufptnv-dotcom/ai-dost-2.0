@@ -755,7 +755,8 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         message: spokenText,
         mode: mode,
         history: historyPayload,
-        customKeys: customKeys
+        customKeys: customKeys,
+        uploadedDocs: uploadedDocs.map(d => ({ name: d.name, content: d.content }))
       };
 
       if (selectedModel !== 'auto') {
@@ -958,7 +959,8 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         message: apiPrompt,
         mode: mode,
         history: historyPayload,
-        customKeys: customKeys
+        customKeys: customKeys,
+        uploadedDocs: uploadedDocs.map(d => ({ name: d.name, content: d.content }))
       };
       
       if (selectedModel !== 'auto') {
@@ -1014,6 +1016,19 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         }
       }
 
+      // Parse custom [GENERATE_IMAGE: descriptive prompt] tags
+      const imageTagRegex = /\[GENERATE_IMAGE:\s*(.*?)\]/i;
+      const imageMatch = finalReplyText.match(imageTagRegex);
+      
+      let generatedImages = [];
+      if (imageMatch) {
+        const imagePromptText = imageMatch[1].trim();
+        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePromptText)}?width=768&height=512&nologo=true`;
+        generatedImages.push(pollinationsUrl);
+        // Replace tag in the chat message
+        finalReplyText = finalReplyText.replace(imageTagRegex, `🎨 Generated Image for: "${imagePromptText}"`).trim();
+      }
+
       // Generate mock clickable citations based on the query and focus mode
       let sources = [];
       if (isProSearch || focusMode !== 'all') {
@@ -1030,7 +1045,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         } else {
           sources = [
             { title: 'Wikipedia citation archives', domain: 'wikipedia.org', url: `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(textInput)}` },
-            { title: 'Britannica global topic index', domain: 'britannica.com', url: `https://www.britannica.com/search?query=${encodeURIComponent(textInput)}` }
+            { title: 'Britannica global topic index', domain: 'britannica.com', url: `https://www.britannica.com/search?query=${encodeURIComponent(textInput)}&searchtype=all` }
           ];
         }
       }
@@ -1038,6 +1053,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
       setMessages(prev => [...prev, {
         sender: 'ai',
         text: finalReplyText,
+        images: generatedImages.length > 0 ? generatedImages : undefined,
         pdfUrl: pdfUrl,
         pdfName: pdfName,
         sources: sources,
