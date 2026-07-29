@@ -19,6 +19,7 @@ const Header = () => {
   const [customGeminiKey, setCustomGeminiKey] = useState('');
   const [customGroqKey, setCustomGroqKey] = useState('');
   const [customDeepSeekKey, setCustomDeepSeekKey] = useState('');
+  const [customNvidiaKey, setCustomNvidiaKey] = useState('');
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme');
@@ -33,12 +34,14 @@ const Header = () => {
     const savedGeminiKey = localStorage.getItem('customGeminiKey') || '';
     const savedGroqKey = localStorage.getItem('customGroqKey') || '';
     const savedDeepSeekKey = localStorage.getItem('customDeepSeekKey') || '';
+    const savedNvidiaKey = localStorage.getItem('customNvidiaKey') || '';
     
     setAutoSaveInterval(savedAutoSave);
     setAutocompleteOn(savedAutocomplete);
     setCustomGeminiKey(savedGeminiKey);
     setCustomGroqKey(savedGroqKey);
     setCustomDeepSeekKey(savedDeepSeekKey);
+    setCustomNvidiaKey(savedNvidiaKey);
   }, []);
 
   const toggleTheme = () => {
@@ -59,6 +62,7 @@ const Header = () => {
     localStorage.setItem('customGeminiKey', customGeminiKey);
     localStorage.setItem('customGroqKey', customGroqKey);
     localStorage.setItem('customDeepSeekKey', customDeepSeekKey);
+    localStorage.setItem('customNvidiaKey', customNvidiaKey);
     setShowSettings(false);
   };
   
@@ -248,6 +252,17 @@ const Header = () => {
                     placeholder="AI-Dost default key will be used if empty"
                     value={customDeepSeekKey}
                     onChange={(e) => setCustomDeepSeekKey(e.target.value)}
+                    className="bg-bg-hover text-text-primary border border-secondary/30 rounded-lg p-2 focus:outline-none focus:ring-1 focus:ring-primary text-xs"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-semibold text-text-secondary">NVIDIA API Key</label>
+                  <input
+                    type="password"
+                    placeholder="AI-Dost default key will be used if empty"
+                    value={customNvidiaKey}
+                    onChange={(e) => setCustomNvidiaKey(e.target.value)}
                     className="bg-bg-hover text-text-primary border border-secondary/30 rounded-lg p-2 focus:outline-none focus:ring-1 focus:ring-primary text-xs"
                   />
                 </div>

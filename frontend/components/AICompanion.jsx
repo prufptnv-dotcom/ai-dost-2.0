@@ -561,6 +561,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
   
   // Perplexity-style Advanced Search & Document states
   const [selectedModel, setSelectedModel] = useState('auto');
+  const [localModels, setLocalModels] = useState([]);
   const [focusMode, setFocusMode] = useState('all');
   const [isProSearch, setIsProSearch] = useState(false);
   const [proSearchStages, setProSearchStages] = useState([]);
@@ -607,6 +608,21 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         recognitionRef.current = rec;
       }
     }
+  }, []);
+
+  useEffect(() => {
+    const fetchLocalModels = async () => {
+      try {
+        const res = await fetch('/api/chat/local-models');
+        const data = await res.json();
+        if (data.success && data.models) {
+          setLocalModels(data.models);
+        }
+      } catch (err) {
+        console.error('Failed to fetch local models:', err);
+      }
+    };
+    fetchLocalModels();
   }, []);
 
   const toggleListening = () => {
@@ -769,7 +785,8 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
       const customKeys = {
         gemini: localStorage.getItem('customGeminiKey') || '',
         groq: localStorage.getItem('customGroqKey') || '',
-        deepseek: localStorage.getItem('customDeepSeekKey') || ''
+        deepseek: localStorage.getItem('customDeepSeekKey') || '',
+        nvidia: localStorage.getItem('customNvidiaKey') || ''
       };
 
       const requestPayload = {
@@ -917,6 +934,16 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
             <option value="groq">🦙 Groq (Llama 3)</option>
             <option value="gemini">♊ Gemini Flash</option>
             <option value="deepseek">🐳 DeepSeek V3</option>
+            <option value="nvidia">💚 NVIDIA NIM</option>
+            {localModels.length > 0 && (
+              <optgroup label="💻 Local Models (Ollama)">
+                {localModels.map(m => (
+                  <option key={m.id} value={m.id}>
+                    💻 {m.name} ({m.size} - {m.category})
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
           <span className="text-[10px] bg-success/15 text-success border border-success/20 px-2 py-0.5 rounded-full font-bold">Active</span>
         </div>
