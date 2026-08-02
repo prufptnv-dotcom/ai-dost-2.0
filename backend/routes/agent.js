@@ -109,12 +109,6 @@ function searchCodebase(query, projectFiles) {
 
 // ── Tool Executor ─────────────────────────────────────────────────────────────
 async function executeTool(action, parameters, projectPath, projectFiles) {
-  const safeJoin = (base, rel) => {
-    const full = path.resolve(base, rel || '');
-    if (!full.startsWith(path.resolve(base))) throw new Error('Path traversal blocked');
-    return full;
-  };
-
   switch (action) {
 
     case 'read_file': {
@@ -313,12 +307,37 @@ async function callLLM(messages) {
   throw new Error('All cloud AI providers failed and local Ollama is offline. Please check API keys in Settings or start Ollama locally.');
 }
 
+// ── Safe Path Join ────────────────────────────────────────────────────────────
+function safeJoin(base, rel) {
+  if (!rel || typeof rel !== 'string') throw new Error('Invalid path parameter');
+  // Strip any leading slashes or Windows drive letters
+  const cleaned = rel.replace(/^([a-zA-Z]:)?[\\\/]+/, '');
+  const full = path.resolve(base, cleaned);
+  const baseResolved = path.resolve(base);
+  if (!full.startsWith(baseResolved)) {
+    throw new Error(`Path traversal blocked: "${rel}" is outside workspace.`);
+  }
+  return full;
+}
+
 // ── Parse LLM JSON output ─────────────────────────────────────────────────────
 function parseLLMAction(raw) {
+  if (!raw || typeof raw !== 'string') {
+    return { thought: 'No output received.', action: 'FINAL_ANSWER', answer: 'No response from model.' };
+  }
   try {
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (jsonMatch) return JSON.parse(jsonMatch[0]);
-  } catch (e) {}
+    // Strip markdown codeblock backticks if present (e.g. ```json ... ```)
+    const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*$/gi, '').trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed && typeof parsed.action === 'string') {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.log('[Agent] JSON parse error, falling back:', e.message);
+  }
   return { thought: raw, action: 'FINAL_ANSWER', answer: raw };
 }
 
@@ -326,8 +345,8 @@ function parseLLMAction(raw) {
 router.post('/run', async (req, res) => {
   const { userPrompt, projectPath, projectFiles, projectId } = req.body;
 
-  if (!userPrompt) {
-    return res.status(400).json({ error: 'userPrompt is required' });
+  if (!userPrompt || typeof userPrompt !== 'string' || !userPrompt.trim()) {
+    return res.status(400).json({ error: 'userPrompt is required and must be a non-empty string' });
   }
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -335,7 +354,14 @@ router.post('/run', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
 
+  let isAborted = false;
+  req.on('close', () => {
+    isAborted = true;
+    console.log('[Agent] Client disconnected. Cancelling ReAct loop.');
+  });
+
   const send = (data) => {
+    if (isAborted) return;
     try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch (_) {}
   };
 
