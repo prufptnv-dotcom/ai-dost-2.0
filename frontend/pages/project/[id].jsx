@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/router';
-import { FileText, Folder, Plus, Trash2, X, PanelRightOpen, PanelRightClose, Info, Bot, MessageSquare } from 'lucide-react';
+import { FileText, Folder, FolderOpen, Plus, Trash2, X, PanelRightOpen, PanelRightClose, Info, Bot, MessageSquare } from 'lucide-react';
 import CodeEditor from '../../components/CodeEditor';
 import ProjectDetails from '../../components/ProjectDetails';
 import AICompanion from '../../components/AICompanion';
