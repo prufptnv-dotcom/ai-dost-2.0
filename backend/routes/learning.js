@@ -142,7 +142,8 @@ ${learnedContext || "No custom corrections logged yet."}
 Your Task:
 Answer the user's questions candidly about what you have learned, how much progress you have made, what mistakes you have self-corrected, and how the workspace models are performing. Speak confidently, professionally, and in the user's preferred language (Hindi/Hinglish/English).`;
 
-        const reply = await GroqService.chat(prompt, history || [], 'chat', process.env.GROQ_API_KEY);
+        const fullPrompt = `${personalSystemPrompt}\n\nUSER QUESTION: ${prompt}`;
+        const reply = await GroqService.chat(fullPrompt, history || [], 'chat', null);
         
         res.json({
             success: true,

@@ -24,7 +24,11 @@ router.post('/generate', async (req, res) => {
         
         const jsonPath = path.join(tempDir, `${fileId}.json`);
         // We write to frontend/public/downloads so Next.js can serve it statically
-        const outputPdfPath = path.join(__dirname, '../../frontend/public/downloads', filename);
+        const downloadsDir = path.join(__dirname, '../../frontend/public/downloads');
+        if (!fs.existsSync(downloadsDir)) {
+            fs.mkdirSync(downloadsDir, { recursive: true });
+        }
+        const outputPdfPath = path.join(downloadsDir, filename);
         
         // Write title and content to JSON file safely
         fs.writeFileSync(jsonPath, JSON.stringify({ title, content }, null, 2), 'utf-8');
