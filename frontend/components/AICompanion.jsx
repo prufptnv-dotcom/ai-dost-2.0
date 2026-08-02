@@ -1278,7 +1278,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
       }
 
       // Smart Intent Pre-processor (Detects Image, PDF, Email, Code requests)
-      const userTextLower = userMessageText.toLowerCase();
+      const userTextLower = (textInput || '').toLowerCase();
       const isImageRequest = /\b(image|photo|picture|draw|banao|bana ke do|painting|illustration|diagram|pic)\b/i.test(userTextLower);
       const isPdfRequest = /\b(pdf|document|report|resume|paper)\b/i.test(userTextLower);
       
@@ -1364,7 +1364,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         finalReplyText = finalReplyText.replace(imageTagRegex, `🎨 Generated Image for: "${imagePromptText}"`).trim();
       } else if (isImageRequest) {
         // Fallback: If user asked for an image and AI model didn't return tag, auto-generate image from user's query!
-        const imagePromptText = userMessageText.replace(/\b(image|photo|picture|draw|banao|bana ke do|painting|illustration|diagram|pic|me|of|a|an)\b/gi, '').trim() || userMessageText;
+        const imagePromptText = textInput.replace(/\b(image|photo|picture|draw|banao|bana ke do|painting|illustration|diagram|pic|me|of|a|an)\b/gi, '').trim() || textInput;
         const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePromptText)}?width=768&height=512&nologo=true`;
         generatedImages.push(pollinationsUrl);
       }
