@@ -8,9 +8,16 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 
 const app = express();
 
-// Debug middleware
+// Debug & timing middleware
 app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    const start = Date.now();
+    res.on('finish', () => {
+        const duration = Date.now() - start;
+        console.log(`${new Date().toISOString()} - ${req.method} ${req.url} ${res.statusCode} (${duration}ms)`);
+        try {
+            res.setHeader('X-Response-Time-Ms', duration);
+        } catch(e) {}
+    });
     next();
 });
 
@@ -25,11 +32,22 @@ const chatRoutes = require('./routes/chat');
 const testRoutes = require('./routes/test');
 const imageRoutes = require('./routes/image');
 const pdfRoutes = require('./routes/pdf');
+const learningRoutes = require('./routes/learning');
+const gitRoutes = require('./routes/git');
+const agentRoutes = require('./routes/agent');
 
 app.use('/api/chat', chatRoutes);
 app.use('/api/test', testRoutes);
 app.use('/api/image', imageRoutes);
 app.use('/api/pdf', pdfRoutes);
+app.use('/api/learning', learningRoutes);
+app.use('/api/git', gitRoutes);
+app.use('/api/agent', agentRoutes);
+
+// Root redirect to frontend
+app.get('/', (req, res) => {
+    res.redirect('http://localhost:3001');
+});
 
 // Health check
 app.get('/health', (req, res) => {

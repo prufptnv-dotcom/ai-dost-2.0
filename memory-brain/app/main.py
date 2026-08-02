@@ -42,26 +42,56 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware config
+import time
+from fastapi import Request
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=[
+        "http://localhost:3001",
+        "http://localhost:3000",
+        "http://127.0.0.1:3001",
+        "http://127.0.0.1:3000",
+        "*"
+    ],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time_ms = round((time.time() - start_time) * 1000, 2)
+    response.headers["X-Response-Time-Ms"] = str(process_time_ms)
+    return response
+
+from app.api.agentic import router as agentic_router
+from app.api.suggestions import router as suggestions_ws_router
+from app.api.chat import router as chat_ws_router
+from app.api.debugging import router as debugging_ws_router
+
+from app.api.git_routes import router as git_local_router
 
 # Include routers
 app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
 app.include_router(profile_router, prefix=settings.API_V1_PREFIX)
 app.include_router(memory_router, prefix=settings.API_V1_PREFIX)
 app.include_router(learning_router, prefix=settings.API_V1_PREFIX)
+app.include_router(git_local_router, prefix=settings.API_V1_PREFIX)
 app.include_router(sandbox_router, prefix=settings.API_V1_PREFIX)
 app.include_router(vector_router, prefix=settings.API_V1_PREFIX)
 app.include_router(real_time_router, prefix=settings.API_V1_PREFIX)
 app.include_router(github_router, prefix=settings.API_V1_PREFIX)
 app.include_router(suggestions_router, prefix=settings.API_V1_PREFIX)
+
+# Include AI Coding Assistant Copilot Routers
+app.include_router(agentic_router)
+app.include_router(suggestions_ws_router)
+app.include_router(chat_ws_router)
+app.include_router(debugging_ws_router)
 
 # Root API
 @app.get("/")

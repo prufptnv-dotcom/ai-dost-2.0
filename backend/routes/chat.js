@@ -6,6 +6,8 @@ const DeepSeekService = require('../services/deepseekService');
 const HuggingFaceService = require('../services/huggingfaceService');
 const NvidiaService = require('../services/nvidiaService');
 const OpenRouterService = require('../services/openrouterService');
+const MistralService = require('../services/mistralService');
+const TogetherService = require('../services/togetherService');
 
 // Local models list endpoint
 router.get('/local-models', async (req, res) => {
@@ -75,12 +77,13 @@ router.post('/', async (req, res) => {
             processedMessage = `Knowledge Base / Document Library Context:\n${docsContext}\n\nUser Message:\n${message}`;
         }
         
-        // Clean history: remove extra parameters like timestamp and map role 'ai' to 'assistant'
+        // Clean history: truncate long content & limit to last 6 messages to stay under Groq TPM (6000 tokens) limit
         const cleanHistory = (history || [])
             .filter(msg => msg.role && msg.content)
+            .slice(-6)
             .map(msg => ({
                 role: msg.role === 'ai' ? 'assistant' : msg.role,
-                content: String(msg.content)
+                content: String(msg.content).substring(0, 1500)
             }));
 
         let response;
@@ -118,6 +121,11 @@ router.post('/', async (req, res) => {
                 case 'groq': {
                     const groqMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
                     response = await GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq);
+                    // Automatic failover to Gemini if Groq rate limit occurs
+                    if (typeof response === 'string' && (response.includes('rate_limit_exceeded') || response.includes('413') || response.includes('429'))) {
+                        console.log('⚠️ Groq rate limit hit. Auto-falling back to Gemini...');
+                        response = await GeminiService.chat(processedMessage, cleanHistory, fileContent, mode, customKeys?.gemini);
+                    }
                     break;
                 }
                 case 'gemini':
@@ -136,6 +144,16 @@ router.post('/', async (req, res) => {
                 case 'openrouter': {
                     const orMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
                     response = await OpenRouterService.chat(orMsg, cleanHistory, customKeys?.openrouter);
+                    break;
+                }
+                case 'mistral': {
+                    const misMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
+                    response = await MistralService.chat(misMsg, cleanHistory, customKeys?.mistral);
+                    break;
+                }
+                case 'together': {
+                    const togMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
+                    response = await TogetherService.chat(togMsg, cleanHistory, customKeys?.together);
                     break;
                 }
                 case 'huggingface': {
@@ -164,27 +182,111 @@ router.post('/', async (req, res) => {
     }
 });
 
-// Auto select best AI model
-async function autoSelectModel(message, section, fileContent, cleanHistory, mode, customKeys = null) {
-    // Coding ke liye Groq best hai
-    if (section === 'coding') {
-        const groqMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${message}` : message;
-        return await GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq);
-    }
-    // Writing ke liye Gemini (with fallback to Groq if key fails)
-    else if (section === 'writing') {
-        const response = await GeminiService.chat(message, cleanHistory, fileContent, mode, customKeys?.gemini);
-        if (response.startsWith('Gemini API error') || response.startsWith('Gemini service me error') || response.includes('key set nahi hai')) {
-            console.log('⚠️ Gemini failed, falling back to Groq');
-            const groqMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${message}` : message;
-            return await GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq);
+// Helper for cascading failover across AI models
+async function executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys) {
+    // 1. Try Groq (Llama 3.3 70B)
+    try {
+        console.log("⚡ Tier 1: Executing Groq API request...");
+        const res = await GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq);
+        const isErrorResponse = typeof res === 'string' && (
+            res.includes('rate_limit_exceeded') || 
+            res.includes('413') || 
+            res.includes('429') || 
+            res.includes('error') || 
+            res.includes('Quota exceeded')
+        );
+        if (!isErrorResponse && res) {
+            return res;
         }
-        return response;
+        console.log("⚠️ Tier 1 (Groq) rate limit or error encountered. Cascading to Tier 2 (NVIDIA NIM)...");
+    } catch (e) {
+        console.warn("Tier 1 (Groq) threw error:", e.message);
     }
-    // Default to Groq (Since DeepSeek has insufficient balance)
+
+    // 2. Try NVIDIA NIM (Llama 3.1 70B)
+    try {
+        console.log("💚 Tier 2: Executing NVIDIA NIM API request...");
+        const res = await NvidiaService.chat(groqMsg, cleanHistory, customKeys?.nvidia);
+        const isErrorResponse = typeof res === 'string' && (
+            res.includes('Error') || 
+            res.includes('429') || 
+            res.includes('Unauthorized')
+        );
+        if (!isErrorResponse && res) {
+            return res;
+        }
+        console.log("⚠️ Tier 2 (NVIDIA NIM) issue encountered. Cascading to Tier 3 (Gemini Flash)...");
+    } catch (e) {
+        console.warn("Tier 2 (NVIDIA NIM) threw error:", e.message);
+    }
+
+    // 3. Try Gemini Flash
+    try {
+        console.log("♊ Tier 3: Executing Gemini Flash API request...");
+        const res = await GeminiService.chat(message, cleanHistory, fileContent, mode, customKeys?.gemini);
+        if (res && !res.includes('API error') && !res.includes('Quota exceeded')) {
+            return res;
+        }
+    } catch (e) {
+        console.warn("Tier 3 (Gemini) threw error:", e.message);
+    }
+
+    return "Ai-Dost: Direct API response unavailable right now due to provider rate limits. Please retry in a few seconds!";
+}
+
+// Auto select best AI model using Smart Natural Language Intent Detection
+async function autoSelectModel(message, section, fileContent, cleanHistory, mode, customKeys = null) {
+    const text = message.toLowerCase();
+    const groqMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${message}` : message;
+
+    // 1. Coding & Debugging Intent Detection
+    const codeKeywords = ['code', 'function', 'bug', 'error', 'debug', 'refactor', 'python', 'javascript', 'html', 'css', 'java', 'c++', 'react', 'api', 'syntax', 'script', 'compile', 'regex', 'database', 'sql', 'backend', 'frontend'];
+    const isCodingIntent = section === 'coding' || codeKeywords.some(kw => text.includes(kw)) || /```[\s\S]*```/.test(message);
+
+    // 2. Language Translation Intent Detection
+    const translationKeywords = ['translate', 'translation', 'anuvad', 'hindi me', 'english me', 'spanish', 'french', 'german', 'language conversion', 'convert text'];
+    const isTranslationIntent = section === 'translation' || translationKeywords.some(kw => text.includes(kw));
+
+    // 3. Creative / Essay / Long-form Writing Intent Detection
+    const writingKeywords = ['write an essay', 'write a blog', 'draft an email', 'write a story', 'poem', 'article', 'summary', 'paraphrase', 'cover letter', 'creative writing', 'kavita', 'kahani'];
+    const isWritingIntent = section === 'writing' || writingKeywords.some(kw => text.includes(kw));
+
+    // 4. Mathematical Problem Solving Intent
+    const mathKeywords = ['solve', 'equation', 'math', 'calculus', 'algebra', 'matrix', 'derivative', 'integral', 'step by step math', 'proof'];
+    const isMathIntent = section === 'math' || mathKeywords.some(kw => text.includes(kw));
+
+    // Intent Routing Execution with 3-Tier Cascading Failover
+    if (isCodingIntent) {
+        console.log("🧠 Smart Intent Classifier: Detected [CODING/DEBUGGING] -> Cascading AI Router");
+        return await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
+    } 
+    else if (isTranslationIntent || isWritingIntent) {
+        console.log("🧠 Smart Intent Classifier: Detected [TRANSLATION/WRITING] -> Primary Gemini Flash");
+        try {
+            const res = await GeminiService.chat(message, cleanHistory, fileContent, mode, customKeys?.gemini);
+            if (!res || res.includes('API error') || res.includes('Quota exceeded') || res.includes('key set nahi hai')) {
+                return await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
+            }
+            return res;
+        } catch (e) {
+            return await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
+        }
+    }
+    else if (isMathIntent) {
+        console.log("🧠 Smart Intent Classifier: Detected [MATHEMATICAL STEP-BY-STEP] -> Primary NVIDIA NIM");
+        try {
+            const res = await NvidiaService.chat(groqMsg, cleanHistory, customKeys?.nvidia);
+            if (!res || res.includes('Error')) {
+                return await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
+            }
+            return res;
+        } catch (e) {
+            return await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
+        }
+    }
     else {
-        const groqMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${message}` : message;
-        return await GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq);
+        console.log("🧠 Smart Intent Classifier: Default General Conversation -> Cascading AI Router");
+        return await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
     }
 }
 

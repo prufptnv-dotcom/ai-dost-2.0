@@ -6,17 +6,71 @@ export const SocketContext = createContext(null);
 export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
   const [projectId, setProjectId] = useState(null);
+  const [collaborators, setCollaborators] = useState([]);
+  const [remoteCursors, setRemoteCursors] = useState({});
 
   useEffect(() => {
     if (!projectId) return;
     
     const token = localStorage.getItem('ai_dost_token') || 'demo_token';
+    
     const ws = initWebSocket(
       projectId, 
       token,
       (message) => {
-        // Log all inbound messages
-        console.log('Received WebSocket message:', message);
+        if (!message) return;
+        
+        switch (message.type) {
+          case 'project_init':
+            if (message.data) {
+              setCollaborators(prev => {
+                if (prev.some(c => c.userId === message.data.user_id)) return prev;
+                return [...prev, {
+                  userId: message.data.user_id,
+                  username: message.data.user_name || 'Collaborator',
+                  color: message.data.user_color || '#06b6d4'
+                }];
+              });
+            }
+            break;
+            
+          case 'user_joined':
+            setCollaborators(prev => {
+              if (prev.some(c => c.userId === message.user_id)) return prev;
+              return [...prev, {
+                userId: message.user_id,
+                username: message.user_name || 'Collaborator',
+                color: message.user_color || '#8b5cf6'
+              }];
+            });
+            break;
+            
+          case 'user_left':
+            setCollaborators(prev => prev.filter(c => c.userId !== message.user_id));
+            setRemoteCursors(prev => {
+              const copy = { ...prev };
+              delete copy[message.user_id];
+              return copy;
+            });
+            break;
+            
+          case 'cursor_move':
+            if (message.user_id && message.position) {
+              setRemoteCursors(prev => ({
+                ...prev,
+                [message.user_id]: {
+                  userId: message.user_id,
+                  username: message.user_name || 'Collaborator',
+                  color: message.user_color || '#06b6d4',
+                  position: message.position
+                }
+              }));
+            }
+            break;
+            
+          default:
+            break;
+        }
       },
       (error) => console.error('WebSocket error:', error),
       (reason) => console.log('WebSocket disconnected:', reason)
@@ -38,7 +92,7 @@ export const SocketProvider = ({ children }) => {
   };
 
   return (
-    <SocketContext.Provider value={{ socket, sendMessage, setProjectId }}>
+    <SocketContext.Provider value={{ socket, sendMessage, setProjectId, collaborators, remoteCursors }}>
       {children}
     </SocketContext.Provider>
   );

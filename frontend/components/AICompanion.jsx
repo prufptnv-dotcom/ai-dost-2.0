@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useMode } from '../context/ModeContext';
 import { useToast } from '../context/ToastContext';
-import { FaMicrophone, FaMicrophoneSlash, FaVolumeUp, FaVolumeMute } from 'react-icons/fa';
+import { Mic, MicOff, Volume2, VolumeX, Bot, Phone, Paperclip, Send, Library, Zap, CheckCircle, ImageIcon, FileText, X, ChevronLeft, Loader2, Play, Square, History, Trash2, MessageSquare, Sparkles, Image as ImageIconLucide, Plus, Copy, ThumbsUp, ThumbsDown, Maximize2, Minimize2, MoveHorizontal } from 'lucide-react';
 
 // Extract image URLs from AI text
 const IMAGE_URL_REGEX = /https?:\/\/[^\s"'<>]+?\.(png|jpg|jpeg|gif|webp)(\?[^\s"'<>]*)?/gi;
@@ -230,16 +230,77 @@ function MessageBubble({ msg, onWriteCode, onCreatePage }) {
           </div>
         )}
 
-        {/* Perplexity Page Creation Action */}
-        {isAI && cleanText && onCreatePage && (
-          <div className="px-3 pb-2 pt-1 flex justify-end border-t border-secondary/5 mt-1 bg-secondary/5">
-            <button
-              onClick={() => onCreatePage(msg.query || 'Research Article', cleanText)}
-              className="px-2 py-1 bg-secondary/10 hover:bg-secondary/20 border border-secondary/20 text-text-secondary hover:text-text-primary rounded text-[9px] transition cursor-pointer flex items-center gap-1 font-semibold"
-              title="Convert this research response into a shareable Page document"
-            >
-              📄 Create Perplexity Page
-            </button>
+        {/* Perplexity Page Creation Action & Feedback Action Bar */}
+        {isAI && cleanText && (
+          <div className="px-3 pb-2 pt-1 flex items-center justify-between border-t border-white/[0.05] mt-1 bg-white/[0.02] gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => msg.onPlayAudio ? msg.onPlayAudio(cleanText) : null}
+                className={`px-2 py-1 rounded text-[10px] transition cursor-pointer flex items-center gap-1.5 font-medium ${
+                  msg.isPlaying ? 'bg-primary/20 border border-primary/40 text-primary' : 'bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-text-muted hover:text-text-primary'
+                }`}
+                title={msg.isPlaying ? "Stop reading" : "Read message aloud"}
+              >
+                {msg.isPlaying ? (
+                  <>
+                    <Square className="w-3 h-3 text-primary fill-primary" />
+                    <span>Stop</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-3 h-3 text-primary fill-primary" />
+                    <span>Play Voice</span>
+                  </>
+                )}
+              </button>
+
+              {/* Copy Button */}
+              <button
+                onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    navigator.clipboard.writeText(cleanText);
+                    if (msg.onShowToast) msg.onShowToast({ type: 'success', message: '📋 Message copied to clipboard!' });
+                  }
+                }}
+                className="px-2 py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-text-muted hover:text-text-primary rounded text-[10px] transition cursor-pointer flex items-center gap-1 font-medium"
+                title="Copy response text"
+              >
+                <Copy className="w-3 h-3 text-primary" />
+                <span>Copy</span>
+              </button>
+
+              {/* Thumbs Up Button */}
+              <button
+                onClick={() => {
+                  if (msg.onFeedback) msg.onFeedback('up', cleanText);
+                }}
+                className="p-1 bg-white/[0.04] hover:bg-success/20 border border-white/[0.08] hover:border-success/40 text-text-muted hover:text-success rounded text-[10px] transition cursor-pointer"
+                title="Good response! (Train Personal Brain)"
+              >
+                <ThumbsUp className="w-3 h-3" />
+              </button>
+
+              {/* Thumbs Down Button */}
+              <button
+                onClick={() => {
+                  if (msg.onFeedback) msg.onFeedback('down', cleanText);
+                }}
+                className="p-1 bg-white/[0.04] hover:bg-warning/20 border border-white/[0.08] hover:border-warning/40 text-text-muted hover:text-warning rounded text-[10px] transition cursor-pointer"
+                title="Needs Improvement (Open Feedback & Self-Correction Modal)"
+              >
+                <ThumbsDown className="w-3 h-3" />
+              </button>
+            </div>
+
+            {onCreatePage && (
+              <button
+                onClick={() => onCreatePage(msg.query || 'Research Article', cleanText)}
+                className="px-2 py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-text-muted hover:text-text-primary rounded text-[9px] transition cursor-pointer flex items-center gap-1 font-medium shrink-0"
+                title="Convert this research response into a shareable Page document"
+              >
+                <span>Document Page</span>
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -547,13 +608,56 @@ function AIAssistantModal({ activeTab, onClose, onSubmit }) {
 const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
   const { mode } = useMode();
   const { showToast } = useToast();
-  const [messages, setMessages] = useState([
-    {
-      sender: 'ai',
-      text: `Namaste! 🤖 Main Ai-Dost hoon.\n\n💬 Chat karo ya /image <description> type karo image banane ke liye!\n\n💡 Aap mujhse code likhva sakte hain. Main jo code block suggest karunga, use aap direct 'Apply Code' button se editor me insert kar sakte hain!`,
+  const storageKey = mode === 'chat' ? 'ai_dost_messages_chat' : 'ai_dost_messages_project';
+
+  const defaultWelcomeMessage = {
+    id: 'welcome',
+    sender: 'ai',
+    text: mode === 'chat' 
+      ? `Namaste! Main Ai-Dost hoon — General Chat Mode mein.\n\nKuch bhi poochna ho — coding, research, writing, translation — yahan type karein!`
+      : `Namaste! Main Ai-Dost hoon — Project Workspace Mode mein.\n\nAapke current project file par madad karne ke liye tayyar hoon. Code blocks ke liye 'Apply Code' button use karein.`
+  };
+
+  const [messages, setMessages] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch(e) {}
+      }
     }
-  ]);
+    return [defaultWelcomeMessage];
+  });
+
+  const [chatHistoryList, setChatHistoryList] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+
+  // Load mode-specific messages whenever mode changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        try {
+          setMessages(JSON.parse(saved));
+        } catch(e) {
+          setMessages([defaultWelcomeMessage]);
+        }
+      } else {
+        setMessages([defaultWelcomeMessage]);
+      }
+    }
+  }, [mode]);
+
+  // Persist messages to mode-specific localStorage key
+  useEffect(() => {
+    if (typeof window !== 'undefined' && messages.length > 0) {
+      localStorage.setItem(storageKey, JSON.stringify(messages));
+    }
+  }, [messages, storageKey]);
+
   const [input, setInput] = useState('');
+  const [copilotMood, setCopilotMood] = useState('chat'); // 'chat' | 'agent' | 'plan'
   const [isTyping, setIsTyping] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const bottomRef = useRef(null);
@@ -568,9 +672,151 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
   const [activePage, setActivePage] = useState(null);
   const [attachedFile, setAttachedFile] = useState(null);
   const fileInputRef = useRef(null);
+
+  // Feedback & Self-Correction Modal States
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [feedbackData, setFeedbackData] = useState({ message: '', aiReply: '' });
+  const [feedbackCategory, setFeedbackCategory] = useState('typo');
+  const [correctionText, setCorrectionText] = useState('');
+
+  const handleFeedbackSignal = async (type, aiReply) => {
+    if (type === 'up') {
+      showToast({ type: 'success', message: '👍 Thanks! AI-Dost learned from this response.' });
+      try {
+        await api.post('/learning/feedback', { type: 'up', aiReply });
+      } catch(e) {}
+    } else {
+      setFeedbackData({ message: input, aiReply });
+      setShowFeedbackModal(true);
+    }
+  };
+
+  const handleSubmitFeedback = async () => {
+    try {
+      await api.post('/learning/feedback', {
+        type: 'down',
+        category: feedbackCategory,
+        aiReply: feedbackData.aiReply,
+        correction: correctionText
+      });
+      showToast({ type: 'success', message: '🧠 Feedback recorded! Personal Brain has self-corrected.' });
+      setShowFeedbackModal(false);
+      setCorrectionText('');
+    } catch (e) {
+      showToast({ type: 'error', message: 'Failed to submit feedback' });
+    }
+  };
+
+  // Clipboard Paste Image / File Handler
+  const handlePaste = (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            setAttachedFile({
+              name: `pasted-image-${Date.now()}.png`,
+              content: evt.target.result,
+              type: 'image',
+              size: (file.size / 1024).toFixed(1) + ' KB',
+              timestamp: new Date().toLocaleTimeString()
+            });
+            showToast({ type: 'success', message: 'Image pasted from clipboard!' });
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    }
+  };
+
+  // Dual-Side Mouse Drag Resizer (Activated ONLY on Double-Click ↔)
+  const [customPixelWidth, setCustomPixelWidth] = useState(null); // numeric px e.g. 1000
+  const [isDragActive, setIsDragActive] = useState(false);
+  const isDraggingRef = useRef(false);
+  const dragSideRef = useRef(null); // 'left' | 'right'
+  const startXRef = useRef(0);
+  const startWidthRef = useRef(1000);
+  const containerRef = useRef(null);
+
+  const handleHandleDoubleClick = (e, side) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragActive(true);
+    isDraggingRef.current = true;
+    dragSideRef.current = side;
+    startXRef.current = e.clientX;
+    
+    const currentW = containerRef.current ? containerRef.current.offsetWidth : 1000;
+    startWidthRef.current = currentW;
+
+    if (showToast) {
+      showToast({ type: 'info', message: '↔️ Double-Click Activated! Move mouse left/right to resize width.' });
+    }
+
+    document.addEventListener('mousemove', handleMouseDragMove);
+    document.addEventListener('mouseup', handleMouseDragEnd);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'ew-resize';
+  };
+
+  const handleMouseDragMove = (e) => {
+    if (!isDraggingRef.current) return;
+    const deltaX = e.clientX - startXRef.current;
+    let newWidth = startWidthRef.current;
+
+    if (dragSideRef.current === 'right') {
+      newWidth = startWidthRef.current + deltaX * 2;
+    } else if (dragSideRef.current === 'left') {
+      newWidth = startWidthRef.current - deltaX * 2;
+    }
+
+    const minW = 480;
+    const maxW = typeof window !== 'undefined' ? window.innerWidth - 32 : 1800;
+    const clampedW = Math.max(minW, Math.min(maxW, newWidth));
+    setCustomPixelWidth(clampedW);
+  };
+
+  const handleMouseDragEnd = () => {
+    isDraggingRef.current = false;
+    dragSideRef.current = null;
+    setIsDragActive(false);
+    document.removeEventListener('mousemove', handleMouseDragMove);
+    document.removeEventListener('mouseup', handleMouseDragEnd);
+    document.body.style.userSelect = '';
+    document.body.style.cursor = '';
+  };
+
+  // Resizable Chat Width States
+  const [widthMode, setWidthMode] = useState('wide'); // 'normal' | 'wide' | 'full'
+
+  const cycleWidthMode = () => {
+    setCustomPixelWidth(null);
+    if (widthMode === 'normal') {
+      setWidthMode('wide');
+      if (showToast) showToast({ type: 'info', message: 'Chat width expanded to Wide (↔)' });
+    } else if (widthMode === 'wide') {
+      setWidthMode('full');
+      if (showToast) showToast({ type: 'info', message: 'Chat expanded to Full Screen (⤢)' });
+    } else {
+      setWidthMode('normal');
+      if (showToast) showToast({ type: 'info', message: 'Chat width set to Compact' });
+    }
+  };
   const [uploadedDocs, setUploadedDocs] = useState([]);
   const [showLibrary, setShowLibrary] = useState(false);
   const [viewingDoc, setViewingDoc] = useState(null);
+
+  // Clear current mode history
+  const handleClearCurrentHistory = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(storageKey);
+    }
+    setMessages([defaultWelcomeMessage]);
+    showToast({ type: 'info', message: `${mode === 'chat' ? 'General Chat' : 'Project Chat'} history cleared.` });
+  };
 
   // Voice Call States
   const [isVoiceCallActive, setIsVoiceCallActive] = useState(false);
@@ -659,9 +905,18 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
     }
   };
 
-  const speakText = (text, onFinishedCallback = null) => {
+  const [playingMessageId, setPlayingMessageId] = useState(null);
+
+  const speakText = (text, messageId = null, onFinishedCallback = null) => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel(); // Mute ongoing audio
+      // If clicking the currently playing message audio, stop it
+      if (playingMessageId === messageId && messageId !== null) {
+        window.speechSynthesis.cancel();
+        setPlayingMessageId(null);
+        return;
+      }
+
+      window.speechSynthesis.cancel(); // Mute any ongoing audio
 
       // Strip markup tags for voice read readability
       const cleanReadText = text
@@ -670,17 +925,39 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         .replace(/[*#_~]/g, '');
 
       const utterance = new SpeechSynthesisUtterance(cleanReadText);
-      utterance.lang = 'hi-IN'; // Localized friendly sound accent
+      
+      // Robust Language & Accent Detection (Hindi, Hinglish, English)
+      const hasDevanagari = /[\u0900-\u097F]/.test(cleanReadText);
+      const hinglishWords = ['aap', 'main', 'karo', 'kya', 'kaise', 'hai', 'hoon', 'karne', 'bhi', 'kuch', 'raha', 'rahi', 'suno', 'batao', 'dost', 'shukriya', 'namaste', 'sabse', 'pehle', 'lekin', 'kyunki'];
+      const textLower = cleanReadText.toLowerCase();
+      const isHinglish = hinglishWords.some(w => textLower.includes(w));
+
+      const isHindiOrHinglish = hasDevanagari || isHinglish;
+      utterance.lang = isHindiOrHinglish ? 'hi-IN' : 'en-US';
 
       const voices = window.speechSynthesis.getVoices();
-      const hindiVoice = voices.find(v => v.lang.includes('hi') || v.lang.includes('IN'));
-      if (hindiVoice) {
-        utterance.voice = hindiVoice;
+      if (isHindiOrHinglish) {
+        // Find Indian Hindi narrator voice first, fallback to Indian English or default
+        const indianVoice = voices.find(v => v.lang.includes('hi') || v.lang.includes('IN'));
+        if (indianVoice) utterance.voice = indianVoice;
+      } else {
+        // Find English narrator voice
+        const englishVoice = voices.find(v => v.lang.startsWith('en-US') || v.lang.startsWith('en-GB') || v.lang.startsWith('en'));
+        if (englishVoice) utterance.voice = englishVoice;
       }
 
-      if (onFinishedCallback) {
+      if (messageId !== null) {
+        setPlayingMessageId(messageId);
         utterance.onend = () => {
-          onFinishedCallback();
+          setPlayingMessageId(null);
+          if (onFinishedCallback) onFinishedCallback();
+        };
+        utterance.onerror = () => {
+          setPlayingMessageId(null);
+        };
+      } else if (onFinishedCallback) {
+        utterance.onend = () => {
+          if (onFinishedCallback) onFinishedCallback();
         };
       }
 
@@ -955,9 +1232,22 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         openrouter: localStorage.getItem('customOpenRouterKey') || ''
       };
 
+      // Copilot Mood Prompt Enhancer
+      let moodPromptPrefix = "";
+      if (mode === 'project') {
+        if (copilotMood === 'agent') {
+          moodPromptPrefix = "[COPILOT AGENT MODE]: You are an autonomous Full Stack AI Agent. Write full, production-ready code blocks and complete files. If creating or modifying multiple files, clearly specify file paths in code headers so the developer can click Apply Code.\n\n";
+        } else if (copilotMood === 'plan') {
+          moodPromptPrefix = "[COPILOT PLAN MODE]: You are a Software Architect. Before writing code, create a step-by-step architectural breakdown plan with file structure, logic flowchart, and key implementation steps.\n\n";
+        } else {
+          moodPromptPrefix = "[COPILOT CHAT MODE]: Provide quick, helpful coding advice, debugging hints, and direct answers.\n\n";
+        }
+      }
+
       const requestPayload = {
-        message: apiPrompt,
+        message: moodPromptPrefix + apiPrompt,
         mode: mode,
+        copilotMood: copilotMood,
         history: historyPayload,
         customKeys: customKeys,
         uploadedDocs: uploadedDocs.map(d => ({ name: d.name, content: d.content }))
@@ -1050,7 +1340,40 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         }
       }
 
+      // In Agent Mood, automatically apply multi-file code edits directly to workspace files & run terminal/preview
+      if (mode === 'project' && copilotMood === 'agent' && onWriteCode) {
+        // Match code blocks with optional filename header e.g. ```html file="index.html" or // File: app.js
+        const codeBlockRegex = /```(?:[a-zA-Z0-9_\-+]+)?(?:\s+(?:file|filename|path)=["']?([a-zA-Z0-9_\-\.\/]+)["']?)?\s*\n([\s\S]*?)```/gi;
+        let match;
+        let fileEdits = [];
+        
+        while ((match = codeBlockRegex.exec(finalReplyText)) !== null) {
+          const explicitFilename = match[1];
+          const codeContent = match[2] ? match[2].trim() : '';
+          
+          if (codeContent) {
+            // Check inside code header if explicitFilename wasn't in backticks
+            const innerHeaderMatch = codeContent.match(/^(?:#|\/\/|\/\*|<!--)\s*(?:File|filename|Path):\s*([a-zA-Z0-9_\-\.\/]+)/i);
+            const targetFilename = explicitFilename || (innerHeaderMatch ? innerHeaderMatch[1].trim() : null);
+            
+            fileEdits.push({
+              code: codeContent,
+              filename: targetFilename
+            });
+          }
+        }
+        
+        if (fileEdits.length > 0) {
+          fileEdits.forEach((edit, idx) => {
+            setTimeout(() => {
+              onWriteCode(edit.code, edit.filename);
+            }, idx * 400);
+          });
+        }
+      }
+
       setMessages(prev => [...prev, {
+        id: Date.now() + Math.random(),
         sender: 'ai',
         text: finalReplyText,
         images: generatedImages.length > 0 ? generatedImages : undefined,
@@ -1059,7 +1382,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         sources: sources,
         query: textInput
       }]);
-      speakText(finalReplyText);
+      // Note: Auto-narration removed so narrator only speaks when Play button is clicked by user
     } catch {
       setMessages(prev => [...prev, {
         sender: 'ai',
@@ -1072,7 +1395,51 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
   };
 
   return (
-    <div className="h-full flex flex-col bg-bg-default/40 backdrop-blur-xl rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden relative animate-fadeIn animate-pulseGlow">
+    <div 
+      ref={containerRef}
+      style={{ width: mode === 'chat' && customPixelWidth ? `${customPixelWidth}px` : undefined }}
+      className={`h-full flex flex-col bg-bg-default/40 backdrop-blur-xl rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden relative animate-fadeIn animate-pulseGlow transition-all duration-200 group/container ${
+        mode === 'project'
+          ? 'w-full max-w-full'
+          : customPixelWidth
+            ? 'max-w-none'
+            : widthMode === 'normal'
+              ? 'max-w-4xl mx-auto w-full'
+              : widthMode === 'wide'
+                ? 'max-w-6xl mx-auto w-full'
+                : 'max-w-none w-full'
+      }`}
+    >
+      {/* Show Resizer Handles ONLY in General Chat Mode */}
+      {mode === 'chat' && (
+        <>
+          {/* Left Border Mouse Drag Resizer Handle (Double-Click to Activate ↔) */}
+          <div className="absolute left-0 top-1/2 -translate-y-1/2 z-40 pointer-events-none select-none">
+            <div
+              onDoubleClick={(e) => handleHandleDoubleClick(e, 'left')}
+              className={`w-2.5 h-14 rounded-r-xl cursor-ew-resize pointer-events-auto transition-all flex items-center justify-center border-y border-r border-primary/30 shadow-md ${
+                isDragActive ? 'bg-primary text-bg-default shadow-[0_0_15px_var(--color-primary-glow)] scale-110' : 'bg-bg-card/80 backdrop-blur-md hover:bg-primary/30 text-primary'
+              }`}
+              title="Double-Click & Drag Mouse Left/Right to Adjust Chat Width (↔)"
+            >
+              <div className="w-1 h-6 rounded-full bg-primary"></div>
+            </div>
+          </div>
+
+          {/* Right Border Mouse Drag Resizer Handle (Double-Click to Activate ↔) */}
+          <div className="absolute right-0 top-1/2 -translate-y-1/2 z-40 pointer-events-none select-none">
+            <div
+              onDoubleClick={(e) => handleHandleDoubleClick(e, 'right')}
+              className={`w-2.5 h-14 rounded-l-xl cursor-ew-resize pointer-events-auto transition-all flex items-center justify-center border-y border-l border-primary/30 shadow-md ${
+                isDragActive ? 'bg-primary text-bg-default shadow-[0_0_15px_var(--color-primary-glow)] scale-110' : 'bg-bg-card/80 backdrop-blur-md hover:bg-primary/30 text-primary'
+              }`}
+              title="Double-Click & Drag Mouse Left/Right to Adjust Chat Width (↔)"
+            >
+              <div className="w-1 h-6 rounded-full bg-primary"></div>
+            </div>
+          </div>
+        </>
+      )}
       {/* Fullscreen Document Page View */}
       {activePage && (
         <AIPageView 
@@ -1242,65 +1609,184 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
       )}
       
       {/* Header */}
-      <div className="flex justify-between items-center p-4 border-b border-secondary/10 shrink-0 bg-bg-hover/20">
-        <div className="flex flex-col">
-          <h1 className="text-sm font-bold text-primary flex items-center gap-1.5">
-            🤖 Ai-Dost
+      <div className="flex justify-between items-center px-4 py-3 border-b border-border shrink-0 gap-3">
+        <div className="flex items-center gap-2.5 shrink-0">
+          <img 
+            src="/logo.jpg" 
+            alt="AI-Dost Logo" 
+            className="w-7 h-7 rounded-lg object-cover border border-primary/30 shadow-[0_0_10px_var(--color-primary-glow)] shrink-0" 
+          />
+          <div>
+            <h1 className="text-sm font-bold text-text-primary leading-none tracking-tight gradient-text">Ai-Dost</h1>
             {currentFile && (
-              <span className="text-[9px] font-normal text-text-secondary bg-secondary/10 px-2 py-0.5 rounded border border-secondary/10">
-                📄 {currentFile}
+              <span className="text-[10px] text-text-muted flex items-center gap-1 mt-0.5">
+                <FileText className="w-2.5 h-2.5 text-primary" />{currentFile}
               </span>
             )}
-          </h1>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {/* Multi-Model Selector */}
+        <div className="flex items-center gap-2 overflow-x-auto shrink-0 no-scrollbar">
           <select 
+            suppressHydrationWarning
             value={selectedModel} 
             onChange={(e) => setSelectedModel(e.target.value)}
-            className="bg-bg-default text-text-primary border border-secondary/30 p-1 rounded text-[10px] focus:outline-none focus:ring-1 focus:ring-primary font-semibold cursor-pointer"
+            className="bg-bg-hover text-text-secondary border border-border rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium cursor-pointer shrink-0"
           >
-            <option value="auto">🤖 Auto-Model</option>
-            <option value="groq">🦙 Groq (Llama 3)</option>
-            <option value="gemini">♊ Gemini Flash</option>
-            <option value="deepseek">🐳 DeepSeek V3</option>
-            <option value="nvidia">💚 NVIDIA NIM</option>
-            <option value="openrouter">🪐 OpenRouter</option>
+            <option value="auto">Auto Model</option>
+            <option value="groq">Groq · Llama 3</option>
+            <option value="gemini">Gemini Flash</option>
+            <option value="deepseek">DeepSeek V3</option>
+            <option value="nvidia">NVIDIA NIM</option>
+            <option value="openrouter">OpenRouter</option>
             {localModels.length > 0 && (
-              <optgroup label="💻 Local Models (Ollama)">
+              <optgroup label="Local (Ollama)">
                 {localModels.map(m => (
                   <option 
                     key={m.id} 
                     value={m.id}
                     disabled={!m.isCompatible}
-                    className={!m.isCompatible ? 'opacity-40 line-through text-text-secondary' : ''}
                   >
-                    💻 {m.name} ({m.size} - {m.isCompatible ? m.category : '⚠️ Requires >6GB VRAM (Disabled)'})
+                    {m.name} ({m.size}{!m.isCompatible ? ' — needs >6GB VRAM' : ''})
                   </option>
                 ))}
               </optgroup>
             )}
           </select>
+          
+          {/* New Chat Button */}
+          <button
+            onClick={handleClearCurrentHistory}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-primary/20 border border-primary/40 hover:bg-primary hover:text-bg-default text-primary text-xs font-bold transition cursor-pointer shrink-0"
+            title="Start New Chat (Clears current session messages)"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>+New</span>
+          </button>
+
+          {/* History Drawer Trigger Button */}
+          <button
+            onClick={() => setShowHistory(true)}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-bg-hover border border-border hover:border-primary/40 text-text-secondary hover:text-primary text-xs font-medium transition cursor-pointer shrink-0"
+            title="Open Chat History Drawer"
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>History</span>
+          </button>
+
+          {/* Delete Current Session Quick Trash Button */}
+          <button
+            onClick={handleClearCurrentHistory}
+            className="p-1.5 rounded-lg bg-bg-hover border border-border hover:border-danger/40 text-text-muted hover:text-danger transition cursor-pointer shrink-0"
+            title="Delete/Clear Chat History"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+
           <button
             onClick={() => setShowLibrary(true)}
-            className="bg-primary/10 border border-primary/20 hover:bg-primary hover:text-bg-default text-primary text-[10px] px-2 py-0.5 rounded font-bold transition flex items-center gap-1 cursor-pointer select-none"
-            title="Open RAG Document Library"
+            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-bg-hover border border-border hover:border-primary/40 text-text-secondary hover:text-primary text-xs font-medium transition cursor-pointer shrink-0"
+            title="Document Library"
           >
-            <span>🗂️ Library</span>
+            <Library className="w-3.5 h-3.5" />
+            <span>Docs</span>
             {uploadedDocs.length > 0 && (
-              <span className="bg-primary text-bg-default text-[8px] px-1 rounded-full">{uploadedDocs.length}</span>
+              <span className="bg-primary text-bg-default text-[9px] px-1.5 py-0.5 rounded-full font-bold">{uploadedDocs.length}</span>
             )}
           </button>
-          <span className="text-[10px] bg-success/15 text-success border border-success/20 px-2 py-0.5 rounded-full font-bold">Active</span>
+
+          {/* Double-Sided Arrow Width Adjuster Button (Chat Mode Only) */}
+          {mode === 'chat' && (
+            <button
+              onClick={cycleWidthMode}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 border border-primary/30 hover:bg-primary/20 text-primary text-xs font-bold transition cursor-pointer shrink-0 shadow-[0_0_10px_var(--color-primary-glow)]"
+              title={`Adjust Chat Card Width: Current [${widthMode.toUpperCase()}] — Click to toggle (↔)`}
+            >
+              {widthMode === 'full' ? (
+                <Minimize2 className="w-3.5 h-3.5 text-primary" />
+              ) : widthMode === 'wide' ? (
+                <MoveHorizontal className="w-3.5 h-3.5 text-primary" />
+              ) : (
+                <Maximize2 className="w-3.5 h-3.5 text-primary" />
+              )}
+              <span className="text-[10px] uppercase tracking-wider font-extrabold">{widthMode} ↔</span>
+            </button>
+          )}
+
+          <span className="flex items-center gap-1 text-[10px] text-success font-semibold shrink-0 ml-1">
+            <span className="w-2 h-2 rounded-full bg-success animate-pulse"></span>Online
+          </span>
         </div>
       </div>
+
+      {/* Chat History Panel Drawer Overlay */}
+      {showHistory && (
+        <div className="absolute inset-0 bg-black/90 backdrop-blur-md z-50 flex flex-col p-5 overflow-hidden select-text text-text-primary">
+          <div className="flex items-center justify-between border-b border-border pb-3 mb-4 shrink-0">
+            <div className="flex items-center gap-2 text-primary font-semibold text-xs">
+              <History className="w-4 h-4" /> 
+              <span>{mode === 'chat' ? 'General Chat History' : 'Project Workspace Chat History'}</span>
+            </div>
+            <button 
+              onClick={() => setShowHistory(false)}
+              className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+            <div className="flex justify-between items-center bg-bg-card p-3 rounded-lg border border-border text-xs">
+              <span className="text-text-muted">Current Mode: <strong className="text-primary capitalize">{mode} Mode</strong></span>
+              <button
+                onClick={handleClearCurrentHistory}
+                className="flex items-center gap-1 px-2.5 py-1 bg-warning/10 border border-warning/30 text-warning hover:bg-warning hover:text-bg-default rounded text-[10px] font-medium transition cursor-pointer"
+              >
+                <Trash2 className="w-3 h-3" /> Clear History
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <h4 className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">Messages ({messages.length})</h4>
+              {messages.map((m, idx) => (
+                <div key={idx} className="p-3 bg-bg-card border border-border rounded-lg text-xs space-y-1 group relative">
+                  <div className="flex justify-between items-center text-[10px] text-text-muted font-medium">
+                    <span className="capitalize">{m.sender === 'ai' ? 'Ai-Dost' : 'You'}</span>
+                    <div className="flex items-center gap-2">
+                      <span>{m.timestamp || ''}</span>
+                      <button
+                        onClick={() => {
+                          setMessages(prev => prev.filter((_, i) => i !== idx));
+                          showToast({ type: 'info', message: 'Message removed from history' });
+                        }}
+                        className="text-text-muted hover:text-warning transition p-0.5 cursor-pointer"
+                        title="Delete this message"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-text-primary font-mono text-[11px] truncate leading-relaxed">
+                    {m.text ? m.text.substring(0, 120) + (m.text.length > 120 ? '...' : '') : ''}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto space-y-3 p-4 select-text">
         {messages.map((msg, i) => (
           <MessageBubble 
-            key={i} 
-            msg={msg} 
+            key={msg.id || i} 
+            msg={{
+              ...msg,
+              isPlaying: playingMessageId === (msg.id || i),
+              onPlayAudio: (txt) => speakText(txt, msg.id || i),
+              onFeedback: handleFeedbackSignal,
+              onShowToast: showToast
+            }} 
             onWriteCode={onWriteCode} 
             onCreatePage={(title, text) => setActivePage({ title, content: text })} 
           />
@@ -1324,11 +1810,9 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
 
         {isTyping && (!isProSearch || proSearchStages.length === 0) && (
           <div className="flex justify-start">
-            <div className="bg-secondary/10 border border-secondary/20 text-text-primary p-3 rounded-xl text-sm">
-              {isGeneratingImage
-                ? <span className="animate-pulse">🎨 Generating image...</span>
-                : <span className="animate-pulse">💭 Thinking...</span>
-              }
+            <div className="flex items-center gap-2.5 bg-bg-card border border-border text-text-secondary px-3 py-2.5 rounded-xl text-xs">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+              {isGeneratingImage ? 'Generating image...' : 'Thinking...'}
             </div>
           </div>
         )}
@@ -1336,64 +1820,108 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
       </div>
 
       {/* Input */}
-      <div className="p-4 border-t border-secondary/10 shrink-0 flex flex-col gap-2.5 bg-bg-hover/30">
+      <div className="px-3 pb-3 pt-2.5 border-t border-border shrink-0 flex flex-col gap-2">
 
-        {/* Attachment preview panel if a file is uploaded */}
+        {/* Attachment preview */}
         {attachedFile && (
-          <div className="flex items-center justify-between p-2 bg-bg-default border border-primary/30 rounded-lg text-xs shrink-0 select-text">
+          <div className="flex items-center justify-between px-3 py-2 bg-bg-card border border-border rounded-lg text-xs shrink-0 select-text">
             <div className="flex items-center gap-2 truncate">
-              <span>{attachedFile.type === 'image' ? '🖼️' : '📎'}</span>
-              <span className="font-semibold text-primary truncate">{attachedFile.name}</span>
+              {attachedFile.type === 'image' ? <ImageIcon className="w-3.5 h-3.5 text-primary shrink-0" /> : <Paperclip className="w-3.5 h-3.5 text-primary shrink-0" />}
+              <span className="font-medium text-text-primary truncate">{attachedFile.name}</span>
             </div>
             <button 
               onClick={() => setAttachedFile(null)}
-              className="text-text-secondary hover:text-danger cursor-pointer px-1 font-bold text-[10px]"
+              className="text-text-muted hover:text-warning cursor-pointer"
             >
-              ✕ Remove
+              <X className="w-3.5 h-3.5" />
             </button>
           </div>
         )}
 
-        <div className="flex gap-2 items-center bg-white/[0.03] border border-white/[0.08] rounded-xl p-2 shadow-lg focus-within:border-primary/40 focus-within:shadow-[0_0_15px_rgba(0,245,255,0.08)] transition-all duration-300">
-          <button
-            onClick={() => setSpeakOutput(!speakOutput)}
-            className={`p-2 rounded-lg transition-colors cursor-pointer text-sm shrink-0 flex items-center justify-center ${
-              speakOutput
-                ? 'text-success hover:text-success/80'
-                : 'text-text-secondary hover:text-text-primary'
-            }`}
-            title={speakOutput ? "Mute Speech Voice" : "Enable Speech Voice (Reads responses)"}
-          >
-            {speakOutput ? <FaVolumeUp /> : <FaVolumeMute />}
-          </button>
+        {/* Copilot Quick Action Pills in Project Mode */}
+        {mode === 'project' && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 select-none no-scrollbar">
+            <button
+              onClick={() => setInput("Find and fix all syntax or runtime bugs in the active file.")}
+              className="px-2 py-0.5 rounded-full bg-white/[0.03] hover:bg-primary/10 border border-white/[0.08] hover:border-primary/30 text-text-secondary hover:text-primary text-[10px] font-medium transition cursor-pointer shrink-0"
+            >
+              🐞 Fix Bugs
+            </button>
+            <button
+              onClick={() => setInput("Refactor the active file for performance and clean code principles.")}
+              className="px-2 py-0.5 rounded-full bg-white/[0.03] hover:bg-secondary/10 border border-white/[0.08] hover:border-secondary/30 text-text-secondary hover:text-secondary text-[10px] font-medium transition cursor-pointer shrink-0"
+            >
+              ⚡ Refactor
+            </button>
+            <button
+              onClick={() => setInput("Generate complete unit tests for all functions in the current file.")}
+              className="px-2 py-0.5 rounded-full bg-white/[0.03] hover:bg-success/10 border border-white/[0.08] hover:border-success/30 text-text-secondary hover:text-success text-[10px] font-medium transition cursor-pointer shrink-0"
+            >
+              🧪 Unit Tests
+            </button>
+            <button
+              onClick={() => setInput("Add detailed JSDoc / Docstring comments to all functions and classes.")}
+              className="px-2 py-0.5 rounded-full bg-white/[0.03] hover:bg-amber-500/10 border border-white/[0.08] hover:border-amber-500/30 text-text-secondary hover:text-amber-400 text-[10px] font-medium transition cursor-pointer shrink-0"
+            >
+              📝 Add Docs
+            </button>
+            <button
+              onClick={() => setInput("Search semantic vector memory for past design decisions and project context.")}
+              className="px-2 py-0.5 rounded-full bg-white/[0.03] hover:bg-cyan-500/10 border border-white/[0.08] hover:border-cyan-500/30 text-text-secondary hover:text-cyan-400 text-[10px] font-medium transition cursor-pointer shrink-0"
+            >
+              🧠 Vector Memory
+            </button>
+          </div>
+        )}
 
-          {/* Microphone */}
-          <button
-            onClick={toggleListening}
-            className={`p-2 rounded-lg transition-colors cursor-pointer text-sm shrink-0 flex items-center justify-center ${
-              isListening
-                ? 'text-danger animate-pulse'
-                : 'text-text-secondary hover:text-text-primary'
-            }`}
-            title={isListening ? "Listening... (Click to stop)" : "Speech Input (Click to speak)"}
-          >
-            {isListening ? <FaMicrophoneSlash /> : <FaMicrophone />}
-          </button>
+        <div className="flex gap-2 items-center bg-bg-card border border-border rounded-xl px-3 py-2 focus-within:border-primary/50 transition-all duration-200">
+          {mode === 'project' ? (
+            /* Compact Copilot Mood Select Dropdown */
+            <select
+              value={copilotMood}
+              onChange={(e) => setCopilotMood(e.target.value)}
+              className="bg-bg-hover text-primary font-bold border border-border rounded-lg px-2 py-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer shrink-0"
+              title="Select Copilot Mood Mode"
+            >
+              <option value="chat">💬 Chat Mood</option>
+              <option value="agent">🤖 Agent Mood</option>
+              <option value="plan">✨ Plan Mood</option>
+            </select>
+          ) : (
+            /* General Chat Voice & Speaker Controls */
+            <>
+              <button
+                onClick={() => setSpeakOutput(!speakOutput)}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer shrink-0 ${
+                  speakOutput ? 'text-success' : 'text-text-muted hover:text-text-secondary'
+                }`}
+                title={speakOutput ? "Mute" : "Read responses aloud"}
+              >
+                {speakOutput ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+              </button>
 
-          {/* Real-time Voice Call Button */}
-          <button
-            onClick={handleToggleVoiceCall}
-            className={`p-2 rounded-lg transition-colors cursor-pointer text-sm shrink-0 flex items-center justify-center ${
-              isVoiceCallActive
-                ? 'bg-danger/25 text-danger border border-danger/40 animate-pulse'
-                : 'text-text-secondary hover:text-text-primary'
-            }`}
-            title={isVoiceCallActive ? "End Voice Call" : "📞 Voice Call AI-Dost"}
-          >
-            <span>📞</span>
-          </button>
+              <button
+                onClick={toggleListening}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer shrink-0 ${
+                  isListening ? 'text-warning animate-pulse' : 'text-text-muted hover:text-text-secondary'
+                }`}
+                title={isListening ? "Listening... click to stop" : "Voice input"}
+              >
+                {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              </button>
 
-          {/* Paperclip attachment button */}
+              <button
+                onClick={handleToggleVoiceCall}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer shrink-0 ${
+                  isVoiceCallActive ? 'text-warning animate-pulse' : 'text-text-muted hover:text-text-secondary'
+                }`}
+                title={isVoiceCallActive ? "End voice call" : "Start voice call"}
+              >
+                <Phone className="w-4 h-4" />
+              </button>
+            </>
+          )}
+
           <input 
             type="file"
             ref={fileInputRef}
@@ -1403,10 +1931,10 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="p-2 rounded-lg text-text-secondary hover:text-text-primary transition-colors cursor-pointer text-sm shrink-0 flex items-center justify-center"
-            title="Attach a file/image"
+            className="p-1.5 rounded-lg text-text-muted hover:text-text-secondary transition-colors cursor-pointer shrink-0"
+            title="Attach File or Image"
           >
-            📎
+            <Paperclip className="w-4 h-4" />
           </button>
 
           {/* Pro Search Toggle */}
@@ -1427,18 +1955,82 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder={isListening ? "Listening..." : "Ask Ai-Dost... or /image <prompt>"}
-            className="flex-1 bg-transparent text-text-primary border-none focus:outline-none focus:ring-0 text-sm min-w-0 px-2"
+            onPaste={handlePaste}
+            placeholder={isListening ? "Listening..." : mode === 'project' ? `Copilot [${copilotMood.toUpperCase()}] — type or paste image/file...` : "Message Ai-Dost..."}
+            className="flex-1 bg-transparent text-text-primary border-none focus:outline-none focus:ring-0 text-sm min-w-0"
           />
           <button
             onClick={handleSend}
             disabled={isTyping}
-            className="p-2 bg-primary text-bg-default rounded-lg font-bold text-sm hover:bg-primary/80 transition disabled:opacity-40 cursor-pointer shrink-0 shadow-[0_0_10px_rgba(0,245,255,0.2)]"
+            className="p-1.5 bg-primary text-bg-default rounded-lg hover:bg-primary-hover transition disabled:opacity-40 cursor-pointer shrink-0"
           >
-            ➤
+            <Send className="w-4 h-4" strokeWidth={2} />
           </button>
         </div>
       </div>
+
+      {/* Interactive Thumbs Down Feedback Modal */}
+      {showFeedbackModal && (
+        <div className="fixed inset-0 z-[110] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn select-text">
+          <div className="w-full max-w-md bg-bg-card border border-warning/40 rounded-2xl p-6 shadow-2xl space-y-4 relative noise-overlay">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex items-center gap-2 text-warning font-bold text-sm">
+                <ThumbsDown className="w-4 h-4" />
+                <span>Teach & Correct Personal Brain Model</span>
+              </div>
+              <button 
+                onClick={() => setShowFeedbackModal(false)}
+                className="text-text-muted hover:text-text-primary text-xs cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-text-secondary leading-relaxed">
+              Aapke iss feedback se **Personal AI-Dost Model** apni galti samjhega aur learning memory me save karke Future responses ko sudharega!
+            </p>
+
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-text-primary">What needs improvement?</label>
+              <select
+                value={feedbackCategory}
+                onChange={(e) => setFeedbackCategory(e.target.value)}
+                className="w-full bg-bg-hover text-text-primary border border-border rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
+              >
+                <option value="typo">Spelling or Grammar Typo</option>
+                <option value="code_error">Code Failed to Run or Had Bugs</option>
+                <option value="inaccurate">Inaccurate / Hallucinated Information</option>
+                <option value="custom">Other Custom Issue</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-text-primary">Enter your correction/instruction:</label>
+              <textarea
+                value={correctionText}
+                onChange={(e) => setCorrectionText(e.target.value)}
+                placeholder="Example: Always write clean python code without typos and use proper exception handling..."
+                className="w-full h-24 p-3 bg-bg-hover text-text-primary border border-border rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-primary font-sans resize-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                onClick={() => setShowFeedbackModal(false)}
+                className="px-4 py-2 bg-bg-hover border border-border text-text-secondary hover:text-text-primary rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmitFeedback}
+                className="gradient-btn px-5 py-2 text-white font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5"
+              >
+                🧠 Submit & Self-Correct
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

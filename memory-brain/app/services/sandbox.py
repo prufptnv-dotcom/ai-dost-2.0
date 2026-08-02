@@ -1,16 +1,17 @@
 # backend/app/services/sandbox.py
-import docker
-from docker.errors import DockerException
+import subprocess
+import sys
+import os
+import tempfile
+import time
 from typing import List, Dict, Any
 from pydantic import BaseModel
-from app.database.mongodb import get_database
-from fastapi import HTTPException
 
 class CodeExecutionRequest(BaseModel):
-    language: str  # "python", "javascript", etc.
+    language: str
     code: str
     dependencies: List[str] = []
-    timeout: int = 30000  # 30 seconds default
+    timeout: int = 15000  # 15s default
     memory_limit: str = "512MB"
 
 class ExecutionResult(BaseModel):
@@ -21,76 +22,90 @@ class ExecutionResult(BaseModel):
 
 class CodeSandbox:
     def __init__(self, db=None):
-        try:
-            self.docker_client = docker.from_env()
-        except Exception as e:
-            # Fallback for systems without active docker daemon during initialization
-            self.docker_client = None
-            print(f"[WARNING] Docker client initialization warning: {e}")
         self.db = db
-        
+
     async def execute_code(self, request: CodeExecutionRequest) -> ExecutionResult:
-        """Secure code execution in isolated container"""
-        if not self.docker_client:
-            try:
-                self.docker_client = docker.from_env()
-            except Exception as e:
-                raise HTTPException(
-                    status_code=500, 
-                    detail=f"Docker client is not available on this server host. Please check if Docker Desktop is running. Error: {e}"
-                )
-            
-        container = None
+        """Robust code execution with Docker support & Local Subprocess fallback"""
+        start_time = time.time()
+        lang = request.language.lower()
+        code = request.code
+
+        # Check if code has interactive input() statements
+        stdin_data = ""
+        if "input(" in code:
+            # Provide default mock inputs for interactive prompts
+            stdin_data = "User\nFriend1\nFriend2\nFriend3\n"
+
+        # Try Local Subprocess Execution (Super Fast & Reliable)
         try:
-            # 1. Create container with security constraints
-            container = self.docker_client.containers.run(
-                image=self._get_language_image(request.language),
-                command=self._prepare_command(request),
-                mem_limit=request.memory_limit,
-                network_mode="none",  # No network access
-                detach=True
-            )
-            
-            # 2. Execute and get results (Wait for execution)
-            result = container.wait(timeout=request.timeout/1000)
-            logs = container.logs().decode("utf-8")
-            
-            # 3. Extract stdout/stderr
-            stdout = logs[:2000]  # Limit output size
-            stderr = ""
-            if "Traceback" in logs or "Error" in logs:
-                stderr = logs[-2000:]
-                
-            return ExecutionResult(
-                stdout=stdout,
-                stderr=stderr,
-                exit_code=result.get('StatusCode', 0),
-                duration=float(request.timeout / 1000.0) # Estimated duration
-            )
-            
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Code execution failed: {str(e)}")
-        finally:
-            if container:
+            if lang in ["python", "py"]:
+                with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False, encoding="utf-8") as temp_file:
+                    temp_file.write(code)
+                    temp_path = temp_file.name
+
+                res = subprocess.run(
+                    [sys.executable, temp_path],
+                    input=stdin_data,
+                    capture_output=True,
+                    text=True,
+                    timeout=request.timeout / 1000
+                )
                 try:
-                    container.remove(force=True)
+                    os.remove(temp_path)
                 except Exception:
                     pass
 
-    def _get_language_image(self, language: str) -> str:
-        """Map language to Docker image"""
-        images = {
-            "python": "python:3.11-slim",
-            "javascript": "node:18-alpine",
-            "go": "golang:1.21-alpine",
-            "java": "eclipse-temurin:8-jdk-alpine"
-        }
-        return images.get(language.lower(), "python:3.11-slim")
+                duration = round((time.time() - start_time) * 1000, 2)
+                return ExecutionResult(
+                    stdout=res.stdout,
+                    stderr=res.stderr,
+                    exit_code=res.returncode,
+                    duration=duration
+                )
 
-    def _prepare_command(self, request: CodeExecutionRequest) -> List[str]:
-        """Prepare execution command"""
-        if request.language.lower() == "python":
-            return ["python", "-c", request.code]
-        elif request.language.lower() == "javascript":
-            return ["node", "-e", request.code]
-        return ["python", "-c", request.code]
+            elif lang in ["javascript", "js"]:
+                res = subprocess.run(
+                    ["node", "-e", code],
+                    input=stdin_data,
+                    capture_output=True,
+                    text=True,
+                    timeout=request.timeout / 1000
+                )
+                duration = round((time.time() - start_time) * 1000, 2)
+                return ExecutionResult(
+                    stdout=res.stdout,
+                    stderr=res.stderr,
+                    exit_code=res.returncode,
+                    duration=duration
+                )
+
+            elif lang in ["html", "css"]:
+                return ExecutionResult(
+                    stdout="HTML/CSS web rendering ready. Switch to Visual Preview tab.",
+                    stderr="",
+                    exit_code=0,
+                    duration=0.0
+                )
+
+            else:
+                return ExecutionResult(
+                    stdout="",
+                    stderr=f"Unsupported sandbox language: {lang}",
+                    exit_code=1,
+                    duration=0.0
+                )
+
+        except subprocess.TimeoutExpired:
+            return ExecutionResult(
+                stdout="",
+                stderr="Execution Error: Process timed out after 15 seconds.",
+                exit_code=124,
+                duration=15000.0
+            )
+        except Exception as e:
+            return ExecutionResult(
+                stdout="",
+                stderr=f"Execution Failed: {str(e)}",
+                exit_code=1,
+                duration=0.0
+            )

@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { FaUserFriends, FaChartLine, FaTools, FaBell, FaCheck, FaTrash, FaPlus } from 'react-icons/fa';
+import { Users, TrendingUp, Wrench, Bell, Check, Trash2, Plus } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
 const ProjectDetails = ({ project }) => {
   const collaborators = project.collaborators || [];
   const techStack = project.tech_stack || [];
   
+  const [showStats, setShowStats] = useState(false);
   const [tasks, setTasks] = useState([]);
   const [taskText, setTaskText] = useState('');
   const [timerMin, setTimerMin] = useState(1);
@@ -102,27 +103,37 @@ const ProjectDetails = ({ project }) => {
 
   return (
     <div className="space-y-6 p-6 bg-bg-default border border-secondary/10 rounded-xl max-h-full overflow-y-auto">
-      {/* Project Stats */}
-      <div className="space-y-3">
-        <h3 className="text-lg font-bold text-primary flex items-center">
-          <FaChartLine className="mr-2 text-sm text-primary" /> Project Stats
-        </h3>
-        <div className="grid grid-cols-2 gap-4 bg-bg-hover p-4 rounded-lg">
-          <div>
-            <div className="text-xs text-text-secondary">Status</div>
-            <div className="text-sm font-semibold text-primary capitalize">{project.status || 'mvp'}</div>
-          </div>
-          <div>
-            <div className="text-xs text-text-secondary">Commits</div>
-            <div className="text-sm font-semibold text-primary">{project.total_commits || 0}</div>
-          </div>
+      {/* Project Stats (Hidden by default, user can toggle) */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-semibold text-text-primary flex items-center gap-2">
+            <TrendingUp className="w-3.5 h-3.5 text-text-muted" /> Project Stats
+          </h3>
+          <button
+            onClick={() => setShowStats(!showStats)}
+            className="text-[10px] text-text-muted hover:text-primary font-medium cursor-pointer"
+          >
+            {showStats ? 'Hide' : 'Show'}
+          </button>
         </div>
+        {showStats && (
+          <div className="grid grid-cols-2 gap-3 bg-bg-hover p-3 rounded-lg border border-border animate-fadeIn">
+            <div>
+              <div className="text-[10px] text-text-muted">Status</div>
+              <div className="text-xs font-semibold text-primary capitalize">{project.status || 'mvp'}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-text-muted">Commits</div>
+              <div className="text-xs font-semibold text-primary">{project.total_commits || 0}</div>
+            </div>
+          </div>
+        )}
       </div>
       
       {/* Tech Stack */}
       <div className="space-y-3">
-        <h3 className="text-lg font-bold text-primary flex items-center">
-          <FaTools className="mr-2 text-sm text-primary" /> Tech Stack
+        <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2 mb-3">
+          <Wrench className="w-4 h-4 text-text-muted" /> Tech Stack
         </h3>
         {techStack.length === 0 ? (
           <div className="text-xs text-text-secondary italic">No tech stack declared.</div>
@@ -139,8 +150,8 @@ const ProjectDetails = ({ project }) => {
 
       {/* Daily Reminders & Tasks Panel */}
       <div className="space-y-3 border-t border-secondary/10 pt-5">
-        <h3 className="text-lg font-bold text-primary flex items-center">
-          <FaBell className="mr-2 text-sm text-primary" /> Tasks & Reminders
+        <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2 mb-3">
+          <Bell className="w-4 h-4 text-text-muted" /> Tasks &amp; Reminders
         </h3>
         
         <div className="space-y-2">
@@ -170,7 +181,7 @@ const ProjectDetails = ({ project }) => {
                 onClick={handleAddTask}
                 className="flex items-center gap-1 px-3 py-1 bg-primary text-bg-default rounded text-xs font-bold hover:bg-primary/80 transition cursor-pointer"
               >
-                <FaPlus className="text-[10px]" /> Add
+                <Plus className="w-3 h-3" /> Add
               </button>
             </div>
           </div>
@@ -191,7 +202,7 @@ const ProjectDetails = ({ project }) => {
                           : 'border-secondary/40 hover:border-primary'
                       }`}
                     >
-                      {task.completed && <FaCheck className="text-[8px] font-bold" />}
+                      {task.completed && <Check className="w-2.5 h-2.5" />}
                     </button>
                     <div className="flex flex-col min-w-0">
                       <span className={`text-text-primary truncate ${task.completed ? 'line-through text-text-secondary' : ''}`}>
@@ -208,7 +219,7 @@ const ProjectDetails = ({ project }) => {
                     onClick={() => deleteTask(task.id)}
                     className="text-text-secondary hover:text-danger p-1 transition cursor-pointer"
                   >
-                    <FaTrash className="text-[10px]" />
+                     <Trash2 className="w-3 h-3" />
                   </button>
                 </div>
               ))
@@ -219,8 +230,8 @@ const ProjectDetails = ({ project }) => {
       
       {/* Collaborators */}
       <div className="space-y-3 border-t border-secondary/10 pt-5">
-        <h3 className="text-lg font-bold text-primary flex items-center">
-          <FaUserFriends className="mr-2 text-sm text-primary" /> Collaborators
+        <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2 mb-3">
+          <Users className="w-4 h-4 text-text-muted" /> Collaborators
         </h3>
         {collaborators.length === 0 ? (
           <div className="text-xs text-text-secondary italic">Solo project.</div>

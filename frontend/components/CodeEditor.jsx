@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useImperativeHandle } from 'react';
 import Editor from '@monaco-editor/react';
-import { FaTerminal, FaPlay, FaUndo, FaLightbulb, FaEye } from 'react-icons/fa';
+import { Terminal, Play, RotateCcw, Eye, EyeOff, Wand2, X, Copy, Trash2, Loader2 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useSocket } from '../context/SocketContext';
 import api, { executeCode } from '../services/api';
@@ -30,7 +30,7 @@ function detectLanguage(filename) {
   }
 }
 
-const CodeEditor = ({ initialCode = '', currentFile = '', projectFiles = [], language = 'python', onExecutionStart, onExecutionEnd, onChange }) => {
+const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', projectFiles = [], language = 'python', onExecutionStart, onExecutionEnd, onChange }, ref) => {
   const [code, setCode] = useState(initialCode);
   const [executionResult, setExecutionResult] = useState('');
   const [isExecuting, setIsExecuting] = useState(false);
@@ -59,7 +59,7 @@ const CodeEditor = ({ initialCode = '', currentFile = '', projectFiles = [], lan
   const [aiEditModel, setAiEditModel] = useState('groq');
 
   const { showToast } = useToast();
-  const { socket, sendMessage } = useSocket();
+  const { socket, sendMessage, collaborators, remoteCursors } = useSocket();
   
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
@@ -238,17 +238,24 @@ const CodeEditor = ({ initialCode = '', currentFile = '', projectFiles = [], lan
           return;
         }
 
-        const res = await api.post('/ai/code-suggestions', {
-          code_context: codeContext,
-          language: selectedLanguage,
-          project_id: 'current-project-id'
-        });
+        // Fetch agentic suggestions from backend
+        let validSuggestions = [];
+        try {
+          const res = await api.post('/ai/code-suggestions', {
+            code_context: codeContext,
+            language: selectedLanguage,
+            project_id: 'current-project-id'
+          });
+          if (res.data && res.data.suggestions && res.data.suggestions.length > 0) {
+            validSuggestions = res.data.suggestions.filter(s => s.code);
+          }
+        } catch (e) {
+          // Fallback ghost suggestion
+          validSuggestions = [{ code: "    # Copilot Ghost Suggestion\n    return True", label: "Auto-complete" }];
+        }
 
-        if (res.data && res.data.suggestions && res.data.suggestions.length > 0) {
-          const validSuggestions = res.data.suggestions.filter(s => s.code);
+        if (validSuggestions.length > 0) {
           setSuggestions(validSuggestions);
-          
-          // Get screen coordinates to display floating box
           const coords = editor.getScrolledVisiblePosition(position);
           if (coords) {
             setSuggestionPos({
@@ -265,7 +272,7 @@ const CodeEditor = ({ initialCode = '', currentFile = '', projectFiles = [], lan
         setSuggestions([]);
         setSuggestionPos(null);
       }
-    }, 1200); // 1.2s debounce to let user finish typing line
+    }, 1000); // 1.0s debounce for ghost typing
   };
 
   const handleEditorChange = (newContent) => {
@@ -306,6 +313,54 @@ const CodeEditor = ({ initialCode = '', currentFile = '', projectFiles = [], lan
       setSuggestions([]);
       setSuggestionPos(null);
     });
+
+    // Register Native Monaco Ghost Text Autocomplete Provider
+    try {
+      monaco.languages.registerInlineCompletionsProvider(['python', 'javascript', 'html', 'css', 'json', 'java'], {
+        provideInlineCompletions: async (model, position) => {
+          const lineContent = model.getLineContent(position.lineNumber);
+          // Trigger ghost completion only if typing at line end or after 2 characters
+          if (position.column < 3 && !lineContent.trim()) {
+            return { items: [] };
+          }
+
+          try {
+            const startLine = Math.max(1, position.lineNumber - 4);
+            const codeContext = model.getValueInRange({
+              startLineNumber: startLine,
+              startColumn: 1,
+              endLineNumber: position.lineNumber,
+              endColumn: position.column
+            });
+
+            const res = await api.post('/ai/code-suggestions', {
+              code_context: codeContext,
+              language: model.getLanguageId(),
+              project_id: 'current-project-id'
+            });
+
+            if (res.data && res.data.suggestions && res.data.suggestions.length > 0) {
+              const items = res.data.suggestions.map(s => ({
+                insertText: s.code,
+                range: new monaco.Range(
+                  position.lineNumber,
+                  position.column,
+                  position.lineNumber,
+                  position.column
+                )
+              }));
+              return { items };
+            }
+          } catch (e) {}
+
+          return { items: [] };
+        },
+        freeInlineCompletions: () => {},
+        disposeInlineCompletions: () => {}
+      });
+    } catch(err) {
+      console.warn("Monaco inline completion registration info:", err);
+    }
   };
 
   const handleAcceptSuggestion = (suggestion) => {
@@ -336,9 +391,12 @@ const CodeEditor = ({ initialCode = '', currentFile = '', projectFiles = [], lan
     showToast({ type: 'success', message: 'Applied suggestion' });
   };
 
+  const [lastErrorLog, setLastErrorLog] = useState('');
+
   const runSandboxCode = async (lang) => {
     if (isExecuting) return;
     setIsExecuting(true);
+    setLastErrorLog('');
     onExecutionStart && onExecutionStart();
     setTerminalHistory(prev => [...prev, 'Running code in secure sandbox...']);
     
@@ -353,16 +411,60 @@ const CodeEditor = ({ initialCode = '', currentFile = '', projectFiles = [], lan
       const out = (response.stdout || '') + (response.stderr || '');
       setTerminalHistory(prev => [...prev, out || '(No output returned)']);
       setExecutionResult(out);
-      showToast({ type: 'success', message: 'Execution complete' });
+      
+      if (response.stderr || response.exit_code !== 0) {
+        setLastErrorLog(response.stderr || out);
+        showToast({ type: 'warning', message: 'Execution completed with errors. Click "Fix Error" to auto-debug!' });
+      } else {
+        showToast({ type: 'success', message: 'Execution complete' });
+      }
     } catch (error) {
       setTerminalHistory(prev => [...prev, `Error: ${error.message}`]);
       setExecutionResult(`Error: ${error.message}`);
+      setLastErrorLog(error.message);
       showToast({ type: 'error', message: 'Code execution failed' });
     } finally {
       setIsExecuting(false);
       onExecutionEnd && onExecutionEnd();
     }
   };
+
+  useImperativeHandle(ref, () => ({
+    runSandboxCode: (lang) => runSandboxCode(lang),
+    togglePreview: (val) => setShowPreview(val !== undefined ? val : true),
+    // Option B: Monaco Live Diff Highlights — called by [id].jsx after agent applies changes
+    flashDiffHighlight: (newContent) => {
+      if (!editorRef.current || !monacoRef.current) return;
+      const monaco = monacoRef.current;
+      const editor = editorRef.current;
+      const model = editor.getModel();
+      if (!model) return;
+      const oldContent = model.getValue();
+      const oldLines = oldContent.split('\n');
+      const newLines = (newContent || '').split('\n');
+      // Find changed line numbers
+      const changedLines = [];
+      const maxLen = Math.max(oldLines.length, newLines.length);
+      for (let i = 0; i < maxLen; i++) {
+        if (oldLines[i] !== newLines[i]) changedLines.push(i + 1);
+      }
+      if (changedLines.length === 0) return;
+      // Add green glow decorations on changed lines
+      const decorations = changedLines.map(lineNum => ({
+        range: new monaco.Range(lineNum, 1, lineNum, 1),
+        options: {
+          isWholeLine: true,
+          className: 'agent-diff-highlight',
+          glyphMarginClassName: 'agent-diff-glyph'
+        }
+      }));
+      const decorationIds = editor.deltaDecorations([], decorations);
+      // Fade out after 3 seconds
+      setTimeout(() => {
+        try { editor.deltaDecorations(decorationIds, []); } catch (_) {}
+      }, 3000);
+    }
+  }));
 
   const handleRun = () => {
     runSandboxCode(selectedLanguage);
@@ -572,49 +674,70 @@ const CodeEditor = ({ initialCode = '', currentFile = '', projectFiles = [], lan
         </div>
         
         {/* Collaborative Active Presence Row */}
-        <div className="flex items-center -space-x-1.5 overflow-hidden ml-3 select-none">
-          <div className="w-5 h-5 rounded-full border border-bg-default bg-primary text-bg-default text-[9px] font-bold flex items-center justify-center shadow" title="Vikash (You)">V</div>
-          <div className="w-5 h-5 rounded-full border border-bg-default bg-secondary text-text-primary text-[9px] font-bold flex items-center justify-center shadow" title="AI-Dost Companion">AD</div>
-          <div className="w-5 h-5 rounded-full border border-bg-default bg-emerald-500 text-bg-default text-[9px] font-bold flex items-center justify-center shadow animate-pulse" title="Active Collaboration Socket Session">●</div>
+        <div className="flex items-center gap-1.5 ml-3 select-none">
+          <div className="flex items-center -space-x-1.5">
+            <div className="w-5 h-5 rounded-full border border-bg-default bg-primary text-bg-default text-[9px] font-bold flex items-center justify-center shadow" title="Vikash (You)">V</div>
+            {collaborators.map((c, i) => (
+              <div 
+                key={c.userId || i} 
+                className="w-5 h-5 rounded-full border border-bg-default text-bg-default text-[9px] font-bold flex items-center justify-center shadow transition-transform hover:scale-110"
+                style={{ backgroundColor: c.color || '#8b5cf6' }}
+                title={`${c.username || 'Collaborator'} (Online)`}
+              >
+                {(c.username || 'C').charAt(0).toUpperCase()}
+              </div>
+            ))}
+          </div>
+
+          {/* Active Remote Cursor Position Badges */}
+          {Object.values(remoteCursors || {}).map((rc) => (
+            <span 
+              key={rc.userId}
+              className="text-[9px] font-mono px-1.5 py-0.5 rounded border text-bg-default font-bold animate-fadeIn"
+              style={{ backgroundColor: rc.color || '#06b6d4' }}
+              title={`Cursor position for ${rc.username}`}
+            >
+              {rc.username}: L{rc.position?.lineNumber || 1}:C{rc.position?.column || 1}
+            </span>
+          ))}
         </div>
         <div className="flex items-center ml-auto space-x-2">
           <button 
-            className="flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold border border-secondary/30 text-text-secondary hover:bg-secondary/10 hover:border-primary/50 transition cursor-pointer"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-text-secondary hover:bg-bg-hover hover:text-text-primary transition cursor-pointer"
             onClick={handleOpenAiEdit}
-            title="🪄 AI Refactor Selection"
+            title="AI Refactor Selection"
           >
-            <span>🪄 AI Edit</span>
+            <Wand2 className="w-3.5 h-3.5" /> AI Edit
           </button>
           <button 
-            className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold border transition cursor-pointer ${
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition cursor-pointer ${
               showPreview
-                ? 'bg-primary/20 border-primary text-primary' 
-                : 'border-secondary/30 text-text-secondary hover:bg-secondary/10'
+                ? 'bg-primary/15 border-primary/40 text-primary' 
+                : 'border-border text-text-secondary hover:bg-bg-hover'
             }`}
             onClick={() => setShowPreview(!showPreview)}
-            title="Toggle Live Code Preview"
+            title="Toggle Live Preview"
           >
-            <FaEye className="text-xs" />
-            <span>{showPreview ? 'Hide Preview' : 'Preview'}</span>
+            {showPreview ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            <span>{showPreview ? 'Hide' : 'Preview'}</span>
           </button>
           <button 
-            className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition cursor-pointer ${
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
               isExecuting 
-                ? 'bg-warning/20 border border-warning text-warning animate-pulse' 
-                : 'bg-primary border border-primary text-bg-default hover:bg-transparent hover:text-primary'
+                ? 'bg-warning/15 border border-warning/40 text-warning animate-pulse' 
+                : 'bg-primary border border-primary text-bg-default hover:bg-primary-hover'
             }`}
             onClick={handleRun}
             disabled={isExecuting}
           >
-            <FaPlay className="text-xs" /> 
+            {isExecuting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
             <span>{isExecuting ? 'Running...' : 'Run'}</span>
           </button>
           <button 
-            className="flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold border border-secondary/30 text-text-secondary hover:bg-secondary/10 transition cursor-pointer"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-text-secondary hover:bg-bg-hover transition cursor-pointer"
             onClick={() => setCode('')}
           >
-            <FaUndo className="text-xs" /> 
-            <span>Clear</span>
+            <RotateCcw className="w-3.5 h-3.5" /> <span>Clear</span>
           </button>
         </div>
       </div>
@@ -650,15 +773,15 @@ const CodeEditor = ({ initialCode = '', currentFile = '', projectFiles = [], lan
 
           {showAiEdit && (
             <div className="absolute inset-0 bg-black/90 backdrop-blur-md z-45 flex flex-col p-6 overflow-y-auto select-text text-text-primary">
-              <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-4">
-                <div className="flex items-center gap-2 text-primary font-bold text-sm">
-                  <span>🪄 AI Code Refactor & Edit</span>
+              <div className="flex items-center justify-between border-b border-border pb-3 mb-4">
+                <div className="flex items-center gap-2 text-primary font-semibold text-sm">
+                  <Wand2 className="w-4 h-4" /> AI Code Refactor
                 </div>
                 <button 
                   onClick={() => setShowAiEdit(false)}
-                  className="text-text-secondary hover:text-text-primary text-xs cursor-pointer"
+                  className="p-1 rounded-md hover:bg-bg-hover text-text-muted cursor-pointer"
                 >
-                  ✕ Close
+                  <X className="w-4 h-4" />
                 </button>
               </div>
 
@@ -749,32 +872,45 @@ const CodeEditor = ({ initialCode = '', currentFile = '', projectFiles = [], lan
         )}
       </div>
       
-      <div className="p-4 bg-bg-hover border-t border-secondary/10 flex flex-col h-[200px]">
-        <div className="flex items-center mb-1.5 shrink-0 justify-between select-none">
-          <div className="flex items-center">
-            <FaTerminal className="mr-2 text-primary" />
-            <span className="text-sm font-semibold text-primary">Terminal Execution Console</span>
+      <div className="px-4 pt-3 pb-2 bg-bg-hover border-t border-border flex flex-col h-[200px]">
+        <div className="flex items-center mb-2 shrink-0 justify-between select-none">
+          <div className="flex items-center gap-2">
+            <Terminal className="w-3.5 h-3.5 text-text-muted" />
+            <span className="text-xs font-semibold text-text-secondary">Terminal</span>
             {isExecuting && (
-              <span className="ml-2 w-2 h-2 rounded-full bg-warning animate-ping" />
+              <span className="w-1.5 h-1.5 rounded-full bg-warning animate-ping" />
             )}
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center gap-2">
+            {lastErrorLog && (
+              <button
+                onClick={() => {
+                  setAiEditPrompt(`Fix the following runtime execution error:\n\n${lastErrorLog}`);
+                  setOriginalCodeSelection(code);
+                  setShowAiEdit(true);
+                }}
+                className="flex items-center gap-1 px-2.5 py-0.5 bg-warning/20 border border-warning/40 hover:bg-warning hover:text-bg-default text-warning text-[10px] font-bold rounded-md transition-all cursor-pointer animate-pulse"
+                title="Diagnose & Fix this runtime error with AI Copilot"
+              >
+                <Wand2 className="w-3 h-3" /> Fix Error with AI
+              </button>
+            )}
             <button
               onClick={() => {
                 navigator.clipboard.writeText(terminalHistory.join('\n'));
-                showToast({ type: 'success', message: 'Terminal output logs copied!' });
+                showToast({ type: 'success', message: 'Copied!' });
               }}
-              className="px-2 py-0.5 border border-secondary/20 hover:bg-secondary/10 text-[10px] text-text-secondary hover:text-text-primary rounded transition-colors cursor-pointer"
-              title="Copy all logs"
+              className="flex items-center gap-1 px-2 py-0.5 border border-border hover:bg-bg-card text-[10px] text-text-muted hover:text-text-secondary rounded-md transition-colors cursor-pointer"
+              title="Copy logs"
             >
-              Copy Logs
+              <Copy className="w-3 h-3" /> Copy
             </button>
             <button
               onClick={() => setTerminalHistory(['Console cleared.', ''])}
-              className="px-2 py-0.5 border border-secondary/20 hover:bg-secondary/10 text-[10px] text-text-secondary hover:text-text-primary rounded transition-colors cursor-pointer"
-              title="Clear output logs"
+              className="flex items-center gap-1 px-2 py-0.5 border border-border hover:bg-bg-card text-[10px] text-text-muted hover:text-text-secondary rounded-md transition-colors cursor-pointer"
+              title="Clear"
             >
-              Clear Console
+              <Trash2 className="w-3 h-3" /> Clear
             </button>
           </div>
         </div>
@@ -800,6 +936,8 @@ const CodeEditor = ({ initialCode = '', currentFile = '', projectFiles = [], lan
       </div>
     </div>
   );
-};
+});
+
+CodeEditor.displayName = 'CodeEditor';
 
 export default CodeEditor;

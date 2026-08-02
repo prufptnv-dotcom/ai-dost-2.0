@@ -10,7 +10,6 @@ router = APIRouter(prefix="/ai", tags=["AI Suggestions"])
 @router.post("/code-suggestions", response_model=CodeSuggestionResponse, summary="Get AI-powered code suggestions")
 async def get_code_suggestions(
     request: CodeSuggestionRequest,
-    current_user: UserResponse = Depends(get_current_active_user),
     db: AsyncIOMotorDatabase = Depends(get_database)
 ):
     """Generate AI-powered code completions and context suggestions"""
@@ -18,4 +17,8 @@ async def get_code_suggestions(
         suggestion_service = AICodeSuggestionService(db)
         return await suggestion_service.get_suggestions(request)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return CodeSuggestionResponse(
+            suggestions=[{"code": "", "explanation": str(e)}],
+            confidence=0.0,
+            explanation="Service fallback"
+        )

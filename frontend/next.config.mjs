@@ -1,4 +1,4 @@
-const BACKEND_URL = process.env.NEXT_PUBLIC_EXPRESS_BACKEND_URL || 'http://localhost:3002';
+const BACKEND_URL = process.env.NEXT_PUBLIC_EXPRESS_BACKEND_URL || 'http://localhost:3000';
 
 const nextConfig = {
   reactStrictMode: true,

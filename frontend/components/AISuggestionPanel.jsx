@@ -1,5 +1,5 @@
 import React from 'react';
-import { FaLightbulb, FaInfoCircle, FaTimes } from 'react-icons/fa';
+import { Lightbulb, Info, X } from 'lucide-react';
 
 const AISuggestionPanel = ({ suggestions = [], position = null, onAccept, onClose }) => {
   if (!position || suggestions.length === 0) return null;
@@ -14,16 +14,16 @@ const AISuggestionPanel = ({ suggestions = [], position = null, onAccept, onClos
       }}
     >
       <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-primary/20">
-        <div className="flex items-center">
-          <FaLightbulb className="text-primary mr-2 animate-pulse text-sm" />
-          <span className="text-xs font-bold text-primary uppercase tracking-wider">AI Suggestions</span>
+        <div className="flex items-center gap-1.5">
+          <Lightbulb className="w-3.5 h-3.5 text-primary" />
+          <span className="text-xs font-semibold text-primary">AI Suggestions</span>
         </div>
         <button 
-          className="text-text-secondary hover:text-primary transition p-1 rounded cursor-pointer"
+          className="p-0.5 rounded text-text-muted hover:text-primary transition cursor-pointer"
           onClick={onClose}
-          title="Close suggestions"
+          title="Close"
         >
-          <FaTimes className="text-xs" />
+          <X className="w-3.5 h-3.5" />
         </button>
       </div>
 
@@ -36,8 +36,8 @@ const AISuggestionPanel = ({ suggestions = [], position = null, onAccept, onClos
           >
             <pre className="text-xs text-text-primary font-mono overflow-x-auto whitespace-pre-wrap">{sug.code}</pre>
             <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-secondary/5 text-[9px] text-text-secondary">
-              <span className="flex items-center italic">
-                <FaInfoCircle className="mr-1 text-[10px] text-primary" />
+              <span className="flex items-center gap-1 italic">
+                <Info className="w-3 h-3 text-primary" />
                 {sug.explanation || 'Contextual Code Suggestion'}
               </span>
               {sug.confidence && (

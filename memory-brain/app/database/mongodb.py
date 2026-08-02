@@ -21,15 +21,16 @@ class MongoDB:
                 settings.MONGODB_URL,
                 maxPoolSize=20,      # Maximum 20 concurrent connections
                 minPoolSize=5,       # Always maintain 5 connections
-                serverSelectionTimeoutMS=5000  # 5 sec timeout
+                serverSelectionTimeoutMS=1000  # 1 sec timeout
             )
             cls.db = cls.client[settings.DATABASE_NAME]
             # Test connection
             await cls.client.admin.command('ping')
             print(f"[OK] Connected to MongoDB: {settings.DATABASE_NAME}")
         except Exception as e:
-            print(f"[ERROR] MongoDB connection failed: {e}")
-            raise e
+            cls.client = None
+            cls.db = None
+            print(f"[WARNING] MongoDB connection failed (running in fallback mode): {e}")
 
     @classmethod
     async def close(cls):
@@ -44,6 +45,8 @@ class MongoDB:
         Performance ke liye indexes create karna.
         Har startup pe call hoga - idempotent operation hai.
         """
+        if not cls.db:
+            return
         try:
             # Users collection indexes
             await cls.db.users.create_index("user_id", unique=True)
