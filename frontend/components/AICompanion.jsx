@@ -103,8 +103,41 @@ function MessageContent({ text, onWriteCode, query = '' }) {
     return <div className="whitespace-pre-wrap break-words">{formatTextWithCitations(text, query)}</div>;
   }
 
+  // Email Detection Helper
+  const isEmail = /subject:\s*(.*)/i.test(text) || (/\b(dear|respected|hi|hello)\b/i.test(text) && /\b(regards|sincerely|thanks|best)\b/i.test(text));
+  const subjectMatch = text.match(/subject:\s*(.*)/i);
+  const emailSubject = subjectMatch ? subjectMatch[1].trim() : 'Email Draft';
+
   return (
     <div className="space-y-2.5 p-3">
+      {isEmail && (
+        <div className="mb-2 p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-xs">
+          <div className="flex items-center justify-between font-bold text-purple-400 mb-1">
+            <span className="flex items-center gap-1.5 text-[11px]">
+              ✉️ Email Draft: <span className="text-text-primary font-normal">{emailSubject}</span>
+            </span>
+            <div className="flex gap-1">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(text);
+                  alert('✉️ Email draft copied to clipboard!');
+                }}
+                className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 hover:bg-purple-500/40 text-[9px] font-bold transition cursor-pointer"
+              >
+                Copy Email
+              </button>
+              <a
+                href={`mailto:?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(text)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="px-2 py-0.5 rounded bg-primary text-bg-default text-[9px] font-bold transition cursor-pointer"
+              >
+                Open in Mail App
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
       {parts.map((part, i) => {
         if (part.type === 'text') {
           return <div key={i} className="whitespace-pre-wrap break-words">{formatTextWithCitations(part.content, query)}</div>;
@@ -1244,8 +1277,20 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         }
       }
 
+      // Smart Intent Pre-processor (Detects Image, PDF, Email, Code requests)
+      const userTextLower = userMessageText.toLowerCase();
+      const isImageRequest = /\b(image|photo|picture|draw|banao|bana ke do|painting|illustration|diagram|pic)\b/i.test(userTextLower);
+      const isPdfRequest = /\b(pdf|document|report|resume|paper)\b/i.test(userTextLower);
+      
+      let intentSuffix = "";
+      if (isImageRequest) {
+        intentSuffix += "\n\n[USER INTENT: IMAGE REQUEST - Include tag `[GENERATE_IMAGE: detailed english prompt]` in your response.]";
+      } else if (isPdfRequest) {
+        intentSuffix += "\n\n[USER INTENT: PDF DOCUMENT REQUEST - Wrap document in `[GENERATE_PDF: Title] content [/GENERATE_PDF]`.]";
+      }
+
       const requestPayload = {
-        message: moodPromptPrefix + apiPrompt,
+        message: moodPromptPrefix + apiPrompt + intentSuffix,
         mode: mode,
         copilotMood: copilotMood,
         history: historyPayload,
@@ -1317,6 +1362,11 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         generatedImages.push(pollinationsUrl);
         // Replace tag in the chat message
         finalReplyText = finalReplyText.replace(imageTagRegex, `🎨 Generated Image for: "${imagePromptText}"`).trim();
+      } else if (isImageRequest) {
+        // Fallback: If user asked for an image and AI model didn't return tag, auto-generate image from user's query!
+        const imagePromptText = userMessageText.replace(/\b(image|photo|picture|draw|banao|bana ke do|painting|illustration|diagram|pic|me|of|a|an)\b/gi, '').trim() || userMessageText;
+        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePromptText)}?width=768&height=512&nologo=true`;
+        generatedImages.push(pollinationsUrl);
       }
 
       // Generate mock clickable citations based on the query and focus mode
