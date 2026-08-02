@@ -245,36 +245,72 @@ async function executeTool(action, parameters, projectPath, projectFiles) {
   }
 }
 
+// ── Ollama Local Offline Model Fallback ───────────────────────────────────────
+async function callOllamaLocal(agentPrompt) {
+  try {
+    const tagsRes = await fetch('http://127.0.0.1:11434/api/tags');
+    if (!tagsRes.ok) return null;
+    const tagsData = await tagsRes.json();
+    const models = tagsData.models || [];
+    if (models.length === 0) return null;
+
+    const modelName = models[0].name;
+    console.log(`[Agent] Trying local Ollama model: ${modelName}...`);
+
+    const genRes = await fetch('http://127.0.0.1:11434/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: modelName,
+        prompt: agentPrompt,
+        stream: false
+      })
+    });
+    if (!genRes.ok) return null;
+    const genData = await genRes.json();
+    return genData.response || null;
+  } catch (e) {
+    console.log('[Agent] Ollama local fallback unavailable:', e.message);
+    return null;
+  }
+}
+
 // ── LLM Call with Cascade ─────────────────────────────────────────────────────
 async function callLLM(messages) {
   const contextBlock = messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
   const agentPrompt = `${AGENT_SYSTEM_PROMPT}\n\n---\n\n${contextBlock}\n\nASSISTANT (respond with valid JSON only):`;
 
-  // Try Groq
+  // 1. Try Groq
   try {
     const resp = await GroqService.chat(agentPrompt, [], 'project', null);
     if (resp && !resp.includes('API key set nahi') && resp.trim().length > 5) return resp;
   } catch (e) { console.log('[Agent] Groq failed:', e.message); }
 
-  // Try NVIDIA NIM
+  // 2. Try NVIDIA NIM
   try {
     const resp = await NvidiaService.chat(agentPrompt, [], null);
     if (resp && !resp.includes('API key set nahi') && resp.trim().length > 5) return resp;
   } catch (e) { console.log('[Agent] NVIDIA failed:', e.message); }
 
-  // Try Mistral
+  // 3. Try Mistral
   try {
     const resp = await MistralService.chat(agentPrompt, [], null);
     if (resp && !resp.includes('API key set nahi') && resp.trim().length > 5) return resp;
   } catch (e) { console.log('[Agent] Mistral failed:', e.message); }
 
-  // Try Gemini
+  // 4. Try Gemini
   try {
     const resp = await GeminiService.chat(agentPrompt, [], null, 'project', null);
     if (resp && !resp.includes('API key set nahi') && resp.trim().length > 5) return resp;
   } catch (e) { console.log('[Agent] Gemini failed:', e.message); }
 
-  throw new Error('All LLM providers failed. Please check API keys in Settings.');
+  // 5. Try Local Ollama (Offline Mode)
+  try {
+    const resp = await callOllamaLocal(agentPrompt);
+    if (resp && resp.trim().length > 5) return resp;
+  } catch (e) { console.log('[Agent] Ollama failed:', e.message); }
+
+  throw new Error('All cloud AI providers failed and local Ollama is offline. Please check API keys in Settings or start Ollama locally.');
 }
 
 // ── Parse LLM JSON output ─────────────────────────────────────────────────────
