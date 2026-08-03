@@ -149,8 +149,8 @@ async function runAllBackendTests() {
   // 8. Chat Route Validation
   await test('POST /api/chat (Auto-Select Cascading Chat Model)', async () => {
     const res = await makeRequest('/api/chat', 'POST', {
-      message: 'Hello AI Dost! Please explain what you can do.',
-      model: 'auto',
+      message: 'Hi',
+      model: 'groq',
       mode: 'chat'
     });
     if (res.status !== 200 || !res.data.success || !res.data.reply) {
