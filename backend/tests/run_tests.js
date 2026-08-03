@@ -19,7 +19,10 @@ function makeRequest(urlPath, method = 'GET', body = null) {
 
     const req = http.request(options, (res) => {
       let data = '';
-      res.on('data', (chunk) => { data += chunk; });
+      res.on('data', (chunk) => {
+        data += chunk;
+        req.setTimeout(30000); // Reset activity timeout on each chunk received
+      });
       res.on('end', () => {
         try {
           const parsed = JSON.parse(data);
