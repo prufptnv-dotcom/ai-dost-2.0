@@ -1,8 +1,17 @@
 {
-  "totalFeedback": 1,
-  "positiveCount": 1,
+  "totalFeedback": 2,
+  "positiveCount": 2,
   "negativeCount": 0,
   "feedbackLogs": [
+    {
+      "id": "1785738545664",
+      "type": "up",
+      "category": "coding",
+      "message": "Write a python script",
+      "aiReply": "print(\"Hello\")",
+      "correction": "",
+      "timestamp": "2026-08-03T06:29:05.664Z"
+    },
     {
       "id": "1785738501099",
       "type": "up",

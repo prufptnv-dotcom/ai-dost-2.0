@@ -25,7 +25,7 @@ function makeRequest(urlPath, method = 'GET', body = null) {
           const parsed = JSON.parse(data);
           resolve({ status: res.statusCode, data: parsed });
         } catch (e) {
-          resolve({ status: res.statusCode, raw: data });
+          resolve({ status: res.statusCode, data: { raw: data } });
         }
       });
     });
