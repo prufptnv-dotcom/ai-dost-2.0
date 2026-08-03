@@ -9,42 +9,32 @@ from app.database.mongodb import get_database
 
 @pytest.fixture(scope="function")
 def client():
-    # Start app (lifespan startup will connect to MONGODB_URL in the correct event loop)
-    # Clear database before test run using a synchronous client to avoid loop mismatches
-    from pymongo import MongoClient
-    sync_client = MongoClient("mongodb://localhost:27017")
-    sync_client.drop_database("ai_dost_test")
-    
     with TestClient(app) as test_client:
         yield test_client
-    
-    # Teardown database synchronously
-    sync_client.drop_database("ai_dost_test")
-    sync_client.close()
 
 def test_create_user(client):
     response = client.post("/api/v1/profile/", json={
-        "name": "Test User",
+        "name": "Test User 1",
         "password": "testpassword123",
         "skill_level": "intermediate",
-        "github_username": "test_user"
+        "github_username": "test_user_1"
     })
     assert response.status_code == 200
-    assert response.json()["github_username"] == "test_user"
+    assert response.json()["github_username"] == "test_user_1"
 
 def test_create_project(client):
     # First register user to ensure they exist
     reg_response = client.post("/api/v1/profile/", json={
-        "name": "Test User",
+        "name": "Test User 2",
         "password": "testpassword123",
         "skill_level": "intermediate",
-        "github_username": "test_user"
+        "github_username": "test_user_2"
     })
     assert reg_response.status_code == 200
 
     # Authenticate user
     login = client.post("/api/v1/auth/login", json={
-        "username": "test_user",
+        "username": "test_user_2",
         "password": "testpassword123"
     })
     assert login.status_code == 200
@@ -66,16 +56,16 @@ def test_create_project(client):
 def test_ai_suggestions(client):
     # Register user
     reg_response = client.post("/api/v1/profile/", json={
-        "name": "Test User",
+        "name": "Test User 3",
         "password": "testpassword123",
         "skill_level": "intermediate",
-        "github_username": "test_user"
+        "github_username": "test_user_3"
     })
     assert reg_response.status_code == 200
 
     # Authenticate user
     login = client.post("/api/v1/auth/login", json={
-        "username": "test_user",
+        "username": "test_user_3",
         "password": "testpassword123"
     })
     assert login.status_code == 200
@@ -95,16 +85,16 @@ def test_ai_suggestions(client):
 def test_project_file_actions(client):
     # Register user
     reg_response = client.post("/api/v1/profile/", json={
-        "name": "Test User",
+        "name": "Test User 4",
         "password": "testpassword123",
         "skill_level": "intermediate",
-        "github_username": "test_user2"
+        "github_username": "test_user_4"
     })
     assert reg_response.status_code == 200
 
     # Authenticate user
     login = client.post("/api/v1/auth/login", json={
-        "username": "test_user2",
+        "username": "test_user_4",
         "password": "testpassword123"
     })
     assert login.status_code == 200

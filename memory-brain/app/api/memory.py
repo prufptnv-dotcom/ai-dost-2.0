@@ -146,7 +146,8 @@ async def get_project(
     if not project:
         return fallback_project
 
-    project["_id"] = str(project["_id"])
+    if "_id" in project:
+        project["_id"] = str(project["_id"])
     await RedisCache.set(cache_key, project, 300)
     return project
 
