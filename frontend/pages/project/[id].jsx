@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/router';
+import Head from 'next/head';
 import { FileText, Folder, FolderOpen, Plus, Trash2, X, PanelRightOpen, PanelRightClose, Info, Bot, MessageSquare } from 'lucide-react';
 import CodeEditor from '../../components/CodeEditor';
 import ProjectDetails from '../../components/ProjectDetails';
@@ -258,18 +259,22 @@ const ProjectWorkspace = () => {
 
   return (
     <div className="min-h-screen bg-bg-default text-text-primary flex flex-col h-screen overflow-hidden">
+      <Head>
+        <title>{project?.title ? `${project.title} - AI-Dost Sandbox` : 'Project Workspace - AI-Dost'}</title>
+        <meta name="description" content="AI-Dost Autonomous AI Agent & Sandbox Workspace" />
+      </Head>
       <Header />
       
       {mode === 'chat' ? (
-        <div className="flex-1 flex pt-20 px-6 pb-6 max-w-6xl mx-auto w-full justify-center h-[calc(100vh-16px)] overflow-hidden">
+        <main className="flex-1 flex pt-20 px-6 pb-6 max-w-6xl mx-auto w-full justify-center h-[calc(100vh-16px)] overflow-hidden">
           <div className="w-full max-w-5xl h-full overflow-hidden pb-2">
             <AICompanion onWriteCode={handleWriteCode} currentCode={code} currentFile={currentFile} />
           </div>
-        </div>
+        </main>
       ) : (
         <>
           {/* ── Desktop Layout ─────────────────────────────────────────────── */}
-          <div className="flex-1 flex pt-24 px-6 gap-6 h-[calc(100vh-24px)] pb-6 overflow-hidden max-w-[1600px] mx-auto w-full">
+          <main className="flex-1 flex pt-24 px-6 gap-6 h-[calc(100vh-24px)] pb-6 overflow-hidden max-w-[1600px] mx-auto w-full">
             {/* Left Drawer: Tabbed — Chat Assistant | Agent Mode (hidden on mobile) */}
             <div className="hidden md:flex flex-col w-[360px] lg:w-[420px] shrink-0 h-full overflow-hidden gap-0">
               {/* Tab Switcher */}
@@ -375,7 +380,7 @@ const ProjectWorkspace = () => {
                 </button>
               </div>
             )}
-          </div>
+          </main>
 
           {/* ── Mobile Bottom Nav Bar (visible only on mobile) ──────────────── */}
           <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-bg-default/90 backdrop-blur-xl border-t border-white/[0.08] px-4 py-2 flex gap-2">

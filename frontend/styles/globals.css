@@ -23,9 +23,9 @@
   --color-border-glow: rgba(6, 182, 212, 0.2);
 
   /* ─── Typography ─── */
-  --color-text-primary: #f0f2f5;
-  --color-text-secondary: #8b92a5;
-  --color-text-muted: #545b6e;
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #94a3b8;
 
   /* ─── Semantic ─── */
   --color-success: #10b981;

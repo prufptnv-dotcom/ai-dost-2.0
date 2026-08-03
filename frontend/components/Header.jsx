@@ -212,6 +212,7 @@ const Header = () => {
           
           <button
             suppressHydrationWarning
+            aria-label={menuOpen ? "Close Menu" : "Open Menu"}
             className="md:hidden p-2 rounded-lg hover:bg-[var(--color-bg-glass)] text-text-muted hover:text-primary hover:shadow-[0_0_12px_var(--color-primary-glow)] transition-all duration-300 cursor-pointer"
             onClick={() => setMenuOpen(!menuOpen)}
           >
