@@ -1,3 +1,4 @@
+const logger = require('../logger');
 class OpenRouterService {
     static async chat(message, history = [], customApiKey = null) {
         try {

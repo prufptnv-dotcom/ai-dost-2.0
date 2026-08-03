@@ -1,3 +1,4 @@
+const logger = require('../logger');
 class DeepSeekService {
     static async chat(message, history = [], customApiKey = null) {
         try {

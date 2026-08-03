@@ -1,3 +1,4 @@
+const logger = require('../logger');
 class NvidiaService {
     static async chat(message, history = [], customApiKey = null) {
         try {

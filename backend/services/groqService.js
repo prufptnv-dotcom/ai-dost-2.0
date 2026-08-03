@@ -1,3 +1,4 @@
+const logger = require('../logger');
 class GroqService {
     static async chat(message, history = [], mode = 'project', customApiKey = null) {
         try {

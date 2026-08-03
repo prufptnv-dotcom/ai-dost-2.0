@@ -1,3 +1,4 @@
+const logger = require('../logger');
 class GeminiService {
     static async chat(message, history = [], fileContent = null, mode = 'project', customApiKey = null) {
         try {

@@ -1,3 +1,4 @@
+const logger = require('../logger');
 class HuggingFaceService {
     static async chat(message) {
         // Multiple free models available
