@@ -266,37 +266,70 @@ async function executeTool(action, parameters, projectPath, projectFiles) {
 }
 
 // ── Ollama Local Offline Model Fallback ───────────────────────────────────────
-async function callOllamaLocal(agentPrompt) {
-  try {
-    const tagsRes = await fetch('http://127.0.0.1:11434/api/tags');
-    if (!tagsRes.ok) return null;
-    const tagsData = await tagsRes.json();
-    const models = tagsData.models || [];
-    if (models.length === 0) return null;
+async function callOllamaLocal(agentPrompt, preferredModel = null) {
+  const ports = [11434, 11435];
+  const host = process.env.OLLAMA_HOST || '127.0.0.1';
 
-    const modelName = models[0].name;
-    logger.info(`[Agent] Trying local Ollama model: ${modelName}...`);
+  for (const port of ports) {
+    try {
+      const tagsRes = await fetch(`http://${host}:${port}/api/tags`, { signal: AbortSignal.timeout(3000) });
+      if (!tagsRes.ok) continue;
+      const tagsData = await tagsRes.json();
+      const models = tagsData.models || [];
+      if (models.length === 0) continue;
 
-    const genRes = await fetch('http://127.0.0.1:11434/api/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: modelName,
-        prompt: agentPrompt,
-        stream: false
-      })
-    });
-    if (!genRes.ok) return null;
-    const genData = await genRes.json();
-    return genData.response || null;
-  } catch (e) {
-    logger.info('[Agent] Ollama local fallback unavailable:', e.message);
-    return null;
+      // Select best coding model available (qwen2.5-coder, codellama, llama3, mistral, deepseek)
+      let selectedModel = preferredModel || process.env.OLLAMA_MODEL;
+      if (!selectedModel) {
+        const codingModel = models.find(m => /coder|code|llama|mistral|qwen|deepseek|phi/i.test(m.name));
+        selectedModel = codingModel ? codingModel.name : models[0].name;
+      }
+
+      logger.info(`[Agent] 🦙 Cascading to local Ollama model: ${selectedModel} (port ${port})...`);
+
+      const genRes = await fetch(`http://${host}:${port}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: selectedModel,
+          messages: [{ role: 'user', content: agentPrompt }],
+          format: 'json',
+          stream: false,
+          options: { temperature: 0.1 }
+        })
+      });
+
+      if (genRes.ok) {
+        const genData = await genRes.json();
+        if (genData.message && genData.message.content) {
+          return genData.message.content;
+        }
+      }
+
+      // Legacy fallback for older Ollama versions (/api/generate)
+      const legacyRes = await fetch(`http://${host}:${port}/api/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: selectedModel,
+          prompt: agentPrompt,
+          format: 'json',
+          stream: false
+        })
+      });
+      if (legacyRes.ok) {
+        const legacyData = await legacyRes.json();
+        return legacyData.response || null;
+      }
+    } catch (e) {
+      logger.info(`[Agent] Ollama port ${port} check: ${e.message}`);
+    }
   }
+  return null;
 }
 
 // ── LLM Call with Cascade ─────────────────────────────────────────────────────
-async function callLLM(messages, customKeys = null) {
+async function callLLM(messages, customKeys = null, onFallbackNotice = null) {
   const contextBlock = messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
   const agentPrompt = `${AGENT_SYSTEM_PROMPT}\n\n---\n\n${contextBlock}\n\nASSISTANT (respond with valid JSON only):`;
 
@@ -336,13 +369,16 @@ async function callLLM(messages, customKeys = null) {
     if (!isErrorResp(resp)) return resp;
   } catch (e) { logger.info('[Agent] Gemini failed:', e.message); }
 
-  // 5. Try Local Ollama (Offline Mode)
+  // 5. Try Local Ollama (Offline / Rate Limit Fallback Mode)
   try {
+    if (typeof onFallbackNotice === 'function') {
+      onFallbackNotice('🦙 Cloud APIs unavailable/rate-limited. Falling back to local Ollama AI model...');
+    }
     const resp = await callOllamaLocal(agentPrompt);
     if (resp && resp.trim().length > 5) return resp;
   } catch (e) { logger.info('[Agent] Ollama failed:', e.message); }
 
-  throw new Error('All cloud AI providers failed and local Ollama is offline. Please check API keys in Settings or start Ollama locally.');
+  throw new Error('All cloud AI providers failed and local Ollama is offline. Please check API keys in Settings or start Ollama locally (ollama serve).');
 }
 
 // ── Safe Path Join ────────────────────────────────────────────────────────────
@@ -533,7 +569,9 @@ router.post('/run', async (req, res) => {
         message: `🧠 Task ${activeTask.id}/${plan.tasks.length}: ${activeTask.title}...` 
       });
 
-      const rawResponse = await callLLM(messages, customKeys);
+      const rawResponse = await callLLM(messages, customKeys, (noticeMsg) => {
+        send({ type: 'thinking', step: step + 1, message: noticeMsg });
+      });
       const parsed = parseLLMAction(rawResponse);
 
       const stepLog = {
