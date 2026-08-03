@@ -1,0 +1,28 @@
+{
+  "totalFeedback": 1,
+  "positiveCount": 1,
+  "negativeCount": 0,
+  "feedbackLogs": [
+    {
+      "id": "1785738501099",
+      "type": "up",
+      "category": "coding",
+      "message": "Write a python script",
+      "aiReply": "print(\"Hello\")",
+      "correction": "",
+      "timestamp": "2026-08-03T06:28:21.099Z"
+    }
+  ],
+  "learnedRules": [
+    "Always write production-ready code with flawless grammar.",
+    "Match user's language (Hindi/Hinglish/English) precisely.",
+    "Avoid self-deprecating disclaimers or imaginary system bug lists."
+  ],
+  "scannedFiles": [
+    "main.py",
+    "index.html",
+    "style.css",
+    "server.js",
+    "AICompanion.jsx"
+  ]
+}

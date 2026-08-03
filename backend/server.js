@@ -65,8 +65,11 @@ app.get('/health', (req, res) => {
 });
 
 // 404 handler for unknown API endpoints
-app.use('/api', (req, res) => {
-    res.status(404).json({ error: 'Endpoint not found', path: req.originalUrl });
+app.use((req, res, next) => {
+    if (req.path.startsWith('/api')) {
+        return res.status(404).json({ error: 'Endpoint not found', path: req.originalUrl });
+    }
+    next();
 });
 
 // Error handling
