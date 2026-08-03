@@ -158,6 +158,20 @@ async function runAllBackendTests() {
     }
   });
 
+  // 9. Agent ReAct Execution Loop & Streaming SSE Endpoint
+  await test('POST /api/agent/run (Autonomous Agent ReAct Loop)', async () => {
+    const res = await makeRequest('/api/agent/run', 'POST', {
+      userPrompt: 'Create a simple hello.py file that prints hello world',
+      projectId: 'test_proj_123',
+      projectFiles: [
+        { path: 'main.py', content: 'print("main")' }
+      ]
+    });
+    if (res.status !== 200) {
+      throw new Error(`Agent run failed with status ${res.status}`);
+    }
+  });
+
   console.log('=================================================');
   console.log(`📊 SUMMARY: ${passed} PASSED, ${failed} FAILED`);
   console.log('=================================================\n');

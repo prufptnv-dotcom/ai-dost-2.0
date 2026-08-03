@@ -132,7 +132,13 @@ async function executeTool(action, parameters, projectPath, projectFiles) {
         const filePath = safeJoin(projectPath, parameters.path);
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.writeFileSync(filePath, parameters.content || '', 'utf-8');
-        return { success: true, message: `File written: ${parameters.path}`, changedFile: parameters.path, newContent: parameters.content };
+        // Update in-memory file array if present
+        if (projectFiles && Array.isArray(projectFiles)) {
+          const inMem = projectFiles.find(f => f.path === parameters.path);
+          if (inMem) inMem.content = parameters.content || '';
+          else projectFiles.push({ path: parameters.path, content: parameters.content || '' });
+        }
+        return { success: true, message: `File written: ${parameters.path}`, changedFile: parameters.path, newContent: parameters.content || '' };
       } catch (e) {
         return { success: false, error: e.message };
       }
@@ -158,7 +164,16 @@ async function executeTool(action, parameters, projectPath, projectFiles) {
           };
         }
         const newContent = content.replace(search, replace);
-        fs.writeFileSync(safeJoin(projectPath, parameters.path), newContent, 'utf-8');
+        try {
+          fs.mkdirSync(path.dirname(filePath), { recursive: true });
+          fs.writeFileSync(filePath, newContent, 'utf-8');
+        } catch (_) {}
+        // Update in-memory file array if present
+        if (projectFiles && Array.isArray(projectFiles)) {
+          const inMem = projectFiles.find(f => f.path === parameters.path);
+          if (inMem) inMem.content = newContent;
+          else projectFiles.push({ path: parameters.path, content: newContent });
+        }
         return { success: true, message: `Diff applied to ${parameters.path}`, changedFile: parameters.path, newContent };
       } catch (e) {
         return { success: false, error: e.message };

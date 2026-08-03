@@ -127,9 +127,12 @@ const ProjectWorkspace = () => {
     saveProjectFile(id, file, content).catch(err => console.error('Agent apply save failed:', err));
   };
 
-  // Called by AgentPanel when agent creates/modifies a file (without user clicking Apply)
+  // Called by AgentPanel when agent creates/modifies a file
   const handleAgentFileSync = ({ file, content }) => {
     if (!file) return;
+    if (file === currentFile && content !== undefined) {
+      setCode(content);
+    }
     setProject(prev => {
       if (!prev) return prev;
       const files = prev.files || [];
@@ -254,9 +257,10 @@ const ProjectWorkspace = () => {
     );
   }
 
-  const projectFiles = project?.files || [
+  const rawFiles = project?.files || [
     { path: 'main.py', content: '# Write your code here...\n\nprint("Hello from AI-Dost sandbox!")\n' }
   ];
+  const projectFiles = rawFiles.map(f => f.path === currentFile ? { ...f, content: code } : f);
 
   return (
     <div className="min-h-screen bg-bg-default text-text-primary flex flex-col h-screen overflow-hidden">
