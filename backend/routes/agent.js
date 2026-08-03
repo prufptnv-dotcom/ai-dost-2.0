@@ -13,10 +13,11 @@ const os = require('os');
 //  ✅ Phase 4: Self-Healing Loop (Terminal error → auto-inject → auto-fix)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const GroqService    = require('../services/groqService');
-const NvidiaService  = require('../services/nvidiaService');
-const GeminiService  = require('../services/geminiService');
-const MistralService = require('../services/mistralService');
+const GroqService       = require('../services/groqService');
+const OpenRouterService = require('../services/openrouterService');
+const NvidiaService     = require('../services/nvidiaService');
+const GeminiService     = require('../services/geminiService');
+const MistralService    = require('../services/mistralService');
 
 // ── Agent System Prompt ───────────────────────────────────────────────────────
 const AGENT_SYSTEM_PROMPT = `You are AI-Dost Agent, an autonomous AI coding assistant — similar to GitHub Copilot Agent Mode.
@@ -124,6 +125,7 @@ async function executeTool(action, parameters, projectPath, projectFiles) {
       }
     }
 
+    case 'create_file':
     case 'write_file': {
       try {
         const filePath = safeJoin(projectPath, parameters.path);
@@ -270,32 +272,35 @@ async function callOllamaLocal(agentPrompt) {
 }
 
 // ── LLM Call with Cascade ─────────────────────────────────────────────────────
-async function callLLM(messages) {
+async function callLLM(messages, customKeys = null) {
   const contextBlock = messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
   const agentPrompt = `${AGENT_SYSTEM_PROMPT}\n\n---\n\n${contextBlock}\n\nASSISTANT (respond with valid JSON only):`;
 
-  // 1. Try Groq
+  const isErrorResp = (r) => !r || r.includes('API key set nahi') || r.includes('API error') || r.includes('service me error') || r.trim().length <= 5;
+
+  // 1. Try Groq (Fast 8b model)
   try {
-    const resp = await GroqService.chat(agentPrompt, [], 'project', null);
-    if (resp && !resp.includes('API key set nahi') && resp.trim().length > 5) return resp;
+    const resp = await GroqService.chat(agentPrompt, [], 'project', customKeys?.groq);
+    if (!isErrorResp(resp)) return resp;
   } catch (e) { console.log('[Agent] Groq failed:', e.message); }
 
-  // 2. Try NVIDIA NIM
+
+  // 3. Try NVIDIA NIM
   try {
-    const resp = await NvidiaService.chat(agentPrompt, [], null);
-    if (resp && !resp.includes('API key set nahi') && resp.trim().length > 5) return resp;
+    const resp = await NvidiaService.chat(agentPrompt, [], customKeys?.nvidia);
+    if (!isErrorResp(resp)) return resp;
   } catch (e) { console.log('[Agent] NVIDIA failed:', e.message); }
 
   // 3. Try Mistral
   try {
-    const resp = await MistralService.chat(agentPrompt, [], null);
-    if (resp && !resp.includes('API key set nahi') && resp.trim().length > 5) return resp;
+    const resp = await MistralService.chat(agentPrompt, [], customKeys?.mistral);
+    if (!isErrorResp(resp)) return resp;
   } catch (e) { console.log('[Agent] Mistral failed:', e.message); }
 
   // 4. Try Gemini
   try {
-    const resp = await GeminiService.chat(agentPrompt, [], null, 'project', null);
-    if (resp && !resp.includes('API key set nahi') && resp.trim().length > 5) return resp;
+    const resp = await GeminiService.chat(agentPrompt, [], customKeys?.gemini, 'project', null);
+    if (!isErrorResp(resp)) return resp;
   } catch (e) { console.log('[Agent] Gemini failed:', e.message); }
 
   // 5. Try Local Ollama (Offline Mode)
@@ -343,7 +348,7 @@ function parseLLMAction(raw) {
 
 // ── ReAct Loop API Endpoint (SSE Streaming) ───────────────────────────────────
 router.post('/run', async (req, res) => {
-  const { userPrompt, projectPath, projectFiles, projectId } = req.body;
+  const { userPrompt, projectPath, projectFiles, projectId, customKeys } = req.body;
 
   if (!userPrompt || typeof userPrompt !== 'string' || !userPrompt.trim()) {
     return res.status(400).json({ error: 'userPrompt is required and must be a non-empty string' });
@@ -400,7 +405,7 @@ router.post('/run', async (req, res) => {
     try {
       send({ type: 'thinking', step: step + 1, message: `🧠 Step ${step + 1}/${MAX_STEPS} — Reasoning...` });
 
-      const rawResponse = await callLLM(messages);
+      const rawResponse = await callLLM(messages, customKeys);
       const parsed = parseLLMAction(rawResponse);
 
       const stepLog = {

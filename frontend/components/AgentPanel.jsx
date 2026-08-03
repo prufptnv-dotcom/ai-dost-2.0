@@ -353,6 +353,13 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
           })),
           projectPath,
           projectId,
+          customKeys: {
+            gemini: localStorage.getItem('customGeminiKey') || '',
+            groq: localStorage.getItem('customGroqKey') || '',
+            deepseek: localStorage.getItem('customDeepSeekKey') || '',
+            nvidia: localStorage.getItem('customNvidiaKey') || '',
+            openrouter: localStorage.getItem('customOpenRouterKey') || ''
+          }
         }),
         signal: controller.signal
       });
@@ -406,6 +413,9 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
           return [...prev, data.stepLog];
         });
         setIsSelfHealing(false);
+        if (data.stepLog?.result?.changedFile && data.stepLog?.result?.newContent && onFileSync) {
+          onFileSync({ file: data.stepLog.result.changedFile, content: data.stepLog.result.newContent });
+        }
         break;
       case 'done':
         setFinalAnswer(data.message || '✅ Done!');
@@ -419,7 +429,7 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
         }, ...prev.slice(0, 14)]);
         break;
       case 'error':
-        setLiveMessage(data.message);
+        setLiveMessage(`❌ ${data.message || 'Error occurred'}`);
         setHasError(true);
         break;
     }

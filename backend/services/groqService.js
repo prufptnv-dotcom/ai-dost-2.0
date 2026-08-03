@@ -37,7 +37,7 @@ Key Response Guidelines:
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    model: 'llama-3.3-70b-versatile',
+                    model: mode === 'project' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
                     messages: [
                         { 
                             role: 'system', 
@@ -52,6 +52,32 @@ Key Response Guidelines:
             });
 
             if (!response.ok) {
+                // Automatic 429 Rate Limit fallback to high-capacity llama-3.1-8b-instant model (131k TPM limit)
+                if (response.status === 429) {
+                    console.log('⚠️ Groq 70b rate limited, retrying with fast llama-3.1-8b-instant model...');
+                    const retryRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${API_KEY}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            model: 'llama-3.1-8b-instant',
+                            messages: [
+                                { role: 'system', content: systemPrompt },
+                                ...history,
+                                { role: 'user', content: message }
+                            ],
+                            temperature: 0.2,
+                            max_tokens: 2500
+                        })
+                    });
+                    if (retryRes.ok) {
+                        const retryData = await retryRes.json();
+                        console.log('✅ Groq 8b fallback response received');
+                        return retryData.choices[0].message.content;
+                    }
+                }
                 const errorText = await response.text();
                 console.error('❌ Groq API Error:', response.status, errorText);
                 return `Groq API error (${response.status}): ${errorText}`;
