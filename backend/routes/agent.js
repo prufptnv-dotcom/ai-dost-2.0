@@ -346,6 +346,54 @@ function parseLLMAction(raw) {
   return { thought: raw, action: 'FINAL_ANSWER', answer: raw };
 }
 
+// ── Dynamic Input Analysis & Task Plan Generator ──────────────────────────────
+async function generateTaskPlan(userPrompt, fileContext, customKeys) {
+  const planPrompt = `Analyze this coding request and break it down into 2 to 4 clear, logical sub-tasks.
+USER REQUEST: "${userPrompt}"
+WORKSPACE FILES:
+${fileContext || '(No files yet)'}
+
+Respond ONLY with valid JSON:
+{
+  "summary": "Short 1-line overview of the plan",
+  "tasks": [
+    { "id": 1, "title": "First clear sub-task" },
+    { "id": 2, "title": "Second clear sub-task" }
+  ]
+}`;
+
+  try {
+    const raw = await callLLM([{ role: 'user', content: planPrompt }], customKeys);
+    const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*$/gi, '').trim();
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      if (parsed && Array.isArray(parsed.tasks) && parsed.tasks.length > 0) {
+        return {
+          summary: parsed.summary || `Plan for: "${userPrompt}"`,
+          tasks: parsed.tasks.map((t, idx) => ({
+            id: t.id || (idx + 1),
+            title: t.title || `Sub-task ${idx + 1}`,
+            status: idx === 0 ? 'in_progress' : 'pending'
+          }))
+        };
+      }
+    }
+  } catch (e) {
+    console.log('[Agent] Dynamic plan generation fallback:', e.message);
+  }
+
+  // Fallback default dynamic plan based on request
+  return {
+    summary: `Executing task: "${userPrompt}"`,
+    tasks: [
+      { id: 1, title: 'Analyze requirements & workspace files', status: 'in_progress' },
+      { id: 2, title: 'Implement requested code changes', status: 'pending' },
+      { id: 3, title: 'Verify implementation & finalize', status: 'pending' }
+    ]
+  };
+}
+
 // ── ReAct Loop API Endpoint (SSE Streaming) ───────────────────────────────────
 router.post('/run', async (req, res) => {
   const { userPrompt, projectPath, projectFiles, projectId, customKeys } = req.body;
@@ -388,28 +436,37 @@ router.post('/run', async (req, res) => {
     ).join('\n\n');
   }
 
+  send({ type: 'start', message: '🔍 Analyzing prompt & generating dynamic task plan...' });
+
+  // Phase 1: Dynamic Task Breakdown Plan
+  const plan = await generateTaskPlan(userPrompt, fileContext, customKeys);
+  send({ type: 'plan', plan });
+
   const messages = [{
     role: 'user',
-    content: `WORKSPACE FILES:\n${fileContext || '(No files yet)'}\n\nUSER TASK: ${userPrompt}`
+    content: `WORKSPACE FILES:\n${fileContext || '(No files yet)'}\n\nUSER TASK: ${userPrompt}\n\nDYNAMIC TASK BREAKDOWN:\n${plan.tasks.map(t => `- Task ${t.id}: ${t.title} [${t.status.toUpperCase()}]`).join('\n')}`
   }];
-
-  send({ type: 'start', message: '🤖 Agent started. Indexing codebase and planning...' });
 
   const MAX_STEPS = 14;
   const steps = [];
-  // Phase 4: Self-healing state
-  let lastFailedCommand = null;
   let selfHealAttempts = 0;
+  let activeTaskId = 1;
 
   for (let step = 0; step < MAX_STEPS; step++) {
     try {
-      send({ type: 'thinking', step: step + 1, message: `🧠 Step ${step + 1}/${MAX_STEPS} — Reasoning...` });
+      const activeTask = plan.tasks.find(t => t.id === activeTaskId) || plan.tasks[0];
+      send({ 
+        type: 'thinking', 
+        step: step + 1, 
+        message: `🧠 Task ${activeTask.id}/${plan.tasks.length}: ${activeTask.title}...` 
+      });
 
       const rawResponse = await callLLM(messages, customKeys);
       const parsed = parseLLMAction(rawResponse);
 
       const stepLog = {
         step: step + 1,
+        taskId: activeTaskId,
         thought: parsed.thought || '',
         action: parsed.action,
         parameters: parsed.parameters || {},
@@ -417,10 +474,14 @@ router.post('/run', async (req, res) => {
       };
 
       if (parsed.action === 'FINAL_ANSWER') {
+        // Mark all tasks as completed
+        plan.tasks.forEach(t => t.status = 'completed');
+        send({ type: 'plan', plan });
+
         stepLog.result = { success: true, message: parsed.answer || 'Task complete.' };
         steps.push(stepLog);
         send({ type: 'step', stepLog });
-        send({ type: 'done', message: parsed.answer || '✅ Task completed!', steps });
+        send({ type: 'done', message: parsed.answer || '✅ All tasks completed!', steps, plan });
         res.end();
         return;
       }
@@ -437,6 +498,22 @@ router.post('/run', async (req, res) => {
       stepLog.result = toolResult;
       steps.push(stepLog);
       send({ type: 'step', stepLog });
+
+      // Update task progress dynamically
+      if (toolResult.success) {
+        // Progress to next sub-task if file created/updated or action succeeded
+        if (['create_file', 'write_file', 'apply_diff'].includes(parsed.action)) {
+          const currentTaskIdx = plan.tasks.findIndex(t => t.id === activeTaskId);
+          if (currentTaskIdx !== -1) {
+            plan.tasks[currentTaskIdx].status = 'completed';
+            if (currentTaskIdx + 1 < plan.tasks.length) {
+              activeTaskId = plan.tasks[currentTaskIdx + 1].id;
+              plan.tasks[currentTaskIdx + 1].status = 'in_progress';
+            }
+          }
+          send({ type: 'plan', plan });
+        }
+      }
 
       // ── Phase 4: Self-Healing Terminal Logic ─────────────────────────────────
       if (parsed.action === 'run_terminal' && !toolResult.success && selfHealAttempts < 2) {

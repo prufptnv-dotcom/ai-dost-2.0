@@ -273,6 +273,7 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
   const [isCommitting, setIsCommitting] = useState(false);
   const [commitMsg, setCommitMsg] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [taskPlan, setTaskPlan] = useState(null);
   const [splitDiffData, setSplitDiffData] = useState(null);
   const recognitionRef = useRef(null);
   const abortRef = useRef(null);
@@ -333,10 +334,11 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
     if (!userPrompt || isRunning) return;
     setIsRunning(true);
     setSteps([]);
+    setTaskPlan(null);
     setFinalAnswer('');
     setHasError(false);
     setIsSelfHealing(false);
-    setLiveMessage('🚀 Starting Agent...');
+    setLiveMessage('🚀 Analyzing task & indexing codebase...');
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -395,6 +397,9 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
       case 'start':
         setLiveMessage(data.message);
         break;
+      case 'plan':
+        if (data.plan) setTaskPlan(data.plan);
+        break;
       case 'thinking':
         setLiveMessage(data.message);
         setIsSelfHealing(false);
@@ -418,7 +423,8 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
         }
         break;
       case 'done':
-        setFinalAnswer(data.message || '✅ Done!');
+        setFinalAnswer(data.message || '✅ Task completed!');
+        if (data.plan) setTaskPlan(data.plan);
         setLiveMessage('');
         setHistory(prev => [{
           id: Date.now(),
@@ -436,7 +442,7 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
   };
 
   const reset = () => {
-    setSteps([]); setFinalAnswer(''); setLiveMessage('');
+    setSteps([]); setTaskPlan(null); setFinalAnswer(''); setLiveMessage('');
     setHasError(false); setIsSelfHealing(false); setPrompt('');
   };
 
@@ -546,6 +552,39 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
                   : hasError ? <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                   : <Check className="w-3.5 h-3.5 shrink-0" />}
                 <span className="leading-snug">{liveMessage}</span>
+              </div>
+            )}
+
+            {/* Dynamic Task Breakdown Plan Card */}
+            {taskPlan && (
+              <div className="rounded-xl border border-primary/20 bg-primary/5 p-3.5 mb-3 shadow-lg animate-fadeIn">
+                <div className="flex items-center gap-2 mb-2 pb-2 border-b border-primary/10">
+                  <Wrench className="w-3.5 h-3.5 text-primary" />
+                  <span className="text-xs font-bold text-text-primary">Execution Plan</span>
+                  <span className="ml-auto text-[10px] bg-primary/20 text-primary px-2 py-0.5 rounded-full font-bold">
+                    {taskPlan.tasks.filter(t => t.status === 'completed').length}/{taskPlan.tasks.length} Done
+                  </span>
+                </div>
+                <p className="text-[11px] text-text-muted mb-2 font-medium">{taskPlan.summary}</p>
+                <div className="space-y-1.5">
+                  {taskPlan.tasks.map((task) => (
+                    <div key={task.id} className="flex items-center gap-2 text-xs">
+                      {task.status === 'completed' ? (
+                        <Check className="w-3.5 h-3.5 text-success shrink-0" />
+                      ) : task.status === 'in_progress' ? (
+                        <Loader2 className="w-3.5 h-3.5 text-primary animate-spin shrink-0" />
+                      ) : (
+                        <div className="w-3.5 h-3.5 rounded-full border border-text-muted/40 shrink-0" />
+                      )}
+                      <span className={`leading-tight ${
+                        task.status === 'completed' ? 'line-through text-text-muted' :
+                        task.status === 'in_progress' ? 'text-primary font-semibold' : 'text-text-secondary'
+                      }`}>
+                        {task.title}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
