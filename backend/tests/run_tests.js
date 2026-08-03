@@ -30,6 +30,10 @@ function makeRequest(urlPath, method = 'GET', body = null) {
       });
     });
 
+    req.setTimeout(15000, () => {
+      req.destroy(new Error('Request timed out after 15 seconds'));
+    });
+
     req.on('error', (err) => reject(err));
     if (body) {
       req.write(JSON.stringify(body));
