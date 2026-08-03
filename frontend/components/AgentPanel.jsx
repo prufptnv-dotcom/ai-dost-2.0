@@ -4,7 +4,7 @@ import {
   FileText, Terminal, FolderOpen, GitMerge, Check,
   AlertCircle, Loader2, Zap, RotateCcw, Lightbulb,
   Code2, Send, Search, History, GitCommit,
-  Copy, ClipboardCheck, Play, ChevronUp, Mic, MicOff, Columns, X
+  Copy, ClipboardCheck, Play, ChevronUp, Mic, MicOff, Columns, X, Wrench
 } from 'lucide-react';
 
 const BACKEND_URL = '';
@@ -727,7 +727,7 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
               <GitCommit className="w-6 h-6 text-white" />
             </div>
             <h3 className="text-sm font-bold text-text-primary">Git Checkpoint</h3>
-            <p className="text-[10px] text-text-muted mt-1">Save your Agent's work as a git commit</p>
+            <p className="text-[10px] text-text-muted mt-1">Save your Agent&apos;s work as a git commit</p>
           </div>
 
           <div className="space-y-3">

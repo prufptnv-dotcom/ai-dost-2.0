@@ -10,14 +10,14 @@ const ProjectDetails = ({ project }) => {
   const [tasks, setTasks] = useState([]);
   const [taskText, setTaskText] = useState('');
   const [timerMin, setTimerMin] = useState(1);
-  const [hasNotificationPermission, setHasNotificationPermission] = useState(false);
+  const [hasNotificationPermission, setHasNotificationPermission] = useState(() => {
+    return typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted';
+  });
   const { showToast } = useToast();
 
   useEffect(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
-      if (Notification.permission === 'granted') {
-        setHasNotificationPermission(true);
-      } else if (Notification.permission !== 'denied') {
+      if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
         Notification.requestPermission().then(permission => {
           if (permission === 'granted') {
             setHasNotificationPermission(true);

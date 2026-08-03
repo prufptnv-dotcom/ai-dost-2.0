@@ -11,13 +11,15 @@ const app = express();
 // Debug & timing middleware
 app.use((req, res, next) => {
     const start = Date.now();
-    res.on('finish', () => {
+    const origEnd = res.end;
+    res.end = function(...args) {
         const duration = Date.now() - start;
-        console.log(`${new Date().toISOString()} - ${req.method} ${req.url} ${res.statusCode} (${duration}ms)`);
-        try {
+        if (!res.headersSent) {
             res.setHeader('X-Response-Time-Ms', duration);
-        } catch(e) {}
-    });
+        }
+        console.log(`${new Date().toISOString()} - ${req.method} ${req.url} ${res.statusCode} (${duration}ms)`);
+        return origEnd.apply(this, args);
+    };
     next();
 });
 
@@ -53,19 +55,38 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => {
     res.json({
         status: 'OK',
+        timestamp: new Date().toISOString(),
         groqKey: !!process.env.GROQ_API_KEY,
         geminiKey: !!process.env.GEMINI_API_KEY,
-        deepseekKey: !!process.env.DEEPSEEK_API_KEY
+        deepseekKey: !!process.env.DEEPSEEK_API_KEY,
+        openrouterKey: !!process.env.OPENROUTER_API_KEY,
+        nvidiaKey: !!process.env.NVIDIA_API_KEY
     });
+});
+
+// 404 handler for unknown API endpoints
+app.use('/api', (req, res) => {
+    res.status(404).json({ error: 'Endpoint not found', path: req.originalUrl });
 });
 
 // Error handling
 app.use((err, req, res, next) => {
     console.error('Server Error:', err);
-    res.status(500).json({
-        error: 'Internal server error',
-        message: err.message
-    });
+    if (!res.headersSent) {
+        res.status(500).json({
+            error: 'Internal server error',
+            message: err.message || 'An unexpected error occurred'
+        });
+    }
+});
+
+// Global process error catchers to avoid crashes
+process.on('uncaughtException', (err) => {
+    console.error('💥 Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
 const PORT = process.env.PORT || 3000;

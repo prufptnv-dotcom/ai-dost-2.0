@@ -594,8 +594,10 @@ router.post('/apply-diff', (req, res) => {
 router.post('/checkpoint', (req, res) => {
   const { message, workDir } = req.body;
   const dir = workDir || path.join(__dirname, '../../');
-  const msg = message || `AI-Dost Agent checkpoint — ${new Date().toISOString()}`;
-  exec(`git add -A && git commit -m "${msg}"`, { cwd: dir }, (err, stdout, stderr) => {
+  const safeMsg = (message || `AI-Dost Agent checkpoint — ${new Date().toISOString()}`)
+    .replace(/"/g, '\\"')
+    .replace(/[`$\\]/g, '');
+  exec(`git add -A && git commit -m "${safeMsg}"`, { cwd: dir }, (err, stdout, stderr) => {
     res.json({
       success: !err,
       message: err ? (stderr || err.message) : stdout.trim()

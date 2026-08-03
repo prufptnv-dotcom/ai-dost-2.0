@@ -9,13 +9,6 @@ export default function GitControlModal({ isOpen, onClose }) {
   const [loading, setLoading] = useState(false);
   const [statusText, setStatusText] = useState('');
 
-  useEffect(() => {
-    if (isOpen) {
-      fetchGitLogs();
-      initGitRepo();
-    }
-  }, [isOpen]);
-
   const initGitRepo = async () => {
     try {
       await api.post('/git/init');
@@ -37,6 +30,13 @@ export default function GitControlModal({ isOpen, onClose }) {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchGitLogs();
+      initGitRepo();
+    }
+  }, [isOpen]);
 
   const handleCreateCommit = async (e) => {
     e?.preventDefault();

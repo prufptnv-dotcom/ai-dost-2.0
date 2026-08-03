@@ -791,9 +791,18 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
 
     document.addEventListener('mousemove', handleMouseDragMove);
     document.addEventListener('mouseup', handleMouseDragEnd);
-    document.body.style.userSelect = 'none';
-    document.body.style.cursor = 'ew-resize';
   };
+
+  useEffect(() => {
+    if (isDragActive) {
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'ew-resize';
+      return () => {
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+      };
+    }
+  }, [isDragActive]);
 
   const handleMouseDragMove = (e) => {
     if (!isDraggingRef.current) return;
@@ -818,8 +827,6 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
     setIsDragActive(false);
     document.removeEventListener('mousemove', handleMouseDragMove);
     document.removeEventListener('mouseup', handleMouseDragEnd);
-    document.body.style.userSelect = '';
-    document.body.style.cursor = '';
   };
 
   // Resizable Chat Width States

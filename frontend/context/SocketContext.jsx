@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { initWebSocket } from '../services/websocket';
 
 export const SocketContext = createContext(null);
@@ -13,6 +13,7 @@ export const SocketProvider = ({ children }) => {
     if (!projectId) return;
     
     const token = localStorage.getItem('ai_dost_token') || 'demo_token';
+    let isMounted = true;
     
     const ws = initWebSocket(
       projectId, 
@@ -76,12 +77,17 @@ export const SocketProvider = ({ children }) => {
       (reason) => console.log('WebSocket disconnected:', reason)
     );
     
-    setSocket(ws);
+    const timer = setTimeout(() => {
+      if (isMounted) setSocket(ws);
+    }, 0);
     
     return () => {
+      isMounted = false;
+      clearTimeout(timer);
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.close();
       }
+      setSocket(null);
     };
   }, [projectId]);
 

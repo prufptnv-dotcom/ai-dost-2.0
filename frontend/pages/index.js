@@ -99,7 +99,7 @@ export default function Home() {
             </div>
             <h3 className="text-xl font-semibold mb-3 text-text-primary group-hover:text-primary transition-colors">Vector Memory</h3>
             <p className="text-text-secondary leading-relaxed">
-              Instant context retrieval across millions of lines of code. AI Dost remembers everything you've ever typed.
+              Instant context retrieval across millions of lines of code. AI Dost remembers everything you&apos;ve ever typed.
             </p>
           </motion.div>
 

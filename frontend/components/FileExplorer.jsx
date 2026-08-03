@@ -11,11 +11,18 @@ const FileExplorer = ({ files = [], currentFile = '', onSelectFile, onDeleteFile
     if (!currentFile) return;
     const parts = currentFile.split('/');
     if (parts.length > 1) {
-      const folderPaths = {};
-      for (let i = 1; i < parts.length; i++) {
-        folderPaths[parts.slice(0, i).join('/')] = true;
-      }
-      setExpandedFolders(prev => ({ ...prev, ...folderPaths }));
+      setExpandedFolders(prev => {
+        let hasNew = false;
+        const newFolders = { ...prev };
+        for (let i = 1; i < parts.length; i++) {
+          const folder = parts.slice(0, i).join('/');
+          if (!newFolders[folder]) {
+            newFolders[folder] = true;
+            hasNew = true;
+          }
+        }
+        return hasNew ? newFolders : prev;
+      });
     }
   }, [currentFile]);
 

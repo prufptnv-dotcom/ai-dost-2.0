@@ -36,7 +36,9 @@ router.post('/init', async (req, res) => {
 router.post('/commit', async (req, res) => {
     try {
         const { message } = req.body;
-        const commitMsg = message ? message.replace(/"/g, '\\"') : 'Local AI-Dost Snapshot';
+        const commitMsg = (message || 'Local AI-Dost Snapshot')
+            .replace(/"/g, '\\"')
+            .replace(/[`$\\]/g, '');
         
         // Stage all files
         await runGitCommand('git add .');
@@ -81,14 +83,15 @@ router.get('/log', async (req, res) => {
 router.post('/checkout', async (req, res) => {
     try {
         const { hash } = req.body;
-        if (!hash) {
+        if (!hash || typeof hash !== 'string') {
             return res.status(400).json({ success: false, error: 'Commit hash is required' });
         }
+        const safeHash = hash.replace(/[^a-zA-Z0-9._-]/g, '');
 
-        const result = await runGitCommand(`git checkout ${hash}`);
+        const result = await runGitCommand(`git checkout ${safeHash}`);
         res.json({
             success: result.success,
-            message: result.success ? `Restored workspace to local commit [${hash}]` : result.error
+            message: result.success ? `Restored workspace to local commit [${safeHash}]` : result.error
         });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });

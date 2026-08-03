@@ -3,13 +3,7 @@ import { GitCommit, FolderOpen, ChevronRight, Clock } from "lucide-react";
 import Link from "next/link";
 
 const ProjectCard = ({ project, index = 0 }) => {
-  const [status, setStatus] = useState(project.status || "mvp");
-  
-  useEffect(() => {
-    if (project.status) {
-      setStatus(project.status);
-    }
-  }, [project.status]);
+  const status = project.status || "mvp";
 
   const statusConfig = {
     "mvp":         { color: "text-warning",   bg: "bg-warning/10",  border: "border-warning/20", dot: "bg-warning",   gradient: "from-rose-500 to-amber-500" },

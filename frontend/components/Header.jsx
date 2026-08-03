@@ -11,17 +11,33 @@ const Header = () => {
   const { mode, setMode } = useMode();
   const { showToast } = useToast();
   const router = useRouter();
-  const [isLightTheme, setIsLightTheme] = useState(false);
+  const [isLightTheme, setIsLightTheme] = useState(() => {
+    return typeof window !== 'undefined' && localStorage.getItem('theme') === 'light';
+  });
   
   // Custom workspace settings states
   const [showSettings, setShowSettings] = useState(false);
-  const [autoSaveInterval, setAutoSaveInterval] = useState('10');
-  const [autocompleteOn, setAutocompleteOn] = useState(true);
-  const [customGeminiKey, setCustomGeminiKey] = useState('');
-  const [customGroqKey, setCustomGroqKey] = useState('');
-  const [customDeepSeekKey, setCustomDeepSeekKey] = useState('');
-  const [customNvidiaKey, setCustomNvidiaKey] = useState('');
-  const [customOpenRouterKey, setCustomOpenRouterKey] = useState('');
+  const [autoSaveInterval, setAutoSaveInterval] = useState(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('autoSave') || '10' : '10';
+  });
+  const [autocompleteOn, setAutocompleteOn] = useState(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('autocomplete') !== 'false' : true;
+  });
+  const [customGeminiKey, setCustomGeminiKey] = useState(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('customGeminiKey') || '' : '';
+  });
+  const [customGroqKey, setCustomGroqKey] = useState(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('customGroqKey') || '' : '';
+  });
+  const [customDeepSeekKey, setCustomDeepSeekKey] = useState(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('customDeepSeekKey') || '' : '';
+  });
+  const [customNvidiaKey, setCustomNvidiaKey] = useState(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('customNvidiaKey') || '' : '';
+  });
+  const [customOpenRouterKey, setCustomOpenRouterKey] = useState(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('customOpenRouterKey') || '' : '';
+  });
 
   // 7-Tap Secret Personal Brain State (Android Developer Mode Style)
   const [settingsClicks, setSettingsClicks] = useState(0);
@@ -60,28 +76,9 @@ const Header = () => {
   };
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme');
-    if (savedTheme === 'light') {
+    if (typeof window !== 'undefined' && localStorage.getItem('theme') === 'light') {
       document.body.classList.add('light-theme');
-      setIsLightTheme(true);
     }
-    
-    // Load config states from localStorage
-    const savedAutoSave = localStorage.getItem('autoSave') || '10';
-    const savedAutocomplete = localStorage.getItem('autocomplete') !== 'false';
-    const savedGeminiKey = localStorage.getItem('customGeminiKey') || '';
-    const savedGroqKey = localStorage.getItem('customGroqKey') || '';
-    const savedDeepSeekKey = localStorage.getItem('customDeepSeekKey') || '';
-    const savedNvidiaKey = localStorage.getItem('customNvidiaKey') || '';
-    const savedOpenRouterKey = localStorage.getItem('customOpenRouterKey') || '';
-    
-    setAutoSaveInterval(savedAutoSave);
-    setAutocompleteOn(savedAutocomplete);
-    setCustomGeminiKey(savedGeminiKey);
-    setCustomGroqKey(savedGroqKey);
-    setCustomDeepSeekKey(savedDeepSeekKey);
-    setCustomNvidiaKey(savedNvidiaKey);
-    setCustomOpenRouterKey(savedOpenRouterKey);
   }, []);
 
   const toggleTheme = () => {

@@ -27,7 +27,7 @@ const Terms = () => {
           <p>All content and technology remains the property of Ai-Dost.</p>
           
           <h2 className="text-xl font-semibold text-text-primary">4. Disclaimer</h2>
-          <p>Our platform is provided "as is" without warranties of any kind.</p>
+          <p>Our platform is provided &quot;as is&quot; without warranties of any kind.</p>
           
           <h2 className="text-xl font-semibold text-text-primary">5. Termination</h2>
           <p>We reserve the right to terminate accounts that violate these terms.</p>
