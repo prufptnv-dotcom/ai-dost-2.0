@@ -351,29 +351,23 @@ async function callLLM(messages, customKeys = null, onFallbackNotice = null) {
     if (!isErrorResp(resp)) return resp;
   } catch (e) { logger.info('[Agent] Groq failed:', e.message); }
 
-  // 2. Try OpenRouter (High capacity model)
+  // 2. Try OpenRouter (5s fast timeout)
   try {
     const resp = await OpenRouterService.chat(agentPrompt, [], customKeys?.openrouter, 'agent');
     if (!isErrorResp(resp)) return resp;
   } catch (e) { logger.info('[Agent] OpenRouter failed:', e.message); }
 
-  // 3. Try NVIDIA NIM
-  try {
-    const resp = await NvidiaService.chat(agentPrompt, [], customKeys?.nvidia, 'agent');
-    if (!isErrorResp(resp)) return resp;
-  } catch (e) { logger.info('[Agent] NVIDIA failed:', e.message); }
-
-  // 3. Try Mistral
-  try {
-    const resp = await MistralService.chat(agentPrompt, [], customKeys?.mistral, 'agent');
-    if (!isErrorResp(resp)) return resp;
-  } catch (e) { logger.info('[Agent] Mistral failed:', e.message); }
-
-  // 4. Try Gemini
+  // 3. Try Gemini
   try {
     const resp = await GeminiService.chat(agentPrompt, [], null, 'agent', customKeys?.gemini);
     if (!isErrorResp(resp)) return resp;
   } catch (e) { logger.info('[Agent] Gemini failed:', e.message); }
+
+  // 4. Try NVIDIA NIM
+  try {
+    const resp = await NvidiaService.chat(agentPrompt, [], customKeys?.nvidia, 'agent');
+    if (!isErrorResp(resp)) return resp;
+  } catch (e) { logger.info('[Agent] NVIDIA failed:', e.message); }
 
   // 5. Try Local Ollama (Offline / Rate Limit Fallback Mode)
   try {

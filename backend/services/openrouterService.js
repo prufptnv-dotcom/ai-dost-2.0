@@ -37,7 +37,7 @@ class OpenRouterService {
                     temperature: 0.1,
                     max_tokens: 2500
                 }),
-                signal: AbortSignal.timeout(10000)
+                signal: AbortSignal.timeout(5000)
             });
             
             if (!response.ok) {
