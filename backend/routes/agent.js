@@ -351,7 +351,13 @@ async function callLLM(messages, customKeys = null, onFallbackNotice = null) {
     if (!isErrorResp(resp)) return resp;
   } catch (e) { logger.info('[Agent] Groq failed:', e.message); }
 
-  // 2. Try NVIDIA NIM
+  // 2. Try OpenRouter (High capacity model)
+  try {
+    const resp = await OpenRouterService.chat(agentPrompt, [], customKeys?.openrouter, 'agent');
+    if (!isErrorResp(resp)) return resp;
+  } catch (e) { logger.info('[Agent] OpenRouter failed:', e.message); }
+
+  // 3. Try NVIDIA NIM
   try {
     const resp = await NvidiaService.chat(agentPrompt, [], customKeys?.nvidia, 'agent');
     if (!isErrorResp(resp)) return resp;

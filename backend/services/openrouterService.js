@@ -1,6 +1,7 @@
 const logger = require('../logger');
+
 class OpenRouterService {
-    static async chat(message, history = [], customApiKey = null) {
+    static async chat(message, history = [], customApiKey = null, mode = 'project') {
         try {
             const API_KEY = customApiKey || process.env.OPENROUTER_API_KEY;
             
@@ -11,16 +12,16 @@ class OpenRouterService {
 
             const API_URL = 'https://openrouter.ai/api/v1/chat/completions';
             
-            const messages = [
-                { 
+            const messages = [];
+            if (mode !== 'agent') {
+                messages.push({ 
                     role: 'system', 
-                    content: `You are AI-Dost, an expert Senior Software Engineer and AI Assistant.
-Write clean, optimal, production-grade code wrapped inside markdown code blocks.` 
-                },
-                ...history,
-                { role: 'user', content: message }
-            ];
-            
+                    content: `You are AI-Dost, an expert Senior Software Engineer and AI Assistant. Write clean, optimal, production-grade code wrapped inside markdown code blocks.` 
+                });
+            }
+            messages.push(...history);
+            messages.push({ role: 'user', content: message });
+
             logger.info('🔄 Calling OpenRouter API...');
             const response = await fetch(API_URL, {
                 method: 'POST',
@@ -33,7 +34,7 @@ Write clean, optimal, production-grade code wrapped inside markdown code blocks.
                 body: JSON.stringify({
                     model: 'meta-llama/llama-3.1-8b-instruct',
                     messages: messages,
-                    temperature: 0.2,
+                    temperature: 0.1,
                     max_tokens: 2500
                 }),
                 signal: AbortSignal.timeout(10000)

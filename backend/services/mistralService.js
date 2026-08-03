@@ -4,7 +4,7 @@ const path = require('path');
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
 class MistralService {
-    static async chat(message, history = [], customKey = null) {
+    static async chat(message, history = [], customKey = null, mode = 'project') {
         const apiKey = customKey || process.env.MISTRAL_API_KEY;
         if (!apiKey) {
             return "Mistral API key set nahi hai. Kripya Header Settings mein API key enter karein.";
@@ -16,6 +16,13 @@ class MistralService {
                 content: String(msg.content)
             }));
 
+            const messages = [];
+            if (mode !== 'agent') {
+                messages.push({ role: "system", content: "You are Ai-Dost, a friendly and intelligent AI assistant." });
+            }
+            messages.push(...formattedHistory);
+            messages.push({ role: "user", content: message });
+
             const response = await fetch("https://api.mistral.ai/v1/chat/completions", {
                 method: "POST",
                 headers: {
@@ -24,13 +31,10 @@ class MistralService {
                 },
                 body: JSON.stringify({
                     model: "mistral-small-latest",
-                    messages: [
-                        { role: "system", content: "You are Ai-Dost, a friendly and intelligent AI assistant." },
-                        ...formattedHistory,
-                        { role: "user", content: message }
-                    ],
-                    temperature: 0.7
-                })
+                    messages: messages,
+                    temperature: 0.1
+                }),
+                signal: AbortSignal.timeout(10000) // 10 second fast timeout
             });
 
             if (!response.ok) {
