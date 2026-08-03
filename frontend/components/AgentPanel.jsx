@@ -682,6 +682,79 @@ const AgentPanel = ({
           {/* Steps / output scroll area */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3">
 
+            {/* Empty state: Copilot Agent Mode features showcase & quick actions */}
+            {steps.length === 0 && !liveMessage && !taskPlan && (
+              <div className="py-4 space-y-4 animate-fadeIn">
+                <div className="text-center px-2">
+                  <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-primary/20 via-purple-500/20 to-cyan-500/20 border border-primary/30 flex items-center justify-center mx-auto mb-2 shadow-[0_0_15px_var(--color-primary-glow)]">
+                    <Bot className="w-5 h-5 text-primary" />
+                  </div>
+                  <h3 className="text-xs font-bold text-text-primary">GitHub Copilot Style Agent Mode</h3>
+                  <p className="text-[11px] text-text-muted mt-0.5">Autonomous coding assistant with real tool execution</p>
+                </div>
+
+                {/* 8 Features Badge Grid */}
+                <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                  <div className="p-2 rounded-xl bg-bg-hover/60 border border-white/[0.06] flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-primary shrink-0" />
+                    <span className="text-text-secondary font-medium">Multi-step ReAct Plan</span>
+                  </div>
+                  <div className="p-2 rounded-xl bg-bg-hover/60 border border-white/[0.06] flex items-center gap-1.5">
+                    <Search className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                    <span className="text-text-secondary font-medium">Codebase RAG Index</span>
+                  </div>
+                  <div className="p-2 rounded-xl bg-bg-hover/60 border border-white/[0.06] flex items-center gap-1.5">
+                    <Code2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                    <span className="text-text-secondary font-medium">Direct Workspace Edit</span>
+                  </div>
+                  <div className="p-2 rounded-xl bg-bg-hover/60 border border-white/[0.06] flex items-center gap-1.5">
+                    <GitMerge className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                    <span className="text-text-secondary font-medium">Surgical Diff Replace</span>
+                  </div>
+                  <div className="p-2 rounded-xl bg-bg-hover/60 border border-white/[0.06] flex items-center gap-1.5">
+                    <Terminal className="w-3.5 h-3.5 text-yellow-400 shrink-0" />
+                    <span className="text-text-secondary font-medium">Terminal Commands</span>
+                  </div>
+                  <div className="p-2 rounded-xl bg-bg-hover/60 border border-white/[0.06] flex items-center gap-1.5">
+                    <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span className="text-text-secondary font-medium">Automated Unit Tests</span>
+                  </div>
+                  <div className="p-2 rounded-xl bg-bg-hover/60 border border-white/[0.06] flex items-center gap-1.5">
+                    <Shield className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                    <span className="text-text-secondary font-medium">Self-Healing Fixes</span>
+                  </div>
+                  <div className="p-2 rounded-xl bg-bg-hover/60 border border-white/[0.06] flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
+                    <span className="text-text-secondary font-medium">Live Monaco Editor Sync</span>
+                  </div>
+                </div>
+
+                {/* Quick Action Suggestion Pills */}
+                <div>
+                  <p className="text-[10px] text-text-muted font-semibold mb-1.5 flex items-center gap-1">
+                    <Lightbulb className="w-3 h-3 text-yellow-400" /> Quick Task Ideas:
+                  </p>
+                  <div className="space-y-1">
+                    {[
+                      'Create index.html with dark theme UI and responsive navbar',
+                      'Search codebase for all functions and create documentation',
+                      'Run terminal build/tests and auto-fix any errors found',
+                      'Refactor main.py to add input validation and error handling'
+                    ].map((s, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => { setPrompt(s); runAgent(s); }}
+                        className="w-full text-left p-2 rounded-xl bg-primary/5 hover:bg-primary/10 border border-primary/15 hover:border-primary/40 text-[11px] text-text-secondary hover:text-primary transition cursor-pointer flex items-center justify-between group"
+                      >
+                        <span className="truncate">{s}</span>
+                        <ChevronRight className="w-3 h-3 opacity-40 group-hover:opacity-100 shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Live message banner */}
             {liveMessage && (
               <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-xl mb-3 ${
