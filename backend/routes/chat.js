@@ -224,14 +224,41 @@ async function executeCascadingFailover(message, groqMsg, cleanHistory, fileCont
     try {
         console.log("♊ Tier 3: Executing Gemini Flash API request...");
         const res = await GeminiService.chat(message, cleanHistory, fileContent, mode, customKeys?.gemini);
-        if (res && !res.includes('API error') && !res.includes('Quota exceeded')) {
+        if (res && !res.includes('API error') && !res.includes('Quota exceeded') && !res.includes('Rate limit')) {
             return res;
         }
     } catch (e) {
         console.warn("Tier 3 (Gemini) threw error:", e.message);
     }
 
-    return "Ai-Dost: Direct API response unavailable right now due to provider rate limits. Please retry in a few seconds!";
+    // 4. Try Local Ollama (Offline Mode)
+    try {
+        console.log("🦙 Tier 4: Executing Local Ollama API request...");
+        const tagsRes = await fetch('http://127.0.0.1:11434/api/tags');
+        if (tagsRes.ok) {
+            const tagsData = await tagsRes.json();
+            const models = tagsData.models || [];
+            if (models.length > 0) {
+                const genRes = await fetch('http://127.0.0.1:11434/api/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: models[0].name,
+                        prompt: message,
+                        stream: false
+                    })
+                });
+                if (genRes.ok) {
+                    const genData = await genRes.json();
+                    if (genData.response) return genData.response;
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("Tier 4 (Ollama) threw error:", e.message);
+    }
+
+    return "Ai-Dost: Direct API response unavailable right now due to provider rate limits. Please check Ollama locally (http://127.0.0.1:11434) or retry in a few seconds!";
 }
 
 // Auto select best AI model using Smart Natural Language Intent Detection

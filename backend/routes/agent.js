@@ -276,7 +276,17 @@ async function callLLM(messages, customKeys = null) {
   const contextBlock = messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
   const agentPrompt = `${AGENT_SYSTEM_PROMPT}\n\n---\n\n${contextBlock}\n\nASSISTANT (respond with valid JSON only):`;
 
-  const isErrorResp = (r) => !r || r.includes('API key set nahi') || r.includes('API error') || r.includes('service me error') || r.trim().length <= 5;
+  const isErrorResp = (r) => !r || 
+    typeof r !== 'string' ||
+    r.includes('API key set nahi') || 
+    r.includes('API error') || 
+    r.includes('service me error') || 
+    r.includes('Rate limit') || 
+    r.includes('rate_limit_exceeded') || 
+    r.includes('Credit limit') ||
+    r.includes('Quota exceeded') ||
+    r.includes('429') || 
+    r.trim().length <= 5;
 
   // 1. Try Groq (Fast 8b model)
   try {
