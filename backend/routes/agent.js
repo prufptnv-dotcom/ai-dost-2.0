@@ -24,6 +24,11 @@ const MistralService    = require('../services/mistralService');
 const AGENT_SYSTEM_PROMPT = `You are AI-Dost Agent, an autonomous AI coding assistant — similar to GitHub Copilot Agent Mode.
 You work inside a real code workspace and have access to TOOLS that let you read, edit, search, and run code.
 
+MULTILINGUAL PROMPT UNDERSTANDING:
+- User prompts may be in English, Hindi, Hinglish (e.g. "ek html page banao index.html naam se", "main.py me error fix karo"), or mixed phrasing.
+- ALWAYS extract the core intent: what file to create/read/modify, what code to write, what terminal command to run.
+- Convert the user's request directly into concrete tool actions.
+
 TOOLS AVAILABLE:
 1. read_file(path) — Read a file's full content
 2. write_file(path, content) — Create or completely overwrite a file
@@ -37,9 +42,12 @@ STRICT OUTPUT FORMAT — Respond ONLY with valid JSON, nothing else:
 
 Shape 1 (Tool Call):
 {
-  "thought": "Your step-by-step reasoning",
+  "thought": "Step-by-step reasoning explaining why this tool is called",
   "action": "tool_name",
-  "parameters": { ...params... }
+  "parameters": {
+    "path": "filename.ext",
+    "content": "code or file content string"
+  }
 }
 
 Shape 2 (Final Answer):
@@ -49,12 +57,12 @@ Shape 2 (Final Answer):
   "answer": "Summary of what was done and what files were changed."
 }
 
-SELF-HEALING RULES:
-- If run_terminal fails with a non-zero exit code or stderr contains an error, you MUST analyze the error and fix it before retrying.
-- If apply_diff fails because search block not found, use read_file first to get exact current content, then retry.
-- Never give up on a recoverable error — attempt a fix and retry at least once.
-- Max 14 steps total. After step 14, output FINAL_ANSWER with what was accomplished.
-- Always prefer apply_diff over write_file to avoid accidental data loss.
+RULES:
+- If user requests creating or writing a file, use action 'write_file' with parameters 'path' and 'content'.
+- If user requests editing an existing file, use action 'apply_diff' with 'path', 'search', and 'replace'. If exact content is unknown, use 'read_file' first.
+- If run_terminal fails with an error, analyze the error and fix it before retrying.
+- Never output prose before or after JSON — respond strictly with the JSON object.
+- Max 14 steps total. Output FINAL_ANSWER when complete.
 `;
 
 // ── Phase 3: Lightweight TF-IDF Codebase Search (RAG) ────────────────────────
@@ -356,19 +364,58 @@ function parseLLMAction(raw) {
   if (!raw || typeof raw !== 'string') {
     return { thought: 'No output received.', action: 'FINAL_ANSWER', answer: 'No response from model.' };
   }
-  try {
-    // Strip markdown codeblock backticks if present (e.g. ```json ... ```)
-    const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*$/gi, '').trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (parsed && typeof parsed.action === 'string') {
-        return parsed;
-      }
+
+  let parsed = null;
+  const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*$/gi, '').trim();
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+
+  if (jsonMatch) {
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch (_) {
+      try {
+        // Attempt JSON repair for unescaped newlines inside strings
+        const repaired = jsonMatch[0].replace(/(?<=:\s*"[\s\S]*?)\r?\n(?=[\s\S]*?")/g, '\\n');
+        parsed = JSON.parse(repaired);
+      } catch (_) {}
     }
-  } catch (e) {
-    logger.info('[Agent] JSON parse error, falling back:', e.message);
   }
+
+  if (parsed && typeof parsed.action === 'string') {
+    const params = parsed.parameters || {};
+    // Parameter key normalization across LLM variations
+    const normalizedParams = {
+      path:      params.path || params.filepath || params.file_path || params.file || params.filename || params.name || params.target,
+      content:   params.content !== undefined ? params.content : (params.code !== undefined ? params.code : (params.body !== undefined ? params.body : (params.text !== undefined ? params.text : params.file_content))),
+      search:    params.search || params.target || params.old_code || params.find || params.search_block,
+      replace:   params.replace || params.new_code || params.replacement || params.replace_block,
+      command:   params.command || params.cmd || params.terminal_command || params.exec,
+      query:     params.query || params.search || params.term || params.text,
+      framework: params.framework,
+    };
+    return {
+      thought: parsed.thought || 'Executing task...',
+      action: parsed.action,
+      parameters: normalizedParams,
+      answer: parsed.answer
+    };
+  }
+
+  // Fallback: If LLM generated code block with file mention, infer write_file
+  const codeBlockMatch = raw.match(/```(?:[a-zA-Z]+)?\r?\n([\s\S]+?)```/);
+  const fileMentionMatch = raw.match(/([\w\-\.\/]+\.(?:html|css|js|jsx|ts|tsx|py|json|md|sql|go|c|cpp|rs))/i);
+
+  if (codeBlockMatch && fileMentionMatch) {
+    const targetFile = fileMentionMatch[1];
+    const codeContent = codeBlockMatch[1];
+    logger.info(`[Agent] Inferred write_file for ${targetFile} from markdown code block.`);
+    return {
+      thought: `Writing code into ${targetFile}`,
+      action: 'write_file',
+      parameters: { path: targetFile, content: codeContent }
+    };
+  }
+
   return { thought: raw, action: 'FINAL_ANSWER', answer: raw };
 }
 
@@ -621,4 +668,5 @@ router.post('/checkpoint', (req, res) => {
   });
 });
 
+router.parseLLMAction = parseLLMAction;
 module.exports = router;
