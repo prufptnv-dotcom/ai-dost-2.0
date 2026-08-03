@@ -314,26 +314,25 @@ async function callLLM(messages, customKeys = null) {
 
   // 1. Try Groq (Fast 8b model)
   try {
-    const resp = await GroqService.chat(agentPrompt, [], 'project', customKeys?.groq);
+    const resp = await GroqService.chat(agentPrompt, [], 'agent', customKeys?.groq);
     if (!isErrorResp(resp)) return resp;
   } catch (e) { logger.info('[Agent] Groq failed:', e.message); }
 
-
-  // 3. Try NVIDIA NIM
+  // 2. Try NVIDIA NIM
   try {
-    const resp = await NvidiaService.chat(agentPrompt, [], customKeys?.nvidia);
+    const resp = await NvidiaService.chat(agentPrompt, [], customKeys?.nvidia, 'agent');
     if (!isErrorResp(resp)) return resp;
   } catch (e) { logger.info('[Agent] NVIDIA failed:', e.message); }
 
   // 3. Try Mistral
   try {
-    const resp = await MistralService.chat(agentPrompt, [], customKeys?.mistral);
+    const resp = await MistralService.chat(agentPrompt, [], customKeys?.mistral, 'agent');
     if (!isErrorResp(resp)) return resp;
   } catch (e) { logger.info('[Agent] Mistral failed:', e.message); }
 
   // 4. Try Gemini
   try {
-    const resp = await GeminiService.chat(agentPrompt, [], customKeys?.gemini, 'project', null);
+    const resp = await GeminiService.chat(agentPrompt, [], null, 'agent', customKeys?.gemini);
     if (!isErrorResp(resp)) return resp;
   } catch (e) { logger.info('[Agent] Gemini failed:', e.message); }
 

@@ -1,4 +1,5 @@
 const logger = require('../logger');
+
 class GeminiService {
     static async chat(message, history = [], fileContent = null, mode = 'project', customApiKey = null) {
         try {
@@ -10,7 +11,6 @@ class GeminiService {
 
             const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
             
-            // Build Gemini contents array containing history
             const contents = [];
             
             if (history && history.length > 0) {
@@ -44,7 +44,7 @@ You are in General Chat Mode.
 - Image Generation: If the user asks you to generate, draw, create, or make an image, graphic, or picture, respond ONLY with the tag: [GENERATE_IMAGE: descriptive prompt for the image] and nothing else.
 - PDF Generation: If the user asks you to generate, write, or export a PDF document or research paper, write the content of the PDF and wrap it inside the custom tags '[GENERATE_PDF: Title of Document]' and '[/GENERATE_PDF]'. For example: '[GENERATE_PDF: History of Bihar]\nBihar has a rich history...\n[/GENERATE_PDF]'. The platform will automatically compile it and give the user a clickable download button link.
 - Language & Grammar Rule (STRICT): Always respond in clean, natural, grammatically flawless language (Hinglish/Hindi/English) matching the exact language written by the user. Always use correct spelling and never write typos or broken words. Present yourself confidently as AI-Dost. Never output generic self-deprecating system error disclaimers unless explicitly asked to debug broken code.`;
-            } else {
+            } else if (mode === 'project') {
                 systemPrompt = `You are AI Dost, a powerful, state-of-the-art engineering companion and collaborative coding environment.
 You are in Project Workspace Mode.
 Here is what you can do and what features are available to the user on this platform:
@@ -59,6 +59,14 @@ Here is what you can do and what features are available to the user on this plat
 9. Code Integration: If you write or update code, write it inside a markdown code block (e.g. \`\`\`python ... \`\`\`).
 10. PDF Generation: If the user asks you to generate, write, or export a PDF document or research paper, write the content inside tags '[GENERATE_PDF: Title]' and '[/GENERATE_PDF]'.
 11. Language & Grammar Rule (STRICT): Always respond in clean, natural, grammatically flawless language matching the user's prompt. Never write typos, broken words, or self-deprecating system disclaimers. Always present yourself as an expert Senior Software Engineer AI.`;
+            } else if (mode === 'agent') {
+                // Agent ReAct mode — do not inject chat system prompt
+                systemPrompt = '';
+            }
+
+            const bodyPayload = { contents };
+            if (systemPrompt) {
+                bodyPayload.systemInstruction = { parts: [{ text: systemPrompt }] };
             }
 
             const response = await fetch(API_URL, {
@@ -66,14 +74,7 @@ Here is what you can do and what features are available to the user on this plat
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    contents: contents,
-                    systemInstruction: {
-                        parts: [{
-                            text: systemPrompt
-                        }]
-                    }
-                })
+                body: JSON.stringify(bodyPayload)
             });
             
             if (!response.ok) {
@@ -84,13 +85,13 @@ Here is what you can do and what features are available to the user on this plat
 
             const data = await response.json();
             logger.info('✅ Gemini response received');
-
-            if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0]) {
+            
+            if (data.candidates && data.candidates[0] && data.candidates[0].content) {
                 return data.candidates[0].content.parts[0].text;
             } else {
-                logger.error('❌ Unexpected Gemini API response structure:', data);
-                return 'Gemini returned an unexpected response. Please try again.';
+                return 'Gemini response decode nahi ho paya.';
             }
+            
         } catch (error) {
             logger.error('❌ Gemini Service Error:', error.message);
             return 'Gemini service me error: ' + error.message;
