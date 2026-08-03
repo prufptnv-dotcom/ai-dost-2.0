@@ -4,7 +4,7 @@ class DeepSeekService {
             const API_KEY = customApiKey || process.env.DEEPSEEK_API_KEY;
             
             if (!API_KEY || API_KEY === 'your_deepseek_key') {
-                console.error('❌ DEEPSEEK API Key not found or still default!');
+                logger.error('❌ DEEPSEEK API Key not found or still default!');
                 return 'DeepSeek API key set nahi hai. settings icon pe click karke apni custom key enter karein.';
             }
 
@@ -29,7 +29,7 @@ Always present yourself as AI Dost, speak in a friendly and professional tone, a
                 { role: 'user', content: message }
             ];
             
-            console.log('🔄 Calling DeepSeek API...');
+            logger.info('🔄 Calling DeepSeek API...');
             const response = await fetch(API_URL, {
                 method: 'POST',
                 headers: {
@@ -45,21 +45,21 @@ Always present yourself as AI Dost, speak in a friendly and professional tone, a
             
             if (!response.ok) {
                 const errorText = await response.text();
-                console.error('❌ DeepSeek API Error:', response.status, errorText);
+                logger.error('❌ DeepSeek API Error:', response.status, errorText);
                 return `DeepSeek API error (${response.status}): ${errorText}`;
             }
 
             const data = await response.json();
-            console.log('✅ DeepSeek response received');
+            logger.info('✅ DeepSeek response received');
 
             if (data.choices && data.choices[0] && data.choices[0].message) {
                 return data.choices[0].message.content;
             } else {
-                console.error('❌ Unexpected DeepSeek API response structure:', data);
+                logger.error('❌ Unexpected DeepSeek API response structure:', data);
                 return 'DeepSeek returned an unexpected response. Please try again.';
             }
         } catch (error) {
-            console.error('❌ DeepSeek Service Error:', error.message);
+            logger.error('❌ DeepSeek Service Error:', error.message);
             return 'DeepSeek service me error: ' + error.message;
         }
     }

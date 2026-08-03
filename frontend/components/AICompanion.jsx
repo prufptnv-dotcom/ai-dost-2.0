@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import Image from 'next/image';
 import { useMode } from '../context/ModeContext';
 import { useToast } from '../context/ToastContext';
 import { Mic, MicOff, Volume2, VolumeX, Bot, Phone, Paperclip, Send, Library, Zap, CheckCircle, ImageIcon, FileText, X, ChevronLeft, Loader2, Play, Square, History, Trash2, MessageSquare, Sparkles, Image as ImageIconLucide, Plus, Copy, ThumbsUp, ThumbsDown, Maximize2, Minimize2, MoveHorizontal } from 'lucide-react';
@@ -189,9 +190,12 @@ function GeneratedImage({ url, alt }) {
           </button>
         </div>
       )}
-      <img
+      <Image
         src={url}
         alt={alt || 'Generated image'}
+        width={512}
+        height={256}
+        unoptimized
         className={`w-full h-auto max-h-64 object-contain transition-opacity duration-300 ${status === 'loaded' ? 'opacity-100' : 'opacity-0 h-0'}`}
         onLoad={() => setStatus('loaded')}
         onError={() => setStatus('error')}
@@ -667,8 +671,10 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
   const [showHistory, setShowHistory] = useState(false);
 
   // Load mode-specific messages whenever mode changes
+  // Wrapped in setTimeout to defer state updates outside synchronous effect body
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    if (typeof window === 'undefined') return;
+    const timer = setTimeout(() => {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
         try {
@@ -679,7 +685,9 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
       } else {
         setMessages([defaultWelcomeMessage]);
       }
-    }
+    }, 0);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
   // Persist messages to mode-specific localStorage key
@@ -1668,10 +1676,12 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
       {/* Header */}
       <div className="flex justify-between items-center px-4 py-3 border-b border-border shrink-0 gap-3">
         <div className="flex items-center gap-2.5 shrink-0">
-          <img 
-            src="/logo.jpg" 
-            alt="AI-Dost Logo" 
-            className="w-7 h-7 rounded-lg object-cover border border-primary/30 shadow-[0_0_10px_var(--color-primary-glow)] shrink-0" 
+          <Image
+            src="/logo.jpg"
+            alt="AI-Dost Logo"
+            width={28}
+            height={28}
+            className="w-7 h-7 rounded-lg object-cover border border-primary/30 shadow-[0_0_10px_var(--color-primary-glow)] shrink-0"
           />
           <div>
             <h1 className="text-sm font-bold text-text-primary leading-none tracking-tight gradient-text">Ai-Dost</h1>

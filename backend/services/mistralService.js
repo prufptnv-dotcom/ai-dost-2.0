@@ -1,4 +1,5 @@
-﻿const dotenv = require('dotenv');
+const dotenv = require('dotenv');
+const logger = require('../logger');
 const path = require('path');
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
@@ -40,7 +41,7 @@ class MistralService {
             const data = await response.json();
             return data.choices?.[0]?.message?.content || "Mistral se koi reply nahi mila.";
         } catch (error) {
-            console.error("Mistral Service Error:", error);
+            logger.error("Mistral Service Error:", error);
             return `Mistral Service Error: ${error.message}`;
         }
     }

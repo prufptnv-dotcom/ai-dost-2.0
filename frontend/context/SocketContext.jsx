@@ -12,7 +12,14 @@ export const SocketProvider = ({ children }) => {
   useEffect(() => {
     if (!projectId) return;
     
-    const token = localStorage.getItem('ai_dost_token') || 'demo_token';
+    const token = localStorage.getItem('ai_dost_token');
+    // If no real auth token exists, skip WebSocket — server will reject fake tokens
+    if (!token) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[SocketContext] No auth token — WebSocket connection skipped.');
+      }
+      return;
+    }
     let isMounted = true;
     
     const ws = initWebSocket(

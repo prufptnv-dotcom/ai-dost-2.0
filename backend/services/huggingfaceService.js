@@ -17,7 +17,7 @@ class HuggingFaceService {
                 headers['Authorization'] = `Bearer ${API_KEY}`;
             }
 
-            console.log(`🔄 Calling Hugging Face API with model: ${randomModel}...`);
+            logger.info(`🔄 Calling Hugging Face API with model: ${randomModel}...`);
             const response = await fetch(randomModel, {
                 method: 'POST',
                 headers: headers,
@@ -31,24 +31,24 @@ class HuggingFaceService {
             });
             if (!response.ok) {
                 const errorText = await response.text();
-                console.error('❌ Hugging Face API Error:', response.status, errorText);
+                logger.error('❌ Hugging Face API Error:', response.status, errorText);
                 return `Hugging Face API error (${response.status}): ${errorText}`;
             }
 
             const data = await response.json();
-            console.log('✅ Hugging Face response received');
+            logger.info('✅ Hugging Face response received');
 
             if (Array.isArray(data) && data[0] && data[0].generated_text) {
                 return data[0].generated_text.split('<|assistant|>')[1] || data[0].generated_text;
             } else if (data.error) {
-                console.error('❌ Hugging Face returned error:', data.error);
+                logger.error('❌ Hugging Face returned error:', data.error);
                 return `Hugging Face model error: ${data.error}`;
             } else {
-                console.error('❌ Unexpected Hugging Face API response structure:', data);
+                logger.error('❌ Unexpected Hugging Face API response structure:', data);
                 return 'Hugging Face returned an unexpected response.';
             }
         } catch (error) {
-            console.error('❌ Hugging Face Service Error:', error.message);
+            logger.error('❌ Hugging Face Service Error:', error.message);
             return 'Hugging Face service me error: ' + error.message;
         }
     }

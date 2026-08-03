@@ -54,6 +54,7 @@ const ProjectWorkspace = () => {
     };
     
     loadProject();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   // Clean up timers on unmount

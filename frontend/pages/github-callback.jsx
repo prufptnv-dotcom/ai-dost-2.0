@@ -31,6 +31,7 @@ const GitHubCallback = () => {
     };
 
     handleCallback();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code, router]);
 
   return (

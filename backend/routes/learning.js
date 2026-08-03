@@ -1,4 +1,5 @@
 const express = require('express');
+const logger = require('../logger');
 const router = express.Router();
 const fs = require('fs');
 const path = require('path');
@@ -50,7 +51,7 @@ function saveBrainMemory(data) {
         }
         fs.writeFileSync(MEMORY_FILE, JSON.stringify(data, null, 2));
     } catch (e) {
-        console.error("Failed to save personal brain memory:", e.message);
+        logger.error("Failed to save personal brain memory:", e.message);
     }
 }
 

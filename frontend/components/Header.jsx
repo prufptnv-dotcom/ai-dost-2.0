@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/router';
 import { Sun, Moon, Settings, User, LogOut, Menu, X, Bot, ChevronDown, Save, Sparkles, Key, Brain, GitBranch } from 'lucide-react';
 import { useMode } from '../context/ModeContext';
@@ -118,9 +119,11 @@ const Header = () => {
             className="flex items-center gap-2.5 cursor-pointer select-none group"
             title="Go to Dashboard"
           >
-            <img 
-              src="/logo.jpg" 
-              alt="AI-Dost Logo" 
+            <Image
+              src="/logo.jpg"
+              alt="AI-Dost Logo"
+              width={32}
+              height={32}
               className="w-8 h-8 rounded-lg object-cover border border-primary/30 shadow-[0_0_12px_var(--color-primary-glow)] transition-transform duration-300 group-hover:scale-105 shrink-0"
             />
             <span className="text-base font-extrabold text-text-primary tracking-tight group-hover:gradient-text transition-all duration-300">Ai-Dost</span>

@@ -9,6 +9,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -125,7 +126,7 @@ func main() {
 			"engine":      "Go (Golang) High-Speed Gateway",
 			"pythonBrain": pythonBrainURL,
 			"timestamp":   time.Now().Format(time.RFC3339),
-			"goroutines":  sync.Mutex{},
+			"goroutines":  runtime.NumGoroutine(),
 		}
 		json.NewEncoder(w).Encode(response)
 	})

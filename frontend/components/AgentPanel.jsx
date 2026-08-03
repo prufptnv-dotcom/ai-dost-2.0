@@ -1,10 +1,12 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Bot, Square, ChevronDown,
   FileText, Terminal, FolderOpen, GitMerge, Check,
   AlertCircle, Loader2, Zap, RotateCcw, Lightbulb,
   Code2, Send, Search, History, GitCommit,
-  Copy, ClipboardCheck, Play, ChevronUp, Mic, MicOff, Columns, X, Wrench
+  Copy, ClipboardCheck, Play, ChevronUp, Mic, MicOff,
+  Columns, X, Wrench, Clock, Activity, TrendingUp,
+  ChevronRight, Sparkles, Shield, Eye
 } from 'lucide-react';
 
 const BACKEND_URL = '';
@@ -12,25 +14,28 @@ const BACKEND_URL = '';
 // ── Tiny helpers ──────────────────────────────────────────────────────────────
 const ToolIcon = ({ action }) => {
   const map = {
-    read_file:       <FileText  className="w-3.5 h-3.5 text-blue-400" />,
-    write_file:      <Code2     className="w-3.5 h-3.5 text-green-400" />,
-    apply_diff:      <GitMerge  className="w-3.5 h-3.5 text-primary" />,
-    run_terminal:    <Terminal  className="w-3.5 h-3.5 text-yellow-400" />,
+    read_file:       <FileText   className="w-3.5 h-3.5 text-blue-400" />,
+    write_file:      <Code2      className="w-3.5 h-3.5 text-green-400" />,
+    apply_diff:      <GitMerge   className="w-3.5 h-3.5 text-primary" />,
+    run_terminal:    <Terminal   className="w-3.5 h-3.5 text-yellow-400" />,
     list_directory:  <FolderOpen className="w-3.5 h-3.5 text-purple-400" />,
-    search_codebase: <Search    className="w-3.5 h-3.5 text-cyan-400" />,
-    run_tests:       <Zap       className="w-3.5 h-3.5 text-emerald-400" />,
-    FINAL_ANSWER:    <Check     className="w-3.5 h-3.5 text-success" />,
+    search_codebase: <Search     className="w-3.5 h-3.5 text-cyan-400" />,
+    run_tests:       <Zap        className="w-3.5 h-3.5 text-emerald-400" />,
+    FINAL_ANSWER:    <Check      className="w-3.5 h-3.5 text-success" />,
   };
   return map[action] || <Zap className="w-3.5 h-3.5 text-primary" />;
 };
 
 const ToolLabel = ({ action }) => {
   const map = {
-    read_file: 'Read File', write_file: 'Write File',
-    apply_diff: 'Apply Diff', run_terminal: 'Run Terminal',
-    list_directory: 'List Dir', search_codebase: 'Search Code',
-    run_tests: 'Run Tests',
-    FINAL_ANSWER: 'Done',
+    read_file:       'Read File',
+    write_file:      'Write File',
+    apply_diff:      'Apply Diff',
+    run_terminal:    'Run Terminal',
+    list_directory:  'List Dir',
+    search_codebase: 'Search Code',
+    run_tests:       'Run Tests',
+    FINAL_ANSWER:    'Done',
   };
   return map[action] || action;
 };
@@ -57,7 +62,7 @@ const DiffView = ({ search, replace }) => {
 };
 
 // ── Step Card ─────────────────────────────────────────────────────────────────
-const StepCard = ({ stepLog, onApplyToEditor }) => {
+const StepCard = ({ stepLog, onApplyToEditor, onOpenSplitDiff }) => {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const success = stepLog.result?.success !== false;
@@ -66,7 +71,8 @@ const StepCard = ({ stepLog, onApplyToEditor }) => {
   const isTerminal = stepLog.action === 'run_terminal';
 
   const copyOutput = (text) => {
-    navigator.clipboard.writeText(text);
+    if (!text) return;
+    navigator.clipboard.writeText(text).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -91,7 +97,10 @@ const StepCard = ({ stepLog, onApplyToEditor }) => {
         </span>
         {!success && <AlertCircle className="w-3 h-3 text-danger shrink-0" />}
         {success && isFileChange && <div className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" title="File changed" />}
-        {expanded ? <ChevronUp className="w-3 h-3 text-text-muted shrink-0" /> : <ChevronDown className="w-3 h-3 text-text-muted shrink-0" />}
+        {expanded
+          ? <ChevronUp className="w-3 h-3 text-text-muted shrink-0" />
+          : <ChevronDown className="w-3 h-3 text-text-muted shrink-0" />
+        }
       </button>
 
       {expanded && (
@@ -229,12 +238,10 @@ const SplitDiffModal = ({ data, onClose, onApply }) => {
         </div>
         {/* Diff Columns */}
         <div className="flex-1 grid grid-cols-2 divide-x divide-border overflow-y-auto p-4 font-mono text-xs gap-2">
-          {/* Before */}
           <div className="bg-danger/5 border border-danger/20 rounded-xl p-3">
             <div className="text-[10px] font-bold text-danger uppercase mb-2">Original (Before)</div>
             <pre className="text-danger/90 whitespace-pre-wrap leading-relaxed overflow-x-auto">{data.oldCode}</pre>
           </div>
-          {/* After */}
           <div className="bg-success/5 border border-success/20 rounded-xl p-3">
             <div className="text-[10px] font-bold text-success uppercase mb-2">Proposed (After)</div>
             <pre className="text-success/90 whitespace-pre-wrap leading-relaxed overflow-x-auto">{data.newCode}</pre>
@@ -259,8 +266,55 @@ const SplitDiffModal = ({ data, onClose, onApply }) => {
   );
 };
 
+// ── Agent Stats Card ──────────────────────────────────────────────────────────
+const AgentStats = ({ steps, elapsed }) => {
+  const toolCounts = steps.reduce((acc, s) => {
+    acc[s.action] = (acc[s.action] || 0) + 1;
+    return acc;
+  }, {});
+  const filesChanged = steps.filter(s =>
+    ['write_file', 'apply_diff'].includes(s.action) && s.result?.success
+  ).length;
+  const errors = steps.filter(s => s.result?.success === false).length;
+
+  return (
+    <div className="grid grid-cols-3 gap-1.5 mb-3">
+      {[
+        { label: 'Steps', value: steps.length, icon: <Activity className="w-3 h-3 text-primary" />, color: 'text-primary' },
+        { label: 'Files', value: filesChanged, icon: <FileText className="w-3 h-3 text-green-400" />, color: 'text-green-400' },
+        { label: 'Errors', value: errors, icon: <AlertCircle className="w-3 h-3 text-danger" />, color: errors > 0 ? 'text-danger' : 'text-text-muted' },
+      ].map(stat => (
+        <div key={stat.label} className="bg-bg-hover/50 border border-border rounded-xl p-2 flex flex-col items-center gap-1">
+          {stat.icon}
+          <span className={`text-sm font-bold ${stat.color}`}>{stat.value}</span>
+          <span className="text-[9px] text-text-muted">{stat.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ── Animated Typing Indicator ─────────────────────────────────────────────────
+const TypingDots = () => (
+  <span className="inline-flex gap-0.5 items-end ml-1">
+    {[0, 150, 300].map(delay => (
+      <span
+        key={delay}
+        className="w-1 h-1 rounded-full bg-current animate-bounce"
+        style={{ animationDelay: `${delay}ms` }}
+      />
+    ))}
+  </span>
+);
+
 // ── Main AgentPanel ───────────────────────────────────────────────────────────
-const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApplyToEditor }) => {
+const AgentPanel = ({
+  projectFiles = [],
+  projectPath = '',
+  projectId = '',
+  onApplyToEditor,
+  onFileSync,
+}) => {
   const [activeTab, setActiveTab] = useState('agent');
   const [prompt, setPrompt] = useState('');
   const [isRunning, setIsRunning] = useState(false);
@@ -275,12 +329,55 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
   const [isListening, setIsListening] = useState(false);
   const [taskPlan, setTaskPlan] = useState(null);
   const [splitDiffData, setSplitDiffData] = useState(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+
   const recognitionRef = useRef(null);
   const abortRef = useRef(null);
   const scrollRef = useRef(null);
+  const timerRef = useRef(null);
+  const startTimeRef = useRef(null);
+  const promptRef = useRef(prompt);
+
+  // Keep promptRef in sync via effect (avoids direct render-time mutation)
+  useEffect(() => { promptRef.current = prompt; }, [prompt]);
+
+  // Auto-scroll to bottom on new content
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [steps, liveMessage, isSelfHealing]);
+
+  // Elapsed timer when running
+  useEffect(() => {
+    if (isRunning) {
+      startTimeRef.current = Date.now();
+      timerRef.current = setInterval(() => {
+        setElapsedMs(Date.now() - (startTimeRef.current ?? Date.now()));
+      }, 500);
+    } else {
+      clearInterval(timerRef.current);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [isRunning]);
+
+  // Abort any running request on unmount
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) abortRef.current.abort();
+      clearInterval(timerRef.current);
+    };
+  }, []);
+
+  const formatElapsed = (ms) => {
+    if (ms < 1000) return `${ms}ms`;
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    return `${Math.floor(s / 60)}m ${s % 60}s`;
+  };
 
   // Voice Input (Web Speech API)
-  const toggleVoiceInput = () => {
+  const toggleVoiceInput = useCallback(() => {
     if (isListening) {
       if (recognitionRef.current) recognitionRef.current.stop();
       setIsListening(false);
@@ -294,7 +391,7 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = false;
-    recognition.lang = 'en-US';
+    recognition.lang = 'hi-IN';
 
     recognition.onstart = () => setIsListening(true);
     recognition.onend = () => setIsListening(false);
@@ -307,92 +404,25 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
 
     recognitionRef.current = recognition;
     recognition.start();
-  };
+  }, [isListening]);
 
   const QUICK_PROMPTS = [
     { emoji: '🐛', label: 'Fix all bugs', prompt: 'Find and fix all bugs in the project files' },
     { emoji: '📝', label: 'Add docstrings', prompt: 'Add docstrings and comments to all functions' },
-    { emoji: '🧪', label: 'Write unit tests', prompt: 'Write comprehensive unit tests for main.py' },
+    { emoji: '🧪', label: 'Write unit tests', prompt: 'Write comprehensive unit tests for the main file' },
     { emoji: '🔧', label: 'Refactor code', prompt: 'Refactor code to be cleaner and more maintainable' },
     { emoji: '📊', label: 'Add logging', prompt: 'Add structured logging throughout the project' },
     { emoji: '⚡', label: 'Optimize', prompt: 'Optimize the code for better performance' },
   ];
 
-  useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [steps, liveMessage, isSelfHealing]);
-
-  const stopAgent = () => {
+  const stopAgent = useCallback(() => {
     if (abortRef.current) abortRef.current.abort();
     setIsRunning(false);
     setIsSelfHealing(false);
     setLiveMessage('⛔ Agent stopped by user.');
-  };
+  }, []);
 
-  const runAgent = async (customPrompt) => {
-    const userPrompt = (customPrompt || prompt).trim();
-    if (!userPrompt || isRunning) return;
-    setIsRunning(true);
-    setSteps([]);
-    setTaskPlan(null);
-    setFinalAnswer('');
-    setHasError(false);
-    setIsSelfHealing(false);
-    setLiveMessage('🚀 Analyzing task & indexing codebase...');
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/agent/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userPrompt,
-          projectFiles: projectFiles.slice(0, 10).map(f => ({
-            path: f.path,
-            content: (f.content || '').substring(0, 2000)
-          })),
-          projectPath,
-          projectId,
-          customKeys: {
-            gemini: localStorage.getItem('customGeminiKey') || '',
-            groq: localStorage.getItem('customGroqKey') || '',
-            deepseek: localStorage.getItem('customDeepSeekKey') || '',
-            nvidia: localStorage.getItem('customNvidiaKey') || '',
-            openrouter: localStorage.getItem('customOpenRouterKey') || ''
-          }
-        }),
-        signal: controller.signal
-      });
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try { handleSSE(JSON.parse(line.slice(6))); } catch (_) {}
-        }
-      }
-    } catch (err) {
-      if (err.name !== 'AbortError') {
-        setLiveMessage(`❌ Network error: ${err.message}`);
-        setHasError(true);
-      }
-    } finally {
-      setIsRunning(false);
-      setIsSelfHealing(false);
-    }
-  };
-
-  const handleSSE = (data) => {
+  const handleSSE = useCallback((data) => {
     switch (data.type) {
       case 'start':
         setLiveMessage(data.message);
@@ -418,8 +448,12 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
           return [...prev, data.stepLog];
         });
         setIsSelfHealing(false);
-        if (data.stepLog?.result?.changedFile && data.stepLog?.result?.newContent && onFileSync) {
-          onFileSync({ file: data.stepLog.result.changedFile, content: data.stepLog.result.newContent });
+        // Sync file changes to editor automatically
+        if (data.stepLog?.result?.changedFile && data.stepLog?.result?.newContent && typeof onFileSync === 'function') {
+          onFileSync({
+            file: data.stepLog.result.changedFile,
+            content: data.stepLog.result.newContent
+          });
         }
         break;
       case 'done':
@@ -428,9 +462,9 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
         setLiveMessage('');
         setHistory(prev => [{
           id: Date.now(),
-          prompt: prompt || 'Quick task',
+          prompt: promptRef.current || 'Quick task',
           answer: data.message,
-          steps: data.steps?.length || steps.length,
+          steps: data.steps?.length || 0,
           time: new Date().toLocaleTimeString()
         }, ...prev.slice(0, 14)]);
         break;
@@ -438,51 +472,143 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
         setLiveMessage(`❌ ${data.message || 'Error occurred'}`);
         setHasError(true);
         break;
+      default:
+        break;
     }
-  };
+  }, [onFileSync]);
 
-  const reset = () => {
-    setSteps([]); setTaskPlan(null); setFinalAnswer(''); setLiveMessage('');
-    setHasError(false); setIsSelfHealing(false); setPrompt('');
-  };
+  const runAgent = useCallback(async (customPrompt) => {
+    const userPrompt = (customPrompt || promptRef.current).trim();
+    if (!userPrompt || isRunning) return;
 
-  const gitCheckpoint = async () => {
+    setIsRunning(true);
+    setSteps([]);
+    setTaskPlan(null);
+    setFinalAnswer('');
+    setHasError(false);
+    setIsSelfHealing(false);
+    setElapsedMs(0);
+    startTimeRef.current = null;
+    setLiveMessage('🚀 Analyzing task & indexing codebase...');
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/agent/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userPrompt,
+          projectFiles: projectFiles.slice(0, 10).map(f => ({
+            path: f.path,
+            content: (f.content || '').substring(0, 2000)
+          })),
+          projectPath,
+          projectId,
+          customKeys: {
+            gemini:      localStorage.getItem('customGeminiKey')      || '',
+            groq:        localStorage.getItem('customGroqKey')        || '',
+            deepseek:    localStorage.getItem('customDeepSeekKey')    || '',
+            nvidia:      localStorage.getItem('customNvidiaKey')      || '',
+            openrouter:  localStorage.getItem('customOpenRouterKey')  || '',
+          }
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            handleSSE(JSON.parse(line.slice(6)));
+          } catch (_) {
+            // Ignore malformed SSE lines
+          }
+        }
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        setLiveMessage(`❌ Network error: ${err.message}`);
+        setHasError(true);
+      }
+    } finally {
+      setIsRunning(false);
+      setIsSelfHealing(false);
+    }
+  }, [isRunning, projectFiles, projectPath, projectId, handleSSE]);
+
+  const reset = useCallback(() => {
+    setSteps([]);
+    setTaskPlan(null);
+    setFinalAnswer('');
+    setLiveMessage('');
+    setHasError(false);
+    setIsSelfHealing(false);
+    setPrompt('');
+    setElapsedMs(0);
+  }, []);
+
+  const gitCheckpoint = useCallback(async () => {
     setIsCommitting(true);
     try {
       const res = await fetch(`${BACKEND_URL}/api/agent/checkpoint`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: commitMsg || `Agent checkpoint — ${new Date().toLocaleString()}` })
+        body: JSON.stringify({
+          message: commitMsg || `Agent checkpoint — ${new Date().toLocaleString()}`
+        }),
       });
       const data = await res.json();
       setCommitMsg('');
-      alert(data.success ? `✅ Git commit done:\n${data.message}` : `⚠️ ${data.message}`);
+      alert(data.success
+        ? `✅ Git commit done:\n${data.message}`
+        : `⚠️ ${data.message}`
+      );
     } catch (e) {
       alert('Git commit failed: ' + e.message);
     } finally {
       setIsCommitting(false);
     }
-  };
+  }, [commitMsg]);
 
-  const changedFiles = steps.filter(s => ['write_file', 'apply_diff'].includes(s.action) && s.result?.success);
+  const changedFiles = steps.filter(s =>
+    ['write_file', 'apply_diff'].includes(s.action) && s.result?.success
+  );
   const isIdle = !isRunning && steps.length === 0 && !finalAnswer;
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full bg-bg-default/40 backdrop-blur-xl rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden">
 
-      {/* Header */}
+      {/* ── Header ── */}
       <div className="px-4 py-3 border-b border-border shrink-0">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center shadow-[0_0_16px_var(--color-primary-glow)]">
-            <Bot className="w-4.5 h-4.5 text-white" />
+            <Bot className="w-4 h-4 text-white" />
           </div>
-          <div>
-            <h2 className="text-sm font-bold gradient-text">AI-Dost Agent</h2>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-sm font-bold gradient-text leading-tight">AI-Dost Agent</h2>
             <p className="text-[10px] text-text-muted">ReAct · RAG · Self-Healing</p>
           </div>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {isRunning && (
-              <div className="flex items-center gap-1 text-[10px] font-semibold">
+              <div className="flex items-center gap-1.5 text-[10px] font-semibold">
+                <Clock className="w-3 h-3 text-text-muted" />
+                <span className="text-text-muted">{formatElapsed(elapsedMs)}</span>
                 <span className={`w-2 h-2 rounded-full ${isSelfHealing ? 'bg-yellow-400 animate-ping' : 'bg-primary animate-ping'}`} />
                 <span className={isSelfHealing ? 'text-yellow-400' : 'text-primary'}>
                   {isSelfHealing ? 'HEALING' : 'RUNNING'}
@@ -490,7 +616,11 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
               </div>
             )}
             {!isRunning && (steps.length > 0 || finalAnswer) && (
-              <button onClick={reset} className="p-1.5 rounded-lg hover:bg-bg-hover text-text-muted hover:text-text-primary transition cursor-pointer" title="Reset">
+              <button
+                onClick={reset}
+                className="p-1.5 rounded-lg hover:bg-bg-hover text-text-muted hover:text-text-primary transition cursor-pointer"
+                title="Reset"
+              >
                 <RotateCcw className="w-3.5 h-3.5" />
               </button>
             )}
@@ -500,15 +630,17 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
         {/* Inner tabs */}
         <div className="flex gap-1 mt-2.5 bg-bg-hover/50 rounded-xl p-1">
           {[
-            { id: 'agent', icon: <Bot className="w-3 h-3" />, label: 'Agent' },
-            { id: 'history', icon: <History className="w-3 h-3" />, label: `History${history.length ? ` (${history.length})` : ''}` },
-            { id: 'git', icon: <GitCommit className="w-3 h-3" />, label: 'Git' },
+            { id: 'agent',   icon: <Bot className="w-3 h-3" />,       label: 'Agent' },
+            { id: 'history', icon: <History className="w-3 h-3" />,   label: `History${history.length ? ` (${history.length})` : ''}` },
+            { id: 'git',     icon: <GitCommit className="w-3 h-3" />, label: 'Git' },
           ].map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[10px] font-semibold transition cursor-pointer ${
-                activeTab === tab.id ? 'bg-primary text-bg-default' : 'text-text-muted hover:text-text-primary'
+                activeTab === tab.id
+                  ? 'bg-primary text-bg-default'
+                  : 'text-text-muted hover:text-text-primary'
               }`}
             >
               {tab.icon} {tab.label}
@@ -520,10 +652,12 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
       {/* ── Agent Tab ── */}
       {activeTab === 'agent' && (
         <>
-          {/* Quick Prompts (idle only) */}
+          {/* Quick Prompts — shown only when idle */}
           {isIdle && (
             <div className="px-4 pt-3 shrink-0">
-              <p className="text-[10px] text-text-muted font-bold uppercase tracking-wider mb-2">Quick Tasks</p>
+              <p className="text-[10px] text-text-muted font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <Sparkles className="w-3 h-3 text-primary" /> Quick Tasks
+              </p>
               <div className="grid grid-cols-2 gap-1.5">
                 {QUICK_PROMPTS.map((qp, i) => (
                   <button
@@ -538,25 +672,38 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
             </div>
           )}
 
-          {/* Steps / output */}
+          {/* Stats bar — shown when agent has run */}
+          {steps.length > 0 && (
+            <div className="px-4 pt-3 shrink-0">
+              <AgentStats steps={steps} elapsed={elapsedMs} />
+            </div>
+          )}
+
+          {/* Steps / output scroll area */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3">
+
             {/* Live message banner */}
             {liveMessage && (
               <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-xl mb-3 ${
-                hasError ? 'bg-danger/10 border border-danger/30 text-danger'
-                : isSelfHealing ? 'bg-yellow-400/10 border border-yellow-400/30 text-yellow-400'
-                : 'bg-primary/10 border border-primary/20 text-primary'
+                hasError
+                  ? 'bg-danger/10 border border-danger/30 text-danger'
+                  : isSelfHealing
+                  ? 'bg-yellow-400/10 border border-yellow-400/30 text-yellow-400'
+                  : 'bg-primary/10 border border-primary/20 text-primary'
               }`}>
                 {isRunning && !hasError
                   ? <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-                  : hasError ? <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                  : <Check className="w-3.5 h-3.5 shrink-0" />}
-                <span className="leading-snug">{liveMessage}</span>
+                  : hasError
+                  ? <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  : <Check className="w-3.5 h-3.5 shrink-0" />
+                }
+                <span className="leading-snug flex-1">{liveMessage}</span>
+                {isRunning && !hasError && <TypingDots />}
               </div>
             )}
 
             {/* Dynamic Task Breakdown Plan Card */}
-            {taskPlan && (
+            {taskPlan && taskPlan.tasks && (
               <div className="rounded-xl border border-primary/20 bg-primary/5 p-3.5 mb-3 shadow-lg animate-fadeIn">
                 <div className="flex items-center gap-2 mb-2 pb-2 border-b border-primary/10">
                   <Wrench className="w-3.5 h-3.5 text-primary" />
@@ -565,7 +712,21 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
                     {taskPlan.tasks.filter(t => t.status === 'completed').length}/{taskPlan.tasks.length} Done
                   </span>
                 </div>
-                <p className="text-[11px] text-text-muted mb-2 font-medium">{taskPlan.summary}</p>
+
+                {/* Progress bar */}
+                <div className="h-1 bg-white/10 rounded-full mb-2.5 overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-primary to-purple-500 rounded-full transition-all duration-500"
+                    style={{
+                      width: `${(taskPlan.tasks.filter(t => t.status === 'completed').length / taskPlan.tasks.length) * 100}%`
+                    }}
+                  />
+                </div>
+
+                {taskPlan.summary && (
+                  <p className="text-[11px] text-text-muted mb-2 font-medium">{taskPlan.summary}</p>
+                )}
+
                 <div className="space-y-1.5">
                   {taskPlan.tasks.map((task) => (
                     <div key={task.id} className="flex items-center gap-2 text-xs">
@@ -577,8 +738,9 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
                         <div className="w-3.5 h-3.5 rounded-full border border-text-muted/40 shrink-0" />
                       )}
                       <span className={`leading-tight ${
-                        task.status === 'completed' ? 'line-through text-text-muted' :
-                        task.status === 'in_progress' ? 'text-primary font-semibold' : 'text-text-secondary'
+                        task.status === 'completed'   ? 'line-through text-text-muted' :
+                        task.status === 'in_progress' ? 'text-primary font-semibold'   :
+                                                        'text-text-secondary'
                       }`}>
                         {task.title}
                       </span>
@@ -600,7 +762,7 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
 
             {/* Final answer */}
             {finalAnswer && (
-              <div className="rounded-xl border border-success/30 bg-success/5 px-4 py-3 mt-2">
+              <div className="rounded-xl border border-success/30 bg-success/5 px-4 py-3 mt-2 animate-fadeIn">
                 <div className="flex items-center gap-2 text-xs font-bold text-success mb-1.5">
                   <Check className="w-4 h-4" /> Task Completed
                   {changedFiles.length > 0 && (
@@ -611,7 +773,7 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
                 </div>
                 <p className="text-xs text-text-secondary leading-relaxed">{finalAnswer}</p>
 
-                {/* Changed files summary */}
+                {/* Changed files summary chips */}
                 {changedFiles.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {changedFiles.map((s, i) => (
@@ -621,26 +783,45 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
                     ))}
                   </div>
                 )}
+
+                {/* Quick-commit shortcut */}
+                <button
+                  onClick={() => setActiveTab('git')}
+                  className="mt-2 w-full flex items-center justify-center gap-1.5 text-[10px] py-1.5 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-400 hover:bg-orange-500/20 transition cursor-pointer font-semibold"
+                >
+                  <GitCommit className="w-3 h-3" /> Save as Git Checkpoint
+                </button>
               </div>
             )}
           </div>
 
-          {/* Input area */}
+          {/* ── Input area ── */}
           <div className="px-4 py-3 border-t border-border shrink-0">
             <div className="flex gap-2 items-end">
               <textarea
                 value={prompt}
                 onChange={e => setPrompt(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !isRunning) { e.preventDefault(); runAgent(); } }}
-                placeholder={isListening ? "Listening... Speak your task now" : "Task for the Agent... (e.g. 'Add input validation and run tests')"}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey && !isRunning) {
+                    e.preventDefault();
+                    runAgent();
+                  }
+                }}
+                placeholder={
+                  isListening
+                    ? 'Listening... Speak your task now'
+                    : "Task for the Agent... (e.g. 'Add input validation and run tests')"
+                }
                 disabled={isRunning}
                 rows={2}
                 className={`flex-1 bg-bg-hover border rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-muted resize-none focus:outline-none transition disabled:opacity-50 ${
-                  isListening ? 'border-red-500 shadow-[0_0_12px_rgba(239,68,68,0.4)]' : 'border-border focus:border-primary/50'
+                  isListening
+                    ? 'border-red-500 shadow-[0_0_12px_rgba(239,68,68,0.4)]'
+                    : 'border-border focus:border-primary/50'
                 }`}
               />
 
-              {/* Voice Input Button */}
+              {/* Voice Input */}
               <button
                 onClick={toggleVoiceInput}
                 disabled={isRunning}
@@ -654,8 +835,13 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
                 {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
               </button>
 
+              {/* Run / Stop */}
               {isRunning ? (
-                <button onClick={stopAgent} className="p-2 rounded-xl bg-danger/10 border border-danger/30 text-danger hover:bg-danger/20 transition cursor-pointer shrink-0">
+                <button
+                  onClick={stopAgent}
+                  className="p-2 rounded-xl bg-danger/10 border border-danger/30 text-danger hover:bg-danger/20 transition cursor-pointer shrink-0"
+                  title="Stop agent"
+                >
                   <Square className="w-4 h-4" />
                 </button>
               ) : (
@@ -663,24 +849,33 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
                   onClick={() => runAgent()}
                   disabled={!prompt.trim()}
                   className="p-2 rounded-xl bg-primary text-bg-default hover:bg-primary/80 transition cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_0_12px_var(--color-primary-glow)]"
+                  title="Run agent (Enter)"
                 >
                   <Send className="w-4 h-4" />
                 </button>
               )}
             </div>
-            <p className="text-[10px] text-text-muted mt-1 pl-1">
-              Enter ↵ to run · 🎙️ Click Mic to speak · 📊 Side-by-side split diff enabled
+            <p className="text-[10px] text-text-muted mt-1.5 pl-1 flex items-center gap-2 flex-wrap">
+              <span>↵ Enter to run</span>
+              <span>·</span>
+              <span>🎙️ Mic for voice</span>
+              <span>·</span>
+              <span>⇧↵ Newline</span>
             </p>
           </div>
         </>
       )}
 
-      {/* Render Side-by-Side Split Diff Modal */}
+      {/* ── Split Diff Modal ── */}
       {splitDiffData && (
         <SplitDiffModal
           data={splitDiffData}
           onClose={() => setSplitDiffData(null)}
-          onApply={onApplyToEditor ? () => onApplyToEditor({ file: splitDiffData.file, content: splitDiffData.newCode }) : null}
+          onApply={
+            onApplyToEditor
+              ? () => onApplyToEditor({ file: splitDiffData.file, content: splitDiffData.newCode })
+              : null
+          }
         />
       )}
 
@@ -708,9 +903,9 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
                   </div>
                   <button
                     onClick={() => { setPrompt(h.prompt); setActiveTab('agent'); }}
-                    className="opacity-0 group-hover:opacity-100 text-[9px] px-2 py-0.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition cursor-pointer shrink-0"
+                    className="opacity-0 group-hover:opacity-100 text-[9px] px-2 py-0.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition cursor-pointer shrink-0 flex items-center gap-1"
                   >
-                    Re-run
+                    <ChevronRight className="w-3 h-3" /> Re-run
                   </button>
                 </div>
               </div>
@@ -723,7 +918,7 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
       {activeTab === 'git' && (
         <div className="flex-1 overflow-y-auto px-4 py-3">
           <div className="text-center mb-4">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center mx-auto mb-2 shadow-lg">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center mx-auto mb-2 shadow-lg shadow-orange-500/20">
               <GitCommit className="w-6 h-6 text-white" />
             </div>
             <h3 className="text-sm font-bold text-text-primary">Git Checkpoint</h3>
@@ -737,6 +932,7 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
                 type="text"
                 value={commitMsg}
                 onChange={e => setCommitMsg(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') gitCheckpoint(); }}
                 placeholder={`Agent checkpoint — ${new Date().toLocaleDateString()}`}
                 className="w-full bg-bg-hover border border-border rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary/50 transition"
               />
@@ -745,28 +941,30 @@ const AgentPanel = ({ projectFiles = [], projectPath = '', projectId = '', onApp
             <button
               onClick={gitCheckpoint}
               disabled={isCommitting}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 text-white text-xs font-bold hover:opacity-90 transition cursor-pointer disabled:opacity-50 shadow-lg"
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 text-white text-xs font-bold hover:opacity-90 transition cursor-pointer disabled:opacity-50 shadow-lg shadow-orange-500/20"
             >
               {isCommitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <GitCommit className="w-4 h-4" />}
               {isCommitting ? 'Committing...' : 'Create Git Commit'}
             </button>
 
-            {/* Recent changed files */}
+            {/* Changed files summary */}
             {changedFiles.length > 0 && (
               <div className="mt-4">
                 <p className="text-[10px] text-text-muted font-bold uppercase mb-2">Files Changed This Session</p>
                 {changedFiles.map((s, i) => (
                   <div key={i} className="flex items-center gap-2 py-1.5 border-b border-border/50 last:border-0">
-                    <span className="text-[9px] font-bold text-green-400">M</span>
+                    <span className="text-[9px] font-bold text-green-400 w-3 text-center">M</span>
                     <span className="text-[10px] text-text-secondary font-mono">{s.parameters?.path}</span>
                   </div>
                 ))}
               </div>
             )}
 
-            <div className="bg-bg-hover/50 rounded-xl p-3 border border-border">
+            {/* Info box */}
+            <div className="bg-bg-hover/50 rounded-xl p-3 border border-border flex gap-2">
+              <Shield className="w-4 h-4 text-text-muted shrink-0 mt-0.5" />
               <p className="text-[10px] text-text-muted leading-relaxed">
-                💡 This runs <code className="bg-white/10 px-1 rounded">git add -A && git commit</code> in your project root. Make sure your project is a git repository.
+                This runs <code className="bg-white/10 px-1 rounded">git add -A &amp;&amp; git commit</code> in your project root. Make sure your project is a git repository.
               </p>
             </div>
           </div>

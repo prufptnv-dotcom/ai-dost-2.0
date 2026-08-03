@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { Users, TrendingUp, Wrench, Bell, Check, Trash2, Plus } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
@@ -240,7 +241,7 @@ const ProjectDetails = ({ project }) => {
             {collaborators.map((collab, i) => (
               <div key={i} className="flex items-center space-x-3 bg-bg-hover p-2 rounded-lg">
                 {collab.avatar_url ? (
-                  <img src={collab.avatar_url} className="w-8 h-8 rounded-full border border-secondary/20" alt={collab.name} />
+                  <Image src={collab.avatar_url} width={32} height={32} className="w-8 h-8 rounded-full border border-secondary/20 object-cover" alt={collab.name || 'Collaborator'} unoptimized />
                 ) : (
                   <div className="w-8 h-8 rounded-full bg-secondary/30 flex items-center justify-center text-xs font-bold text-primary">
                     {collab.name ? collab.name[0].toUpperCase() : 'U'}

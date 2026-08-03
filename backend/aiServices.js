@@ -1,3 +1,5 @@
+const logger = require('./logger');
+
 class AIDost {
     
     // 1. Groq API Call
@@ -71,7 +73,7 @@ class AIDost {
                 return await this.callGroq(message);
             }
         } catch (error) {
-            console.error("AI Calling Error: ", error);
+            logger.error('AI Calling Error:', error.message);
             return "Sorry bhai, API call me koi dikkat aayi hai. .env file me API keys check kar lo!";
         }
     }

@@ -2,13 +2,14 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
+const logger = require('./logger');
 
 // Load .env file
 dotenv.config({ path: path.join(__dirname, '.env') });
 
 const app = express();
 
-// Debug & timing middleware
+// HTTP request logging middleware
 app.use((req, res, next) => {
     const start = Date.now();
     const origEnd = res.end;
@@ -17,7 +18,7 @@ app.use((req, res, next) => {
         if (!res.headersSent) {
             res.setHeader('X-Response-Time-Ms', duration);
         }
-        console.log(`${new Date().toISOString()} - ${req.method} ${req.url} ${res.statusCode} (${duration}ms)`);
+        logger.http(req.method, req.url, res.statusCode, duration);
         return origEnd.apply(this, args);
     };
     next();
@@ -30,25 +31,26 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, '../frontend')));
 
 // Routes
-const chatRoutes = require('./routes/chat');
-const testRoutes = require('./routes/test');
-const imageRoutes = require('./routes/image');
-const pdfRoutes = require('./routes/pdf');
+const chatRoutes    = require('./routes/chat');
+const testRoutes    = require('./routes/test');
+const imageRoutes   = require('./routes/image');
+const pdfRoutes     = require('./routes/pdf');
 const learningRoutes = require('./routes/learning');
-const gitRoutes = require('./routes/git');
-const agentRoutes = require('./routes/agent');
+const gitRoutes     = require('./routes/git');
+const agentRoutes   = require('./routes/agent');
 
-app.use('/api/chat', chatRoutes);
-app.use('/api/test', testRoutes);
-app.use('/api/image', imageRoutes);
-app.use('/api/pdf', pdfRoutes);
+app.use('/api/chat',     chatRoutes);
+app.use('/api/test',     testRoutes);
+app.use('/api/image',    imageRoutes);
+app.use('/api/pdf',      pdfRoutes);
 app.use('/api/learning', learningRoutes);
-app.use('/api/git', gitRoutes);
-app.use('/api/agent', agentRoutes);
+app.use('/api/git',      gitRoutes);
+app.use('/api/agent',    agentRoutes);
 
-// Root redirect to frontend
+// Root redirect to frontend dev server
 app.get('/', (req, res) => {
-    res.redirect('http://localhost:3001');
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+    res.redirect(frontendUrl);
 });
 
 // Health check
@@ -56,11 +58,11 @@ app.get('/health', (req, res) => {
     res.json({
         status: 'OK',
         timestamp: new Date().toISOString(),
-        groqKey: !!process.env.GROQ_API_KEY,
-        geminiKey: !!process.env.GEMINI_API_KEY,
-        deepseekKey: !!process.env.DEEPSEEK_API_KEY,
+        groqKey:       !!process.env.GROQ_API_KEY,
+        geminiKey:     !!process.env.GEMINI_API_KEY,
+        deepseekKey:   !!process.env.DEEPSEEK_API_KEY,
         openrouterKey: !!process.env.OPENROUTER_API_KEY,
-        nvidiaKey: !!process.env.NVIDIA_API_KEY
+        nvidiaKey:     !!process.env.NVIDIA_API_KEY,
     });
 });
 
@@ -72,32 +74,31 @@ app.use((req, res, next) => {
     next();
 });
 
-// Error handling
+// Global error handler
 app.use((err, req, res, next) => {
-    console.error('Server Error:', err);
+    logger.error('Server Error:', err.message, err.stack);
     if (!res.headersSent) {
         res.status(500).json({
             error: 'Internal server error',
-            message: err.message || 'An unexpected error occurred'
+            message: err.message || 'An unexpected error occurred',
         });
     }
 });
 
-// Global process error catchers to avoid crashes
+// Global process error catchers — prevent crashes
 process.on('uncaughtException', (err) => {
-    console.error('💥 Uncaught Exception:', err);
+    logger.error('💥 Uncaught Exception:', err.message, err.stack);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
+process.on('unhandledRejection', (reason) => {
+    logger.error('💥 Unhandled Rejection:', reason?.message || reason);
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`\n🚀 AI Dost Server running on http://localhost:${PORT}`);
-    console.log('📋 Available endpoints:');
-    console.log(`   - Health: http://localhost:${PORT}/health`);
-    console.log(`   - Chat: http://localhost:${PORT}/api/chat`);
-    console.log(`   - Image: http://localhost:${PORT}/api/image/generate`);
-    console.log(`   - Test: http://localhost:${PORT}/api/test/all\n`);
+    logger.info(`🚀 AI Dost Server running on http://localhost:${PORT}`);
+    logger.info(`   Health : http://localhost:${PORT}/health`);
+    logger.info(`   Chat   : http://localhost:${PORT}/api/chat`);
+    logger.info(`   Image  : http://localhost:${PORT}/api/image/generate`);
+    logger.info(`   Test   : http://localhost:${PORT}/api/test/all`);
 });

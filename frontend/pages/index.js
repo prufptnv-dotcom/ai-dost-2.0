@@ -1,5 +1,6 @@
 import Head from 'next/head';
 import Link from 'next/link';
+import Image from 'next/image';
 import { motion } from 'framer-motion';
 import Footer from '../components/Footer';
 import { Brain, Terminal, Users, Zap, ArrowRight, Bot, Sparkles, Code2, Shield } from 'lucide-react';
@@ -39,7 +40,7 @@ export default function Home() {
       <header className="sticky top-0 z-50 glass-card border-b border-border-subtle backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <img src="/logo.jpg" alt="AI-Dost Logo" className="w-9 h-9 rounded-lg object-cover border border-primary/30 shadow-[0_0_12px_var(--color-primary-glow)]" />
+            <Image src="/logo.jpg" alt="AI-Dost Logo" width={36} height={36} className="w-9 h-9 rounded-lg object-cover border border-primary/30 shadow-[0_0_12px_var(--color-primary-glow)]" />
             <span className="font-bold text-xl tracking-tight gradient-text">AI Dost</span>
           </div>
           <div className="flex items-center gap-4">

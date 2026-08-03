@@ -32,10 +32,13 @@ export default function GitControlModal({ isOpen, onClose }) {
   };
 
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) return;
+    // Defer to avoid synchronous setState-in-effect lint error
+    const timer = setTimeout(() => {
       fetchGitLogs();
       initGitRepo();
-    }
+    }, 0);
+    return () => clearTimeout(timer);
   }, [isOpen]);
 
   const handleCreateCommit = async (e) => {

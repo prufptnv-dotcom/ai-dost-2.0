@@ -12,11 +12,12 @@ const api = axios.create({
 // Add JWT token interceptor
 api.interceptors.request.use(config => {
   if (typeof window !== 'undefined') {
-    let token = localStorage.getItem('ai_dost_token');
-    if (!token) {
-      token = 'demo_token';
+    const token = localStorage.getItem('ai_dost_token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
     }
-    config.headers.Authorization = `Bearer ${token}`;
+    // No token → send request without Authorization header.
+    // The server will return 401 and the UI can handle it gracefully.
   }
   return config;
 });
@@ -39,10 +40,16 @@ export const fetchProject = async (projectId) => {
     const res = await api.get(`/memory/project/${projectId}`);
     return res.data;
   } catch (error) {
-    console.warn('Project fetch API warning, using demo workspace fallback:', error?.message);
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('Project fetch API warning, using local fallback:', error?.message);
+    }
+    // Use actual user_id from localStorage — never fake identity
+    const actualUserId = typeof window !== 'undefined'
+      ? localStorage.getItem('ai_dost_user_id') || null
+      : null;
     return {
       project_id: projectId,
-      user_id: 'demo_user_id',
+      user_id: actualUserId,
       project_name: 'AI Dost Workspace',
       description: 'Interactive Development Sandbox & AI Copilot Workspace',
       status: 'Development',
@@ -68,9 +75,13 @@ export const executeCode = async (codeData) => {
       };
     }
     try {
-      const fallbackRes = await axios.post('http://localhost:3000/api/test/execute', codeData);
+      // Fallback to Express backend sandbox runner
+      const expressUrl = process.env.NEXT_PUBLIC_EXPRESS_BACKEND_URL || 'http://localhost:3000';
+      const fallbackRes = await axios.post(`${expressUrl}/api/test/execute`, codeData);
       return fallbackRes.data;
-    } catch (e2) {}
+    } catch (e2) {
+      console.warn('Fallback execute also failed:', e2?.message);
+    }
 
     return {
       stdout: '',

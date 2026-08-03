@@ -3,7 +3,7 @@ class GeminiService {
         try {
             const API_KEY = customApiKey || process.env.GEMINI_API_KEY;
             if (!API_KEY || API_KEY === 'your_gemini_key') {
-                console.error('❌ GEMINI API Key not found or still default!');
+                logger.error('❌ GEMINI API Key not found or still default!');
                 return 'Gemini API key set nahi hai. settings icon pe click karke apni custom key enter karein.';
             }
 
@@ -31,7 +31,7 @@ class GeminiService {
                 parts: currentParts
             });
             
-            console.log('🔄 Calling Gemini API...');
+            logger.info('🔄 Calling Gemini API...');
             
             let systemPrompt = '';
             if (mode === 'chat') {
@@ -77,21 +77,21 @@ Here is what you can do and what features are available to the user on this plat
             
             if (!response.ok) {
                 const errorText = await response.text();
-                console.error('❌ Gemini API Error:', response.status, errorText);
+                logger.error('❌ Gemini API Error:', response.status, errorText);
                 return `Gemini API error (${response.status}): ${errorText}`;
             }
 
             const data = await response.json();
-            console.log('✅ Gemini response received');
+            logger.info('✅ Gemini response received');
 
             if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0]) {
                 return data.candidates[0].content.parts[0].text;
             } else {
-                console.error('❌ Unexpected Gemini API response structure:', data);
+                logger.error('❌ Unexpected Gemini API response structure:', data);
                 return 'Gemini returned an unexpected response. Please try again.';
             }
         } catch (error) {
-            console.error('❌ Gemini Service Error:', error.message);
+            logger.error('❌ Gemini Service Error:', error.message);
             return 'Gemini service me error: ' + error.message;
         }
     }

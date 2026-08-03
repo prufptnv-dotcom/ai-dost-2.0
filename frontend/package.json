@@ -11,12 +11,14 @@
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
     "axios": "^1.18.1",
+    "dompurify": "^3.4.12",
     "framer-motion": "^12.42.2",
     "lucide-react": "^1.27.0",
-    "next": "16.2.10",
+    "next": "^16.2.12",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-icons": "^5.7.0",
+    "sharp": "^0.35.3",
     "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
@@ -24,8 +26,17 @@
     "@types/node": "^20.0.0",
     "@types/react": "^19.0.0",
     "eslint": "^9",
-    "eslint-config-next": "16.2.10",
+    "eslint-config-next": "^16.2.12",
     "tailwindcss": "^4",
     "typescript": "^5.3.3"
+  },
+  "overrides": {
+    "monaco-editor": {
+      "dompurify": "^3.4.12"
+    },
+    "next": {
+      "sharp": "^0.35.3",
+      "postcss": "^8.5.18"
+    }
   }
 }

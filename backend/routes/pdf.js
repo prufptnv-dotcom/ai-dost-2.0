@@ -1,4 +1,5 @@
 const express = require('express');
+const logger = require('../logger');
 const router = express.Router();
 const fs = require('fs');
 const path = require('path');
@@ -46,15 +47,15 @@ router.post('/generate', async (req, res) => {
             try {
                 fs.unlinkSync(jsonPath);
             } catch (e) {
-                console.error('Temp file clean up warning:', e.message);
+                logger.error('Temp file clean up warning:', e.message);
             }
             
             if (err) {
-                console.error('PDF Generation execution error:', stderr);
+                logger.error('PDF Generation execution error:', stderr);
                 return res.status(500).json({ success: false, error: 'Failed to compile PDF', details: stderr });
             }
             
-            console.log(`PDF compiled successfully: ${filename}`);
+            logger.info(`PDF compiled successfully: ${filename}`);
             
             // Return public static URL (statically served by Next.js from /public/downloads/)
             const downloadUrl = `/downloads/${filename}`;
@@ -68,7 +69,7 @@ router.post('/generate', async (req, res) => {
         });
         
     } catch (error) {
-        console.error('PDF route error:', error);
+        logger.error('PDF route error:', error);
         res.status(500).json({ success: false, error: 'Server error during PDF compilation', details: error.message });
     }
 });

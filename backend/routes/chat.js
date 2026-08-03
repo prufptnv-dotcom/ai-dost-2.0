@@ -1,4 +1,5 @@
 const express = require('express');
+const logger = require('../logger');
 const router = express.Router();
 const GroqService = require('../services/groqService');
 const GeminiService = require('../services/geminiService');
@@ -92,7 +93,7 @@ router.post('/', async (req, res) => {
             const localModelName = model.substring(6);
             const localMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
             
-            console.log(`🔄 Routing request to local model: ${localModelName}`);
+            logger.info(`🔄 Routing request to local model: ${localModelName}`);
             const localPayload = {
                 model: localModelName,
                 messages: [
@@ -123,7 +124,7 @@ router.post('/', async (req, res) => {
                     response = await GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq);
                     // Automatic failover to Gemini if Groq rate limit occurs
                     if (typeof response === 'string' && (response.includes('rate_limit_exceeded') || response.includes('413') || response.includes('429'))) {
-                        console.log('⚠️ Groq rate limit hit. Auto-falling back to Gemini...');
+                        logger.info('⚠️ Groq rate limit hit. Auto-falling back to Gemini...');
                         response = await GeminiService.chat(processedMessage, cleanHistory, fileContent, mode, customKeys?.gemini);
                     }
                     break;
@@ -173,7 +174,7 @@ router.post('/', async (req, res) => {
             model: model || 'auto'
         });
     } catch (error) {
-        console.error('Chat error:', error);
+        logger.error('Chat error:', error);
         res.json({
             success: false,
             reply: 'Sorry, error aaya. Dubara try karo.',
@@ -186,7 +187,7 @@ router.post('/', async (req, res) => {
 async function executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys) {
     // 1. Try Groq (Llama 3.3 70B)
     try {
-        console.log("⚡ Tier 1: Executing Groq API request...");
+        logger.info("⚡ Tier 1: Executing Groq API request...");
         const res = await GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq);
         const isErrorResponse = typeof res === 'string' && (
             res.includes('rate_limit_exceeded') || 
@@ -198,14 +199,14 @@ async function executeCascadingFailover(message, groqMsg, cleanHistory, fileCont
         if (!isErrorResponse && res) {
             return res;
         }
-        console.log("⚠️ Tier 1 (Groq) rate limit or error encountered. Cascading to Tier 2 (NVIDIA NIM)...");
+        logger.info("⚠️ Tier 1 (Groq) rate limit or error encountered. Cascading to Tier 2 (NVIDIA NIM)...");
     } catch (e) {
-        console.warn("Tier 1 (Groq) threw error:", e.message);
+        logger.warn("Tier 1 (Groq) threw error:", e.message);
     }
 
     // 2. Try NVIDIA NIM (Llama 3.1 70B)
     try {
-        console.log("💚 Tier 2: Executing NVIDIA NIM API request...");
+        logger.info("💚 Tier 2: Executing NVIDIA NIM API request...");
         const res = await NvidiaService.chat(groqMsg, cleanHistory, customKeys?.nvidia);
         const isErrorResponse = typeof res === 'string' && (
             res.includes('Error') || 
@@ -215,25 +216,25 @@ async function executeCascadingFailover(message, groqMsg, cleanHistory, fileCont
         if (!isErrorResponse && res) {
             return res;
         }
-        console.log("⚠️ Tier 2 (NVIDIA NIM) issue encountered. Cascading to Tier 3 (Gemini Flash)...");
+        logger.info("⚠️ Tier 2 (NVIDIA NIM) issue encountered. Cascading to Tier 3 (Gemini Flash)...");
     } catch (e) {
-        console.warn("Tier 2 (NVIDIA NIM) threw error:", e.message);
+        logger.warn("Tier 2 (NVIDIA NIM) threw error:", e.message);
     }
 
     // 3. Try Gemini Flash
     try {
-        console.log("♊ Tier 3: Executing Gemini Flash API request...");
+        logger.info("♊ Tier 3: Executing Gemini Flash API request...");
         const res = await GeminiService.chat(message, cleanHistory, fileContent, mode, customKeys?.gemini);
         if (res && !res.includes('API error') && !res.includes('Quota exceeded') && !res.includes('Rate limit')) {
             return res;
         }
     } catch (e) {
-        console.warn("Tier 3 (Gemini) threw error:", e.message);
+        logger.warn("Tier 3 (Gemini) threw error:", e.message);
     }
 
     // 4. Try Local Ollama (Offline Mode)
     try {
-        console.log("🦙 Tier 4: Executing Local Ollama API request...");
+        logger.info("🦙 Tier 4: Executing Local Ollama API request...");
         const tagsRes = await fetch('http://127.0.0.1:11434/api/tags');
         if (tagsRes.ok) {
             const tagsData = await tagsRes.json();
@@ -255,7 +256,7 @@ async function executeCascadingFailover(message, groqMsg, cleanHistory, fileCont
             }
         }
     } catch (e) {
-        console.warn("Tier 4 (Ollama) threw error:", e.message);
+        logger.warn("Tier 4 (Ollama) threw error:", e.message);
     }
 
     return "Ai-Dost: Direct API response unavailable right now due to provider rate limits. Please check Ollama locally (http://127.0.0.1:11434) or retry in a few seconds!";
@@ -284,11 +285,11 @@ async function autoSelectModel(message, section, fileContent, cleanHistory, mode
 
     // Intent Routing Execution with 3-Tier Cascading Failover
     if (isCodingIntent) {
-        console.log("🧠 Smart Intent Classifier: Detected [CODING/DEBUGGING] -> Cascading AI Router");
+        logger.info("🧠 Smart Intent Classifier: Detected [CODING/DEBUGGING] -> Cascading AI Router");
         return await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
     } 
     else if (isTranslationIntent || isWritingIntent) {
-        console.log("🧠 Smart Intent Classifier: Detected [TRANSLATION/WRITING] -> Primary Gemini Flash");
+        logger.info("🧠 Smart Intent Classifier: Detected [TRANSLATION/WRITING] -> Primary Gemini Flash");
         try {
             const res = await GeminiService.chat(message, cleanHistory, fileContent, mode, customKeys?.gemini);
             if (!res || res.includes('API error') || res.includes('Quota exceeded') || res.includes('key set nahi hai')) {
@@ -300,7 +301,7 @@ async function autoSelectModel(message, section, fileContent, cleanHistory, mode
         }
     }
     else if (isMathIntent) {
-        console.log("🧠 Smart Intent Classifier: Detected [MATHEMATICAL STEP-BY-STEP] -> Primary NVIDIA NIM");
+        logger.info("🧠 Smart Intent Classifier: Detected [MATHEMATICAL STEP-BY-STEP] -> Primary NVIDIA NIM");
         try {
             const res = await NvidiaService.chat(groqMsg, cleanHistory, customKeys?.nvidia);
             if (!res || res.includes('Error')) {
@@ -312,7 +313,7 @@ async function autoSelectModel(message, section, fileContent, cleanHistory, mode
         }
     }
     else {
-        console.log("🧠 Smart Intent Classifier: Default General Conversation -> Cascading AI Router");
+        logger.info("🧠 Smart Intent Classifier: Default General Conversation -> Cascading AI Router");
         return await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
     }
 }

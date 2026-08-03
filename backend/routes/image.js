@@ -1,4 +1,5 @@
 const express = require('express');
+const logger = require('../logger');
 const router = express.Router();
 
 // Image generation using Pollinations.ai (completely free, no API key needed)
@@ -37,7 +38,7 @@ router.post('/generate', async (req, res) => {
             });
         }
     } catch (error) {
-        console.error('Image generation error:', error.message);
+        logger.error('Image generation error:', error.message);
 
         // Even on fetch error, return the URL — browser will load it directly
         const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.trim())}`;

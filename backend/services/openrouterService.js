@@ -4,7 +4,7 @@ class OpenRouterService {
             const API_KEY = customApiKey || process.env.OPENROUTER_API_KEY;
             
             if (!API_KEY) {
-                console.error('❌ OpenRouter API Key not found!');
+                logger.error('❌ OpenRouter API Key not found!');
                 return 'OpenRouter API key set nahi hai. settings icon pe click karke apni custom key enter karein.';
             }
 
@@ -20,7 +20,7 @@ Write clean, optimal, production-grade code wrapped inside markdown code blocks.
                 { role: 'user', content: message }
             ];
             
-            console.log('🔄 Calling OpenRouter API...');
+            logger.info('🔄 Calling OpenRouter API...');
             const response = await fetch(API_URL, {
                 method: 'POST',
                 headers: {
@@ -40,12 +40,12 @@ Write clean, optimal, production-grade code wrapped inside markdown code blocks.
             
             if (!response.ok) {
                 const errorText = await response.text();
-                console.error('❌ OpenRouter API Error:', response.status, errorText);
+                logger.error('❌ OpenRouter API Error:', response.status, errorText);
                 return `OpenRouter API error (${response.status}): ${errorText}`;
             }
 
             const data = await response.json();
-            console.log('✅ OpenRouter response received');
+            logger.info('✅ OpenRouter response received');
 
             if (data.choices && data.choices[0] && data.choices[0].message) {
                 return data.choices[0].message.content;
@@ -53,7 +53,7 @@ Write clean, optimal, production-grade code wrapped inside markdown code blocks.
                 return 'OpenRouter returned empty content.';
             }
         } catch (error) {
-            console.error('❌ OpenRouter Service Error:', error.message);
+            logger.error('❌ OpenRouter Service Error:', error.message);
             return 'OpenRouter service error: ' + error.message;
         }
     }

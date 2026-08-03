@@ -1,4 +1,5 @@
 const express = require('express');
+const logger = require('../logger');
 const router = express.Router();
 const fs = require('fs');
 const path = require('path');
@@ -251,7 +252,7 @@ async function callOllamaLocal(agentPrompt) {
     if (models.length === 0) return null;
 
     const modelName = models[0].name;
-    console.log(`[Agent] Trying local Ollama model: ${modelName}...`);
+    logger.info(`[Agent] Trying local Ollama model: ${modelName}...`);
 
     const genRes = await fetch('http://127.0.0.1:11434/api/generate', {
       method: 'POST',
@@ -266,7 +267,7 @@ async function callOllamaLocal(agentPrompt) {
     const genData = await genRes.json();
     return genData.response || null;
   } catch (e) {
-    console.log('[Agent] Ollama local fallback unavailable:', e.message);
+    logger.info('[Agent] Ollama local fallback unavailable:', e.message);
     return null;
   }
 }
@@ -292,32 +293,32 @@ async function callLLM(messages, customKeys = null) {
   try {
     const resp = await GroqService.chat(agentPrompt, [], 'project', customKeys?.groq);
     if (!isErrorResp(resp)) return resp;
-  } catch (e) { console.log('[Agent] Groq failed:', e.message); }
+  } catch (e) { logger.info('[Agent] Groq failed:', e.message); }
 
 
   // 3. Try NVIDIA NIM
   try {
     const resp = await NvidiaService.chat(agentPrompt, [], customKeys?.nvidia);
     if (!isErrorResp(resp)) return resp;
-  } catch (e) { console.log('[Agent] NVIDIA failed:', e.message); }
+  } catch (e) { logger.info('[Agent] NVIDIA failed:', e.message); }
 
   // 3. Try Mistral
   try {
     const resp = await MistralService.chat(agentPrompt, [], customKeys?.mistral);
     if (!isErrorResp(resp)) return resp;
-  } catch (e) { console.log('[Agent] Mistral failed:', e.message); }
+  } catch (e) { logger.info('[Agent] Mistral failed:', e.message); }
 
   // 4. Try Gemini
   try {
     const resp = await GeminiService.chat(agentPrompt, [], customKeys?.gemini, 'project', null);
     if (!isErrorResp(resp)) return resp;
-  } catch (e) { console.log('[Agent] Gemini failed:', e.message); }
+  } catch (e) { logger.info('[Agent] Gemini failed:', e.message); }
 
   // 5. Try Local Ollama (Offline Mode)
   try {
     const resp = await callOllamaLocal(agentPrompt);
     if (resp && resp.trim().length > 5) return resp;
-  } catch (e) { console.log('[Agent] Ollama failed:', e.message); }
+  } catch (e) { logger.info('[Agent] Ollama failed:', e.message); }
 
   throw new Error('All cloud AI providers failed and local Ollama is offline. Please check API keys in Settings or start Ollama locally.');
 }
@@ -351,7 +352,7 @@ function parseLLMAction(raw) {
       }
     }
   } catch (e) {
-    console.log('[Agent] JSON parse error, falling back:', e.message);
+    logger.info('[Agent] JSON parse error, falling back:', e.message);
   }
   return { thought: raw, action: 'FINAL_ANSWER', answer: raw };
 }
@@ -390,7 +391,7 @@ Respond ONLY with valid JSON:
       }
     }
   } catch (e) {
-    console.log('[Agent] Dynamic plan generation fallback:', e.message);
+    logger.info('[Agent] Dynamic plan generation fallback:', e.message);
   }
 
   // Fallback default dynamic plan based on request
@@ -420,7 +421,7 @@ router.post('/run', async (req, res) => {
   let isAborted = false;
   req.on('close', () => {
     isAborted = true;
-    console.log('[Agent] Client disconnected. Cancelling ReAct loop.');
+    logger.info('[Agent] Client disconnected. Cancelling ReAct loop.');
   });
 
   const send = (data) => {

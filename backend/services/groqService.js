@@ -4,10 +4,10 @@ class GroqService {
             const API_KEY = customApiKey || process.env.GROQ_API_KEY;
             
             if (!API_KEY || API_KEY === 'gsk_your_key_here') {
-                console.error('❌ GROQ API Key not found or still default!');
+                logger.error('❌ GROQ API Key not found or still default!');
                 return 'Groq API key set nahi hai. settings icon pe click karke apni custom key enter karein.';
             }
-            console.log('🔄 Calling Groq API...');
+            logger.info('🔄 Calling Groq API...');
             
             let systemPrompt = '';
             if (mode === 'chat') {
@@ -54,7 +54,7 @@ Key Response Guidelines:
             if (!response.ok) {
                 // Automatic 429 Rate Limit fallback to high-capacity llama-3.1-8b-instant model (131k TPM limit)
                 if (response.status === 429) {
-                    console.log('⚠️ Groq 70b rate limited, retrying with fast llama-3.1-8b-instant model...');
+                    logger.info('⚠️ Groq 70b rate limited, retrying with fast llama-3.1-8b-instant model...');
                     const retryRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                         method: 'POST',
                         headers: {
@@ -74,22 +74,22 @@ Key Response Guidelines:
                     });
                     if (retryRes.ok) {
                         const retryData = await retryRes.json();
-                        console.log('✅ Groq 8b fallback response received');
+                        logger.info('✅ Groq 8b fallback response received');
                         return retryData.choices[0].message.content;
                     }
                 }
                 const errorText = await response.text();
-                console.error('❌ Groq API Error:', response.status, errorText);
+                logger.error('❌ Groq API Error:', response.status, errorText);
                 return `Groq API error (${response.status}): ${errorText}`;
             }
 
             const data = await response.json();
-            console.log('✅ Groq response received');
+            logger.info('✅ Groq response received');
             
             return data.choices[0].message.content;
             
         } catch (error) {
-            console.error('❌ Groq Service Error:', error.message);
+            logger.error('❌ Groq Service Error:', error.message);
             return 'Groq service me error: ' + error.message;
         }
     }

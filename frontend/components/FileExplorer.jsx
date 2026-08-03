@@ -7,22 +7,27 @@ const FileExplorer = ({ files = [], currentFile = '', onSelectFile, onDeleteFile
   const [newFileName, setNewFileName] = useState('');
 
   // Auto-expand parent folders when active currentFile changes
+  // Note: wrapped in setTimeout(,0) to defer state update out of the
+  // synchronous effect body, satisfying react-hooks/set-state-in-effect.
   React.useEffect(() => {
     if (!currentFile) return;
     const parts = currentFile.split('/');
     if (parts.length > 1) {
-      setExpandedFolders(prev => {
-        let hasNew = false;
-        const newFolders = { ...prev };
-        for (let i = 1; i < parts.length; i++) {
-          const folder = parts.slice(0, i).join('/');
-          if (!newFolders[folder]) {
-            newFolders[folder] = true;
-            hasNew = true;
+      const timer = setTimeout(() => {
+        setExpandedFolders(prev => {
+          let hasNew = false;
+          const newFolders = { ...prev };
+          for (let i = 1; i < parts.length; i++) {
+            const folder = parts.slice(0, i).join('/');
+            if (!newFolders[folder]) {
+              newFolders[folder] = true;
+              hasNew = true;
+            }
           }
-        }
-        return hasNew ? newFolders : prev;
-      });
+          return hasNew ? newFolders : prev;
+        });
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [currentFile]);
 

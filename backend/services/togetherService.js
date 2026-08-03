@@ -1,4 +1,5 @@
-﻿const dotenv = require('dotenv');
+const dotenv = require('dotenv');
+const logger = require('../logger');
 const path = require('path');
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
@@ -40,7 +41,7 @@ class TogetherService {
             const data = await response.json();
             return data.choices?.[0]?.message?.content || "Together AI se response nahi mila.";
         } catch (error) {
-            console.error("Together Service Error:", error);
+            logger.error("Together Service Error:", error);
             return `Together Service Error: ${error.message}`;
         }
     }

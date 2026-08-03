@@ -4,7 +4,7 @@ class NvidiaService {
             const API_KEY = customApiKey || process.env.NVIDIA_API_KEY;
             
             if (!API_KEY || API_KEY === 'your_nvidia_key') {
-                console.error('❌ NVIDIA API Key not found or still default!');
+                logger.error('❌ NVIDIA API Key not found or still default!');
                 return 'NVIDIA API key set nahi hai. settings icon pe click karke apni custom key enter karein.';
             }
 
@@ -25,7 +25,7 @@ Key Guidelines:
                 { role: 'user', content: message }
             ];
             
-            console.log('🔄 Calling NVIDIA NIM API...');
+            logger.info('🔄 Calling NVIDIA NIM API...');
             const response = await fetch(API_URL, {
                 method: 'POST',
                 headers: {
@@ -42,21 +42,21 @@ Key Guidelines:
             
             if (!response.ok) {
                 const errorText = await response.text();
-                console.error('❌ NVIDIA API Error:', response.status, errorText);
+                logger.error('❌ NVIDIA API Error:', response.status, errorText);
                 return `NVIDIA API error (${response.status}): ${errorText}`;
             }
 
             const data = await response.json();
-            console.log('✅ NVIDIA response received');
+            logger.info('✅ NVIDIA response received');
 
             if (data.choices && data.choices[0] && data.choices[0].message) {
                 return data.choices[0].message.content;
             } else {
-                console.error('❌ Unexpected NVIDIA API response structure:', data);
+                logger.error('❌ Unexpected NVIDIA API response structure:', data);
                 return 'NVIDIA returned an unexpected response. Please try again.';
             }
         } catch (error) {
-            console.error('❌ NVIDIA Service Error:', error.message);
+            logger.error('❌ NVIDIA Service Error:', error.message);
             return 'NVIDIA service me error: ' + error.message;
         }
     }
