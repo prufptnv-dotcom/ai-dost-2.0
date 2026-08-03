@@ -6,11 +6,24 @@ const FileExplorer = ({ files = [], currentFile = '', onSelectFile, onDeleteFile
   const [showNewFileInput, setShowNewFileInput] = useState(false);
   const [newFileName, setNewFileName] = useState('');
 
+  // Auto-expand parent folders when active currentFile changes
+  React.useEffect(() => {
+    if (!currentFile) return;
+    const parts = currentFile.split('/');
+    if (parts.length > 1) {
+      const folderPaths = {};
+      for (let i = 1; i < parts.length; i++) {
+        folderPaths[parts.slice(0, i).join('/')] = true;
+      }
+      setExpandedFolders(prev => ({ ...prev, ...folderPaths }));
+    }
+  }, [currentFile]);
+
   // 1. Convert flat files array to a hierarchical tree
   const buildFileTree = () => {
     const root = { name: 'root', type: 'folder', path: '', children: [] };
     
-    files.forEach(file => {
+    (files || []).forEach(file => {
       if (!file || !file.path) return;
       const parts = file.path.split('/');
       let current = root;
