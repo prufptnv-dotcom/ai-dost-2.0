@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import Image from 'next/image';
 import { useMode } from '../context/ModeContext';
 import { useToast } from '../context/ToastContext';
+import { logger } from '../utils/logger';
 import { Mic, MicOff, Volume2, VolumeX, Bot, Phone, Paperclip, Send, Library, Zap, CheckCircle, ImageIcon, FileText, X, ChevronLeft, Loader2, Play, Square, History, Trash2, MessageSquare, Sparkles, Image as ImageIconLucide, Plus, Copy, ThumbsUp, ThumbsDown, Maximize2, Minimize2, MoveHorizontal } from 'lucide-react';
 
 // Extract image URLs from AI text
@@ -1031,17 +1032,17 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
     callRec.lang = 'hi-IN';
 
     callRec.onstart = () => {
-      console.log('Voice Call Mic active');
+      logger.log('Voice Call Mic active');
     };
 
     callRec.onresult = (event) => {
       const text = event.results[0][0].transcript;
-      console.log('Spoken:', text);
+      logger.log('Spoken:', text);
       triggerVoiceCallTurn(text);
     };
 
     callRec.onerror = (e) => {
-      console.error('Call mic error:', e);
+      logger.error('Call mic error:', e);
       if (isVoiceCallActiveRef.current) {
         setTimeout(() => {
           if (isVoiceCallActiveRef.current) startListeningForCall();
@@ -1050,7 +1051,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
     };
 
     callRec.onend = () => {
-      console.log('Call mic end');
+      logger.log('Call mic end');
     };
 
     callRec.start();

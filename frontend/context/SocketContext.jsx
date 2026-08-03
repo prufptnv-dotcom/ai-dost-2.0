@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { initWebSocket } from '../services/websocket';
+import { logger } from '../utils/logger';
 
 export const SocketContext = createContext(null);
 
@@ -80,8 +81,8 @@ export const SocketProvider = ({ children }) => {
             break;
         }
       },
-      (error) => console.error('WebSocket error:', error),
-      (reason) => console.log('WebSocket disconnected:', reason)
+      (error) => logger.error('WebSocket error:', error),
+      (reason) => logger.log('WebSocket disconnected:', reason)
     );
     
     const timer = setTimeout(() => {
