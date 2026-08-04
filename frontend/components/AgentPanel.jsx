@@ -481,6 +481,7 @@ const AgentPanel = ({
     const userPrompt = (customPrompt || promptRef.current).trim();
     if (!userPrompt || isRunning) return;
 
+    setPrompt('');
     setIsRunning(true);
     setSteps([]);
     setTaskPlan(null);

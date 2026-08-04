@@ -511,9 +511,11 @@ router.post('/run', async (req, res) => {
   }
 
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
   let isAborted = false;
   req.on('close', () => {
@@ -523,7 +525,10 @@ router.post('/run', async (req, res) => {
 
   const send = (data) => {
     if (isAborted) return;
-    try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch (_) {}
+    try {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+      if (typeof res.flush === 'function') res.flush();
+    } catch (_) {}
   };
 
   const workspacePath = projectPath || path.join(os.tmpdir(), `agent-ws-${projectId || 'default'}`);
