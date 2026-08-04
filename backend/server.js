@@ -47,6 +47,37 @@ app.use('/api/learning', learningRoutes);
 app.use('/api/git',      gitRoutes);
 app.use('/api/agent',    agentRoutes);
 
+// Fallback Project Memory endpoints
+app.get(['/api/v1/memory/projects', '/api/projects'], (req, res) => {
+    res.json([
+        {
+            project_id: 'proj_demo_1',
+            project_name: 'AI-Dost Interactive Web App',
+            description: 'Glassmorphism Web IDE & Autonomous AI Copilot Workspace',
+            created_at: new Date().toISOString(),
+            status: 'Active'
+        },
+        {
+            project_id: 'proj_demo_2',
+            project_name: 'Python Calculator Engine',
+            description: 'Standalone Python & Glassmorphic Web Calculator App',
+            created_at: new Date().toISOString(),
+            status: 'Completed'
+        }
+    ]);
+});
+
+app.post(['/api/v1/memory/project', '/api/project'], (req, res) => {
+    const { project_name, description } = req.body;
+    res.json({
+        project_id: 'proj_' + Date.now(),
+        project_name: project_name || 'New AI-Dost Workspace',
+        description: description || 'Interactive AI Copilot Workspace',
+        created_at: new Date().toISOString(),
+        status: 'Active'
+    });
+});
+
 // Root redirect to frontend dev server
 app.get('/', (req, res) => {
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
