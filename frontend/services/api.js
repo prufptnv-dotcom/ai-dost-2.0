@@ -74,9 +74,6 @@ export const fetchProject = async (projectId) => {
     const res = await api.get(`/memory/project/${projectId}`);
     return res.data;
   } catch (error) {
-    if (process.env.NODE_ENV === 'development') {
-      console.warn('Project fetch API warning, using local fallback:', error?.message);
-    }
     // Use actual user_id from localStorage — never fake identity
     const actualUserId = typeof window !== 'undefined'
       ? localStorage.getItem('ai_dost_user_id') || null

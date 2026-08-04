@@ -78,6 +78,33 @@ app.post(['/api/v1/memory/project', '/api/project'], (req, res) => {
     });
 });
 
+app.get(['/api/v1/memory/project/:id', '/api/project/:id'], (req, res) => {
+    const { id } = req.params;
+    res.json({
+        project_id: id || 'proj_demo_1',
+        project_name: id === 'proj_demo_2' ? 'Python Calculator Engine' : 'AI-Dost Interactive Web App',
+        description: 'Interactive Development Sandbox & AI Copilot Workspace',
+        status: 'Development',
+        files: [
+            { path: 'main.py', content: '# Write python code here...\nprint("Hello from AI-Dost Sandbox!")\n' },
+            { path: 'index.html', content: '<!DOCTYPE html>\n<html>\n<head>\n  <link rel="stylesheet" href="style.css">\n</head>\n<body>\n  <div class="container">\n    <h1>Welcome to AI-Dost Sandbox</h1>\n    <p>AI Copilot Workspace is active and ready!</p>\n  </div>\n</body>\n</html>\n' },
+            { path: 'style.css', content: 'body {\n  background: #05060a;\n  color: #06b6d4;\n  font-family: sans-serif;\n  display: flex;\n  justify-content: center;\n  align-items: center;\n  height: 100vh;\n  margin: 0;\n}\n.container {\n  text-align: center;\n  border: 1px solid rgba(6, 182, 212, 0.2);\n  padding: 32px;\n  border-radius: 16px;\n  background: rgba(14, 16, 24, 0.8);\n}\n' }
+        ]
+    });
+});
+
+app.post(['/api/v1/memory/project/:id/file', '/api/project/:id/file'], (req, res) => {
+    res.json({ success: true, message: 'File added successfully' });
+});
+
+app.put(['/api/v1/memory/project/:id/file', '/api/project/:id/file'], (req, res) => {
+    res.json({ success: true, message: 'File updated successfully' });
+});
+
+app.delete(['/api/v1/memory/project/:id/file', '/api/project/:id/file'], (req, res) => {
+    res.json({ success: true, message: 'File deleted successfully' });
+});
+
 // Root redirect to frontend dev server
 app.get('/', (req, res) => {
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
