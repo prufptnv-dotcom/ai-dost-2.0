@@ -376,7 +376,7 @@ const Header = () => {
               </div>
 
               {/* API Keys */}
-              <div>
+              <form onSubmit={e => { e.preventDefault(); saveSettings(); }}>
                 <div className="text-[11px] font-bold gradient-text uppercase tracking-widest flex items-center gap-1.5 mb-3">
                   <Key className="w-3 h-3" /> Custom API Keys (Optional)
                 </div>
@@ -394,6 +394,7 @@ const Header = () => {
                       </label>
                       <input
                         type="password"
+                        autoComplete="off"
                         placeholder="Leave empty to use AI-Dost default key"
                         value={val}
                         onChange={e => set(e.target.value)}
@@ -405,7 +406,7 @@ const Header = () => {
                     </div>
                   ))}
                 </div>
-              </div>
+              </form>
             </div>
 
             {/* Actions */}
