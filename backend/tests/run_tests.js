@@ -9,6 +9,35 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function makeStreamRequest(urlPath, method = 'GET', body = null) {
+  const url = new URL(urlPath, BASE_URL);
+  const response = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(10000)
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`${method} ${urlPath} failed: ${response.status} ${text}`);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error(`${method} ${urlPath} failed: stream body unavailable`);
+  }
+
+  const { value, done } = await reader.read();
+  if (done && !value) {
+    throw new Error(`${method} ${urlPath} failed: empty stream`);
+  }
+
+  const chunk = value ? new TextDecoder().decode(value) : '';
+  try { await reader.cancel(); } catch (_) {}
+  return { status: response.status, data: { raw: chunk } };
+}
+
 async function isServerHealthy() {
   try {
     const res = await makeRequest('/health');
@@ -193,15 +222,15 @@ async function runAllBackendTests() {
 
   // 9. Agent ReAct Execution Loop & Streaming SSE Endpoint
   await test('POST /api/agent/run (Autonomous Agent ReAct Loop)', async () => {
-    const res = await makeRequest('/api/agent/run', 'POST', {
+    const res = await makeStreamRequest('/api/agent/run', 'POST', {
       userPrompt: 'Create a simple hello.py file that prints hello world',
       projectId: 'test_proj_123',
       projectFiles: [
         { path: 'main.py', content: 'print("main")' }
       ]
     });
-    if (res.status !== 200) {
-      throw new Error(`Agent run failed with status ${res.status}`);
+    if (res.status !== 200 || !String(res.data.raw || '').includes('data:')) {
+      throw new Error(`Agent run failed: ${JSON.stringify(res.data)}`);
     }
   });
 
