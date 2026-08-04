@@ -664,21 +664,24 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
 
   // Load mode-specific messages after component mounts on client
   useEffect(() => {
-    setMounted(true);
-    if (typeof window === 'undefined') return;
-    const saved = localStorage.getItem(storageKey);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setMessages(parsed);
+    const timer = setTimeout(() => {
+      setMounted(true);
+      if (typeof window === 'undefined') return;
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setMessages(parsed);
+          }
+        } catch (e) {
+          setMessages([defaultWelcomeMessage]);
         }
-      } catch (e) {
+      } else {
         setMessages([defaultWelcomeMessage]);
       }
-    } else {
-      setMessages([defaultWelcomeMessage]);
-    }
+    }, 0);
+    return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 

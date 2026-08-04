@@ -68,14 +68,18 @@ const Header = () => {
 
   // Load client-only localStorage settings after mount
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (localStorage.getItem('theme') === 'light') setIsLightTheme(true);
-    if (localStorage.getItem('autoSave')) setAutoSaveInterval(localStorage.getItem('autoSave'));
-    if (localStorage.getItem('autocomplete') === 'false') setAutocompleteOn(false);
-    if (localStorage.getItem('customGeminiKey')) setCustomGeminiKey(localStorage.getItem('customGeminiKey'));
-    if (localStorage.getItem('customGroqKey')) setCustomGroqKey(localStorage.getItem('customGroqKey'));
-    if (localStorage.getItem('customDeepSeekKey')) setCustomDeepSeekKey(localStorage.getItem('customDeepSeekKey'));
-    if (localStorage.getItem('customNvidiaKey')) setCustomNvidiaKey(localStorage.getItem('customNvidiaKey'));
+    const timer = setTimeout(() => {
+      if (typeof window === 'undefined') return;
+      if (localStorage.getItem('theme') === 'light') setIsLightTheme(true);
+      if (localStorage.getItem('autoSave')) setAutoSaveInterval(localStorage.getItem('autoSave'));
+      if (localStorage.getItem('autocomplete') === 'false') setAutocompleteOn(false);
+      if (localStorage.getItem('customGeminiKey')) setCustomGeminiKey(localStorage.getItem('customGeminiKey'));
+      if (localStorage.getItem('customGroqKey')) setCustomGroqKey(localStorage.getItem('customGroqKey'));
+      if (localStorage.getItem('customDeepSeekKey')) setCustomDeepSeekKey(localStorage.getItem('customDeepSeekKey'));
+      if (localStorage.getItem('customNvidiaKey')) setCustomNvidiaKey(localStorage.getItem('customNvidiaKey'));
+      if (localStorage.getItem('customOpenRouterKey')) setCustomOpenRouterKey(localStorage.getItem('customOpenRouterKey'));
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   // Secret 7-tap brain
