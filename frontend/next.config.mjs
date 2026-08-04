@@ -2,7 +2,7 @@ import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const BACKEND_URL = process.env.NEXT_PUBLIC_EXPRESS_BACKEND_URL || 'http://localhost:3000';
+const BACKEND_URL = process.env.NEXT_PUBLIC_EXPRESS_BACKEND_URL || 'http://localhost:5000';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -33,6 +33,10 @@ const nextConfig = {
   },
   async rewrites() {
     return [
+      {
+        source: '/api/v1/:path*',
+        destination: `${BACKEND_URL}/api/v1/:path*`,
+      },
       {
         source: '/api/chat',
         destination: `${BACKEND_URL}/api/chat`,

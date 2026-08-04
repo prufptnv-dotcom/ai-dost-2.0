@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000/api/v1';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -76,7 +76,7 @@ export const executeCode = async (codeData) => {
     }
     try {
       // Fallback to Express backend sandbox runner
-      const expressUrl = process.env.NEXT_PUBLIC_EXPRESS_BACKEND_URL || 'http://localhost:3000';
+      const expressUrl = process.env.NEXT_PUBLIC_EXPRESS_BACKEND_URL || '';
       const fallbackRes = await axios.post(`${expressUrl}/api/test/execute`, codeData);
       return fallbackRes.data;
     } catch (e2) {

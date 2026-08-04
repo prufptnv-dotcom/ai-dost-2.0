@@ -9,7 +9,7 @@ import {
   ChevronRight, Sparkles, Shield, Eye
 } from 'lucide-react';
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_EXPRESS_BACKEND_URL || 'http://localhost:3000';
+const BACKEND_URL = process.env.NEXT_PUBLIC_EXPRESS_BACKEND_URL || '';
 
 // ── Tiny helpers ──────────────────────────────────────────────────────────────
 const ToolIcon = ({ action }) => {

@@ -521,6 +521,8 @@ router.post('/run', async (req, res) => {
     try { fs.mkdirSync(workspacePath, { recursive: true }); } catch (_) {}
   }
 
+  const plan = generateTaskPlan(userPrompt);
+
   // Early force-local handling: UI can hint backend to prefer deterministic
   // local intent execution (useful when LLMs are offline or to avoid simulated outputs).
   if (req.body && req.body.forceLocal) {
@@ -578,7 +580,6 @@ router.post('/run', async (req, res) => {
   send({ type: 'start', message: '🔍 Analyzing prompt & generating dynamic task plan...' });
 
   // Phase 1: Dynamic Task Breakdown Plan (Instant 0ms response)
-  const plan = generateTaskPlan(userPrompt);
   send({ type: 'plan', plan });
 
   const taskListText = (plan?.tasks || [])
