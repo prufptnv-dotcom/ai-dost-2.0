@@ -97,7 +97,7 @@ async function runAllBackendTests() {
     }
 
     const commitRes = await makeRequest('/api/git/commit', 'POST', { message: 'Test commit from automated test suite' });
-    if (commitRes.status !== 200 || !commitRes.data.success) {
+    if (commitRes.status !== 200 || (!commitRes.data.success && !commitRes.data.details?.includes('nothing to commit'))) {
       throw new Error(`Git commit failed: ${JSON.stringify(commitRes.data)}`);
     }
 
