@@ -53,34 +53,30 @@ const Header = () => {
   const { showToast } = useToast();
   const router = useRouter();
 
-  const [isLightTheme, setIsLightTheme] = useState(() =>
-    typeof window !== 'undefined' && localStorage.getItem('theme') === 'light'
-  );
+  const [isLightTheme, setIsLightTheme] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
   // Settings state
-  const [autoSaveInterval, setAutoSaveInterval] = useState(() =>
-    typeof window !== 'undefined' ? localStorage.getItem('autoSave') || '10' : '10'
-  );
-  const [autocompleteOn, setAutocompleteOn] = useState(() =>
-    typeof window !== 'undefined' ? localStorage.getItem('autocomplete') !== 'false' : true
-  );
-  const [customGeminiKey, setCustomGeminiKey] = useState(() =>
-    typeof window !== 'undefined' ? localStorage.getItem('customGeminiKey') || '' : ''
-  );
-  const [customGroqKey, setCustomGroqKey] = useState(() =>
-    typeof window !== 'undefined' ? localStorage.getItem('customGroqKey') || '' : ''
-  );
-  const [customDeepSeekKey, setCustomDeepSeekKey] = useState(() =>
-    typeof window !== 'undefined' ? localStorage.getItem('customDeepSeekKey') || '' : ''
-  );
-  const [customNvidiaKey, setCustomNvidiaKey] = useState(() =>
-    typeof window !== 'undefined' ? localStorage.getItem('customNvidiaKey') || '' : ''
-  );
-  const [customOpenRouterKey, setCustomOpenRouterKey] = useState(() =>
-    typeof window !== 'undefined' ? localStorage.getItem('customOpenRouterKey') || '' : ''
-  );
+  const [autoSaveInterval, setAutoSaveInterval] = useState('10');
+  const [autocompleteOn, setAutocompleteOn] = useState(true);
+  const [customGeminiKey, setCustomGeminiKey] = useState('');
+  const [customGroqKey, setCustomGroqKey] = useState('');
+  const [customDeepSeekKey, setCustomDeepSeekKey] = useState('');
+  const [customNvidiaKey, setCustomNvidiaKey] = useState('');
+  const [customOpenRouterKey, setCustomOpenRouterKey] = useState('');
+
+  // Load client-only localStorage settings after mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (localStorage.getItem('theme') === 'light') setIsLightTheme(true);
+    if (localStorage.getItem('autoSave')) setAutoSaveInterval(localStorage.getItem('autoSave'));
+    if (localStorage.getItem('autocomplete') === 'false') setAutocompleteOn(false);
+    if (localStorage.getItem('customGeminiKey')) setCustomGeminiKey(localStorage.getItem('customGeminiKey'));
+    if (localStorage.getItem('customGroqKey')) setCustomGroqKey(localStorage.getItem('customGroqKey'));
+    if (localStorage.getItem('customDeepSeekKey')) setCustomDeepSeekKey(localStorage.getItem('customDeepSeekKey'));
+    if (localStorage.getItem('customNvidiaKey')) setCustomNvidiaKey(localStorage.getItem('customNvidiaKey'));
+  }, []);
 
   // Secret 7-tap brain
   const [settingsClicks, setSettingsClicks] = useState(0);

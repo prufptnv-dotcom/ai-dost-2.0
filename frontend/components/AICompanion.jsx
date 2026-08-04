@@ -656,47 +656,38 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
       : `Namaste! Main Ai-Dost hoon — Project Workspace Mode mein.\n\nAapke current project file par madad karne ke liye tayyar hoon. Code blocks ke liye 'Apply Code' button use karein.`
   };
 
-  const [messages, setMessages] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch(e) {}
-      }
-    }
-    return [defaultWelcomeMessage];
-  });
+  const [messages, setMessages] = useState([defaultWelcomeMessage]);
+  const [mounted, setMounted] = useState(false);
 
   const [chatHistoryList, setChatHistoryList] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
 
-  // Load mode-specific messages whenever mode changes
-  // Wrapped in setTimeout to defer state updates outside synchronous effect body
+  // Load mode-specific messages after component mounts on client
   useEffect(() => {
+    setMounted(true);
     if (typeof window === 'undefined') return;
-    const timer = setTimeout(() => {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        try {
-          setMessages(JSON.parse(saved));
-        } catch(e) {
-          setMessages([defaultWelcomeMessage]);
+    const saved = localStorage.getItem(storageKey);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(parsed);
         }
-      } else {
+      } catch (e) {
         setMessages([defaultWelcomeMessage]);
       }
-    }, 0);
-    return () => clearTimeout(timer);
+    } else {
+      setMessages([defaultWelcomeMessage]);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
   // Persist messages to mode-specific localStorage key
   useEffect(() => {
-    if (typeof window !== 'undefined' && messages.length > 0) {
+    if (mounted && typeof window !== 'undefined' && messages.length > 0) {
       localStorage.setItem(storageKey, JSON.stringify(messages));
     }
-  }, [messages, storageKey]);
+  }, [messages, storageKey, mounted]);
 
   const [input, setInput] = useState('');
   const [copilotMood, setCopilotMood] = useState('chat'); // 'chat' | 'agent' | 'plan'
