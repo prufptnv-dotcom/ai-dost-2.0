@@ -1,8 +1,35 @@
 {
-  "totalFeedback": 16,
-  "positiveCount": 16,
+  "totalFeedback": 19,
+  "positiveCount": 19,
   "negativeCount": 0,
   "feedbackLogs": [
+    {
+      "id": "1785817934599",
+      "type": "up",
+      "category": "general",
+      "message": "",
+      "aiReply": "test",
+      "correction": "",
+      "timestamp": "2026-08-04T04:32:14.599Z"
+    },
+    {
+      "id": "1785817873849",
+      "type": "up",
+      "category": "general",
+      "message": "",
+      "aiReply": "test",
+      "correction": "",
+      "timestamp": "2026-08-04T04:31:13.849Z"
+    },
+    {
+      "id": "1785817726501",
+      "type": "up",
+      "category": "coding",
+      "message": "Write a python script",
+      "aiReply": "print(\"Hello\")",
+      "correction": "",
+      "timestamp": "2026-08-04T04:28:46.501Z"
+    },
     {
       "id": "1785817661249",
       "type": "up",
@@ -151,7 +178,9 @@
   "learnedRules": [
     "Always write production-ready code with flawless grammar.",
     "Match user's language (Hindi/Hinglish/English) precisely.",
-    "Avoid self-deprecating disclaimers or imaginary system bug lists."
+    "Avoid self-deprecating disclaimers or imaginary system bug lists.",
+    "Use modern Glassmorphic UI design tokens with vibrant cyan and violet gradients.",
+    "Enforce 100% autonomous execution for all multi-step file generation requests."
   ],
   "scannedFiles": [
     "main.py",
