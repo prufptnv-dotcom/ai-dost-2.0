@@ -455,53 +455,36 @@ function parseLLMAction(raw) {
 }
 
 // ── Dynamic Input Analysis & Task Plan Generator ──────────────────────────────
-async function generateTaskPlan(userPrompt, fileContext, customKeys) {
-  const planPrompt = `Analyze this coding request and break it down into 2 to 4 clear, logical sub-tasks.
-USER REQUEST: "${userPrompt}"
-WORKSPACE FILES:
-${fileContext || '(No files yet)'}
-
-Respond ONLY with valid JSON:
-{
-  "summary": "Short 1-line overview of the plan",
-  "tasks": [
-    { "id": 1, "title": "First clear sub-task" },
-    { "id": 2, "title": "Second clear sub-task" }
-  ]
-}`;
-
+function generateTaskPlan(userPrompt) {
   const clean = (userPrompt || '').toLowerCase();
-  if (clean.includes('todo') || clean.includes('list') || clean.includes('task')) {
-    return {
-      summary: `Building Todo List Web Application: "${userPrompt}"`,
-      tasks: [
-        { id: 1, title: 'Create index.html layout & UI structure', status: 'in_progress' },
-        { id: 2, title: 'Create style.css with dark glassmorphism styling', status: 'pending' },
-        { id: 3, title: 'Create script.js with task add/delete & localStorage', status: 'pending' },
-        { id: 4, title: 'Verify files & finalize workspace', status: 'pending' }
-      ]
-    };
-  }
-  if (clean.includes('calc') || clean.includes('math')) {
-    return {
-      summary: `Building Calculator App: "${userPrompt}"`,
-      tasks: [
-        { id: 1, title: 'Create index.html display & key grid layout', status: 'in_progress' },
-        { id: 2, title: 'Create style.css modern glass theme', status: 'pending' },
-        { id: 3, title: 'Create script.js evaluation logic', status: 'pending' },
-        { id: 4, title: 'Verify files & finalize workspace', status: 'pending' }
-      ]
-    };
-  }
+  let tasks = [];
+  let summary = `Executing task: "${userPrompt}"`;
 
-  return {
-    summary: `Executing autonomous task: "${userPrompt}"`,
-    tasks: [
+  if (clean.includes('todo') || clean.includes('list') || clean.includes('task')) {
+    summary = `Building Todo List Web Application: "${userPrompt}"`;
+    tasks = [
+      { id: 1, title: 'Create index.html layout & UI structure', status: 'in_progress' },
+      { id: 2, title: 'Create style.css with dark glassmorphism styling', status: 'pending' },
+      { id: 3, title: 'Create script.js with task add/delete & localStorage', status: 'pending' },
+      { id: 4, title: 'Verify files & finalize workspace', status: 'pending' }
+    ];
+  } else if (clean.includes('calc') || clean.includes('math')) {
+    summary = `Building Calculator App: "${userPrompt}"`;
+    tasks = [
+      { id: 1, title: 'Create index.html display & key grid layout', status: 'in_progress' },
+      { id: 2, title: 'Create style.css modern glass theme', status: 'pending' },
+      { id: 3, title: 'Create script.js evaluation logic', status: 'pending' },
+      { id: 4, title: 'Verify files & finalize workspace', status: 'pending' }
+    ];
+  } else {
+    tasks = [
       { id: 1, title: 'Analyze requirements & workspace files', status: 'in_progress' },
       { id: 2, title: 'Implement requested application code & styles', status: 'pending' },
       { id: 3, title: 'Verify implementation & finalize project', status: 'pending' }
-    ]
-  };
+    ];
+  }
+
+  return { summary, tasks };
 }
 
 // ── ReAct Loop API Endpoint (SSE Streaming) ───────────────────────────────────
@@ -557,9 +540,13 @@ router.post('/run', async (req, res) => {
   const plan = generateTaskPlan(userPrompt);
   send({ type: 'plan', plan });
 
+  const taskListText = (plan?.tasks || [])
+    .map(t => `- Task ${t.id}: ${t.title} [${(t.status || 'pending').toUpperCase()}]`)
+    .join('\n');
+
   const messages = [{
     role: 'user',
-    content: `WORKSPACE FILES:\n${fileContext || '(No files yet)'}\n\nUSER TASK: ${userPrompt}\n\nDYNAMIC TASK BREAKDOWN:\n${plan.tasks.map(t => `- Task ${t.id}: ${t.title} [${t.status.toUpperCase()}]`).join('\n')}`
+    content: `WORKSPACE FILES:\n${fileContext || '(No files yet)'}\n\nUSER TASK: ${userPrompt}\n\nDYNAMIC TASK BREAKDOWN:\n${taskListText}`
   }];
 
   const MAX_STEPS = 14;
