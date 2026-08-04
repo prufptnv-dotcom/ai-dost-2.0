@@ -1,33 +1,35 @@
-# Multi-stage Dockerfile for Next.js Frontend
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Install dependencies
+COPY package.json package-lock.json* ./
 RUN npm ci
 
-# Copy source code
+# Copy source
 COPY . .
 
-# Build Next.js production bundle
-ENV NEXT_TELEMETRY_DISABLED=1
+# Build the application
+ARG BACKEND_INTERNAL_URL
+ENV BACKEND_INTERNAL_URL=$BACKEND_INTERNAL_URL
 RUN npm run build
 
-# Stage 2: Production Runner
+# Production image
 FROM node:20-alpine AS runner
-
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
 
-# Copy built assets from builder
+# Copy necessary files from builder
+COPY --from=builder /app/next.config.mjs ./
 COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/.next/standalone/app ./
+COPY --from=builder /app/.next/static ./.next/static
 
-EXPOSE 3000
+# Expose port
+EXPOSE 3001
+ENV PORT=3001
+ENV HOSTNAME="0.0.0.0"
 
-CMD ["npm", "start"]
+# Start the application
+CMD ["node", "server.js"]

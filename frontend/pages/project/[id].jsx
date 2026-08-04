@@ -19,7 +19,7 @@ const ProjectWorkspace = () => {
   const { mode } = useMode();
   const [project, setProject] = useState(null);
   const [error, setError] = useState('');
-  const [currentFile, setCurrentFile] = useState('main.py');
+  const [currentFile, setCurrentFile] = useState('');
   const [code, setCode] = useState('');
   const [showRightSidebar, setShowRightSidebar] = useState(false);
   const [leftTab, setLeftTab] = useState('chat'); // 'chat' | 'agent'
@@ -45,8 +45,9 @@ const ProjectWorkspace = () => {
           setCurrentFile(data.files[0].path);
           setCode(data.files[0].content);
         } else {
-          // Default initial files
-          setCode('# Write your code here...\n\nprint("Hello from AI-Dost sandbox!")\n');
+          // Empty initial state
+          setCurrentFile('');
+          setCode('');
         }
       } catch (error) {
         console.error('Error loading project:', error);
@@ -87,6 +88,7 @@ const ProjectWorkspace = () => {
       clearTimeout(saveTimeoutRef.current);
     }
     saveTimeoutRef.current = setTimeout(async () => {
+      if (!currentFile) return;
       try {
         await saveProjectFile(id, currentFile, updatedContent);
         // Silently sync local state context
@@ -128,6 +130,31 @@ const ProjectWorkspace = () => {
     showToast({ type: 'success', message: `✅ Agent changes applied to ${file}` });
     // Auto-save to backend
     saveProjectFile(id, file, content).catch(err => console.error('Agent apply save failed:', err));
+  };
+
+  const handleAgentApplyAll = (filesToApply) => {
+    if (!filesToApply || filesToApply.length === 0) return;
+    
+    // We optionally switch to the first file in the editor
+    const firstFile = filesToApply[0];
+    setCurrentFile(firstFile.file);
+    setCode(firstFile.content);
+
+    setProject(prev => {
+      if (!prev) return prev;
+      let files = [...(prev.files || [])];
+      
+      filesToApply.forEach(({ file, content }) => {
+        const fileIndex = files.findIndex(f => f.path === file);
+        if (fileIndex !== -1) {
+          files[fileIndex] = { ...files[fileIndex], content };
+        } else {
+          files.push({ path: file, content });
+        }
+      });
+      return { ...prev, files };
+    });
+    showToast({ type: 'success', message: `✅ Applied ${filesToApply.length} files from agent` });
   };
 
   // Called by AgentPanel when agent creates/modifies a file
@@ -285,9 +312,7 @@ const ProjectWorkspace = () => {
     );
   }
 
-  const rawFiles = project?.files || [
-    { path: 'main.py', content: '# Write your code here...\n\nprint("Hello from AI-Dost sandbox!")\n' }
-  ];
+  const rawFiles = project?.files || [];
   const projectFiles = rawFiles.map(f => f.path === currentFile ? { ...f, content: code } : f);
 
   return (
@@ -346,6 +371,7 @@ const ProjectWorkspace = () => {
                     projectFiles={project?.files || []}
                     projectId={id}
                     onApplyToEditor={handleAgentApply}
+                    onApplyAllToEditor={handleAgentApplyAll}
                     onFileSync={handleAgentFileSync}
                   />
                 )}
@@ -469,6 +495,7 @@ const ProjectWorkspace = () => {
                       projectFiles={project?.files || []}
                       projectId={id}
                       onApplyToEditor={handleAgentApply}
+                      onApplyAllToEditor={handleAgentApplyAll}
                       onFileSync={handleAgentFileSync}
                     />
                   )}

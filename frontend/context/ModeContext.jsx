@@ -3,12 +3,14 @@ import { createContext, useContext, useState, useEffect } from 'react';
 const ModeContext = createContext();
 
 export const ModeProvider = ({ children }) => {
-  const [mode, setMode] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('ai_dost_layout_mode') || 'project';
+  const [mode, setMode] = useState('project');
+
+  useEffect(() => {
+    const saved = localStorage.getItem('ai_dost_layout_mode');
+    if (saved) {
+      setMode(saved);
     }
-    return 'project';
-  });
+  }, []);
 
   const changeMode = (newMode) => {
     setMode(newMode);

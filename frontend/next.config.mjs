@@ -2,11 +2,11 @@ import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const BACKEND_URL = process.env.NEXT_PUBLIC_EXPRESS_BACKEND_URL || 'http://localhost:5000';
+const BACKEND_URL = process.env.BACKEND_INTERNAL_URL || process.env.NEXT_PUBLIC_EXPRESS_BACKEND_URL || 'http://127.0.0.1:5005';
 
-/** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  output: 'standalone',
   // Turbopack root: absolute path to monorepo root (one level above frontend/)
   turbopack: {
     root: resolve(__dirname, '..'),

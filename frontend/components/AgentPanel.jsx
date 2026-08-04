@@ -313,6 +313,7 @@ const AgentPanel = ({
   projectPath = '',
   projectId = '',
   onApplyToEditor,
+  onApplyAllToEditor,
   onFileSync,
 }) => {
   const [activeTab, setActiveTab] = useState('agent');
@@ -530,12 +531,14 @@ const AgentPanel = ({
       const decoder = new TextDecoder();
       let buffer = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+      const drainBuffer = (flush = false) => {
         const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
+        if (!flush) {
+          buffer = lines.pop() ?? '';
+        } else {
+          buffer = '';
+        }
+
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           try {
@@ -544,6 +547,16 @@ const AgentPanel = ({
             // Ignore malformed SSE lines
           }
         }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          if (buffer) drainBuffer(true);
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        drainBuffer(false);
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
@@ -566,29 +579,6 @@ const AgentPanel = ({
     setPrompt('');
     setElapsedMs(0);
   }, []);
-
-  const gitCheckpoint = useCallback(async () => {
-    setIsCommitting(true);
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/agent/checkpoint`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: commitMsg || `Agent checkpoint — ${new Date().toLocaleString()}`
-        }),
-      });
-      const data = await res.json();
-      setCommitMsg('');
-      alert(data.success
-        ? `✅ Git commit done:\n${data.message}`
-        : `⚠️ ${data.message}`
-      );
-    } catch (e) {
-      alert('Git commit failed: ' + e.message);
-    } finally {
-      setIsCommitting(false);
-    }
-  }, [commitMsg]);
 
   const changedFiles = steps.filter(s =>
     ['write_file', 'apply_diff'].includes(s.action) && s.result?.success
@@ -637,7 +627,6 @@ const AgentPanel = ({
           {[
             { id: 'agent',   icon: <Bot className="w-3 h-3" />,       label: 'Agent' },
             { id: 'history', icon: <History className="w-3 h-3" />,   label: `History${history.length ? ` (${history.length})` : ''}` },
-            { id: 'git',     icon: <GitCommit className="w-3 h-3" />, label: 'Git' },
           ].map(tab => (
             <button
               key={tab.id}
@@ -861,14 +850,6 @@ const AgentPanel = ({
                     ))}
                   </div>
                 )}
-
-                {/* Quick-commit shortcut */}
-                <button
-                  onClick={() => setActiveTab('git')}
-                  className="mt-2 w-full flex items-center justify-center gap-1.5 text-[10px] py-1.5 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-400 hover:bg-orange-500/20 transition cursor-pointer font-semibold"
-                >
-                  <GitCommit className="w-3 h-3" /> Save as Git Checkpoint
-                </button>
               </div>
             )}
           </div>
@@ -992,62 +973,7 @@ const AgentPanel = ({
         </div>
       )}
 
-      {/* ── Git Tab ── */}
-      {activeTab === 'git' && (
-        <div className="flex-1 overflow-y-auto px-4 py-3">
-          <div className="text-center mb-4">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center mx-auto mb-2 shadow-lg shadow-orange-500/20">
-              <GitCommit className="w-6 h-6 text-white" />
-            </div>
-            <h3 className="text-sm font-bold text-text-primary">Git Checkpoint</h3>
-            <p className="text-[10px] text-text-muted mt-1">Save your Agent&apos;s work as a git commit</p>
-          </div>
 
-          <div className="space-y-3">
-            <div>
-              <label className="text-[10px] text-text-muted font-bold uppercase block mb-1.5">Commit Message</label>
-              <input
-                type="text"
-                value={commitMsg}
-                onChange={e => setCommitMsg(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') gitCheckpoint(); }}
-                placeholder={`Agent checkpoint — ${new Date().toLocaleDateString()}`}
-                className="w-full bg-bg-hover border border-border rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary/50 transition"
-              />
-            </div>
-
-            <button
-              onClick={gitCheckpoint}
-              disabled={isCommitting}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 text-white text-xs font-bold hover:opacity-90 transition cursor-pointer disabled:opacity-50 shadow-lg shadow-orange-500/20"
-            >
-              {isCommitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <GitCommit className="w-4 h-4" />}
-              {isCommitting ? 'Committing...' : 'Create Git Commit'}
-            </button>
-
-            {/* Changed files summary */}
-            {changedFiles.length > 0 && (
-              <div className="mt-4">
-                <p className="text-[10px] text-text-muted font-bold uppercase mb-2">Files Changed This Session</p>
-                {changedFiles.map((s, i) => (
-                  <div key={i} className="flex items-center gap-2 py-1.5 border-b border-border/50 last:border-0">
-                    <span className="text-[9px] font-bold text-green-400 w-3 text-center">M</span>
-                    <span className="text-[10px] text-text-secondary font-mono">{s.parameters?.path}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Info box */}
-            <div className="bg-bg-hover/50 rounded-xl p-3 border border-border flex gap-2">
-              <Shield className="w-4 h-4 text-text-muted shrink-0 mt-0.5" />
-              <p className="text-[10px] text-text-muted leading-relaxed">
-                This runs <code className="bg-white/10 px-1 rounded">git add -A &amp;&amp; git commit</code> in your project root. Make sure your project is a git repository.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

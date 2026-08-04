@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     PROJECT_NAME: str = "Ai-Dost Memory Brain"
     VERSION: str = "1.0.0"
+    
+    # 🔴 CORS Configuration
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001"
 
     # 🔴 JWT Configuration
     SECRET_KEY: str = "super_secret_key_for_ai_dost_memory_brain_12345"

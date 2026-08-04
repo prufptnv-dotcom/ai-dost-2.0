@@ -5,6 +5,14 @@ const ToastContext = createContext(null);
 export const ToastProvider = ({ children }) => {
   const [toast, setToast] = useState(null);
 
+  React.useEffect(() => {
+    const handleGlobalToast = (e) => {
+      showToast(e.detail);
+    };
+    window.addEventListener('ai_dost_toast', handleGlobalToast);
+    return () => window.removeEventListener('ai_dost_toast', handleGlobalToast);
+  }, []);
+
   const showToast = ({ type, message }) => {
     setToast({ type, message });
     setTimeout(() => {

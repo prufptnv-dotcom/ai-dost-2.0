@@ -87,6 +87,22 @@ class CodeSandbox:
                     duration=0.0
                 )
 
+            elif lang in ["shell", "bash", "cmd", "terminal"]:
+                res = subprocess.run(
+                    code,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=request.timeout / 1000
+                )
+                duration = round((time.time() - start_time) * 1000, 2)
+                return ExecutionResult(
+                    stdout=res.stdout,
+                    stderr=res.stderr,
+                    exit_code=res.returncode,
+                    duration=duration
+                )
+
             else:
                 return ExecutionResult(
                     stdout="",

@@ -25,6 +25,14 @@ api.interceptors.request.use(config => {
 const buildApiError = (operation, error) => {
   const status = error?.response?.status;
   const detail = error?.response?.data?.detail || error?.response?.data?.error || error?.message || 'Unknown API error';
+  
+  if (status >= 500 && typeof window !== 'undefined') {
+    const event = new CustomEvent('ai_dost_toast', {
+      detail: { type: 'error', message: `Server Error: ${detail}` }
+    });
+    window.dispatchEvent(event);
+  }
+  
   const wrapped = new Error(`${operation} failed${status ? ` (${status})` : ''}: ${detail}`);
   wrapped.status = status;
   wrapped.detail = detail;

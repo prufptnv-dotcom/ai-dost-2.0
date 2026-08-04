@@ -34,7 +34,7 @@ class MemoryService:
         return context
 
     async def get_projects(self, user_id: str) -> List[dict]:
-        if not self.projects:
+        if self.projects is None:
             return []
         cursor = self.projects.find({"user_id": user_id})
         projects = await cursor.to_list(length=100)
@@ -43,7 +43,7 @@ class MemoryService:
         return projects
 
     async def get_relevant_projects(self, user_id: str) -> List[dict]:
-        if not self.projects:
+        if self.projects is None:
             return []
         # Filter by similar tech stack and project type
         pipeline = [
@@ -59,7 +59,7 @@ class MemoryService:
         return await cursor.to_list(length=100)
 
     async def get_learning_trend(self, user_id: str) -> List[dict]:
-        if not self.learning_logs:
+        if self.learning_logs is None:
             return []
         # Analyze learning progression
         pipeline = [

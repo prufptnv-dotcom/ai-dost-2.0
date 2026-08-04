@@ -46,6 +46,57 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
   ]);
   const terminalEndRef = useRef(null);
   
+  // Terminal WebSocket reference
+  const terminalWs = useRef(null);
+  const [terminalConnected, setTerminalConnected] = useState(false);
+
+  // Initialize Terminal WebSocket
+  useEffect(() => {
+    let ws = null;
+    const connectTerminalWs = () => {
+      // Use standard WebSocket
+      const wsUrl = process.env.NEXT_PUBLIC_GO_WS_URL || 'ws://127.0.0.1:5005';
+      const wsEndpoint = wsUrl.replace('ws://', 'ws://').replace('http://', 'ws://') + '/api/terminal/ws';
+      
+      try {
+        ws = new WebSocket(wsEndpoint);
+        
+        ws.onopen = () => {
+          setTerminalConnected(true);
+          setTerminalHistory(prev => [...prev, 'Connected to Live Terminal (WebSocket). Try running a server!']);
+        };
+        
+        ws.onmessage = (event) => {
+          setTerminalHistory(prev => {
+            const lines = event.data.split(/\r?\n/);
+            // Replace the last line if it's just appending, or add new lines
+            // For simplicity, just append
+            return [...prev, ...lines.filter(l => l.trim() !== '')];
+          });
+        };
+        
+        ws.onclose = () => {
+          setTerminalConnected(false);
+          // Optional: reconnect logic here
+        };
+        
+        ws.onerror = (err) => {
+          console.error('Terminal WS Error:', err);
+        };
+        
+        terminalWs.current = ws;
+      } catch (err) {
+        console.error('Failed to create WebSocket:', err);
+      }
+    };
+    
+    connectTerminalWs();
+    
+    return () => {
+      if (ws) ws.close();
+    };
+  }, []);
+  
   // AI Suggestions states
   const [suggestions, setSuggestions] = useState([]);
   const [suggestionPos, setSuggestionPos] = useState(null);
@@ -284,7 +335,7 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
       const changes = calculateOperations(code, content);
       sendMessage({
         type: 'document_update',
-        doc_id: 'main.py',
+        doc_id: currentFile || 'default',
         changes
       });
 
@@ -398,31 +449,31 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
     setIsExecuting(true);
     setLastErrorLog('');
     onExecutionStart && onExecutionStart();
-    setTerminalHistory(prev => [...prev, 'Running code in secure sandbox...']);
+    setTerminalHistory(prev => [...prev, 'Running code in Live Terminal...']);
     
     try {
-      const executionData = {
-        language: lang || selectedLanguage,
-        code,
-        dependencies: []
-      };
-      
-      const response = await executeCode(executionData);
-      const out = (response.stdout || '') + (response.stderr || '');
-      setTerminalHistory(prev => [...prev, out || '(No output returned)']);
-      setExecutionResult(out);
-      
-      if (response.stderr || response.exit_code !== 0) {
-        setLastErrorLog(response.stderr || out);
-        showToast({ type: 'warning', message: 'Execution completed with errors. Click "Fix Error" to auto-debug!' });
+      if (terminalWs.current && terminalWs.current.readyState === WebSocket.OPEN) {
+        // Send a command to run the script via terminal
+        let runCmd = '';
+        const runLang = lang || selectedLanguage;
+        const filename = currentFile?.split('/').pop() || 'script';
+        
+        if (runLang === 'python' || runLang === 'py') {
+          runCmd = `python ${filename}`;
+        } else if (runLang === 'javascript' || runLang === 'js') {
+          runCmd = `node ${filename}`;
+        } else {
+          runCmd = `echo Cannot execute ${runLang} natively.`;
+        }
+        
+        terminalWs.current.send(runCmd + '\n');
+        showToast({ type: 'success', message: 'Execution started in terminal' });
       } else {
-        showToast({ type: 'success', message: 'Execution complete' });
+        setTerminalHistory(prev => [...prev, 'Error: Terminal is not connected.']);
       }
     } catch (error) {
       setTerminalHistory(prev => [...prev, `Error: ${error.message}`]);
-      setExecutionResult(`Error: ${error.message}`);
-      setLastErrorLog(error.message);
-      showToast({ type: 'error', message: 'Code execution failed' });
+      showToast({ type: 'error', message: 'Execution request failed' });
     } finally {
       setIsExecuting(false);
       onExecutionEnd && onExecutionEnd();
@@ -478,145 +529,16 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
     setTerminalHistory(prev => [...prev, `visitor@ai-dost:~ $ ${cmd}`]);
     setTerminalInput('');
 
-    const parts = cmd.split(/\s+/);
-    const command = parts[0].toLowerCase();
-    const args = parts.slice(1);
-
-    if (command === 'clear') {
+    if (cmd === 'clear') {
       setTerminalHistory([]);
       return;
     }
-
-    if (command === 'help') {
-      setTerminalHistory(prev => [
-        ...prev,
-        'AI-Dost Interactive Sandbox Shell. Available commands:',
-        '  ls                 - List files in current project directory',
-        '  cat <filename>     - Display file contents',
-        '  python <filename>  - Execute Python program',
-        '  node <filename>    - Execute Node.js program',
-        '  pwd                - Print current working directory',
-        '  whoami             - Show active terminal user',
-        '  date               - Print system date',
-        '  clear              - Clear terminal history',
-        '  help               - Display commands helper log'
-      ]);
-      return;
+    
+    if (terminalWs.current && terminalWs.current.readyState === WebSocket.OPEN) {
+      terminalWs.current.send(cmd + '\n');
+    } else {
+      setTerminalHistory(prev => [...prev, 'WebSocket is disconnected. Please refresh.']);
     }
-
-    if (command === 'pwd') {
-      setTerminalHistory(prev => [...prev, '/home/visitor/workspace']);
-      return;
-    }
-
-    if (command === 'whoami') {
-      setTerminalHistory(prev => [...prev, 'visitor']);
-      return;
-    }
-
-    if (command === 'date') {
-      setTerminalHistory(prev => [...prev, new Date().toString()]);
-      return;
-    }
-
-    if (command === 'ls') {
-      if (!projectFiles || projectFiles.length === 0) {
-        setTerminalHistory(prev => [...prev, '(empty directory)']);
-      } else {
-        const fileList = projectFiles.map(f => {
-          const size = f.content ? f.content.length : 0;
-          return `${f.path.padEnd(20)} ${size} bytes`;
-        });
-        setTerminalHistory(prev => [...prev, ...fileList]);
-      }
-      return;
-    }
-
-    if (command === 'cat') {
-      const filename = args[0];
-      if (!filename) {
-        setTerminalHistory(prev => [...prev, 'Usage: cat <filename>']);
-        return;
-      }
-      const file = projectFiles.find(f => f.path.toLowerCase() === filename.toLowerCase());
-      if (file) {
-        setTerminalHistory(prev => [...prev, file.content || '(empty file)']);
-      } else {
-        setTerminalHistory(prev => [...prev, `cat: ${filename}: No such file or directory`]);
-      }
-      return;
-    }
-
-    if (command === 'python') {
-      const filename = args[0];
-      if (!filename) {
-        await runSandboxCode('python');
-        return;
-      }
-      const file = projectFiles.find(f => f.path.toLowerCase() === filename.toLowerCase());
-      if (file) {
-        setIsExecuting(true);
-        onExecutionStart && onExecutionStart();
-        setTerminalHistory(prev => [...prev, `Running ${filename} with Python 3...`]);
-        try {
-          const response = await executeCode({ language: 'python', code: file.content || '' });
-          const out = (response.stdout || '') + (response.stderr || '');
-          setTerminalHistory(prev => [...prev, out || '(No output returned)']);
-        } catch (err) {
-          setTerminalHistory(prev => [...prev, `Error: ${err.message}`]);
-        } finally {
-          setIsExecuting(false);
-          onExecutionEnd && onExecutionEnd();
-        }
-      } else {
-        setTerminalHistory(prev => [...prev, `python: can't open file '${filename}': [Errno 2] No such file or directory`]);
-      }
-      return;
-    }
-
-    if (command === 'node') {
-      const filename = args[0];
-      if (!filename) {
-        await runSandboxCode('javascript');
-        return;
-      }
-      const file = projectFiles.find(f => f.path.toLowerCase() === filename.toLowerCase());
-      if (file) {
-        setIsExecuting(true);
-        onExecutionStart && onExecutionStart();
-        setTerminalHistory(prev => [...prev, `Running ${filename} with Node.js...`]);
-        try {
-          const response = await executeCode({ language: 'javascript', code: file.content || '' });
-          const out = (response.stdout || '') + (response.stderr || '');
-          setTerminalHistory(prev => [...prev, out || '(No output returned)']);
-        } catch (err) {
-          setTerminalHistory(prev => [...prev, `Error: ${err.message}`]);
-        } finally {
-          setIsExecuting(false);
-          onExecutionEnd && onExecutionEnd();
-        }
-      } else {
-        setTerminalHistory(prev => [...prev, `node: internal/modules/cjs/loader.js: Cannot find module '${filename}'`]);
-      }
-      return;
-    }
-
-    // Mock npm install and git status/commits
-    if (command === 'npm') {
-      setTerminalHistory(prev => [...prev, 'npm notice ', 'npm notice Beginning fake dependency analysis...', 'npm WARN sandbox No package.json found. System auto-injected global mock node modules successfully!']);
-      return;
-    }
-
-    if (command === 'git') {
-      setTerminalHistory(prev => [...prev, 'On branch main', 'Your branch is up to date with \'origin/main\'.', 'nothing to commit, working tree clean']);
-      return;
-    }
-
-    setTerminalHistory(prev => [
-      ...prev,
-      `bash: ${command}: command not found`,
-      `Type "help" to view list of active sandbox terminal commands.`
-    ]);
   };
 
   const getPreviewDoc = () => {
@@ -876,7 +798,7 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
         <div className="flex items-center mb-2 shrink-0 justify-between select-none">
           <div className="flex items-center gap-2">
             <Terminal className="w-3.5 h-3.5 text-text-muted" />
-            <span className="text-xs font-semibold text-text-secondary">Terminal</span>
+            <span className="text-xs font-semibold text-text-secondary">Terminal {terminalConnected ? '(Live)' : '(Disconnected)'}</span>
             {isExecuting && (
               <span className="w-1.5 h-1.5 rounded-full bg-warning animate-ping" />
             )}

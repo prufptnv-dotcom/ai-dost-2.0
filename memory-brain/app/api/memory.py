@@ -132,11 +132,7 @@ async def get_project(
         "project_name": "AI Dost Workspace",
         "description": "Interactive Development Sandbox & AI Copilot Workspace",
         "status": "Development",
-        "files": [
-            { "path": "main.py", "content": "# Write python code here...\nprint('Hello from AI-Dost Workspace!')\n" },
-            { "path": "index.html", "content": "<!DOCTYPE html>\n<html>\n<head>\n  <link rel=\"stylesheet\" href=\"style.css\">\n</head>\n<body>\n  <div className=\"container\">\n    <h1>Welcome to AI-Dost Sandbox</h1>\n    <p>AI Copilot Workspace is active and ready!</p>\n  </div>\n</body>\n</html>\n" },
-            { "path": "style.css", "content": "body {\n  background: #05060a;\n  color: #06b6d4;\n  font-family: sans-serif;\n  display: flex;\n  justify-content: center;\n  align-items: center;\n  height: 100vh;\n  margin: 0;\n}\n.container {\n  text-align: center;\n  border: 1px solid rgba(6, 182, 212, 0.2);\n  padding: 32px;\n  border-radius: 16px;\n  background: rgba(14, 16, 24, 0.8);\n}\n" }
-        ]
+        "files": []
     }
 
     if db is None:

@@ -1,8 +1,26 @@
 {
-  "totalFeedback": 24,
-  "positiveCount": 24,
-  "negativeCount": 0,
+  "totalFeedback": 26,
+  "positiveCount": 25,
+  "negativeCount": 1,
   "feedbackLogs": [
+    {
+      "id": "2965313470",
+      "type": "down",
+      "category": "general",
+      "message": "",
+      "aiReply": "",
+      "correction": "",
+      "timestamp": "now"
+    },
+    {
+      "id": "1785834786724",
+      "type": "up",
+      "category": "coding",
+      "message": "Write a python script",
+      "aiReply": "print(\"Hello\")",
+      "correction": "",
+      "timestamp": "2026-08-04T09:13:06.724Z"
+    },
     {
       "id": "1785834029388",
       "type": "up",

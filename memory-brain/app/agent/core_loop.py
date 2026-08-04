@@ -8,16 +8,20 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """
 You are an autonomous AI developer running on a user's local machine.
-You have access to a terminal. You can write files, run scripts, install packages, and fix errors.
+You have access to tools to write files and run terminal scripts.
+CRITICAL: The user's operating system is WINDOWS. You MUST use Windows `cmd` commands for terminal execution. 
+For example: use `type` instead of `cat`, `dir` instead of `ls`, `del` instead of `rm`, etc.
 Always reply strictly in JSON format. Do not add markdown blocks like ```json.
 Format:
 {
     "thought": "What I need to do next to achieve the user's goal",
-    "action": "terminal_command", 
-    "command": "python script.py",
+    "action": "run_terminal" or "write_file" or "done", 
+    "command": "python script.py", # Only if action is run_terminal
+    "file_path": "main.py", # Only if action is write_file
+    "file_content": "print('hello')", # Only if action is write_file
     "status": "in_progress" or "completed"
 }
-If you have achieved the user's ultimate goal, set status to 'completed' and leave command empty.
+If you have achieved the user's ultimate goal, set action to 'done' and status to 'completed'.
 If you get an error in the previous step, your next thought should be how to fix it, and the next command should be the fix.
 """
 
@@ -58,6 +62,8 @@ async def run_autonomous_loop(user_prompt: str, cwd: str = None, max_iterations:
             thought = ai_decision.get("thought", "Thinking...")
             action = ai_decision.get("action")
             command = ai_decision.get("command", "")
+            file_path = ai_decision.get("file_path", "")
+            file_content = ai_decision.get("file_content", "")
             status = ai_decision.get("status", "in_progress")
             
             # Create a task entry for the UI
@@ -86,13 +92,13 @@ async def run_autonomous_loop(user_prompt: str, cwd: str = None, max_iterations:
             }
             
             # Check if completed
-            if status == "completed":
+            if action == "done" or status == "completed":
                 final_result = "Task successfully completed by AI!"
                 current_task["status"] = "completed"
                 break
                 
             # Execute Action
-            if action == "terminal_command" and command:
+            if action == "run_terminal" and command:
                 yield {
                     "type": "thinking",
                     "step": task_id,
@@ -108,11 +114,75 @@ async def run_autonomous_loop(user_prompt: str, cwd: str = None, max_iterations:
                 
                 memory.add_message("user", feedback)
                 
-                # Mark current task as completed since we finished this iteration
+                yield {
+                    "type": "step",
+                    "stepLog": {
+                        "step": task_id,
+                        "action": "run_terminal",
+                        "thought": thought,
+                        "parameters": {"command": command},
+                        "result": {
+                            "success": exec_result["success"],
+                            "stdout": exec_result["stdout"],
+                            "stderr": exec_result["stderr"],
+                            "exit_code": 0 if exec_result["success"] else 1
+                        }
+                    }
+                }
+                current_task["status"] = "completed"
+                
+            elif action == "write_file" and file_path:
+                import os
+                
+                yield {
+                    "type": "thinking",
+                    "step": task_id,
+                    "message": f"📝 Writing file: {file_path}"
+                }
+                
+                full_path = os.path.join(cwd if cwd else ".", file_path)
+                try:
+                    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                    with open(full_path, "w", encoding="utf-8") as f:
+                        f.write(file_content)
+                    
+                    feedback = f"Successfully wrote to {file_path}"
+                    memory.add_message("user", feedback)
+                    
+                    yield {
+                        "type": "step",
+                        "stepLog": {
+                            "step": task_id,
+                            "action": "write_file",
+                            "thought": thought,
+                            "parameters": {"path": file_path},
+                            "result": {
+                                "success": True,
+                                "changedFile": file_path,
+                                "newContent": file_content
+                            }
+                        }
+                    }
+                except Exception as e:
+                    error_msg = f"Failed to write file {file_path}: {str(e)}"
+                    memory.add_message("user", error_msg)
+                    yield {
+                        "type": "step",
+                        "stepLog": {
+                            "step": task_id,
+                            "action": "write_file",
+                            "thought": thought,
+                            "parameters": {"path": file_path},
+                            "result": {
+                                "success": False,
+                                "error": error_msg
+                            }
+                        }
+                    }
                 current_task["status"] = "completed"
             else:
-                # Agent didn't specify a command but isn't done?
-                memory.add_message("user", "System Error: You specified action as terminal_command but provided no command. If you are done, set status to 'completed'.")
+                # Agent didn't specify a valid action
+                memory.add_message("user", "System Error: You specified an invalid action or missing parameters. Use 'run_terminal' or 'write_file' or 'done'.")
                 current_task["status"] = "completed"
                 
         except json.JSONDecodeError:

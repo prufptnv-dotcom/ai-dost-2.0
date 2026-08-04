@@ -3,13 +3,12 @@ import Image from 'next/image';
 import { useRouter } from 'next/router';
 import {
   Sun, Moon, Settings, User, LogOut, Menu, X,
-  Sparkles, Key, Brain, GitBranch, Save, ChevronDown,
-  Zap, MessageSquare, FolderOpen, Bot
+  Sparkles, Key, Brain, Save, ChevronDown,
+  Zap, MessageSquare, FolderOpen, Bot, ListTodo
 } from 'lucide-react';
 import { useMode } from '../context/ModeContext';
 import { useToast } from '../context/ToastContext';
 import PersonalBrainModal from './PersonalBrainModal';
-import GitControlModal from './GitControlModal';
 
 /* ─── Tooltip ─── */
 function Tooltip({ children, label }) {
@@ -86,7 +85,6 @@ const Header = () => {
   const [settingsClicks, setSettingsClicks] = useState(0);
   const [showSecretBrainModal, setShowSecretBrainModal] = useState(false);
   const clickTimerRef = useRef(null);
-  const [showGitModal, setShowGitModal] = useState(false);
 
   // Scroll detection for navbar style change
   useEffect(() => {
@@ -216,27 +214,6 @@ const Header = () => {
 
           {/* ─── Right: Action Buttons ─── */}
           <div className="flex items-center gap-1">
-            {/* Git Button */}
-            <Tooltip label="Local Git Control">
-              <button
-                suppressHydrationWarning
-                onClick={() => setShowGitModal(true)}
-                className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer"
-                style={{
-                  background: 'rgba(34,197,94,0.08)',
-                  border: '1px solid rgba(34,197,94,0.2)',
-                  color: '#22c55e',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(34,197,94,0.15)'; e.currentTarget.style.boxShadow = '0 0 14px rgba(34,197,94,0.2)'; }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(34,197,94,0.08)'; e.currentTarget.style.boxShadow = 'none'; }}
-              >
-                <GitBranch className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Git</span>
-              </button>
-            </Tooltip>
-
-            <div className="w-px h-5 bg-white/8 mx-1" />
-
             <IconBtn
               onClick={toggleTheme}
               icon={isLightTheme ? Moon : Sun}
@@ -255,6 +232,12 @@ const Header = () => {
               onClick={() => router.push('/about-me')}
               icon={User}
               label="Profile"
+            />
+            <IconBtn
+              onClick={() => router.push('/todos')}
+              icon={ListTodo}
+              label="Tasks"
+              active={router.pathname === '/todos'}
             />
             <IconBtn
               onClick={() => { if (confirm('Return to login?')) router.push('/'); }}
@@ -286,8 +269,8 @@ const Header = () => {
           >
             <div className="max-w-screen-2xl mx-auto px-5 py-4 flex flex-col gap-1">
               {[
+                { icon: ListTodo, label: 'Tasks', action: () => { router.push('/todos'); setMenuOpen(false); } },
                 { icon: User, label: 'Profile', action: () => { router.push('/about-me'); setMenuOpen(false); } },
-                { icon: GitBranch, label: 'Git Control', action: () => { setShowGitModal(true); setMenuOpen(false); } },
                 { icon: Settings, label: 'Settings', action: () => { setShowSettings(true); setMenuOpen(false); } },
                 { icon: LogOut, label: 'Logout', action: () => { if (confirm('Return to login?')) router.push('/'); } },
               ].map(({ icon: Icon, label, action }) => (
@@ -431,9 +414,6 @@ const Header = () => {
 
       {/* ─── Secret 7-Tap Brain Modal ─── */}
       <PersonalBrainModal isOpen={showSecretBrainModal} onClose={() => setShowSecretBrainModal(false)} />
-
-      {/* ─── Git Control Modal ─── */}
-      <GitControlModal isOpen={showGitModal} onClose={() => setShowGitModal(false)} />
     </>
   );
 };

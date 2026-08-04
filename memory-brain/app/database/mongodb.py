@@ -7,10 +7,33 @@ Yeh FastAPI ke event loop ke saath compatible hai.
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from app.config import settings
 
+import json
+import os
+
+DB_DIR = os.path.join(os.getcwd(), ".data")
+os.makedirs(DB_DIR, exist_ok=True)
+
 class InMemoryAsyncCollection:
     def __init__(self, name):
         self.name = name
         self._data = []
+        self._filepath = os.path.join(DB_DIR, f"{name}.json")
+        self._load_from_disk()
+
+    def _load_from_disk(self):
+        if os.path.exists(self._filepath):
+            try:
+                with open(self._filepath, 'r', encoding='utf-8') as f:
+                    self._data = json.load(f)
+            except Exception as e:
+                print(f"[WARNING] Could not load data from {self._filepath}: {e}")
+
+    def _save_to_disk(self):
+        try:
+            with open(self._filepath, 'w', encoding='utf-8') as f:
+                json.dump(self._data, f, indent=2, default=str)
+        except Exception as e:
+            print(f"[WARNING] Could not save data to {self._filepath}: {e}")
 
     def _matches(self, doc, filter):
         if not filter:
@@ -33,6 +56,7 @@ class InMemoryAsyncCollection:
     async def insert_one(self, document):
         doc = dict(document)
         self._data.append(doc)
+        self._save_to_disk()
         class InsertResult:
             inserted_id = doc.get("_id", "mock_id")
         return InsertResult()
@@ -126,6 +150,7 @@ class InMemoryAsyncCollection:
                     if k in target and isinstance(target[k], list):
                         pull_path = v.get("path") if isinstance(v, dict) else v
                         target[k] = [item for item in target[k] if (item.get("path") if isinstance(item, dict) else item) != pull_path]
+            self._save_to_disk()
 
         class UpdateResult:
             matched_count = 1 if target else 0
@@ -137,6 +162,7 @@ class InMemoryAsyncCollection:
         for i, doc in enumerate(self._data):
             if self._matches(doc, filter):
                 self._data.pop(i)
+                self._save_to_disk()
                 class DeleteResult:
                     deleted_count = 1
                 return DeleteResult()
@@ -192,7 +218,7 @@ class MongoDB:
 
     @classmethod
     async def create_indexes(cls):
-        if not cls.db or isinstance(cls.db, InMemoryAsyncDatabase):
+        if cls.db is None or isinstance(cls.db, InMemoryAsyncDatabase):
             return
         try:
             await cls.db.users.create_index("user_id", unique=True)

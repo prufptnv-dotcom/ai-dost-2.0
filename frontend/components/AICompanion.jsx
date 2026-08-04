@@ -67,6 +67,60 @@ function formatTextWithCitations(text, query) {
 }
 
 // Custom component to parse and render message content with apply button on code blocks
+function QuizCard({ content }) {
+  const [selected, setSelected] = useState(null);
+  const [quizData, setQuizData] = useState(null);
+
+  useEffect(() => {
+    try {
+      setQuizData(JSON.parse(content));
+    } catch (e) {
+      console.error("Invalid quiz JSON", e);
+    }
+  }, [content]);
+
+  if (!quizData) return <div className="text-red-400 text-xs my-2">Invalid Quiz Format</div>;
+
+  return (
+    <div className="my-3 bg-white/[0.02] border border-cyan-500/20 rounded-xl p-4 shadow-lg">
+      <div className="flex items-center gap-2 text-cyan-400 text-[11px] font-bold uppercase mb-3">
+        <span>🧠</span> Quick Quiz
+      </div>
+      <div className="text-[#f8fafc] text-sm font-medium mb-4 leading-relaxed">{quizData.question}</div>
+      <div className="space-y-2.5">
+        {quizData.options.map((opt, i) => {
+          const isSelected = selected === i;
+          const isCorrect = i === quizData.answer;
+          const showResult = selected !== null;
+          
+          let btnClass = "border-white/[0.08] hover:bg-white/[0.05] text-[#cbd5e1]";
+          if (showResult) {
+            if (isCorrect) btnClass = "bg-green-500/10 border-green-500/40 text-green-400";
+            else if (isSelected && !isCorrect) btnClass = "bg-red-500/10 border-red-500/40 text-red-400";
+            else btnClass = "opacity-40 border-white/[0.05] text-[#94a3b8]";
+          }
+          
+          return (
+            <button
+              key={i}
+              disabled={showResult}
+              onClick={() => setSelected(i)}
+              className={`w-full text-left px-4 py-3 rounded-xl border text-sm transition-all duration-300 cursor-pointer ${btnClass}`}
+            >
+              {opt}
+            </button>
+          );
+        })}
+      </div>
+      {selected !== null && (
+        <div className={`mt-4 text-xs font-bold ${selected === quizData.answer ? 'text-green-400' : 'text-red-400'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+          {selected === quizData.answer ? '🎉 Correct!' : '❌ Incorrect. Try asking me for an explanation!'}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MessageContent({ text, onWriteCode, query = '' }) {
   if (!text) return null;
 
@@ -143,6 +197,8 @@ function MessageContent({ text, onWriteCode, query = '' }) {
       {parts.map((part, i) => {
         if (part.type === 'text') {
           return <div key={i} className="whitespace-pre-wrap break-words">{formatTextWithCitations(part.content, query)}</div>;
+        } else if (part.language === 'quiz') {
+          return <QuizCard key={i} content={part.content} />;
         } else {
           return (
             <div key={i} className="my-2 rounded-xl overflow-hidden border border-white/[0.08] bg-[#0c0c10] font-mono text-xs shadow-inner">
@@ -197,7 +253,8 @@ function GeneratedImage({ url, alt }) {
         width={512}
         height={256}
         unoptimized
-        className={`w-full h-auto max-h-64 object-contain transition-opacity duration-300 ${status === 'loaded' ? 'opacity-100' : 'opacity-0 h-0'}`}
+        style={{ width: '100%', height: 'auto' }}
+        className={`max-h-64 object-contain transition-opacity duration-300 ${status === 'loaded' ? 'opacity-100' : 'opacity-0 h-0'}`}
         onLoad={() => setStatus('loaded')}
         onError={() => setStatus('error')}
       />
@@ -666,19 +723,20 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
   useEffect(() => {
     const timer = setTimeout(() => {
       setMounted(true);
-      if (typeof window === 'undefined') return;
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setMessages(parsed);
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem(storageKey);
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setMessages(parsed);
+            }
+          } catch (e) {
+            setMessages([defaultWelcomeMessage]);
           }
-        } catch (e) {
+        } else {
           setMessages([defaultWelcomeMessage]);
         }
-      } else {
-        setMessages([defaultWelcomeMessage]);
       }
     }, 0);
     return () => clearTimeout(timer);
@@ -693,7 +751,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
   }, [messages, storageKey, mounted]);
 
   const [input, setInput] = useState('');
-  const [copilotMood, setCopilotMood] = useState('chat'); // 'chat' | 'agent' | 'plan'
+  const [copilotMode, setCopilotMode] = useState('chat'); // 'chat' | 'agent' | 'plan'
   const [isTyping, setIsTyping] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const bottomRef = useRef(null);
@@ -1262,7 +1320,8 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
     }
 
     try {
-      const historyPayload = messages.map(msg => ({
+      // Only send the last 6 messages to prevent LLM context window overflow (HTTP 413)
+      const historyPayload = messages.slice(-6).map(msg => ({
         role: msg.sender === 'ai' ? 'assistant' : 'user',
         content: msg.text || ''
       }));
@@ -1275,21 +1334,21 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         openrouter: localStorage.getItem('customOpenRouterKey') || ''
       };
 
-      // Copilot Mood Prompt Enhancer
-      let moodPromptPrefix = "";
+      // Copilot Mode Prompt Enhancer
+      let modePromptPrefix = "";
       if (mode === 'project') {
-        if (copilotMood === 'agent') {
-          moodPromptPrefix = "[COPILOT AGENT MODE]: You are an autonomous Full Stack AI Agent. Write full, production-ready code blocks and complete files. If creating or modifying multiple files, clearly specify file paths in code headers so the developer can click Apply Code.\n\n";
-        } else if (copilotMood === 'plan') {
-          moodPromptPrefix = "[COPILOT PLAN MODE]: You are a Software Architect. Before writing code, create a step-by-step architectural breakdown plan with file structure, logic flowchart, and key implementation steps.\n\n";
+        if (copilotMode === 'agent') {
+          modePromptPrefix = "[COPILOT AGENT MODE]: You are an autonomous Full Stack AI Agent. Write full, production-ready code blocks and complete files. If creating or modifying multiple files, clearly specify file paths in code headers so the developer can click Apply Code.\n\n";
+        } else if (copilotMode === 'plan') {
+          modePromptPrefix = "[COPILOT PLAN MODE]: You are a Software Architect. Before writing code, create a step-by-step architectural breakdown plan with file structure, logic flowchart, and key implementation steps.\n\n";
         } else {
-          moodPromptPrefix = "[COPILOT CHAT MODE]: Provide quick, helpful coding advice, debugging hints, and direct answers.\n\n";
+          modePromptPrefix = "[COPILOT CHAT MODE]: Provide quick, helpful coding advice, debugging hints, and direct answers.\n\n";
         }
       }
 
       // Smart Intent Pre-processor (Detects Image, PDF, Email, Code requests)
       const userTextLower = (textInput || '').toLowerCase();
-      const isImageRequest = /\b(image|photo|picture|draw|banao|bana ke do|painting|illustration|diagram|pic)\b/i.test(userTextLower);
+      const isImageRequest = /\b(image|photo|picture|draw|painting|illustration|diagram|pic)\b/i.test(userTextLower);
       const isPdfRequest = /\b(pdf|document|report|resume|paper)\b/i.test(userTextLower);
       
       let intentSuffix = "";
@@ -1300,9 +1359,9 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
       }
 
       const requestPayload = {
-        message: moodPromptPrefix + apiPrompt + intentSuffix,
+        message: modePromptPrefix + apiPrompt + intentSuffix,
         mode: mode,
-        copilotMood: copilotMood,
+        copilotMode: copilotMode,
         history: historyPayload,
         customKeys: customKeys,
         uploadedDocs: uploadedDocs.map(d => ({ name: d.name, content: d.content }))
@@ -1374,7 +1433,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         finalReplyText = finalReplyText.replace(imageTagRegex, `🎨 Generated Image for: "${imagePromptText}"`).trim();
       } else if (isImageRequest) {
         // Fallback: If user asked for an image and AI model didn't return tag, auto-generate image from user's query!
-        const imagePromptText = textInput.replace(/\b(image|photo|picture|draw|banao|bana ke do|painting|illustration|diagram|pic|me|of|a|an)\b/gi, '').trim() || textInput;
+        const imagePromptText = textInput.replace(/\b(image|photo|picture|draw|painting|illustration|diagram|pic|me|of|a|an)\b/gi, '').trim() || textInput;
         const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePromptText)}?width=768&height=512&nologo=true`;
         generatedImages.push(pollinationsUrl);
       }
@@ -1400,8 +1459,8 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         }
       }
 
-      // In Agent Mood, automatically apply multi-file code edits directly to workspace files & run terminal/preview
-      if (mode === 'project' && copilotMood === 'agent' && onWriteCode) {
+      // In Agent Mode, automatically apply multi-file code edits directly to workspace files & run terminal/preview
+      if (mode === 'project' && copilotMode === 'agent' && onWriteCode) {
         // Match code blocks with optional filename header e.g. ```html file="index.html" or // File: app.js
         const codeBlockRegex = /```(?:[a-zA-Z0-9_\-+]+)?(?:\s+(?:file|filename|path)=["']?([a-zA-Z0-9_\-\.\/]+)["']?)?\s*\n([\s\S]*?)```/gi;
         let match;
@@ -1938,16 +1997,16 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
 
         <div className="flex gap-2 items-center bg-bg-card border border-border rounded-xl px-3 py-2 focus-within:border-primary/50 transition-all duration-200">
           {mode === 'project' ? (
-            /* Compact Copilot Mood Select Dropdown */
+            /* Compact Copilot Mode Select Dropdown */
             <select
-              value={copilotMood}
-              onChange={(e) => setCopilotMood(e.target.value)}
+              value={copilotMode}
+              onChange={(e) => setCopilotMode(e.target.value)}
               className="bg-bg-hover text-primary font-bold border border-border rounded-lg px-2 py-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer shrink-0"
-              title="Select Copilot Mood Mode"
+              title="Select Copilot Mode"
             >
-              <option value="chat">💬 Chat Mood</option>
-              <option value="agent">🤖 Agent Mood</option>
-              <option value="plan">✨ Plan Mood</option>
+              <option value="chat">💬 Chat Mode</option>
+              <option value="agent">🤖 Agent Mode</option>
+              <option value="plan">✨ Plan Mode</option>
             </select>
           ) : (
             /* General Chat Voice & Speaker Controls */
@@ -2018,7 +2077,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             onPaste={handlePaste}
-            placeholder={isListening ? "Listening..." : mode === 'project' ? `Copilot [${copilotMood.toUpperCase()}] — type or paste image/file...` : "Message Ai-Dost..."}
+            placeholder={isListening ? "Listening..." : mode === 'project' ? `Copilot [${copilotMode.toUpperCase()}] — type or paste image/file...` : "Message Ai-Dost..."}
             className="flex-1 bg-transparent text-text-primary border-none focus:outline-none focus:ring-0 text-sm min-w-0"
           />
           <button

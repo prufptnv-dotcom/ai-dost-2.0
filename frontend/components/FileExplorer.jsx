@@ -5,6 +5,8 @@ const FileExplorer = ({ files = [], currentFile = '', onSelectFile, onDeleteFile
   const [expandedFolders, setExpandedFolders] = useState({});
   const [showNewFileInput, setShowNewFileInput] = useState(false);
   const [newFileName, setNewFileName] = useState('');
+  const [showNewFolderInput, setShowNewFolderInput] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
 
   // Auto-expand parent folders when active currentFile changes
   // Note: wrapped in setTimeout(,0) to defer state update out of the
@@ -46,6 +48,7 @@ const FileExplorer = ({ files = [], currentFile = '', onSelectFile, onDeleteFile
         let existing = current.children.find(child => child.name === part);
         
         if (!existing) {
+          if (isLast && part === '.keep') return;
           existing = {
             name: part,
             type: isLast ? 'file' : 'folder',
@@ -74,6 +77,16 @@ const FileExplorer = ({ files = [], currentFile = '', onSelectFile, onDeleteFile
     onCreateFile && onCreateFile(newFileName.trim());
     setNewFileName('');
     setShowNewFileInput(false);
+  };
+
+  const handleFolderCreateSubmit = (e) => {
+    e.preventDefault();
+    if (!newFolderName.trim()) return;
+    const folderPath = newFolderName.trim();
+    const finalPath = folderPath.endsWith('/') ? folderPath + '.keep' : folderPath + '/.keep';
+    onCreateFile && onCreateFile(finalPath);
+    setNewFolderName('');
+    setShowNewFolderInput(false);
   };
 
   const renderNode = (node, level = 0) => {
@@ -146,13 +159,22 @@ const FileExplorer = ({ files = [], currentFile = '', onSelectFile, onDeleteFile
         <h3 className="text-xs font-semibold text-text-secondary flex items-center gap-1.5 uppercase tracking-wider">
           <FolderOpen className="w-3.5 h-3.5" /> Workspace
         </h3>
-        <button 
-          className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-secondary transition cursor-pointer"
-          onClick={() => setShowNewFileInput(!showNewFileInput)}
-          title="New File"
-        >
-          <Plus className="w-3.5 h-3.5" />
-        </button>
+        <div className="flex items-center space-x-1">
+          <button 
+            className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-secondary transition cursor-pointer"
+            onClick={() => setShowNewFolderInput(!showNewFolderInput)}
+            title="New Folder"
+          >
+            <Folder className="w-3.5 h-3.5" />
+          </button>
+          <button 
+            className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-secondary transition cursor-pointer"
+            onClick={() => setShowNewFileInput(!showNewFileInput)}
+            title="New File"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       {showNewFileInput && (
@@ -177,6 +199,35 @@ const FileExplorer = ({ files = [], currentFile = '', onSelectFile, onDeleteFile
             onClick={() => {
               setShowNewFileInput(false);
               setNewFileName('');
+            }}
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </form>
+      )}
+
+      {showNewFolderInput && (
+        <form onSubmit={handleFolderCreateSubmit} className="mb-3 flex items-center space-x-1 shrink-0">
+          <input 
+            type="text" 
+            placeholder="folder/subfolder"
+            className="flex-1 bg-bg-hover border border-border p-1.5 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-primary text-text-primary"
+            value={newFolderName}
+            onChange={(e) => setNewFolderName(e.target.value)}
+            autoFocus
+          />
+          <button 
+            type="submit" 
+            className="p-1.5 rounded-lg bg-primary/10 border border-primary/20 text-primary hover:bg-primary hover:text-bg-default text-xs font-semibold cursor-pointer transition"
+          >
+            Add
+          </button>
+          <button 
+            type="button" 
+            className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted cursor-pointer"
+            onClick={() => {
+              setShowNewFolderInput(false);
+              setNewFolderName('');
             }}
           >
             <X className="w-3 h-3" />

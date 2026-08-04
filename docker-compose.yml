@@ -1,34 +1,56 @@
 version: '3.8'
 
 services:
+  mongodb:
+    image: mongo:6.0
+    container_name: ai_dost_mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+
+  redis:
+    image: redis:7.0-alpine
+    container_name: ai_dost_redis
+    restart: always
+    ports:
+      - "6379:6379"
+
   backend:
     build:
-      context: ./backend
+      context: ./memory-brain
       dockerfile: Dockerfile
-    container_name: ai-dost-backend
+    container_name: ai_dost_backend
+    restart: always
     ports:
-      - "3000:3000"
-    env_file:
-      - ./backend/.env
-    restart: unless-stopped
-    networks:
-      - ai-dost-network
+      - "5005:5005"
+    depends_on:
+      - mongodb
+      - redis
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - REDIS_URL=redis://redis:6379
+      - FRONTEND_URL=http://localhost:3001,http://127.0.0.1:3001
+      # IMPORTANT: To use AI features, provide keys in a .env file or uncomment below
+      # - GROQ_API_KEY=your_key
+      # - GEMINI_API_KEY=your_key
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: ai-dost-frontend
+      args:
+        - BACKEND_INTERNAL_URL=http://backend:5005
+    container_name: ai_dost_frontend
+    restart: always
     ports:
-      - "3001:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://backend:3000
+      - "3001:3001"
     depends_on:
       - backend
-    restart: unless-stopped
-    networks:
-      - ai-dost-network
+    environment:
+      - BACKEND_INTERNAL_URL=http://backend:5005
+      - NEXT_PUBLIC_EXPRESS_BACKEND_URL=http://localhost:5005
 
-networks:
-  ai-dost-network:
-    driver: bridge
+volumes:
+  mongodb_data:
