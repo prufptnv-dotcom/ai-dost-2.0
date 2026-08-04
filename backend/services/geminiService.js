@@ -74,6 +74,7 @@ Here is what you can do and what features are available to the user on this plat
                 headers: {
                     'Content-Type': 'application/json'
                 },
+                signal: AbortSignal.timeout(8000),
                 body: JSON.stringify(bodyPayload)
             });
             

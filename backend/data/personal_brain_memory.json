@@ -1,8 +1,17 @@
 {
-  "totalFeedback": 21,
-  "positiveCount": 21,
+  "totalFeedback": 22,
+  "positiveCount": 22,
   "negativeCount": 0,
   "feedbackLogs": [
+    {
+      "id": "1785833820581",
+      "type": "up",
+      "category": "coding",
+      "message": "x",
+      "aiReply": "y",
+      "correction": "",
+      "timestamp": "2026-08-04T08:57:00.581Z"
+    },
     {
       "id": "1785819021395",
       "type": "up",

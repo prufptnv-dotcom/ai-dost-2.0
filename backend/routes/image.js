@@ -18,7 +18,10 @@ router.post('/generate', async (req, res) => {
         const imageUrl = `https://image.pollinations.ai/prompt/${encoded}?width=768&height=512&seed=${Date.now()}&nologo=true`;
 
         // Verify the image URL is accessible (HEAD request)
-        const checkRes = await fetch(imageUrl, { method: 'HEAD' });
+        const checkRes = await fetch(imageUrl, {
+            method: 'HEAD',
+            signal: AbortSignal.timeout(5000)
+        });
 
         if (checkRes.ok) {
             res.json({

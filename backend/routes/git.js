@@ -9,7 +9,7 @@ const WORKSPACE_DIR = path.join(__dirname, '../../');
 
 function runGitCommand(cmd, cwd = WORKSPACE_DIR) {
     return new Promise((resolve, reject) => {
-        exec(cmd, { cwd }, (error, stdout, stderr) => {
+        exec(cmd, { cwd, timeout: 10000 }, (error, stdout, stderr) => {
             if (error) {
                 resolve({ success: false, error: stderr || error.message, stdout: stdout || '' });
             } else {

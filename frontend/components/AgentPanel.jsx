@@ -514,6 +514,10 @@ const AgentPanel = ({
             nvidia:      localStorage.getItem('customNvidiaKey')      || '',
             openrouter:  localStorage.getItem('customOpenRouterKey')  || '',
           }
+        ,
+            // Hint to backend: prefer deterministic local intent handling when possible
+            forceLocal: true,
+            saveToRepo: true
         }),
         signal: controller.signal,
       });

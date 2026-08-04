@@ -18,6 +18,7 @@ const ProjectWorkspace = () => {
   const { id } = router.query;
   const { mode } = useMode();
   const [project, setProject] = useState(null);
+  const [error, setError] = useState('');
   const [currentFile, setCurrentFile] = useState('main.py');
   const [code, setCode] = useState('');
   const [showRightSidebar, setShowRightSidebar] = useState(false);
@@ -35,6 +36,7 @@ const ProjectWorkspace = () => {
     
     const loadProject = async () => {
       try {
+        setError('');
         const data = await fetchProject(id);
         setProject(data);
         
@@ -48,6 +50,7 @@ const ProjectWorkspace = () => {
         }
       } catch (error) {
         console.error('Error loading project:', error);
+        setError(error?.message || 'Error loading project');
       } finally {
         setLoading(false);
       }
@@ -253,6 +256,31 @@ const ProjectWorkspace = () => {
     return (
       <div className="min-h-screen bg-bg-default text-text-primary flex items-center justify-center">
         <div className="text-primary font-bold text-lg animate-pulse">Loading Workspace...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-bg-default text-text-primary flex items-center justify-center px-6">
+        <div className="max-w-lg w-full rounded-3xl border border-red-500/20 bg-red-500/10 p-6 text-center shadow-2xl">
+          <div className="text-lg font-bold text-red-100">Unable to load workspace</div>
+          <div className="mt-2 text-sm text-red-200/90 break-words">{error}</div>
+          <div className="mt-5 flex items-center justify-center gap-3">
+            <button
+              onClick={() => router.reload()}
+              className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-bg-default"
+            >
+              Retry
+            </button>
+            <button
+              onClick={() => router.push('/dashboard')}
+              className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-text-primary"
+            >
+              Back to Dashboard
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

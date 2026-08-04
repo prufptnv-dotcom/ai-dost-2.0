@@ -22,6 +22,7 @@ class HuggingFaceService {
             const response = await fetch(randomModel, {
                 method: 'POST',
                 headers: headers,
+                signal: AbortSignal.timeout(10000),
                 body: JSON.stringify({
                     inputs: `<|user|>\n${message}\n<|assistant|>\n`,
                     parameters: {

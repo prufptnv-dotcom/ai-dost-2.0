@@ -22,6 +22,7 @@ class TogetherService {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${apiKey}`
                 },
+                signal: AbortSignal.timeout(10000),
                 body: JSON.stringify({
                     model: "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
                     messages: [

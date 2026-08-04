@@ -521,6 +521,47 @@ router.post('/run', async (req, res) => {
     try { fs.mkdirSync(workspacePath, { recursive: true }); } catch (_) {}
   }
 
+  // Early force-local handling: UI can hint backend to prefer deterministic
+  // local intent execution (useful when LLMs are offline or to avoid simulated outputs).
+  if (req.body && req.body.forceLocal) {
+    try {
+      const text = (userPrompt || '').trim();
+      // More permissive patterns: capture filename then capture content in quotes
+      const patterns = [
+        /(?:create|write|make)\s+(?:a\s+)?(?:new\s+)?file(?:\s+named)?\s+["']?([^"'\s]+)["']?(?:[\s\S]*?)(?:with|containing|that contains)?\s+["']([\s\S]+?)["']\s*$/i,
+        /(?:file)\s+["']?([^"'\s]+)["']?(?:[\s\S]*?)contains?\s+["']([\s\S]+?)["']\s*$/i,
+        /["']([^"']+\.[a-zA-Z0-9]+)["']\s+with\s+["']([\s\S]+?)["']\s*$/i
+      ];
+      let matched = null;
+      for (const rx of patterns) {
+        const m = text.match(rx);
+        if (m) { matched = m; break; }
+      }
+      if (matched) {
+        const filename = matched[1];
+        const fileContent = matched[2];
+        send({ type: 'thinking', message: '⚡ forceLocal: handling create-file intent locally...' });
+        // Determine target base: repo root if requested, otherwise temp workspace
+        let targetBase = workspacePath;
+        if (req.body.saveToRepo) {
+          try {
+            targetBase = path.resolve(__dirname, '../../');
+          } catch (_) { targetBase = workspacePath; }
+        }
+        const toolResult = await executeTool('write_file', { path: filename, content: fileContent }, targetBase, projectFiles);
+        const stepLog = { step: 1, taskId: 1, thought: 'forceLocal write_file', action: 'write_file', parameters: { path: filename, content: fileContent }, result: toolResult };
+        send({ type: 'step', stepLog });
+        plan.tasks.forEach(t => t.status = 'completed');
+        send({ type: 'plan', plan });
+        send({ type: 'done', message: `✅ forceLocal: ${filename} created`, steps: [stepLog], plan });
+        res.end();
+        return;
+      }
+    } catch (e) {
+      logger.info('[Agent] forceLocal handler error:', e.message || e);
+    }
+  }
+
   // Build file context (RAG: most relevant files via search first)
   let fileContext = '';
   const relevantFiles = searchCodebase(userPrompt, projectFiles).results;
@@ -562,6 +603,50 @@ router.post('/run', async (req, res) => {
         step: step + 1, 
         message: `🧠 Task ${activeTask.id}/${plan.tasks.length}: ${activeTask.title}...` 
       });
+
+      // Simple local intent handler: perform deterministic actions for
+      // straightforward prompts without calling external LLMs. This
+      // improves offline resilience and handles basic user requests.
+      try {
+        const text = (userPrompt || '').trim();
+        // More permissive patterns for runtime local handler
+        const patterns = [
+          /(?:create|write|make)\s+(?:a\s+)?(?:new\s+)?file(?:\s+named)?\s+["']?([^"'\s]+)["']?(?:[\s\S]*?)(?:with|containing|that contains)?\s+["']([\s\S]+?)["']\s*$/i,
+          /(?:file)\s+["']?([^"'\s]+)["']?(?:[\s\S]*?)contains?\s+["']([\s\S]+?)["']\s*$/i,
+          /["']([^"']+\.[a-zA-Z0-9]+)["']\s+with\s+["']([\s\S]+?)["']\s*$/i
+        ];
+
+        let matched = null;
+        for (const rx of patterns) {
+          const m = text.match(rx);
+          if (m) { matched = m; break; }
+        }
+
+        if (matched) {
+          const filename = matched[1];
+          const fileContent = matched[2];
+          send({ type: 'thinking', step: step + 1, message: '⚡ Handling simple "create file" intent locally (no LLM) ...' });
+          const toolResult = await executeTool('write_file', { path: filename, content: fileContent }, workspacePath, projectFiles);
+          const stepLog = {
+            step: step + 1,
+            taskId: activeTaskId,
+            thought: 'Local handler executed: write_file',
+            action: 'write_file',
+            parameters: { path: filename, content: fileContent },
+            result: toolResult
+          };
+          steps.push(stepLog);
+          send({ type: 'step', stepLog });
+          // mark plan completed and finish
+          plan.tasks.forEach(t => t.status = 'completed');
+          send({ type: 'plan', plan });
+          send({ type: 'done', message: `✅ Local intent handled: ${filename} created`, steps, plan });
+          res.end();
+          return;
+        }
+      } catch (localErr) {
+        logger.info('[Agent] Local intent handler error:', localErr?.message || localErr);
+      }
 
       const rawResponse = await callLLM(messages, customKeys, (noticeMsg) => {
         send({ type: 'thinking', step: step + 1, message: noticeMsg });

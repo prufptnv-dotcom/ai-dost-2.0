@@ -22,30 +22,22 @@ api.interceptors.request.use(config => {
   return config;
 });
 
+const buildApiError = (operation, error) => {
+  const status = error?.response?.status;
+  const detail = error?.response?.data?.detail || error?.response?.data?.error || error?.message || 'Unknown API error';
+  const wrapped = new Error(`${operation} failed${status ? ` (${status})` : ''}: ${detail}`);
+  wrapped.status = status;
+  wrapped.detail = detail;
+  wrapped.originalError = error;
+  return wrapped;
+};
+
 export const fetchProjects = async (userId) => {
   try {
     const res = await api.get('/memory/projects', { params: { user_id: userId } });
     return res.data;
   } catch (error) {
-    if (process.env.NODE_ENV === 'development') {
-      console.warn('Memory projects API offline, using local projects list:', error?.message);
-    }
-    return [
-      {
-        project_id: 'proj_demo_1',
-        project_name: 'AI-Dost Interactive Web App',
-        description: 'Glassmorphism Web IDE & Autonomous AI Copilot Workspace',
-        created_at: new Date().toISOString(),
-        status: 'Active'
-      },
-      {
-        project_id: 'proj_demo_2',
-        project_name: 'Python Calculator Engine',
-        description: 'Standalone Python & Glassmorphic Web Calculator App',
-        created_at: new Date().toISOString(),
-        status: 'Completed'
-      }
-    ];
+    throw buildApiError('Load projects', error);
   }
 };
 
@@ -57,15 +49,7 @@ export const createProject = async (projectName, description, userId) => {
     }, { params: { user_id: userId } });
     return res.data;
   } catch (error) {
-    console.warn('Memory project create API offline, creating local project:', error?.message);
-    const newProjId = 'proj_' + Date.now();
-    return {
-      project_id: newProjId,
-      project_name: projectName,
-      description: description || 'New AI-Dost Workspace',
-      created_at: new Date().toISOString(),
-      status: 'Active'
-    };
+    throw buildApiError('Create project', error);
   }
 };
 
@@ -74,22 +58,7 @@ export const fetchProject = async (projectId) => {
     const res = await api.get(`/memory/project/${projectId}`);
     return res.data;
   } catch (error) {
-    // Use actual user_id from localStorage — never fake identity
-    const actualUserId = typeof window !== 'undefined'
-      ? localStorage.getItem('ai_dost_user_id') || null
-      : null;
-    return {
-      project_id: projectId,
-      user_id: actualUserId,
-      project_name: 'AI Dost Workspace',
-      description: 'Interactive Development Sandbox & AI Copilot Workspace',
-      status: 'Development',
-      files: [
-        { path: 'main.py', content: '# Write python code here...\nprint("Hello from AI-Dost Sandbox!")\n' },
-        { path: 'index.html', content: '<!DOCTYPE html>\n<html>\n<head>\n  <link rel="stylesheet" href="style.css">\n</head>\n<body>\n  <div class="container">\n    <h1>Welcome to AI-Dost Sandbox</h1>\n    <p>AI Copilot Workspace is active and ready!</p>\n  </div>\n</body>\n</html>\n' },
-        { path: 'style.css', content: 'body {\n  background: #05060a;\n  color: #06b6d4;\n  font-family: sans-serif;\n  display: flex;\n  justify-content: center;\n  align-items: center;\n  height: 100vh;\n  margin: 0;\n}\n.container {\n  text-align: center;\n  border: 1px solid rgba(6, 182, 212, 0.2);\n  padding: 32px;\n  border-radius: 16px;\n  background: rgba(14, 16, 24, 0.8);\n}\n' }
-      ]
-    };
+    throw buildApiError('Load project', error);
   }
 };
 

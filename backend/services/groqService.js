@@ -50,6 +50,7 @@ Key Response Guidelines:
                     'Authorization': `Bearer ${API_KEY}`,
                     'Content-Type': 'application/json'
                 },
+                signal: AbortSignal.timeout(8000),
                 body: JSON.stringify({
                     model: mode === 'chat' ? 'llama-3.3-70b-versatile' : 'llama-3.1-8b-instant',
                     messages: messagesPayload,
@@ -68,6 +69,7 @@ Key Response Guidelines:
                             'Authorization': `Bearer ${API_KEY}`,
                             'Content-Type': 'application/json'
                         },
+                        signal: AbortSignal.timeout(8000),
                         body: JSON.stringify({
                             model: 'llama-3.1-8b-instant',
                             messages: messagesPayload,

@@ -60,6 +60,7 @@ function StatCard({ icon: Icon, label, value, color, sub, delay }) {
 const Dashboard = () => {
   const { mode } = useMode();
   const [projects, setProjects] = useState([]);
+  const [loadError, setLoadError] = useState('');
   const [learningProgress] = useState([
     { topic: 'Python Basics', description: 'Variables, Lists, Dicts', progress: 85, color: '#06b6d4' },
     { topic: 'FastAPI Development', description: 'Routing & Pydantic schemas', progress: 60, color: '#8b5cf6' },
@@ -75,11 +76,14 @@ const Dashboard = () => {
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
+        setLoadError('');
         let userId = localStorage.getItem('ai_dost_user_id') || 'demo_user_id';
         const data = await fetchProjects(userId);
         setProjects(data || []);
       } catch (err) {
         console.error('Failed to load projects', err);
+        setProjects([]);
+        setLoadError(err?.message || 'Failed to load projects');
       } finally {
         setLoading(false);
       }
@@ -92,6 +96,7 @@ const Dashboard = () => {
     if (!newProjectName.trim()) return;
     setCreating(true);
     try {
+      setLoadError('');
       let userId = localStorage.getItem('ai_dost_user_id') || 'demo_user_id';
       const newProj = await createProject(newProjectName.trim(), newProjectDesc.trim(), userId);
       if (newProj?.project_id) {
@@ -103,6 +108,7 @@ const Dashboard = () => {
       }
     } catch (err) {
       console.error('Failed to create project', err);
+      setLoadError(err?.message || 'Failed to create project');
     } finally {
       setCreating(false);
     }
@@ -174,6 +180,13 @@ const Dashboard = () => {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 {stats.map((s, i) => <StatCard key={i} {...s} />)}
               </div>
+
+              {loadError && (
+                <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                  <div className="font-semibold text-red-100">Project data unavailable</div>
+                  <div className="mt-1 text-red-200/90">{loadError}</div>
+                </div>
+              )}
 
               {/* Projects Grid */}
               {loading ? (

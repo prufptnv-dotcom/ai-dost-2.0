@@ -58,7 +58,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+# app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
@@ -88,6 +88,9 @@ app.include_router(github_router, prefix=settings.API_V1_PREFIX)
 app.include_router(suggestions_router, prefix=settings.API_V1_PREFIX)
 
 # Include AI Coding Assistant Copilot Routers
+from app.api.agent_routes import router as ai_agent_router
+app.include_router(ai_agent_router, prefix="/api/agent")
+
 app.include_router(agentic_router)
 app.include_router(suggestions_ws_router)
 app.include_router(chat_ws_router)

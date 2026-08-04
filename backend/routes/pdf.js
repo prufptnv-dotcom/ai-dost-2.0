@@ -42,7 +42,7 @@ router.post('/generate', async (req, res) => {
         const scriptPath = path.join(__dirname, '../services/pdfGenerator.py');
         
         // Run python script to build PDF
-        exec(`"${pythonCmd}" "${scriptPath}" "${jsonPath}" "${outputPdfPath}"`, (err, stdout, stderr) => {
+        exec(`"${pythonCmd}" "${scriptPath}" "${jsonPath}" "${outputPdfPath}"`, { timeout: 20000 }, (err, stdout, stderr) => {
             // Clean up temp JSON file asynchronously
             try {
                 fs.unlinkSync(jsonPath);

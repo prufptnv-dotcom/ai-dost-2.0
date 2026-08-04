@@ -37,6 +37,7 @@ Always present yourself as AI Dost, speak in a friendly and professional tone, a
                     'Authorization': `Bearer ${API_KEY}`,
                     'Content-Type': 'application/json'
                 },
+                signal: AbortSignal.timeout(8000),
                 body: JSON.stringify({
                     model: 'deepseek-chat',
                     messages: messages,

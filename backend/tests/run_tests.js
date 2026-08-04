@@ -1,47 +1,64 @@
-const http = require('http');
+const { spawn } = require('child_process');
 const path = require('path');
-const fs = require('fs');
 
-const BASE_URL = 'http://localhost:3000';
+const BACKEND_PORT = process.env.BACKEND_PORT || process.env.PORT || '5000';
+const BASE_URL = `http://localhost:${BACKEND_PORT}`;
+const BACKEND_DIR = path.resolve(__dirname, '..');
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function isServerHealthy() {
+  try {
+    const res = await makeRequest('/health');
+    return res.status === 200 && res.data?.status === 'OK';
+  } catch (error) {
+    return false;
+  }
+}
+
+async function ensureServerRunning() {
+  if (await isServerHealthy()) {
+    return null;
+  }
+
+  const serverProcess = spawn('node', ['server.js'], {
+    cwd: BACKEND_DIR,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  serverProcess.stdout.on('data', (chunk) => process.stdout.write(chunk));
+  serverProcess.stderr.on('data', (chunk) => process.stderr.write(chunk));
+
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    if (await isServerHealthy()) {
+      return serverProcess;
+    }
+    await sleep(500);
+  }
+
+  serverProcess.kill();
+  throw new Error(`Backend server did not become healthy on ${BASE_URL}`);
+}
 
 function makeRequest(urlPath, method = 'GET', body = null) {
-  return new Promise((resolve, reject) => {
-    const url = new URL(urlPath, BASE_URL);
-    const options = {
-      hostname: url.hostname,
-      port: url.port,
-      path: url.pathname + url.search,
-      method: method,
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    };
-
-    const req = http.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => {
-        data += chunk;
-        req.setTimeout(30000); // Reset activity timeout on each chunk received
-      });
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(data);
-          resolve({ status: res.statusCode, data: parsed });
-        } catch (e) {
-          resolve({ status: res.statusCode, data: { raw: data } });
-        }
-      });
-    });
-
-    req.setTimeout(30000, () => {
-      req.destroy(new Error('Request timed out after 30 seconds'));
-    });
-
-    req.on('error', (err) => reject(err));
-    if (body) {
-      req.write(JSON.stringify(body));
+  const url = new URL(urlPath, BASE_URL);
+  return fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(15000)
+  }).then(async (res) => {
+    const text = await res.text();
+    try {
+      return { status: res.status, data: text ? JSON.parse(text) : {} };
+    } catch (e) {
+      return { status: res.status, data: { raw: text } };
     }
-    req.end();
+  }).catch((err) => {
+    throw new Error(`${method} ${urlPath} failed: ${err?.cause?.code || err?.name || err?.message}`);
   });
 }
 
@@ -52,6 +69,19 @@ async function runAllBackendTests() {
 
   let passed = 0;
   let failed = 0;
+  let serverProcess = null;
+  let serverStartedByTest = false;
+
+  try {
+    const healthyBeforeStart = await isServerHealthy();
+    if (!healthyBeforeStart) {
+      serverProcess = await ensureServerRunning();
+      serverStartedByTest = true;
+    }
+  } catch (error) {
+    console.error(`💥 Unable to start backend server: ${error.message}`);
+    process.exit(1);
+  }
 
   async function test(name, fn) {
     try {
@@ -179,10 +209,15 @@ async function runAllBackendTests() {
   console.log(`📊 SUMMARY: ${passed} PASSED, ${failed} FAILED`);
   console.log('=================================================\n');
 
+  if (serverStartedByTest && serverProcess) {
+    serverProcess.kill();
+  }
+
   if (failed > 0) process.exit(1);
 }
 
-runAllBackendTests().catch(err => {
-  console.error('💥 Test suite crashed:', err);
-  process.exit(1);
-});
+runAllBackendTests()
+  .catch(err => {
+    console.error('💥 Test suite crashed:', err);
+    process.exit(1);
+  });

@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     SENTRY_DSN: Optional[str] = None
     LOG_LEVEL: str = "INFO"
 
+    # 🔴 LLM API Keys
+    GROQ_API_KEY: Optional[str] = None
+    GEMINI_API_KEY: Optional[str] = None
+    DEEPSEEK_API_KEY: Optional[str] = None
+    NVIDIA_API_KEY: Optional[str] = None
+    OPENROUTER_API_KEY: Optional[str] = None
+
     # Pydantic V2 style config
     model_config = {
         "env_file": ".env",  # Auto-load from .env file
