@@ -21,8 +21,8 @@ RUN pip install --upgrade pip && \
 # Copy project
 COPY . .
 
-# Expose port
+# Expose port (Optional, Render overrides this)
 EXPOSE 5005
 
-# Start Gunicorn with Uvicorn workers
-CMD ["gunicorn", "app.main:app", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:5005", "--timeout", "120", "--keep-alive", "65"]
+# Start Gunicorn with 1 worker to save memory on Render's free tier, and bind to the PORT environment variable.
+CMD gunicorn app.main:app --workers 1 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-5005} --timeout 120 --keep-alive 65
