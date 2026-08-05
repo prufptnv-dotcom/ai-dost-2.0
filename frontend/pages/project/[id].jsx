@@ -2,16 +2,24 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { FileText, Folder, FolderOpen, Plus, Trash2, X, PanelRightOpen, PanelRightClose, Info, Bot, MessageSquare } from 'lucide-react';
-import CodeEditor from '../../components/CodeEditor';
-import ProjectDetails from '../../components/ProjectDetails';
-import AICompanion from '../../components/AICompanion';
-import Header from '../../components/Header';
 import { fetchProject, addProjectFile, deleteProjectFile, saveProjectFile } from '../../services/api';
+import ProjectDetails from '../../components/ProjectDetails';
+import Header from '../../components/Header';
 import { useSocket } from '../../context/SocketContext';
 import { useToast } from '../../context/ToastContext';
 import FileExplorer from '../../components/FileExplorer';
 import { useMode } from '../../context/ModeContext';
 import AgentPanel from '../../components/AgentPanel';
+import dynamic from 'next/dynamic';
+
+const CodeEditor = dynamic(() => import('../../components/CodeEditor'), { 
+  ssr: false, 
+  loading: () => <div className="animate-pulse w-full h-full bg-white/5" /> 
+});
+const AICompanion = dynamic(() => import('../../components/AICompanion'), { 
+  ssr: false, 
+  loading: () => <div className="animate-pulse w-full h-full bg-white/5 rounded-2xl border border-white/10" /> 
+});
 
 const ProjectWorkspace = () => {
   const router = useRouter();

@@ -6,9 +6,14 @@ import {
   Terminal, Bot, Activity, Star
 } from 'lucide-react';
 import ProjectCard from '../components/ProjectCard';
-import AICompanion from '../components/AICompanion';
 import Header from '../components/Header';
 import { fetchProjects, createProject } from '../services/api';
+import dynamic from 'next/dynamic';
+
+const AICompanion = dynamic(() => import('../components/AICompanion'), { 
+  ssr: false, 
+  loading: () => <div className="animate-pulse w-full h-full bg-white/5 rounded-2xl border border-white/10" /> 
+});
 import { useMode } from '../context/ModeContext';
 
 /* ─── Animated Progress Bar ─── */
