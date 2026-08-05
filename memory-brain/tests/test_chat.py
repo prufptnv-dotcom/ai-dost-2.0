@@ -9,7 +9,7 @@ def test_chat_endpoint(mock_call_llm):
     
     with TestClient(app) as client:
         response = client.post(
-            "/api/v1/chat",
+            "/api/chat",
             json={"message": "Hello AI", "model": "auto", "history": []}
         )
         
@@ -24,7 +24,7 @@ def test_chat_endpoint_error_handling(mock_call_llm):
     
     with TestClient(app) as client:
         response = client.post(
-            "/api/v1/chat",
+            "/api/chat",
             json={"message": "Hello AI", "model": "auto", "history": []}
         )
     
