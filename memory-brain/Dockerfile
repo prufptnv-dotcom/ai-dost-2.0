@@ -25,4 +25,4 @@ COPY . .
 EXPOSE 5005
 
 # Start Gunicorn with 1 worker to save memory on Render's free tier, and bind to the PORT environment variable.
-CMD gunicorn app.main:app --workers 1 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-5005} --timeout 120 --keep-alive 65
+CMD gunicorn app.main:app --workers 1 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-5005} --timeout 600 --keep-alive 65
