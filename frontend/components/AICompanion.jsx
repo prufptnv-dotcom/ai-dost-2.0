@@ -970,7 +970,8 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
   useEffect(() => {
     const fetchLocalModels = async () => {
       try {
-        const res = await fetch('/api/chat/local-models');
+        const baseUrl = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/api\/v1\/?$/, '') || 'http://localhost:5005';
+        const res = await fetch(`${baseUrl}/api/chat/local-models`);
         const data = await res.json();
         if (data.success && data.models) {
           setLocalModels(data.models);
