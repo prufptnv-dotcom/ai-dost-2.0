@@ -4,11 +4,16 @@
  * local dev (ws://) and production (wss://) without code changes.
  */
 
-const WS_BASE_URL =
-  process.env.NEXT_PUBLIC_GO_WS_URL ||
-  (typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-    ? `wss://${typeof window !== 'undefined' ? window.location.host : ''}`
-    : 'ws://localhost:5000');
+const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
+let defaultWs = 'ws://localhost:5000';
+
+if (apiBase) {
+  defaultWs = apiBase.replace(/^http/, 'ws').replace(/\/api\/v1\/?$/, '');
+} else if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
+  defaultWs = `wss://${window.location.host}`;
+}
+
+const WS_BASE_URL = process.env.NEXT_PUBLIC_GO_WS_URL || defaultWs;
 
 export const initWebSocket = (projectId, token, onMessage, onError, onDisconnect) => {
   if (!projectId) {

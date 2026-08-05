@@ -3,7 +3,7 @@ import Editor from '@monaco-editor/react';
 import { Terminal, Play, RotateCcw, Eye, EyeOff, Wand2, X, Copy, Trash2, Loader2 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useSocket } from '../context/SocketContext';
-import api, { executeCode } from '../services/api';
+import api, { executeCode, API_HOST } from '../services/api';
 import { calculateOperations, applyOperations } from '../lib/ot';
 import AISuggestionPanel from './AISuggestionPanel';
 
@@ -156,7 +156,7 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
         customKeys: customKeys
       };
 
-      const res = await fetch('/api/chat', {
+      const res = await fetch(`${API_HOST}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

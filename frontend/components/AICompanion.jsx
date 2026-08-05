@@ -3,6 +3,7 @@ import Image from 'next/image';
 import { useMode } from '../context/ModeContext';
 import { useToast } from '../context/ToastContext';
 import { logger } from '../utils/logger';
+import { API_HOST } from '../services/api';
 import { Mic, MicOff, Volume2, VolumeX, Bot, Phone, Paperclip, Send, Library, Zap, CheckCircle, ImageIcon, FileText, X, ChevronLeft, Loader2, Play, Square, History, Trash2, MessageSquare, Sparkles, Image as ImageIconLucide, Plus, Copy, ThumbsUp, ThumbsDown, Maximize2, Minimize2, MoveHorizontal } from 'lucide-react';
 
 // Extract image URLs from AI text
@@ -1147,7 +1148,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         payload.section = 'coding';
       }
 
-      const res = await fetch('/api/chat', {
+      const res = await fetch(`${API_HOST}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -1378,7 +1379,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         requestPayload.section = 'coding';
       }
 
-      const response = await fetch('/api/chat', {
+      const response = await fetch(`${API_HOST}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestPayload),
@@ -1406,7 +1407,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         const pdfContent = innerContent.length > (cleanChatText.length * 0.7) ? innerContent : cleanChatText;
         
         try {
-          const pdfRes = await fetch('/api/pdf/generate', {
+          const pdfRes = await fetch(`${API_HOST}/api/pdf/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title: pdfTitle, content: pdfContent })

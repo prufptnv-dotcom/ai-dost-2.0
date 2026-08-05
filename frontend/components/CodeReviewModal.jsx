@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Shield, ShieldAlert, ShieldCheck, Zap, Sparkles, X, Check, Copy, RefreshCw } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
+import { API_HOST } from '../services/api';
 
 export default function CodeReviewModal({ isOpen, onClose, currentCode, currentFile, onApplyPatch }) {
   const [analyzing, setAnalyzing] = useState(false);
@@ -19,7 +20,7 @@ export default function CodeReviewModal({ isOpen, onClose, currentCode, currentF
     setAuditReport(null);
 
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch(`${API_HOST}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
