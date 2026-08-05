@@ -1,0 +1,106 @@
+[
+  {
+    "name": "Test User 1",
+    "skill_level": "intermediate",
+    "current_stack": [],
+    "learning_goals": [],
+    "preferences": null,
+    "hardware_specs": null,
+    "daily_coding_hours": 2.0,
+    "project_type": "solo",
+    "goal": "learning",
+    "github_username": "test_user_1",
+    "password_hash": "$2b$12$wi/T8skxbrbNMUHJKGgNNuxr.CpvlX83hgxpIVQld71gVsEFzQO/y",
+    "user_id": "67bc76fa-15f1-4c8d-9e2c-79858b73f0fe",
+    "total_projects": 0,
+    "total_learning_days": 0,
+    "created_at": "2026-08-05 08:16:20.202921",
+    "updated_at": "2026-08-05 08:16:20.202921"
+  },
+  {
+    "name": "Test User 2",
+    "skill_level": "intermediate",
+    "current_stack": [],
+    "learning_goals": [],
+    "preferences": null,
+    "hardware_specs": null,
+    "daily_coding_hours": 2.0,
+    "project_type": "solo",
+    "goal": "learning",
+    "github_username": "test_user_2",
+    "password_hash": "$2b$12$5CNbWcQAQscvMSMz/rdSjObn/lXrRVHzIxpCaUaKT77kEufzkb9NG",
+    "user_id": "ca1548df-2038-435a-9de9-1de14abad7eb",
+    "total_projects": 0,
+    "total_learning_days": 0,
+    "created_at": "2026-08-05 08:16:21.222672",
+    "updated_at": "2026-08-05 08:16:21.222672"
+  },
+  {
+    "name": "Test User 3",
+    "skill_level": "intermediate",
+    "current_stack": [],
+    "learning_goals": [],
+    "preferences": null,
+    "hardware_specs": null,
+    "daily_coding_hours": 2.0,
+    "project_type": "solo",
+    "goal": "learning",
+    "github_username": "test_user_3",
+    "password_hash": "$2b$12$WM463hIkTrRLgNo.phq/5.XNtpKapKtUN33F392oaQNV6BT2IcoMi",
+    "user_id": "6b57cbd8-35e9-4ff6-91c7-1ccc18fc157b",
+    "total_projects": 0,
+    "total_learning_days": 0,
+    "created_at": "2026-08-05 08:16:50.687598",
+    "updated_at": "2026-08-05 08:16:50.687598"
+  },
+  {
+    "name": "Test User 4",
+    "skill_level": "intermediate",
+    "current_stack": [],
+    "learning_goals": [],
+    "preferences": null,
+    "hardware_specs": null,
+    "daily_coding_hours": 2.0,
+    "project_type": "solo",
+    "goal": "learning",
+    "github_username": "test_user_4",
+    "password_hash": "$2b$12$Xf7hB9818bnJYMyE1O9wKuLYzGzf5R4n4HIjc/EB3IzKXfZfhI9AG",
+    "user_id": "e7792b4a-7163-4e5e-843f-ffec930bdd01",
+    "total_projects": 0,
+    "total_learning_days": 0,
+    "created_at": "2026-08-05 08:16:53.231094",
+    "updated_at": "2026-08-05 08:16:53.231094"
+  },
+  {
+    "user_id": "demo_user_id",
+    "name": "Demo User",
+    "skill_level": "intermediate",
+    "current_stack": [],
+    "learning_goals": [
+      "FastAPI",
+      "React"
+    ],
+    "preferences": {
+      "favorite_colors": [
+        "blue"
+      ],
+      "coding_style": "clean_code",
+      "naming_convention": "PascalCase",
+      "editor": "VS Code",
+      "theme": "dark"
+    },
+    "hardware_specs": {
+      "ram": "16GB",
+      "os": "Windows",
+      "cpu": null
+    },
+    "daily_coding_hours": 2.0,
+    "project_type": "solo",
+    "goal": "learning",
+    "github_username": null,
+    "total_projects": 0,
+    "total_learning_days": 1,
+    "created_at": "2026-08-05 08:16:53.734948",
+    "updated_at": "2026-08-05 08:16:53.734948"
+  }
+]

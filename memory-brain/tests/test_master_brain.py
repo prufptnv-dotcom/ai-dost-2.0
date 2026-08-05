@@ -1,7 +1,9 @@
 import os
-os.environ["MONGODB_URL"] = "mongodb://localhost:27017"
-os.environ["DATABASE_NAME"] = "ai_dost_test"
-
+# Only set defaults if not running in CI/CD
+if "MONGODB_URL" not in os.environ:
+    os.environ["MONGODB_URL"] = "mongodb://localhost:27017"
+if "DATABASE_NAME" not in os.environ:
+    os.environ["DATABASE_NAME"] = "ai_dost_test"
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
