@@ -199,7 +199,7 @@ class MongoDB:
                 settings.MONGODB_URL,
                 maxPoolSize=20,
                 minPoolSize=5,
-                serverSelectionTimeoutMS=500  # 0.5 sec fast timeout
+                serverSelectionTimeoutMS=5000  # 5 sec timeout to allow Atlas SSL handshake in production
             )
             cls.db = cls.client[settings.DATABASE_NAME]
             await cls.client.admin.command('ping')
