@@ -122,4 +122,4 @@ async def read_root(current_user: UserResponse = Depends(get_current_active_user
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "ok", "version": "1.0.0"}
+    return {"status": "healthy", "version": "1.0.0"}

@@ -1,0 +1,49 @@
+[
+  {
+    "project_name": "Test Project",
+    "description": "Test description which is long enough to pass validation schema.",
+    "tech_stack": [],
+    "architecture": "# Architecture",
+    "folder_structure": "# Folder Structure",
+    "features": [],
+    "errors_faced": [],
+    "deployment": {},
+    "github_repo": null,
+    "project_type": "mvp",
+    "collaborators": [],
+    "user_id": "a8dea41d-d461-4253-8908-936a6840d7d6",
+    "project_id": "9d1c96bf-e565-4bbf-8b84-13086367bc22",
+    "created_at": "2026-08-05 08:28:34.596274",
+    "updated_at": "2026-08-05 08:28:34.596274"
+  },
+  {
+    "project_name": "Test Project Files",
+    "description": "Test description which is long enough to pass validation schema.",
+    "tech_stack": [],
+    "architecture": "# Architecture",
+    "folder_structure": "# Folder Structure",
+    "features": [],
+    "errors_faced": [],
+    "deployment": {},
+    "github_repo": null,
+    "project_type": "mvp",
+    "collaborators": [],
+    "user_id": "4b87d54c-e814-48f4-815f-cb9c7208708b",
+    "project_id": "86f320e6-5bfa-4092-80e9-884d975cc55e",
+    "created_at": "2026-08-05 08:28:48.943708",
+    "updated_at": "2026-08-05 08:28:49.042212",
+    "files": [],
+    "version_history": [
+      {
+        "file_path": "test_file.py",
+        "versions": [
+          {
+            "timestamp": "2026-08-05T08:28:49.022202",
+            "content": "print('hello world')",
+            "user_id": "demo_user_id"
+          }
+        ]
+      }
+    ]
+  }
+]
