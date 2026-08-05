@@ -8,7 +8,13 @@ class RedisCache:
     @classmethod
     async def connect(cls):
         try:
-            cls.client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+            cls.client = aioredis.from_url(
+                settings.REDIS_URL, 
+                decode_responses=True,
+                socket_connect_timeout=5.0,
+                socket_timeout=5.0,
+                ssl_cert_reqs="none"
+            )
             # Test ping
             await cls.client.ping()
             print(f"[OK] Connected to Redis successfully: {settings.REDIS_URL}")
