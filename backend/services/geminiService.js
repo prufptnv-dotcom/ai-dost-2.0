@@ -1,18 +1,40 @@
 const logger = require('../logger');
+const { RobustApiClient } = require('./apiClient');
 
 class GeminiService {
+    constructor() {
+        this.client = new RobustApiClient({
+            baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+            serviceName: 'Gemini',
+            timeout: 15000,
+            maxRetries: 3,
+            retryDelay: 1000,
+            rateLimiter: {
+                maxRequests: 50,
+                windowMs: 60000
+            },
+            circuitBreaker: {
+                failureThreshold: 5,
+                timeout: 60000
+            }
+        });
+    }
+
     static async chat(message, history = [], fileContent = null, mode = 'project', customApiKey = null) {
+        const instance = new GeminiService();
+        return instance._chat(message, history, fileContent, mode, customApiKey);
+    }
+
+    async _chat(message, history = [], fileContent = null, mode = 'project', customApiKey = null) {
         try {
             const API_KEY = customApiKey || process.env.GEMINI_API_KEY;
             if (!API_KEY || API_KEY === 'your_gemini_key') {
                 logger.error('❌ GEMINI API Key not found or still default!');
-                return 'Gemini API key set nahi hai. settings icon pe click karke apni custom key enter karein.';
+                return 'Gemini API key set nahi hai. Settings icon pe click karke apni custom key enter karein.';
             }
 
-            const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
-            
             const contents = [];
-            
+
             if (history && history.length > 0) {
                 history.forEach(item => {
                     contents.push({
@@ -21,19 +43,17 @@ class GeminiService {
                     });
                 });
             }
-            
+
             const currentParts = [{ text: message }];
             if (fileContent) {
                 currentParts.unshift({ text: `File content: ${fileContent}` });
             }
-            
+
             contents.push({
                 role: 'user',
                 parts: currentParts
             });
-            
-            logger.info('🔄 Calling Gemini API...');
-            
+
             let systemPrompt = '';
             if (mode === 'chat') {
                 systemPrompt = `You are AI Dost, a friendly and helpful general coding assistant.
@@ -60,7 +80,6 @@ Here is what you can do and what features are available to the user on this plat
 10. PDF Generation: If the user asks you to generate, write, or export a PDF document or research paper, write the content inside tags '[GENERATE_PDF: Title]' and '[/GENERATE_PDF]'.
 11. Language & Grammar Rule (STRICT): Always respond in clean, natural, grammatically flawless language matching the user's prompt. Never write typos, broken words, or self-deprecating system disclaimers. Always present yourself as an expert Senior Software Engineer AI.`;
             } else if (mode === 'agent') {
-                // Agent ReAct mode — do not inject chat system prompt
                 systemPrompt = '';
             }
 
@@ -69,32 +88,60 @@ Here is what you can do and what features are available to the user on this plat
                 bodyPayload.systemInstruction = { parts: [{ text: systemPrompt }] };
             }
 
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                signal: AbortSignal.timeout(8000),
-                body: JSON.stringify(bodyPayload)
-            });
-            
-            if (!response.ok) {
-                const errorText = await response.text();
-                logger.error('❌ Gemini API Error:', response.status, errorText);
-                return `Gemini API error (${response.status}): ${errorText}`;
+            // Try multiple models in order — free tier quota varies per model/key
+            const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+            let lastError = null;
+
+            for (const model of models) {
+                const endpoint = `/models/${model}:generateContent?key=${API_KEY}`;
+                try {
+                    const result = await this.client.post(endpoint, bodyPayload);
+
+                    logger.info(`✅ Gemini response received (model: ${model})`);
+
+                    if (result.data.candidates && result.data.candidates[0] && result.data.candidates[0].content) {
+                        return result.data.candidates[0].content.parts[0].text;
+                    } else {
+                        return 'Gemini response decode nahi ho paya.';
+                    }
+                } catch (error) {
+                    lastError = error;
+                    if (error.status === 429) {
+                        logger.warn(`⚠️ Gemini model ${model} rate limited, trying next model...`);
+                        continue;
+                    }
+                    if (error.status === 404) {
+                        logger.warn(`⚠️ Gemini model ${model} not available, trying next model...`);
+                        continue;
+                    }
+                    // Non-retryable error — break and report
+                    break;
+                }
             }
 
-            const data = await response.json();
-            logger.info('✅ Gemini response received');
-            
-            if (data.candidates && data.candidates[0] && data.candidates[0].content) {
-                return data.candidates[0].content.parts[0].text;
-            } else {
-                return 'Gemini response decode nahi ho paya.';
+            // All models failed
+            if (lastError?.status === 429) {
+                throw new Error('RATE_LIMIT: ' + lastError.message);
             }
-            
+            if (lastError?.lastError) {
+                const le = lastError.lastError;
+                logger.error('❌ Gemini API Error:', le.status, le.message);
+                throw new Error(`${le.status}: ${le.message}`);
+            }
+            logger.error('❌ Gemini API Error:', lastError?.status || 500, lastError?.message);
+            throw new Error(`${lastError?.status || 500}: ${lastError?.message}`);
+
         } catch (error) {
             logger.error('❌ Gemini Service Error:', error.message);
+
+            if (error.message.includes('RATE_LIMIT')) {
+                return 'GEMINI_RATE_LIMITED';
+            }
+
+            if (error.message.includes('Circuit breaker')) {
+                return 'GEMINI_CIRCUIT_OPEN';
+            }
+
             return 'Gemini service me error: ' + error.message;
         }
     }

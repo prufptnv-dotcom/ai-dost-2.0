@@ -13,11 +13,22 @@ const COLORS = {
   cyan:   '\x1b[36m',
   yellow: '\x1b[33m',
   red:    '\x1b[31m',
+  green:  '\x1b[32m',
   bold:   '\x1b[1m',
 };
 
 const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
 const MIN_LEVEL = IS_PROD ? LEVELS.warn : LEVELS.debug;
+
+// Metrics tracking
+const metrics = {
+  requests: 0,
+  errors: 0,
+  rateLimits: 0,
+  fallbacks: 0,
+  modelUsage: {},
+  responseTimes: []
+};
 
 function timestamp() {
   return new Date().toISOString();
@@ -59,6 +70,36 @@ function createLogger(label = '') {
         `${method} ${url} ${color}${status}${COLORS.reset} (${ms}ms)`
       );
     },
+    /** Metrics tracking */
+    metric: {
+      request: (model) => {
+        metrics.requests++;
+        if (model) {
+          metrics.modelUsage[model] = (metrics.modelUsage[model] || 0) + 1;
+        }
+      },
+      error: () => { metrics.errors++; },
+      rateLimit: () => { metrics.rateLimits++; },
+      fallback: () => { metrics.fallbacks++; },
+      responseTime: (ms) => { 
+        metrics.responseTimes.push(ms);
+        if (metrics.responseTimes.length > 1000) metrics.responseTimes.shift();
+      },
+      get: () => ({
+        ...metrics,
+        avgResponseTime: metrics.responseTimes.length > 0 
+          ? Math.round(metrics.responseTimes.reduce((a,b) => a+b, 0) / metrics.responseTimes.length)
+          : 0
+      }),
+      reset: () => {
+        metrics.requests = 0;
+        metrics.errors = 0;
+        metrics.rateLimits = 0;
+        metrics.fallbacks = 0;
+        metrics.modelUsage = {};
+        metrics.responseTimes = [];
+      }
+    }
   };
 }
 

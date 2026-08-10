@@ -1,16 +1,39 @@
 const logger = require('../logger');
+const { RobustApiClient } = require('./apiClient');
 
 class GroqService {
+    constructor() {
+        this.client = new RobustApiClient({
+            baseUrl: 'https://api.groq.com/openai/v1',
+            serviceName: 'Groq',
+            timeout: 15000,
+            maxRetries: 3,
+            retryDelay: 1000,
+            rateLimiter: {
+                maxRequests: 20,
+                windowMs: 60000
+            },
+            circuitBreaker: {
+                failureThreshold: 5,
+                timeout: 60000
+            }
+        });
+    }
+
     static async chat(message, history = [], mode = 'project', customApiKey = null) {
+        const instance = new GroqService();
+        return instance._chat(message, history, mode, customApiKey);
+    }
+
+    async _chat(message, history = [], mode = 'project', customApiKey = null) {
         try {
             const API_KEY = customApiKey || process.env.GROQ_API_KEY;
-            
+
             if (!API_KEY || API_KEY === 'gsk_your_key_here') {
                 logger.error('❌ GROQ API Key not found or still default!');
-                return 'Groq API key set nahi hai. settings icon pe click karke apni custom key enter karein.';
+                return 'Groq API key set nahi hai. Settings icon pe click karke apni custom key enter karein.';
             }
-            logger.info('🔄 Calling Groq API...');
-            
+
             let systemPrompt = '';
             if (mode === 'chat') {
                 systemPrompt = `You are AI-Dost, an ultra-intelligent Senior Software Engineer and Multimodal AI Assistant.
@@ -31,7 +54,6 @@ Key Response Guidelines:
    - PDF / DOCUMENT: Format printable documents as \`[GENERATE_PDF: Title] Content [/GENERATE_PDF]\`.
 3. Language & Grammar: Respond in clean, natural, grammatically flawless language matching user preference.`;
             } else if (mode === 'agent') {
-                // Agent ReAct mode — do not inject chat system prompt so LLM responds strictly with tool JSON
                 systemPrompt = '';
             }
 
@@ -44,56 +66,64 @@ Key Response Guidelines:
             }
             messagesPayload.push({ role: 'user', content: message });
 
-            const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${API_KEY}`,
-                    'Content-Type': 'application/json'
-                },
-                signal: AbortSignal.timeout(8000),
-                body: JSON.stringify({
-                    model: mode === 'chat' ? 'llama-3.3-70b-versatile' : 'llama-3.1-8b-instant',
-                    messages: messagesPayload,
-                    temperature: 0.1,
-                    max_tokens: 2500
-                })
-            });
+            const primaryModel = mode === 'chat' ? 'llama-3.3-70b-versatile' : 'llama-3.1-8b-instant';
+            const fallbackModel = 'llama-3.1-8b-instant';
 
-            if (!response.ok) {
-                // Automatic 429 Rate Limit fallback
-                if (response.status === 429) {
-                    logger.info('⚠️ Groq rate limited, retrying with llama-3.1-8b-instant model...');
-                    const retryRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${API_KEY}`,
-                            'Content-Type': 'application/json'
-                        },
-                        signal: AbortSignal.timeout(8000),
-                        body: JSON.stringify({
-                            model: 'llama-3.1-8b-instant',
-                            messages: messagesPayload,
-                            temperature: 0.1,
-                            max_tokens: 2500
-                        })
+            const tryModel = async (model) => {
+                try {
+                    const result = await this.client.post('/chat/completions', {
+                        model,
+                        messages: messagesPayload,
+                        temperature: 0.1,
+                        max_tokens: 2500
+                    }, {
+                        'Authorization': `Bearer ${API_KEY}`
                     });
-                    if (retryRes.ok) {
-                        const retryData = await retryRes.json();
-                        logger.info('✅ Groq 8b fallback response received');
-                        return retryData.choices[0].message.content;
+
+                    // New client throws on error, so if we get here, it's success
+                    return result.data.choices[0].message.content;
+                } catch (error) {
+                    // Convert thrown error to result format for compatibility
+                    if (error.status === 429 && error.retryable) {
+                        throw new Error(`RATE_LIMIT: ${error.message}`);
+                    }
+                    if (error.lastError) {
+                        const le = error.lastError;
+                        throw new Error(`${le.status}: ${le.message}`);
+                    }
+                    throw new Error(`${error.status || 500}: ${error.message}`);
+                }
+            };
+
+            try {
+                logger.info(`🔄 Calling Groq API with model: ${primaryModel}`);
+                return await tryModel(primaryModel);
+            } catch (primaryError) {
+                if (primaryError.message.includes('RATE_LIMIT') && primaryModel !== fallbackModel) {
+                    logger.info('⚠️ Groq rate limited on primary model, retrying with fallback model...');
+                    try {
+                        return await tryModel(fallbackModel);
+                    } catch (fallbackError) {
+                        if (fallbackError.message.includes('RATE_LIMIT')) {
+                            throw new Error('RATE_LIMIT_EXCEEDED: Both primary and fallback models rate limited');
+                        }
+                        throw fallbackError;
                     }
                 }
-                const errorText = await response.text();
-                logger.error('❌ Groq API Error:', response.status, errorText);
-                return `Groq API error (${response.status}): ${errorText}`;
+                throw primaryError;
             }
 
-            const data = await response.json();
-            logger.info('✅ Groq response received');
-            return data.choices[0].message.content;
-            
         } catch (error) {
             logger.error('❌ Groq Service Error:', error.message);
+            
+            if (error.message.includes('RATE_LIMIT')) {
+                return 'GROQ_RATE_LIMITED';
+            }
+            
+            if (error.message.includes('Circuit breaker')) {
+                return 'GROQ_CIRCUIT_OPEN';
+            }
+            
             return 'Groq service me error: ' + error.message;
         }
     }

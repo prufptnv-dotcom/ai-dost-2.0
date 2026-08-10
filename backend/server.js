@@ -124,6 +124,17 @@ app.get('/health', (req, res) => {
     });
 });
 
+// Metrics endpoint
+app.get('/metrics', (req, res) => {
+    res.json({
+        success: true,
+        metrics: logger.metric.get(),
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        timestamp: new Date().toISOString()
+    });
+});
+
 // 404 handler for unknown API endpoints
 app.use((req, res, next) => {
     if (req.path.startsWith('/api')) {

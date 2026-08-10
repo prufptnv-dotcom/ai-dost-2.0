@@ -22,6 +22,7 @@ pydantic-settings==2.1.0  # Env variables
 python-dotenv==1.0.0   # .env file reader
 httpx==0.26.0          # Async HTTP client
 python-multipart==0.0.6  # File upload support
+google-genai==0.2.0    # Gemini Robotics SDK
 
 # Development
 pytest==8.0.0

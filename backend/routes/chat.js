@@ -10,6 +10,41 @@ const OpenRouterService = require('../services/openrouterService');
 const MistralService = require('../services/mistralService');
 const TogetherService = require('../services/togetherService');
 
+// Helper to check if response indicates rate limit or error
+function isRateLimitedOrError(response) {
+    if (!response || typeof response !== 'string') return false;
+    const errorIndicators = [
+        'RATE_LIMIT',
+        'CIRCUIT_OPEN',
+        'rate_limit',
+        '429',
+        '413',
+        'Quota exceeded',
+        'quota exceeded',
+        'API error',
+        'API Error',
+        'key set nahi hai',
+        'service me error',
+        'service error',
+        'Service Error',
+        'temporarily unavailable',
+        'unexpected response',
+        'not found',
+        'All models unavailable',
+        'Max retries exceeded'
+    ];
+    return errorIndicators.some(indicator => response.includes(indicator));
+}
+
+// Helper to check if response is a valid AI response
+function isValidResponse(response) {
+    if (!response || typeof response !== 'string' || response.length < 10) return false;
+    if (isRateLimitedOrError(response)) return false;
+    // Error responses from services usually start with "<Service> ... Error"
+    if (/^(groq|gemini|nvidia|deepseek|openrouter|mistral|together|huggingface|hf).*error/i.test(response)) return false;
+    return true;
+}
+
 // Local models list endpoint
 router.get('/local-models', async (req, res) => {
     try {
@@ -67,10 +102,44 @@ router.get('/local-models', async (req, res) => {
     }
 });
 
+// Service health check endpoint
+router.get('/health/services', async (req, res) => {
+    const services = {
+        groq: { available: !!process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'gsk_your_key_here' },
+        gemini: { available: !!process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_key' },
+        nvidia: { available: !!process.env.NVIDIA_API_KEY && process.env.NVIDIA_API_KEY !== 'your_nvidia_key' },
+        deepseek: { available: !!process.env.DEEPSEEK_API_KEY && process.env.DEEPSEEK_API_KEY !== 'your_deepseek_key' },
+        openrouter: { available: !!process.env.OPENROUTER_API_KEY },
+        mistral: { available: !!process.env.MISTRAL_API_KEY },
+        together: { available: !!process.env.TOGETHER_API_KEY },
+        huggingface: { available: !!process.env.HUGGINGFACE_API_KEY && process.env.HUGGINGFACE_API_KEY !== 'hf_your_key_here' },
+        ollama: { available: false }
+    };
+
+    // Check Ollama
+    try {
+        const ollamaRes = await fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(2000) });
+        services.ollama.available = ollamaRes.ok;
+    } catch (e) {
+        services.ollama.available = false;
+    }
+
+    res.json({ success: true, services });
+});
+
 // Main chat endpoint
 router.post('/', async (req, res) => {
+    const startTime = Date.now();
     try {
         const { message, model, section, fileContent, history, mode, customKeys, uploadedDocs } = req.body;
+        
+        if (!message || !message.trim()) {
+            return res.status(400).json({
+                success: false,
+                error: 'Message is required',
+                code: 'MISSING_MESSAGE'
+            });
+        }
         
         let processedMessage = message;
         if (uploadedDocs && uploadedDocs.length > 0) {
@@ -78,7 +147,7 @@ router.post('/', async (req, res) => {
             processedMessage = `Knowledge Base / Document Library Context:\n${docsContext}\n\nUser Message:\n${message}`;
         }
         
-        // Clean history: truncate long content & limit to last 6 messages to stay under Groq TPM (6000 tokens) limit
+        // Clean history: truncate long content & limit to last 6 messages to stay under token limits
         const cleanHistory = (history || [])
             .filter(msg => msg.role && msg.content)
             .slice(-6)
@@ -88,7 +157,9 @@ router.post('/', async (req, res) => {
             }));
 
         let response;
-        
+        let usedModel = model || 'auto';
+        let fallbacksAttempted = [];
+
         if (model && model.startsWith('local:')) {
             const localModelName = model.substring(6);
             const localMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
@@ -106,7 +177,8 @@ router.post('/', async (req, res) => {
             const localRes = await fetch('http://127.0.0.1:11434/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(localPayload)
+                body: JSON.stringify(localPayload),
+                signal: AbortSignal.timeout(30000)
             });
             
             if (!localRes.ok) {
@@ -117,125 +189,200 @@ router.post('/', async (req, res) => {
             const localData = await localRes.json();
             response = localData.message?.content || 'No response from local model.';
         } else {
-            // Choose AI model based on selection
+            // Model-specific routing with intelligent failover
+            const groqMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
+            
+            const tryModel = async (modelName, serviceFn, ...args) => {
+                fallbacksAttempted.push(modelName);
+                logger.info(`🔄 Trying model: ${modelName}`);
+                const result = await serviceFn(...args);
+                return result;
+            };
+
+            const executeWithFailover = async (primaryModel, primaryFn, primaryArgs, fallbackChain) => {
+                // Try primary model
+                let result = await tryModel(primaryModel, primaryFn, ...primaryArgs);
+                
+                if (isValidResponse(result)) {
+                    return { response: result, model: primaryModel };
+                }
+                
+                logger.warn(`⚠️ ${primaryModel} failed or rate limited, trying fallbacks...`);
+                
+                // Try fallback chain
+                for (const { name, fn, args } of fallbackChain) {
+                    result = await tryModel(name, fn, ...args);
+                    if (isValidResponse(result)) {
+                        logger.info(`✅ Fallback to ${name} succeeded`);
+                        return { response: result, model: name };
+                    }
+                    logger.warn(`⚠️ Fallback ${name} also failed`);
+                }
+                
+                return { response: null, model: primaryModel };
+            };
+
             switch(model) {
                 case 'groq': {
-                    const groqMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
-                    response = await GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq);
-                    // Automatic failover to Gemini if Groq rate limit occurs
-                    if (typeof response === 'string' && (response.includes('rate_limit_exceeded') || response.includes('413') || response.includes('429'))) {
-                        logger.info('⚠️ Groq rate limit hit. Auto-falling back to Gemini...');
-                        response = await GeminiService.chat(processedMessage, cleanHistory, fileContent, mode, customKeys?.gemini);
-                    }
+                    const result = await executeWithFailover(
+                        'groq',
+                        GroqService.chat,
+                        [groqMsg, cleanHistory, mode, customKeys?.groq],
+                        [
+                            { name: 'gemini', fn: GeminiService.chat, args: [processedMessage, cleanHistory, fileContent, mode, customKeys?.gemini] },
+                            { name: 'nvidia', fn: NvidiaService.chat, args: [groqMsg, cleanHistory, customKeys?.nvidia] },
+                            { name: 'openrouter', fn: OpenRouterService.chat, args: [groqMsg, cleanHistory, customKeys?.openrouter] },
+                            { name: 'together', fn: TogetherService.chat, args: [groqMsg, cleanHistory, customKeys?.together] },
+                            { name: 'deepseek', fn: DeepSeekService.chat, args: [groqMsg, cleanHistory, customKeys?.deepseek] },
+                            { name: 'mistral', fn: MistralService.chat, args: [groqMsg, cleanHistory, customKeys?.mistral] },
+                            { name: 'huggingface', fn: HuggingFaceService.chat, args: [groqMsg] }
+                        ]
+                    );
+                    response = result.response;
+                    usedModel = result.model;
                     break;
                 }
-                case 'gemini':
-                    response = await GeminiService.chat(processedMessage, cleanHistory, fileContent, mode, customKeys?.gemini);
+                case 'gemini': {
+                    const result = await executeWithFailover(
+                        'gemini',
+                        GeminiService.chat,
+                        [processedMessage, cleanHistory, fileContent, mode, customKeys?.gemini],
+                        [
+                            { name: 'groq', fn: GroqService.chat, args: [groqMsg, cleanHistory, mode, customKeys?.groq] },
+                            { name: 'nvidia', fn: NvidiaService.chat, args: [groqMsg, cleanHistory, customKeys?.nvidia] },
+                            { name: 'openrouter', fn: OpenRouterService.chat, args: [groqMsg, cleanHistory, customKeys?.openrouter] }
+                        ]
+                    );
+                    response = result.response;
+                    usedModel = result.model;
                     break;
+                }
                 case 'nvidia': {
-                    const nvMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
-                    response = await NvidiaService.chat(nvMsg, cleanHistory, customKeys?.nvidia);
+                    const result = await executeWithFailover(
+                        'nvidia',
+                        NvidiaService.chat,
+                        [groqMsg, cleanHistory, customKeys?.nvidia],
+                        [
+                            { name: 'groq', fn: GroqService.chat, args: [groqMsg, cleanHistory, mode, customKeys?.groq] },
+                            { name: 'gemini', fn: GeminiService.chat, args: [processedMessage, cleanHistory, fileContent, mode, customKeys?.gemini] },
+                            { name: 'openrouter', fn: OpenRouterService.chat, args: [groqMsg, cleanHistory, customKeys?.openrouter] }
+                        ]
+                    );
+                    response = result.response;
+                    usedModel = result.model;
                     break;
                 }
-                case 'deepseek': {
-                    const dsMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
-                    response = await DeepSeekService.chat(dsMsg, cleanHistory, customKeys?.deepseek);
+                case 'deepseek':
+                    response = await DeepSeekService.chat(groqMsg, cleanHistory, customKeys?.deepseek);
                     break;
-                }
-                case 'openrouter': {
-                    const orMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
-                    response = await OpenRouterService.chat(orMsg, cleanHistory, customKeys?.openrouter);
+                case 'openrouter':
+                    response = await OpenRouterService.chat(groqMsg, cleanHistory, customKeys?.openrouter);
                     break;
-                }
-                case 'mistral': {
-                    const misMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
-                    response = await MistralService.chat(misMsg, cleanHistory, customKeys?.mistral);
+                case 'mistral':
+                    response = await MistralService.chat(groqMsg, cleanHistory, customKeys?.mistral);
                     break;
-                }
-                case 'together': {
-                    const togMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
-                    response = await TogetherService.chat(togMsg, cleanHistory, customKeys?.together);
+                case 'together':
+                    response = await TogetherService.chat(groqMsg, cleanHistory, customKeys?.together);
                     break;
-                }
-                case 'huggingface': {
-                    const hfMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
-                    response = await HuggingFaceService.chat(hfMsg);
+                case 'huggingface':
+                    response = await HuggingFaceService.chat(groqMsg);
                     break;
-                }
                 default:
-                    // Auto-select best model
-                    response = await autoSelectModel(processedMessage, section, fileContent, cleanHistory, mode, customKeys);
+                    // Auto-select best model with intelligent intent detection
+                    const autoResult = await autoSelectModel(processedMessage, section, fileContent, cleanHistory, mode, customKeys);
+                    response = autoResult.response;
+                    usedModel = autoResult.model;
             }
         }
+        
+        // Final fallback if all models failed
+        if (!isValidResponse(response)) {
+            logger.error('All AI models failed, returning fallback response');
+            response = "Ai-Dost: Sabhi AI models temporarily unavailable. Please check your API keys in settings, try again in a moment, or use local Ollama (http://127.0.0.1:11434) for offline mode.";
+            usedModel = 'fallback';
+        }
+        
+        const duration = Date.now() - startTime;
+        logger.info(`✅ Chat completed in ${duration}ms using model: ${usedModel}`);
         
         res.json({
             success: true,
             reply: response,
-            model: model || 'auto'
+            model: usedModel,
+            fallbacksAttempted,
+            duration
         });
     } catch (error) {
+        const duration = Date.now() - startTime;
         logger.error('Chat error:', error);
-        res.json({
+        res.status(500).json({
             success: false,
-            reply: 'Sorry, error aaya. Dubara try karo.',
-            error: error.message
+            error: 'Internal server error',
+            message: error.message,
+            code: 'CHAT_ERROR',
+            duration
         });
     }
 });
 
-// Helper for cascading failover across AI models
+// Helper for cascading failover across AI models with better error handling
 async function executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys) {
-    // 1. Try Groq (Llama 3.3 70B)
-    try {
-        logger.info("⚡ Tier 1: Executing Groq API request...");
-        const res = await GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq);
-        const isErrorResponse = typeof res === 'string' && (
-            res.includes('rate_limit_exceeded') || 
-            res.includes('413') || 
-            res.includes('429') || 
-            res.includes('error') || 
-            res.includes('Quota exceeded')
-        );
-        if (!isErrorResponse && res) {
-            return res;
+    const tiers = [
+        { 
+            name: 'Groq (Llama 3.3 70B)', 
+            fn: () => GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq),
+            check: (r) => isValidResponse(r)
+        },
+        { 
+            name: 'NVIDIA NIM (Llama 3.1 70B)', 
+            fn: () => NvidiaService.chat(groqMsg, cleanHistory, customKeys?.nvidia),
+            check: (r) => isValidResponse(r)
+        },
+        { 
+            name: 'Gemini Flash', 
+            fn: () => GeminiService.chat(message, cleanHistory, fileContent, mode, customKeys?.gemini),
+            check: (r) => isValidResponse(r)
+        },
+        { 
+            name: 'OpenRouter (Llama 3.1 8B)', 
+            fn: () => OpenRouterService.chat(groqMsg, cleanHistory, customKeys?.openrouter),
+            check: (r) => isValidResponse(r)
+        },
+        { 
+            name: 'Together AI (Llama 3.1 8B)', 
+            fn: () => TogetherService.chat(groqMsg, cleanHistory, customKeys?.together),
+            check: (r) => isValidResponse(r)
+        },
+        { 
+            name: 'DeepSeek', 
+            fn: () => DeepSeekService.chat(groqMsg, cleanHistory, customKeys?.deepseek),
+            check: (r) => isValidResponse(r)
+        },
+        { 
+            name: 'Mistral', 
+            fn: () => MistralService.chat(groqMsg, cleanHistory, customKeys?.mistral),
+            check: (r) => isValidResponse(r)
         }
-        logger.info("⚠️ Tier 1 (Groq) rate limit or error encountered. Cascading to Tier 2 (NVIDIA NIM)...");
-    } catch (e) {
-        logger.warn("Tier 1 (Groq) threw error:", e.message);
-    }
+    ];
 
-    // 2. Try NVIDIA NIM (Llama 3.1 70B)
-    try {
-        logger.info("💚 Tier 2: Executing NVIDIA NIM API request...");
-        const res = await NvidiaService.chat(groqMsg, cleanHistory, customKeys?.nvidia);
-        const isErrorResponse = typeof res === 'string' && (
-            res.includes('Error') || 
-            res.includes('429') || 
-            res.includes('Unauthorized')
-        );
-        if (!isErrorResponse && res) {
-            return res;
+    for (const tier of tiers) {
+        try {
+            logger.info(`⚡ Trying ${tier.name}...`);
+            const res = await tier.fn();
+            if (tier.check(res)) {
+                logger.info(`✅ ${tier.name} succeeded`);
+                return res;
+            }
+            logger.warn(`⚠️ ${tier.name} returned error/rate limit: ${res?.substring(0, 100)}`);
+        } catch (e) {
+            logger.warn(`⚠️ ${tier.name} threw error:`, e.message);
         }
-        logger.info("⚠️ Tier 2 (NVIDIA NIM) issue encountered. Cascading to Tier 3 (Gemini Flash)...");
-    } catch (e) {
-        logger.warn("Tier 2 (NVIDIA NIM) threw error:", e.message);
-    }
-
-    // 3. Try Gemini Flash
-    try {
-        logger.info("♊ Tier 3: Executing Gemini Flash API request...");
-        const res = await GeminiService.chat(message, cleanHistory, fileContent, mode, customKeys?.gemini);
-        if (res && !res.includes('API error') && !res.includes('Quota exceeded') && !res.includes('Rate limit')) {
-            return res;
-        }
-    } catch (e) {
-        logger.warn("Tier 3 (Gemini) threw error:", e.message);
     }
 
     // 4. Try Local Ollama (Offline Mode)
     try {
-        logger.info("🦙 Tier 4: Executing Local Ollama API request...");
-        const tagsRes = await fetch('http://127.0.0.1:11434/api/tags');
+        logger.info("🦙 Tier: Executing Local Ollama API request...");
+        const tagsRes = await fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(3000) });
         if (tagsRes.ok) {
             const tagsData = await tagsRes.json();
             const models = tagsData.models || [];
@@ -247,7 +394,8 @@ async function executeCascadingFailover(message, groqMsg, cleanHistory, fileCont
                         model: models[0].name,
                         prompt: message,
                         stream: false
-                    })
+                    }),
+                    signal: AbortSignal.timeout(60000)
                 });
                 if (genRes.ok) {
                     const genData = await genRes.json();
@@ -256,7 +404,7 @@ async function executeCascadingFailover(message, groqMsg, cleanHistory, fileCont
             }
         }
     } catch (e) {
-        logger.warn("Tier 4 (Ollama) threw error:", e.message);
+        logger.warn("Tier (Ollama) threw error:", e.message);
     }
 
     return "Ai-Dost: Direct API response unavailable right now due to provider rate limits. Please check Ollama locally (http://127.0.0.1:11434) or retry in a few seconds!";
@@ -283,38 +431,44 @@ async function autoSelectModel(message, section, fileContent, cleanHistory, mode
     const mathKeywords = ['solve', 'equation', 'math', 'calculus', 'algebra', 'matrix', 'derivative', 'integral', 'step by step math', 'proof'];
     const isMathIntent = section === 'math' || mathKeywords.some(kw => text.includes(kw));
 
-    // Intent Routing Execution with 3-Tier Cascading Failover
+    // Intent Routing Execution with Cascading Failover
     if (isCodingIntent) {
         logger.info("🧠 Smart Intent Classifier: Detected [CODING/DEBUGGING] -> Cascading AI Router");
-        return await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
+        const response = await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
+        return { response, model: 'auto-coding' };
     } 
     else if (isTranslationIntent || isWritingIntent) {
         logger.info("🧠 Smart Intent Classifier: Detected [TRANSLATION/WRITING] -> Primary Gemini Flash");
         try {
             const res = await GeminiService.chat(message, cleanHistory, fileContent, mode, customKeys?.gemini);
-            if (!res || res.includes('API error') || res.includes('Quota exceeded') || res.includes('key set nahi hai')) {
-                return await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
+            if (isValidResponse(res)) {
+                return { response: res, model: 'gemini' };
             }
-            return res;
         } catch (e) {
-            return await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
+            logger.warn("Gemini failed for writing/translation:", e.message);
         }
+        // Fallback to cascading
+        const response = await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
+        return { response, model: 'auto-writing' };
     }
     else if (isMathIntent) {
         logger.info("🧠 Smart Intent Classifier: Detected [MATHEMATICAL STEP-BY-STEP] -> Primary NVIDIA NIM");
         try {
             const res = await NvidiaService.chat(groqMsg, cleanHistory, customKeys?.nvidia);
-            if (!res || res.includes('Error')) {
-                return await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
+            if (isValidResponse(res)) {
+                return { response: res, model: 'nvidia' };
             }
-            return res;
         } catch (e) {
-            return await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
+            logger.warn("NVIDIA failed for math:", e.message);
         }
+        // Fallback to cascading
+        const response = await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
+        return { response, model: 'auto-math' };
     }
     else {
         logger.info("🧠 Smart Intent Classifier: Default General Conversation -> Cascading AI Router");
-        return await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
+        const response = await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
+        return { response, model: 'auto-general' };
     }
 }
 

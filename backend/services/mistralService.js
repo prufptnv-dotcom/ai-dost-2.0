@@ -1,10 +1,31 @@
-const dotenv = require('dotenv');
 const logger = require('../logger');
-const path = require('path');
-dotenv.config({ path: path.join(__dirname, '../.env') });
+const { RobustApiClient } = require('./apiClient');
 
 class MistralService {
+    constructor() {
+        this.client = new RobustApiClient({
+            baseUrl: 'https://api.mistral.ai/v1',
+            serviceName: 'Mistral',
+            timeout: 15000,
+            maxRetries: 3,
+            retryDelay: 1000,
+            rateLimiter: {
+                maxRequests: 20,
+                windowMs: 60000
+            },
+            circuitBreaker: {
+                failureThreshold: 5,
+                timeout: 60000
+            }
+        });
+    }
+
     static async chat(message, history = [], customKey = null, mode = 'project') {
+        const instance = new MistralService();
+        return instance._chat(message, history, customKey, mode);
+    }
+
+    async _chat(message, history = [], customKey = null, mode = 'project') {
         const apiKey = customKey || process.env.MISTRAL_API_KEY;
         if (!apiKey) {
             return "Mistral API key set nahi hai. Kripya Header Settings mein API key enter karein.";
@@ -23,29 +44,27 @@ class MistralService {
             messages.push(...formattedHistory);
             messages.push({ role: "user", content: message });
 
-            const response = await fetch("https://api.mistral.ai/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${apiKey}`
-                },
-                body: JSON.stringify({
-                    model: "mistral-small-latest",
-                    messages: messages,
-                    temperature: 0.1
-                }),
-                signal: AbortSignal.timeout(10000) // 10 second fast timeout
+            const result = await this.client.post('/chat/completions', {
+                model: "mistral-small-latest",
+                messages: messages,
+                temperature: 0.1
+            }, {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${apiKey}`
             });
 
-            if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(`Mistral API Error (${response.status}): ${errText}`);
-            }
-
-            const data = await response.json();
-            return data.choices?.[0]?.message?.content || "Mistral se koi reply nahi mila.";
+            return result.data.choices?.[0]?.message?.content || "Mistral se koi reply nahi mila.";
         } catch (error) {
             logger.error("Mistral Service Error:", error);
+
+            if (error.message.includes('RATE_LIMIT')) {
+                return 'MISTRAL_RATE_LIMITED';
+            }
+
+            if (error.message.includes('Circuit breaker')) {
+                return 'MISTRAL_CIRCUIT_OPEN';
+            }
+
             return `Mistral Service Error: ${error.message}`;
         }
     }

@@ -1,17 +1,39 @@
 const logger = require('../logger');
+const { RobustApiClient } = require('./apiClient');
 
 class NvidiaService {
+    constructor() {
+        this.client = new RobustApiClient({
+            baseUrl: 'https://integrate.api.nvidia.com/v1',
+            serviceName: 'NVIDIA',
+            timeout: 15000,
+            maxRetries: 3,
+            retryDelay: 1000,
+            rateLimiter: {
+                maxRequests: 30,
+                windowMs: 60000
+            },
+            circuitBreaker: {
+                failureThreshold: 5,
+                timeout: 60000
+            }
+        });
+    }
+
     static async chat(message, history = [], customApiKey = null, mode = 'project') {
+        const instance = new NvidiaService();
+        return instance._chat(message, history, customApiKey, mode);
+    }
+
+    async _chat(message, history = [], customApiKey = null, mode = 'project') {
         try {
             const API_KEY = customApiKey || process.env.NVIDIA_API_KEY;
-            
+
             if (!API_KEY || API_KEY === 'your_nvidia_key') {
                 logger.error('❌ NVIDIA API Key not found or still default!');
-                return 'NVIDIA API key set nahi hai. settings icon pe click karke apni custom key enter karein.';
+                return 'NVIDIA API key set nahi hai. Settings icon pe click karke apni custom key enter karein.';
             }
 
-            const API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
-            
             let systemPrompt = '';
             if (mode !== 'agent') {
                 systemPrompt = `You are AI-Dost, an expert Senior Software Engineer and AI Assistant.
@@ -30,38 +52,34 @@ Key Guidelines:
             }
             messagesPayload.push({ role: 'user', content: message });
 
-            logger.info('🔄 Calling NVIDIA NIM API...');
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${API_KEY}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    model: 'meta/llama-3.1-70b-instruct',
-                    messages: messagesPayload,
-                    temperature: 0.1,
-                    max_tokens: 2500
-                }),
-                signal: AbortSignal.timeout(10000) // 10 second fast timeout
+            const result = await this.client.post('/chat/completions', {
+                model: 'meta/llama-3.1-70b-instruct',
+                messages: messagesPayload,
+                temperature: 0.1,
+                max_tokens: 2500
+            }, {
+                'Authorization': `Bearer ${API_KEY}`
             });
-            
-            if (!response.ok) {
-                const errorText = await response.text();
-                logger.error('❌ NVIDIA API Error:', response.status, errorText);
-                return `NVIDIA API error (${response.status}): ${errorText}`;
-            }
 
-            const data = await response.json();
             logger.info('✅ NVIDIA response received');
 
-            if (data.choices && data.choices[0] && data.choices[0].message) {
-                return data.choices[0].message.content;
+            if (result.data.choices && result.data.choices[0] && result.data.choices[0].message) {
+                return result.data.choices[0].message.content;
             } else {
                 return 'NVIDIA returned an unexpected response.';
             }
+
         } catch (error) {
             logger.error('❌ NVIDIA Service Error:', error.message);
+
+            if (error.message.includes('RATE_LIMIT')) {
+                return 'NVIDIA_RATE_LIMITED';
+            }
+
+            if (error.message.includes('Circuit breaker')) {
+                return 'NVIDIA_CIRCUIT_OPEN';
+            }
+
             return 'NVIDIA service me error: ' + error.message;
         }
     }

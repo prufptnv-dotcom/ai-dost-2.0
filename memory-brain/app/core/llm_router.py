@@ -41,6 +41,66 @@ async def call_groq(system_prompt: str, user_prompt: str, model="llama-3.1-8b-in
         data = response.json()
         return data["choices"][0]["message"]["content"]
 
+async def call_nvidia_glm(system_prompt: str, user_prompt: str, history=None) -> str:
+    if not settings.NVIDIA_API_KEY:
+        raise ValueError("NVIDIA_API_KEY is not set.")
+        
+    url = "https://integrate.api.nvidia.com/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {settings.NVIDIA_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    messages = [{"role": "system", "content": system_prompt}]
+    if history:
+        for msg in history:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if content:
+                messages.append({"role": role, "content": content})
+                
+    messages.append({"role": "user", "content": user_prompt})
+    
+    payload = {
+        "model": "z-ai/glm-5.2",
+        "messages": messages,
+        "temperature": 1,
+        "top_p": 1,
+        "max_tokens": 16384,
+        "seed": 42
+    }
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(url, headers=headers, json=payload)
+        if response.status_code != 200:
+            logger.error(f"NVIDIA API Error: {response.text}")
+        response.raise_for_status()
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
+
+async def call_gemini_robotics_vision(image_path: str, prompt: str) -> str:
+    from google import genai
+    client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    
+    # Upload image
+    uploaded_file = client.files.upload(file=image_path)
+    
+    # Interact with robotics model
+    image_response = client.interactions.create(
+        model="gemini-robotics-er-2-preview",
+        input=[
+            {
+                "type": "image",
+                "uri": uploaded_file.uri,
+                "mime_type": uploaded_file.mime_type
+            },
+            {"type": "text", "text": prompt}
+        ],
+        generation_config={"thinking_level": "high"},
+    )
+    
+    return image_response.output_text
+
 async def call_gemini(system_prompt: str, user_prompt: str, history=None) -> str:
     if not settings.GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY is not set.")
@@ -137,10 +197,14 @@ async def call_llm_with_fallback(system_prompt: str, user_prompt: str, history=N
     Cascading LLM Router: Tries Groq first, falls back to Gemini.
     """
     try:
-        logger.info("Attempting primary LLM (Groq)...")
-        return await call_groq(system_prompt, user_prompt, history=history)
+        logger.info("Attempting primary LLM (Nvidia GLM)...")
+        return await call_nvidia_glm(system_prompt, user_prompt, history=history)
     except Exception as e:
-        logger.error(f"Groq failed: {e}. Switching to Gemini fallback...")
+        logger.error(f"Nvidia failed: {e}. Switching to Groq fallback...")
+        try:
+            return await call_groq(system_prompt, user_prompt, history=history)
+        except Exception as fallback_groq_e:
+            logger.error(f"Groq failed: {fallback_groq_e}. Switching to Gemini fallback...")
         try:
             return await call_gemini(system_prompt, user_prompt, history=history)
         except Exception as fallback_e:
