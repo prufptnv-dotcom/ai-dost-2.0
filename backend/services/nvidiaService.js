@@ -6,16 +6,16 @@ class NvidiaService {
         this.client = new RobustApiClient({
             baseUrl: 'https://integrate.api.nvidia.com/v1',
             serviceName: 'NVIDIA',
-            timeout: 15000,
-            maxRetries: 3,
+            timeout: 7000,
+            maxRetries: 1,
             retryDelay: 1000,
             rateLimiter: {
                 maxRequests: 30,
                 windowMs: 60000
             },
             circuitBreaker: {
-                failureThreshold: 5,
-                timeout: 60000
+                failureThreshold: 3,
+                timeout: 30000
             }
         });
     }
@@ -53,10 +53,12 @@ Key Guidelines:
             messagesPayload.push({ role: 'user', content: message });
 
             const result = await this.client.post('/chat/completions', {
-                model: 'meta/llama-3.1-70b-instruct',
+                model: 'z-ai/glm-5.2',
                 messages: messagesPayload,
-                temperature: 0.1,
-                max_tokens: 2500
+                temperature: 1,
+                top_p: 1,
+                max_tokens: 16384,
+                seed: 42
             }, {
                 'Authorization': `Bearer ${API_KEY}`
             });
