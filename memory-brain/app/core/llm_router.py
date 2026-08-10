@@ -6,7 +6,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-async def call_groq(system_prompt: str, user_prompt: str, model="llama-3.1-8b-instant", history=None) -> str:
+async def call_groq(system_prompt: str, user_prompt: str, model="llama-3.3-70b-versatile", history=None) -> str:
     if not settings.GROQ_API_KEY:
         raise ValueError("GROQ_API_KEY is not set in environment variables.")
         
