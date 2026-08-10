@@ -1,10 +1,23 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import Image from 'next/image';
 import { useMode } from '../context/ModeContext';
 import { useToast } from '../context/ToastContext';
 import { logger } from '../utils/logger';
 import { API_HOST } from '../services/api';
 import { Mic, MicOff, Volume2, VolumeX, Bot, Phone, Paperclip, Send, Library, Zap, CheckCircle, ImageIcon, FileText, X, ChevronLeft, Loader2, Play, Square, History, Trash2, MessageSquare, Sparkles, Image as ImageIconLucide, Plus, Copy, ThumbsUp, ThumbsDown, Maximize2, Minimize2, MoveHorizontal } from 'lucide-react';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+
+// Configure marked for safe, well-formatted output
+marked.setOptions({ breaks: true, gfm: true });
+
+// Render markdown text to sanitized HTML string
+function renderMarkdown(text) {
+  if (!text) return '';
+  const raw = marked.parse(text);
+  if (typeof window === 'undefined') return raw;
+  return DOMPurify.sanitize(raw, { ADD_ATTR: ['target', 'rel'] });
+}
 
 // Extract image URLs from AI text
 const IMAGE_URL_REGEX = /https?:\/\/[^\s"'<>]+?\.(png|jpg|jpeg|gif|webp)(\?[^\s"'<>]*)?/gi;
@@ -122,6 +135,55 @@ function QuizCard({ content }) {
   );
 }
 
+// Markdown prose styles injected once
+const MARKDOWN_PROSE_STYLES = `
+  .md-prose h1,.md-prose h2,.md-prose h3,.md-prose h4 {
+    font-weight:700; margin:0.6em 0 0.3em; line-height:1.3;
+    color: var(--color-text-primary, #f1f5f9);
+  }
+  .md-prose h1{font-size:1.2em;}
+  .md-prose h2{font-size:1.08em;}
+  .md-prose h3{font-size:0.98em;}
+  .md-prose h4{font-size:0.9em;}
+  .md-prose p { margin:0.35em 0; line-height:1.65; }
+  .md-prose ul,.md-prose ol { margin:0.3em 0 0.3em 1.2em; padding:0; }
+  .md-prose li { margin:0.2em 0; line-height:1.6; }
+  .md-prose strong { font-weight:700; color: var(--color-text-primary, #f1f5f9); }
+  .md-prose em { font-style:italic; }
+  .md-prose blockquote {
+    border-left:3px solid rgba(139,92,246,0.6);
+    margin:0.5em 0; padding:0.3em 0.8em;
+    color:rgba(255,255,255,0.7); background:rgba(255,255,255,0.02);
+    border-radius:0 6px 6px 0;
+  }
+  .md-prose hr { border:none; border-top:1px solid rgba(255,255,255,0.08); margin:0.6em 0; }
+  .md-prose a { color:#818cf8; text-decoration:underline; }
+  .md-prose table { border-collapse:collapse; width:100%; margin:0.5em 0; font-size:0.85em; }
+  .md-prose th { background:rgba(255,255,255,0.05); font-weight:700; }
+  .md-prose th,.md-prose td { border:1px solid rgba(255,255,255,0.1); padding:0.35em 0.7em; text-align:left; }
+  .md-prose code:not(pre code) {
+    background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.1);
+    border-radius:4px; padding:0.1em 0.4em; font-size:0.83em; font-family:monospace;
+  }
+`;
+
+if (typeof window !== 'undefined' && !document.getElementById('md-prose-styles')) {
+  const s = document.createElement('style');
+  s.id = 'md-prose-styles';
+  s.textContent = MARKDOWN_PROSE_STYLES;
+  document.head.appendChild(s);
+}
+
+function MarkdownText({ text }) {
+  const html = useMemo(() => renderMarkdown(text), [text]);
+  return (
+    <div
+      className="md-prose text-sm leading-relaxed"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
 function MessageContent({ text, onWriteCode, query = '' }) {
   if (!text) return null;
 
@@ -129,35 +191,23 @@ function MessageContent({ text, onWriteCode, query = '' }) {
   let lastIndex = 0;
   let match;
 
-  // Match fenced code blocks: ```lang\ncode```
-  const regex = /```(\w*)\n([\s\S]*?)```/g;
+  // Match fenced code blocks: ```lang\ncode``` (strip them so markdown renderer won't double-process)
+  const regex = /```(\w*)\n?([\s\S]*?)```/g;
 
   while ((match = regex.exec(text)) !== null) {
     if (match.index > lastIndex) {
-      parts.push({
-        type: 'text',
-        content: text.substring(lastIndex, match.index)
-      });
+      parts.push({ type: 'text', content: text.substring(lastIndex, match.index) });
     }
-
-    parts.push({
-      type: 'code',
-      language: match[1],
-      content: match[2]
-    });
-
+    parts.push({ type: 'code', language: match[1], content: match[2] });
     lastIndex = regex.lastIndex;
   }
 
   if (lastIndex < text.length) {
-    parts.push({
-      type: 'text',
-      content: text.substring(lastIndex)
-    });
+    parts.push({ type: 'text', content: text.substring(lastIndex) });
   }
 
   if (parts.length === 0) {
-    return <div className="whitespace-pre-wrap break-words">{formatTextWithCitations(text, query)}</div>;
+    return <div className="p-3"><MarkdownText text={text} /></div>;
   }
 
   // Email Detection Helper
@@ -197,7 +247,7 @@ function MessageContent({ text, onWriteCode, query = '' }) {
       )}
       {parts.map((part, i) => {
         if (part.type === 'text') {
-          return <div key={i} className="whitespace-pre-wrap break-words">{formatTextWithCitations(part.content, query)}</div>;
+          return <MarkdownText key={i} text={part.content} />;
         } else if (part.language === 'quiz') {
           return <QuizCard key={i} content={part.content} />;
         } else {
