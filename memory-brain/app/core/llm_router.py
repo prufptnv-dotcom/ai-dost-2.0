@@ -33,7 +33,7 @@ async def call_groq(system_prompt: str, user_prompt: str, model="llama-3.1-8b-in
         "max_tokens": 4000
     }
     
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=6.0) as client:
         response = await client.post(url, headers=headers, json=payload)
         if response.status_code != 200:
             logger.error(f"Groq API Error: {response.text}")
@@ -70,7 +70,7 @@ async def call_nvidia_glm(system_prompt: str, user_prompt: str, history=None) ->
         "seed": 42
     }
     
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=6.0) as client:
         response = await client.post(url, headers=headers, json=payload)
         if response.status_code != 200:
             logger.error(f"NVIDIA API Error: {response.text}")
@@ -131,7 +131,7 @@ async def call_gemini(system_prompt: str, user_prompt: str, history=None) -> str
         }
     }
     
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=6.0) as client:
         response = await client.post(url, headers=headers, json=payload)
         response.raise_for_status()
         data = response.json()
@@ -186,7 +186,7 @@ async def call_ollama(system_prompt: str, user_prompt: str, model="llama3", hist
         }
     }
     
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=5.0) as client:
         response = await client.post(url, json=payload)
         response.raise_for_status()
         data = response.json()
