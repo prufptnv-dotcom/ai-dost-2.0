@@ -69,11 +69,11 @@ async def track_mistake(
 @router.post("/feedback", summary="Submit thumbs up/down and correction feedback")
 async def submit_feedback(payload: dict = Body(...)):
     memory = read_brain_memory()
-    fb_type = payload.get("type", "up")
-    message = payload.get("message", "")
-    ai_reply = payload.get("aiReply", "")
-    correction = payload.get("correction", "")
-    category = payload.get("category", "general")
+    fb_type = payload.get("type") or "up"
+    message = payload.get("message") or ""
+    ai_reply = payload.get("aiReply") or ""
+    correction = payload.get("correction") or ""
+    category = payload.get("category") or "general"
 
     memory["totalFeedback"] = memory.get("totalFeedback", 0) + 1
     if fb_type == "up":
