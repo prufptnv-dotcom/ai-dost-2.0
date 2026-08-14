@@ -1,13 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/router';
-import {
-  Sun, Moon, Settings, User, LogOut, Menu, X,
-  Sparkles, Key, Brain, Save, ChevronDown,
-  Zap, MessageSquare, FolderOpen, Bot, ListTodo
-} from 'lucide-react';
+import { Settings, X, Key, Save, ChevronDown, Mic, Music, Bot, Folder, LayoutDashboard, MessageSquare, Image as ImageIcon, Zap, Trash2, Eye, EyeOff, Sun, Moon, Palette, Lifejacket, ArrowLeftArrowRight, Lock, Shield, Volume2, VolumeX, MicOff, Bot as BotIcon, Paperclip, Send, Library, ThumbsUp, ThumbsDown, Maximize2, Minimize2, MoveHorizontal, Search, Play, FolderOpen, GitBranch, Terminal, Code, CheckCircle, Loader2, Plus, XCircle, Info, User, ListTodo, LogOut, Menu, Sparkles } from 'lucide-react';
 import { useMode } from '../context/ModeContext';
 import { useToast } from '../context/ToastContext';
+import SettingsModal from './SettingsModal';
 import PersonalBrainModal from './PersonalBrainModal';
 
 /* ─── Tooltip ─── */
@@ -83,7 +80,7 @@ const Header = () => {
 
   // Secret 7-tap brain
   const [settingsClicks, setSettingsClicks] = useState(0);
-  const [showSecretBrainModal, setShowSecretBrainModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const clickTimerRef = useRef(null);
 
   // Scroll detection for navbar style change
@@ -118,11 +115,11 @@ const Header = () => {
     if (newCount >= 7) {
       setSettingsClicks(0);
       setShowSettings(false);
-      setShowSecretBrainModal(true);
+setShowSecretBrainModal(true);
       showToast?.({ type: 'success', message: '🔓 Secret Developer Brain Mode Unlocked!' });
     } else {
       if (newCount >= 3) showToast?.({ type: 'info', message: `Tap ${7 - newCount} more times to unlock Secret Developer Brain Mode...` });
-      clickTimerRef.current = setTimeout(() => { setSettingsClicks(0); setShowSettings(true); }, 350);
+      clickTimerRef.current = setTimeout(() => { setSettingsClicks(0); setShowSettings(true); setShowSettingsModal(true); }, 350);
     }
   };
 
@@ -291,129 +288,129 @@ const Header = () => {
       {/* ─── Settings Modal ─── */}
       {showSettings && (
         <div
-          className="fixed inset-0 z-[200] flex items-center justify-center p-4 animate-fadeIn"
-          style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(12px)' }}
-          onClick={e => { if (e.target === e.currentTarget) setShowSettings(false); }}
+        className="fixed inset-0 z-[200] flex items-center justify-center p-4 animate-fadeIn"
+        style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(12px)' }}
+        onClick={e => { if (e.target === e.currentTarget) setShowSettings(false); }}
+      >
+        <div
+          className="w-full max-w-md rounded-2xl p-6 shadow-2xl animate-scaleIn relative overflow-hidden max-h-[88vh] overflow-y-auto"
+          style={{
+            background: 'rgba(10,11,18,0.97)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            boxShadow: '0 0 0 1px rgba(6,182,212,0.08), 0 24px 64px rgba(0,0,0,0.6)',
+          }}
         >
-          <div
-            className="w-full max-w-md rounded-2xl p-6 shadow-2xl animate-scaleIn relative overflow-hidden max-h-[88vh] overflow-y-auto"
-            style={{
-              background: 'rgba(10,11,18,0.97)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              boxShadow: '0 0 0 1px rgba(6,182,212,0.08), 0 24px 64px rgba(0,0,0,0.6)',
-            }}
-          >
-            {/* Top accent line */}
-            <div className="absolute top-0 left-0 right-0 h-px" style={{ background: 'var(--gradient-primary)' }} />
+          {/* Top accent line */}
+          <div className="absolute top-0 left-0 right-0 h-px" style={{ background: 'var(--gradient-primary)' }} />
 
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-bold flex items-center gap-2 gradient-text">
-                <Settings className="w-5 h-5 text-cyan-400" />
-                Workspace Settings
-              </h2>
-              <button
-                onClick={() => setShowSettings(false)}
-                className="w-7 h-7 rounded-lg flex items-center justify-center text-[#64748b] hover:text-[#e2e8f0] hover:bg-white/5 transition-all cursor-pointer"
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-bold flex items-center gap-2 gradient-text">
+              <Settings className="w-5 h-5 text-cyan-400" />
+              Workspace Settings
+            </h2>
+            <button
+              onClick={() => setShowSettings(false)}
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-[#64748b] hover:text-[#e2e8f0] hover:bg-white/5 transition-all cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="space-y-5 text-sm">
+            {/* Voice Assistant */}
+            <SettingsModal isOpen={false} />
+
+            {/* Auto Save */}
+            <div className="flex flex-col gap-2">
+              <label className="font-semibold text-[#e2e8f0] flex items-center gap-2 text-xs uppercase tracking-wider">
+                <Save className="w-3.5 h-3.5 text-cyan-400" /> Auto-Save Interval
+              </label>
+              <select
+                value={autoSaveInterval}
+                onChange={e => setAutoSaveInterval(e.target.value)}
+                className="rounded-xl px-3 py-2.5 text-sm text-[#e2e8f0] cursor-pointer focus:outline-none transition-all"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
               >
-                <X className="w-4 h-4" />
+                <option value="5">Every 5 Seconds</option>
+                <option value="10">Every 10 Seconds</option>
+                <option value="30">Every 30 Seconds</option>
+                <option value="manual">Manual Save Only</option>
+              </select>
+            </div>
+
+            {/* Autocomplete Toggle */}
+            <div className="flex items-center justify-between py-3 rounded-xl px-4" style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
+              <div>
+                <div className="font-semibold text-[#e2e8f0] flex items-center gap-2 text-sm">
+                  <Sparkles className="w-4 h-4 text-violet-400" /> AI Autocomplete
+                </div>
+                <div className="text-[11px] text-[#64748b] mt-0.5">Inline code suggestions in Monaco</div>
+              </div>
+              <button
+                onClick={() => setAutocompleteOn(v => !v)}
+                className={`relative w-10 h-6 rounded-full transition-all duration-300 cursor-pointer shrink-0`}
+                style={{ background: autocompleteOn ? '#06b6d4' : 'rgba(255,255,255,0.08)' }}
+              >
+                <div
+                  className="absolute top-1 w-4 h-4 rounded-full bg-white transition-all duration-300"
+                  style={{ left: autocompleteOn ? '22px' : '4px' }}
+                />
               </button>
             </div>
 
-            <div className="space-y-5 text-sm">
-              {/* Auto Save */}
-              <div className="flex flex-col gap-2">
-                <label className="font-semibold text-[#e2e8f0] flex items-center gap-2 text-xs uppercase tracking-wider">
-                  <Save className="w-3.5 h-3.5 text-cyan-400" /> Auto-Save Interval
-                </label>
-                <select
-                  value={autoSaveInterval}
-                  onChange={e => setAutoSaveInterval(e.target.value)}
-                  className="rounded-xl px-3 py-2.5 text-sm text-[#e2e8f0] cursor-pointer focus:outline-none transition-all"
-                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
-                >
-                  <option value="5">Every 5 Seconds</option>
-                  <option value="10">Every 10 Seconds</option>
-                  <option value="30">Every 30 Seconds</option>
-                  <option value="manual">Manual Save Only</option>
-                </select>
+            {/* API Keys */}
+            <form onSubmit={e => { e.preventDefault(); saveSettings(); }}>
+              <div className="text-[11px] font-bold gradient-text uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                <Key className="w-3 h-3" /> Custom API Keys (Optional)
               </div>
-
-              {/* Autocomplete Toggle */}
-              <div className="flex items-center justify-between py-3 rounded-xl px-4" style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                <div>
-                  <div className="font-semibold text-[#e2e8f0] flex items-center gap-2 text-sm">
-                    <Sparkles className="w-4 h-4 text-violet-400" /> AI Autocomplete
+              <div className="space-y-2.5">
+                {[
+                  { label: 'Gemini', val: customGeminiKey, set: setCustomGeminiKey, color: '#4285f4' },
+                  { label: 'Groq', val: customGroqKey, set: setCustomGroqKey, color: '#f7971e' },
+                  { label: 'DeepSeek', val: customDeepSeekKey, set: setCustomDeepSeekKey, color: '#06b6d4' },
+                  { label: 'NVIDIA', val: customNvidiaKey, set: setCustomNvidiaKey, color: '#76b900' },
+                  { label: 'OpenRouter', val: customOpenRouterKey, set: setCustomOpenRouterKey, color: '#8b5cf6' },
+                ].map(({ label, val, set, color }) => (
+                  <div key={label} className="flex flex-col gap-1">
+                    <label className="text-[11px] font-medium" style={{ color }}>
+                      {label} API Key
+                    </label>
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      placeholder="Leave empty to use AI-Dost default key"
+                      value={val}
+                      onChange={e => set(e.target.value)}
+                      className="rounded-xl px-3 py-2 text-xs text-[#e2e8f0] placeholder-[#334155] focus:outline-none transition-all"
+                      style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${color}20` }}
+                      onFocus={e => { e.target.style.borderColor = `${color}50`; e.target.style.boxShadow = `0 0 8px ${color}15`; }}
+                      onBlur={e => { e.target.style.borderColor = `${color}20`; e.target.style.boxShadow = 'none'; }}
+                    />
                   </div>
-                  <div className="text-[11px] text-[#64748b] mt-0.5">Inline code suggestions in Monaco</div>
-                </div>
-                <button
-                  onClick={() => setAutocompleteOn(v => !v)}
-                  className={`relative w-10 h-6 rounded-full transition-all duration-300 cursor-pointer shrink-0`}
-                  style={{ background: autocompleteOn ? '#06b6d4' : 'rgba(255,255,255,0.08)' }}
-                >
-                  <div
-                    className="absolute top-1 w-4 h-4 rounded-full bg-white transition-all duration-300"
-                    style={{ left: autocompleteOn ? '22px' : '4px' }}
-                  />
-                </button>
+                ))}
               </div>
+            </form>
+          </div>
 
-              {/* API Keys */}
-              <form onSubmit={e => { e.preventDefault(); saveSettings(); }}>
-                <div className="text-[11px] font-bold gradient-text uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                  <Key className="w-3 h-3" /> Custom API Keys (Optional)
-                </div>
-                <div className="space-y-2.5">
-                  {[
-                    { label: 'Gemini', val: customGeminiKey, set: setCustomGeminiKey, color: '#4285f4' },
-                    { label: 'Groq', val: customGroqKey, set: setCustomGroqKey, color: '#f7971e' },
-                    { label: 'DeepSeek', val: customDeepSeekKey, set: setCustomDeepSeekKey, color: '#06b6d4' },
-                    { label: 'NVIDIA', val: customNvidiaKey, set: setCustomNvidiaKey, color: '#76b900' },
-                    { label: 'OpenRouter', val: customOpenRouterKey, set: setCustomOpenRouterKey, color: '#8b5cf6' },
-                  ].map(({ label, val, set, color }) => (
-                    <div key={label} className="flex flex-col gap-1">
-                      <label className="text-[11px] font-medium" style={{ color }}>
-                        {label} API Key
-                      </label>
-                      <input
-                        type="password"
-                        autoComplete="off"
-                        placeholder="Leave empty to use AI-Dost default key"
-                        value={val}
-                        onChange={e => set(e.target.value)}
-                        className="rounded-xl px-3 py-2 text-xs text-[#e2e8f0] placeholder-[#334155] focus:outline-none transition-all"
-                        style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${color}20` }}
-                        onFocus={e => { e.target.style.borderColor = `${color}50`; e.target.style.boxShadow = `0 0 8px ${color}15`; }}
-                        onBlur={e => { e.target.style.borderColor = `${color}20`; e.target.style.boxShadow = 'none'; }}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </form>
-            </div>
-
-            {/* Actions */}
-            <div className="flex gap-3 mt-6 pt-5" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-              <button
-                onClick={() => setShowSettings(false)}
-                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-[#64748b] hover:text-[#e2e8f0] transition-all cursor-pointer"
-                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={saveSettings}
-                className="flex-1 gradient-btn py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2"
-              >
-                <Save className="w-4 h-4" /> Save Changes
-              </button>
-            </div>
+          {/* Actions */}
+          <div className="flex gap-3 mt-6 pt-5" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+            <button
+              onClick={() => setShowSettings(false)}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-[#64748b] hover:text-[#e2e8f0] transition-all cursor-pointer"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={saveSettings}
+              className="flex-1 gradient-btn py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2"
+            >
+              <Save className="w-4 h-4" /> Save Changes
+            </button>
           </div>
         </div>
-      )}
-
-      {/* ─── Secret 7-Tap Brain Modal ─── */}
-      <PersonalBrainModal isOpen={showSecretBrainModal} onClose={() => setShowSecretBrainModal(false)} />
+      </div>
+    )}
     </>
   );
 };

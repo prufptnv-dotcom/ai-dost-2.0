@@ -163,4 +163,46 @@ export const addVectorDocument = async (content, sourceType = 'note') => {
   }
 };
 
+// Voice Assistant API calls
+export const startVoiceSession = async (userId = 'default') => {
+  try {
+    const res = await api.post('/voice/start', { user: userId });
+    return res.data;
+  } catch (error) {
+    console.error('Start voice session error:', error);
+    throw error;
+  }
+};
+
+export const stopVoiceSession = async (sessionId) => {
+  try {
+    const res = await api.post('/voice/stop', { sessionId });
+    return res.data;
+  } catch (error) {
+    console.error('Stop voice session error:', error);
+    throw error;
+  }
+};
+
+export const getGeminiLiveToken = async () => {
+  try {
+    const res = await api.get('/gemini-live-token');
+    return res.data;
+  } catch (error) {
+    console.error('Get Gemini Live token error:', error);
+    throw error;
+  }
+};
+
+// Resume Builder API calls
+export const generateResume = async (prompt) => {
+  try {
+    const res = await api.post('/resume/generate', { prompt });
+    return res.data;
+  } catch (error) {
+    console.error('Generate resume error:', error);
+    throw error;
+  }
+};
+
 export default api;

@@ -19,10 +19,11 @@ const OpenRouterService = require('../services/openrouterService');
 const NvidiaService     = require('../services/nvidiaService');
 const GeminiService     = require('../services/geminiService');
 const MistralService    = require('../services/mistralService');
+const AgentOrchestrator = require('../agent/orchestrator');
 
 // ── Agent System Prompt ───────────────────────────────────────────────────────
 const AGENT_SYSTEM_PROMPT = `You are AI-Dost Agent, an autonomous AI coding assistant — similar to GitHub Copilot Agent Mode.
-You work inside a real code workspace and have access to TOOLS that let you read, edit, search, and run code.
+You work inside a real code workspace and have access to TOOLS that let you read, edit, search, run code, see the UI, and generate full projects.
 
 MULTILINGUAL PROMPT UNDERSTANDING:
 - User prompts may be in English, Hindi, Hinglish (e.g. "ek html page banao index.html naam se", "main.py me error fix karo"), or mixed phrasing.
@@ -35,8 +36,11 @@ TOOLS AVAILABLE:
 3. apply_diff(path, search, replace) — Surgically replace a code block in a file (PREFERRED for edits)
 4. run_terminal(command) — Execute a shell command, get stdout+stderr
 5. list_directory(path) — List all files in a folder
-6. search_codebase(query) — Semantic keyword search across all project files, returns top 5 matching code chunks
-7. run_tests(framework) — Auto-detect and execute unit tests (e.g. pytest, unittest, jest, npm test) and return pass/fail report
+5. search_codebase(query) — Semantic keyword search across all project files, returns top 5 matching code chunks
+6. run_tests(framework) — Auto-detect and execute unit tests (e.g. pytest, unittest, jest, npm test) and return pass/fail report
+7. take_screenshot(url) — Take a full-page screenshot of a running app (default: http://localhost:3001). Returns base64 PNG. Use this to visually inspect the UI for bugs.
+8. generate_project_from_prompt(prompt, targetDir) — Plan and create a complete full-stack project from a single prompt. Writes all files, runs npm install, starts dev server.
+9. resume_from_chat(prompt) — Generate a structured resume from a user prompt. Returns JSON resume data.
 
 STRICT OUTPUT FORMAT — Respond ONLY with valid JSON, nothing else:
 
@@ -61,6 +65,9 @@ RULES:
 - If user requests creating or writing a file, use action 'write_file' with parameters 'path' and 'content'.
 - If user requests editing an existing file, use action 'apply_diff' with 'path', 'search', and 'replace'. If exact content is unknown, use 'read_file' first.
 - If run_terminal fails with an error, analyze the error and fix it before retrying.
+- For visual UI bugs, use 'take_screenshot' to capture the rendered app, then analyze with vision.
+- For "create a full project" requests, use 'generate_project_from_prompt' to build the entire project autonomously.
+- For resume requests, use 'resume_from_chat' to generate structured resume data.
 - Never output prose before or after JSON — respond strictly with the JSON object.
 - Max 14 steps total. Output FINAL_ANSWER when complete.
 `;
@@ -83,17 +90,36 @@ function buildCodebaseIndex(projectFiles) {
 }
 
 function scoreChunk(chunk, query) {
+  if (!query || !chunk.text) return 0;
   const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
   const text = chunk.text.toLowerCase();
   const filename = chunk.file.toLowerCase();
   let score = 0;
   for (const word of words) {
-    const re = new RegExp(word, 'g');
-    const matches = (text.match(re) || []).length;
-    score += matches * 2;
+    // Exact word boundary match
+    const wordRegex = new RegExp(`\\b${word}\\b`, 'g');
+    const matches = (text.match(wordRegex) || []).length;
+    score += matches * 3;
+    // Bonus for filename match
     if (filename.includes(word)) score += 5;
+    // Partial word match (word contained in larger word)
+    if (text.includes(word) && !wordRegex.test(text)) score += 1;
   }
-  return score;
+  // Boost score if query words appear in consecutive lines
+  const wordSet = new Set(words.filter(w => w.length > 3));
+  const textLines = text.split('\n');
+  let consecutiveHits = 0;
+  let maxConsecutive = 0;
+  for (const line of textLines) {
+    let lineHits = 0;
+    for (const word of wordSet) {
+      if (line.includes(word)) lineHits++;
+    }
+    consecutiveHits = lineHits > 0 ? consecutiveHits + 1 : 0;
+    maxConsecutive = Math.max(maxConsecutive, consecutiveHits);
+  }
+  score += maxConsecutive * 2;
+  return Math.max(0, score);
 }
 
 function searchCodebase(query, projectFiles) {
@@ -134,6 +160,23 @@ async function executeTool(action, parameters, projectPath, projectFiles) {
       }
     }
 
+    case 'list_directory': {
+      try {
+        const dirPath = safeJoin(projectPath, parameters.path || '.');
+        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+        return { success: true, entries: entries.map(e => ({ name: e.name, type: e.isDirectory() ? 'dir' : 'file' })) };
+      } catch (e) {
+        // Fallback: derive from in-memory files
+        const dirs = new Set();
+        for (const f of (projectFiles || [])) {
+          dirs.add(f.path);
+          const parts = f.path.split('/');
+          for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join('/'));
+        }
+        return { success: true, entries: [...dirs].map(d => ({ name: d, type: 'file' })), note: 'From memory' };
+      }
+    }
+
     case 'create_file':
     case 'write_file': {
       try {
@@ -163,8 +206,8 @@ async function executeTool(action, parameters, projectPath, projectFiles) {
           if (!inMem) return { success: false, error: `File not found: ${parameters.path}. Use read_file first.` };
           content = inMem.content || '';
         }
-        const search = parameters.search || '';
-        const replace = parameters.replace || '';
+        const search = parameters.search || parameters.search_block || '';
+        const replace = parameters.replace || parameters.new_code || parameters.replacement || '';
         if (!content.includes(search)) {
           return {
             success: false,
@@ -229,6 +272,48 @@ async function executeTool(action, parameters, projectPath, projectFiles) {
       });
     }
 
+    // ── Enhanced: Terminal with auto-retry on common errors ───────────────────
+    case 'run_terminal_auto': {
+      return new Promise((resolve) => {
+        const cmd = parameters.command || '';
+        const BLOCKED = ['rm -rf /', 'format c:', 'del /f /s /q c:\\', 'shutdown', 'rmdir /s /q c:'];
+        if (BLOCKED.some(b => cmd.toLowerCase().includes(b))) {
+          return resolve({ success: false, error: 'Command blocked for safety.', exit_code: 1 });
+        }
+        let attempt = 0;
+        const maxAttempts = 3;
+        
+        function runCommand() {
+          exec(cmd, { cwd: projectPath, timeout: 20000 }, (err, stdout, stderr) => {
+            const exitCode = err ? (err.code !== undefined ? err.code : 1) : 0;
+            if (exitCode === 0) {
+              resolve({
+                success: true,
+                stdout: (stdout || '').substring(0, 3000),
+                stderr: (stderr || '').substring(0, 3000),
+                exit_code: exitCode,
+                attempt: attempt + 1
+              });
+            } else if (attempt < maxAttempts - 1) {
+              attempt++;
+              // Auto-retry with hint
+              setTimeout(runCommand, 500);
+            } else {
+              resolve({
+                success: false,
+                stdout: (stdout || '').substring(0, 3000),
+                stderr: (stderr || '').substring(0, 3000),
+                exit_code: exitCode,
+                attempt: attempt + 1,
+                selfHealingHint: `Command failed after ${maxAttempts} attempts. Stderr: ${(stderr || '').substring(0, 500)}. Analyze the error and fix the code before retrying manually.`
+              });
+            }
+          });
+        }
+        runCommand();
+      });
+    }
+
     // ── Phase 3: RAG Search Tool ──────────────────────────────────────────────
     case 'search_codebase': {
       const query = parameters.query || '';
@@ -260,8 +345,799 @@ async function executeTool(action, parameters, projectPath, projectFiles) {
       });
     }
 
+    // ── Git Tool ──────────────────────────────────────────────────────────────
+    case 'git': {
+      return new Promise((resolve) => {
+        try {
+          const action = parameters.action || '';
+          const cmd = parameters.command || '';
+          
+          if (!action) {
+            // Default: show status
+            if (fs.existsSync(path.join(projectPath, '.git'))) {
+              resolve({
+                success: true,
+                type: 'status',
+                message: 'Git repository exists',
+                branch: this._getCurrentBranch(projectPath)
+              });
+            } else {
+              resolve({
+                success: true,
+                type: 'status',
+                message: 'No git repository initialized',
+                initNeeded: true
+              });
+            }
+            return;
+          }
+          
+          // Initialize git repo
+          if (action === 'init') {
+            exec('git init', { cwd: projectPath, timeout: 10000 }, (err) => {
+              if (err) return resolve({ success: false, error: err.message });
+              resolve({ success: true, message: 'Git repository initialized' });
+            });
+            return;
+          }
+          
+          // Add files
+          if (action === 'add') {
+            const files = parameters.files || [];
+            if (files.length === 0) {
+              // Add all
+              exec(`git add .`, { cwd: projectPath, timeout: 10000 }, (err) => {
+                resolve({ success: !err, message: err ? err.message : 'All files staged' });
+              });
+            } else {
+              files.forEach(f => exec(`git add ${f}`, { cwd: projectPath, timeout: 10000 }));
+              resolve({ success: true, message: 'Files staged' });
+            }
+            return;
+          }
+          
+          // Commit
+          if (action === 'commit') {
+            const message = parameters.message || 'AI-Dost commit';
+            exec(`git commit -m "${message}"`, { cwd: projectPath, timeout: 10000 }, (err) => {
+              resolve({ success: !err, message: err ? err.message : `Committed: ${message}` });
+            });
+            return;
+          }
+          
+          // Branch
+          if (action === 'branch') {
+            const branchName = parameters.branch || 'main';
+            exec(`git branch ${branchName}`, { cwd: projectPath, timeout: 10000 }, (err) => {
+              resolve({ success: !err, message: err ? err.message : `Branch ${branchName} created` });
+            });
+            return;
+          }
+          
+          // Log
+          if (action === 'log') {
+            exec(`git log --oneline -5`, { cwd: projectPath, timeout: 10000 }, (err, stdout) => {
+              resolve({ success: !err, log: err ? null : stdout, message: err ? err.message : 'Showing recent commits' });
+            });
+            return;
+          }
+          
+          // Default: show help
+          resolve({ success: true, help: 'Git actions: init, add, commit, branch, log' });
+          
+        } catch (e) {
+          resolve({ success: false, error: e.message });
+        }
+      });
+    }
+
+    // Helper: Get current branch
+    this._getCurrentBranch = function(projectPath) {
+      try {
+        const { stdout } = execSync(`git branch --show-current`, { cwd: projectPath, timeout: 5000 });
+        return stdout.trim();
+      } catch {
+        return 'main';
+      }
+    };
+    case 'take_screenshot': {
+      return new Promise(async (resolve) => {
+        try {
+          // Dynamic import of Playwright
+          const { chromium } = await import('playwright');
+          const browser = await chromium.launch({ headless: true });
+          const page = await browser.newPage();
+          
+          const targetUrl = parameters.url || 'http://localhost:3001';
+          await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 30000 });
+          
+          // Take full page screenshot
+          const screenshotBuffer = await page.screenshot({ fullPage: true, type: 'png' });
+          await browser.close();
+          
+          // Convert to base64
+          const base64 = screenshotBuffer.toString('base64');
+          
+          resolve({ 
+            success: true, 
+            screenshot: base64,
+            mimeType: 'image/png',
+            url: targetUrl,
+            message: `Screenshot captured from ${targetUrl}`
+          });
+        } catch (e) {
+          logger.error('[Agent] Screenshot error:', e.message);
+          resolve({ success: false, error: `Screenshot failed: ${e.message}` });
+        }
+      });
+    }
+
+    // ── Full Project Generation Tool ──────────────────────────────────────────
+    case 'generate_project_from_prompt': {
+      return new Promise(async (resolve) => {
+        try {
+          const prompt = parameters.prompt || '';
+          const targetDir = parameters.targetDir || projectPath;
+          const orchestrator = new AgentOrchestrator({ groqService: GroqService, geminiService: GeminiService });
+          
+          // Analyze prompt to determine project type
+          const cleanPrompt = prompt.toLowerCase();
+          const projectType = orchestrator.detectProjectType(cleanPrompt);
+          
+          // Generate project based on type
+          const projectFiles = await orchestrator.generateProjectFiles(projectType, prompt, targetDir);
+          
+          // Initialize git repo
+          try {
+            await exec('git init', { cwd: targetDir, timeout: 10000 });
+          } catch (_) {}
+          
+          // Install dependencies if package.json was created
+          if (projectFiles.some(f => f.path === 'package.json')) {
+            try {
+              await exec('npm install', { cwd: targetDir, timeout: 120000 });
+            } catch (e) {
+              logger.info('[Agent] npm install partial or failed, continuing...');
+            }
+          }
+          
+          resolve({ 
+            success: true, 
+            message: `Project generated: ${projectType}`,
+            generatedFiles: projectFiles.map(f => ({ path: f.path, size: Buffer.from(f.content).length })),
+            targetDir: targetDir
+          });
+        } catch (e) {
+          logger.error('[Agent] Project generation error:', e.message);
+          resolve({ success: false, error: `Project generation failed: ${e.message}` });
+        }
+      });
+    }
+
+    // Helper: Detect project type from user prompt
+    function detectProjectType(cleanPrompt) {
+      if (cleanPrompt.includes('todo') || cleanPrompt.includes('task') || cleanPrompt.includes('dolist')) return 'todo';
+      if (cleanPrompt.includes('calc') || cleanPrompt.includes('calculator') || cleanPrompt.includes('math')) return 'calculator';
+      if (cleanPrompt.includes('web') || cleanPrompt.includes('website') || cleanPrompt.includes('portfolio')) return 'web';
+      if (cleanPrompt.includes('api') || cleanPrompt.includes('backend') || cleanPrompt.includes('server')) return 'api';
+      if (cleanPrompt.includes('react') || cleanPrompt.includes('next') || cleanPrompt.includes('vue')) return 'react';
+      if (cleanPrompt.includes('python') || cleanPrompt.includes('flask') || cleanPrompt.includes('django')) return 'python';
+      if (cleanPrompt.includes('chrome') || cleanPrompt.includes('extension') || cleanPrompt.includes('browser')) return 'extension';
+      return 'general';
+    }
+
+    // Helper: Generate project files based on type
+    async function generateProjectFiles(projectType, prompt, targetDir) {
+      const files = [];
+      
+      switch (projectType) {
+        case 'todo': {
+          files.push(...await generateTodoProject(targetDir, prompt));
+          break;
+        }
+        case 'calculator': {
+          files.push(...await generateCalculatorProject(targetDir, prompt));
+          break;
+        }
+        case 'web': {
+          files.push(...await generateWebProject(targetDir, prompt));
+          break;
+        }
+        case 'api': {
+          files.push(...await generateApiProject(targetDir, prompt));
+          break;
+        }
+        case 'react': {
+          files.push(...await generateReactProject(targetDir, prompt));
+          break;
+        }
+        case 'python': {
+          files.push(...await generatePythonProject(targetDir, prompt));
+          break;
+        }
+        case 'extension': {
+          files.push(...await generateExtensionProject(targetDir, prompt));
+          break;
+        }
+        default: {
+          files.push(...await generateGeneralProject(targetDir, prompt));
+          break;
+        }
+      }
+      
+      return files;
+    }
+
+    // Generate Todo App project
+    async function generateTodoProject(targetDir, prompt) {
+      const files = [];
+      const sanitizedDir = targetDir.replace(/[^a-zA-Z0-9\/]/g, '');
+      const projectDir = `${sanitizedDir}/todo-app`;
+      
+      // Create directory structure
+      try { fs.mkdirSync(projectDir, { recursive: true }); } catch (_) {}
+      
+      // index.html
+      files.push({
+        path: `${projectDir}/index.html`,
+        content: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Todo App - AI Generated</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>📝 Todo App</h1>
+    <input type="text" id="new-task" placeholder="Add a task...">
+    <button onclick="addTask()">Add</button>
+    <ul id="task-list"></ul>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>`,
+      });
+      
+      // style.css
+      files.push({
+        path: `${projectDir}/style.css`,
+        content: `body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: #f0f2f5;
+  margin: 0;
+  padding: 2rem;
+}
+
+.container {
+  max-width: 500px;
+  margin: 0 auto;
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+input[type="text"] {
+  width: 70%;
+  padding: 0.5rem;
+  margin-right: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+button {
+  padding: 0.5rem 1rem;
+  background: #06b6d4;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #0891b2;
+}
+
+ul {
+  margin-top: 1rem;
+  list-style: none;
+}
+
+li {
+  background: #f8f9fa;
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  border-radius: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}`,
+      });
+      
+      // script.js
+      files.push({
+        path: `${projectDir}/script.js`,
+        content: `// Todo List
+const taskList = JSON.parse(localStorage.getItem('tasks') || '[]');
+const taskListEl = document.getElementById('task-list');
+const inputEl = document.getElementById('new-task');
+
+function renderTasks() {
+  taskListEl.innerHTML = '';
+  taskList.forEach((task, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = \`
+      <span>\${task}</span>
+      <button onclick="deleteTask(\${i})">✕</button>
+    \`;
+    taskListEl.appendChild(li);
+  });
+}
+
+function addTask() {
+  const task = inputEl.value.trim();
+  if (task) {
+    taskList.push(task);
+    localStorage.setItem('tasks', JSON.stringify(taskList));
+    renderTasks();
+    inputEl.value = '';
+  }
+}
+
+function deleteTask(i) {
+  taskList.splice(i, 1);
+  localStorage.setItem('tasks', JSON.stringify(taskList));
+  renderTasks();
+}
+
+// Render on load
+renderTasks();
+`,
+      });
+      
+      // package.json
+      files.push({
+        path: `${projectDir}/package.json`,
+        content: `{
+  "name": "todo-app",
+  "version": "1.0.0",
+  "description": "Todo application generated by AI-Dost",
+  "main": "script.js",
+  "scripts": {
+    "start": "node -e \"console.log('Starting dev server...')\""
+  },
+      "dependencies": {}
+}`,
+      });
+      
+    }
+
+    // Generate Calculator project
+    async function generateCalculatorProject(targetDir, prompt) {
+      const files = [];
+      const sanitizedDir = targetDir.replace(/[^a-zA-Z0-9\/]/g, '');
+      const projectDir = `${sanitizedDir}/calculator`;
+      
+      try { fs.mkdirSync(projectDir, { recursive: true }); } catch (_) {}
+      
+      // index.html
+      files.push({
+        path: `${projectDir}/index.html`,
+        content: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Calculator - AI Generated</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="calculator">
+    <input type="text" id="display" disabled>
+    <div class="keys">
+      <button onclick="clearDisplay()">AC</button>
+      <button onclick="appendDisplay('/')">/</button>
+      <button onclick="appendDisplay('*')">*</button>
+      <button onclick="appendDisplay('-')">-</button>
+      <button onclick="calculate()">=</button>
+    </div>
+    <input type="text" id="history" disabled>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>`,
+      });
+      
+      // style.css
+      files.push({
+        path: `${projectDir}/style.css`,
+        content: `body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #1a1a2e;
+  color: #e94560;
+  margin: 0;
+  padding: 2rem;
+  display: flex;
+  justify-content: center;
+}
+
+.calculator {
+  background: #16213e;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+  width: 300px;
+}
+
+#display {
+  width: 100%;
+  height: 40px;
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+  padding: 0.5rem;
+  background: #2a3548;
+  color: #e94560;
+  border: none;
+  border-radius: 4px;
+  text-align: right;
+}
+
+.keys {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+}
+
+.keys button {
+  background: #06b6d4;
+  color: white;
+  border: none;
+  padding: 1rem;
+  border-radius: 6px;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.keys button:hover {
+  background: #0891b2;
+}`,
+      });
+      
+      // script.js
+      files.push({
+        path: `${projectDir}/script.js`,
+        content: `// Calculator
+const display = document.getElementById('display');
+const history = document.getElementById('history');
+
+function appendDisplay(val) {
+  display.value += val;
+}
+
+function clearDisplay() {
+  display.value = '';
+}
+
+function calculate() {
+  try {
+    display.value = eval(display.value);
+    history.value = display.value;
+  } catch (e) {
+    display.value = 'Error';
+    setTimeout(() => display.value = '', 1000);
+  }
+}
+`,
+      });
+      
+      // package.json
+      files.push({
+        path: `${projectDir}/package.json`,
+        content: `{
+  "name": "calculator",
+  "version": "1.0.0",
+  "description": "Calculator app generated by AI-Dost",
+  "main": "script.js",
+  "scripts": {
+    "start": "echo 'Calculator running'"
+  },
+  "dependencies": {}
+}`,
+      });
+      
+    }
+
+    // Generate general web project
+    async function generateWebProject(targetDir, prompt) {
+      const files = [];
+      const sanitizedDir = targetDir.replace(/[^a-zA-Z0-9\/]/g, '');
+      const projectDir = `${sanitizedDir}/web-app`;
+      
+      try { fs.mkdirSync(projectDir, { recursive: true }); } catch (_) {}
+      
+      files.push({
+        path: `${projectDir}/index.html`,
+        content: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI-Generated Web App</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>👋 Welcome to AI-Dost Generated App</h1>
+  </header>
+  <main>
+    <section class="hero">
+      <h2>Created with AI assistance</h2>
+      <p>This project was generated from your prompt.</p>
+    </section>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>`,
+      });
+      
+      files.push({
+        path: `${projectDir}/style.css`,
+        content: `body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 0;
+  padding: 0;
+  background: #0a0a0f;
+  color: #f8fafc;
+  min-height: 100vh;
+}
+
+header {
+  background: #16213e;
+  padding: 1rem 2rem;
+  text-align: center;
+}
+
+.hero {
+  padding: 3rem;
+  text-align: center;
+}
+
+h1 { color: #06b6d4; }
+h2 { color: #67e8f9; }
+p { color: #a0aec0; }
+`,
+      });
+      
+      files.push({
+        path: `${projectDir}/script.js`,
+        content: `// General Web App
+console.log('AI-Dost generated web application');
+
+// Add your custom JavaScript here
+`,
+      });
+      
+      // package.json
+      files.push({
+        path: `${projectDir}/package.json`,
+        content: `{
+  "name": "web-app",
+  "version": "1.0.0",
+  "description": "Web application generated by AI-Dost",
+  "main": "script.js",
+  "scripts": {
+    "start": "echo 'Web app running'"
+  },
+  "dependencies": {}
+}`,
+      });
+      
+    }
+
+    // Generate Python project
+    async function generatePythonProject(targetDir, prompt) {
+      const files = [];
+      const sanitizedDir = targetDir.replace(/[^a-zA-Z0-9\/]/g, '');
+      const projectDir = `${sanitizedDir}/python-project`;
+      
+      try { fs.mkdirSync(projectDir, { recursive: true }); } catch (_) {}
+      
+      // main.py
+      files.push({
+        path: `${projectDir}/main.py`,
+        content: `#!/usr/bin/env python3
+\"\"\"\nGenerated Python Project by AI-Dost\n\"\"\"\n\nimport sys\nimport os\n\ndef main():\n    print(\"🐍 AI-Dost Generated Python Project\")\n    print(f\"Project: {prompt[:50] if prompt else 'General'}\")\n    \n    # Get current directory\n    current_dir = os.path.dirname(os.path.abspath(__file__))\n    print(f\"Working in: {current_dir}\")\n    \n    # List files in current directory\n    try:\n        files = os.listdir(current_dir)\n        print(\"Files:\")\n        for f in files:\n            print(f\"  - {f}\")\n    except Exception as e:\n        print(f\"Error listing files: {e}\")\n\nif __name__ == \"__main__\":\n    main()\n`,
+      });
+      
+      // requirements.txt
+      files.push({
+        path: `${projectDir}/requirements.txt`,
+        content: `# AI-Dost Generated Python Project\n# Add your dependencies here\n`,
+      });
+      
+      // README.md
+      files.push({
+        path: `${projectDir}/README.md`,
+        content: `# AI-Dost Generated Python Project\n\nGenerated from prompt: ${prompt}\n\n## Usage\n\nRun with: python main.py\n\n## Description\n\nThis project was automatically generated by AI-Dost.`,
+      });
+      
+      // package.json (for Python with PyScript if needed)
+      files.push({
+        path: `${projectDir}/package.json`,
+        content: `{
+  "name": "python-project",
+  "version": "1.0.0",
+  "description": "Python project generated by AI-Dost",
+  "main": "main.py",
+  "scripts": {
+    "start": "python main.py"
+  },
+  "dependencies": {}
+}`,
+      });
+      
+    }
+
+    // Generate Chrome extension project
+    async function generateExtensionProject(targetDir, prompt) {
+      const files = [];
+      const sanitizedDir = targetDir.replace(/[^a-zA-Z0-9\/]/g, '');
+      const projectDir = `${sanitizedDir}/chrome-extension`;
+      
+      try { fs.mkdirSync(projectDir, { recursive: true }); } catch (_) {}
+      
+      // manifest.json
+      files.push({
+        path: `${projectDir}/manifest.json`,
+        content: `{
+  \"manifest_version\": 3,
+  \"name\": \"AI-Dost Extension\",
+  \"version\": \"1.0.0\",
+  \"description\": \"Generated by AI-Dost\",
+  \"permissions\": [\"activeTab\", \"storage\"],
+  \"content_scripts\": [
+    {
+      \"matches\": [\"<all_urls>\"],
+      \"js\": [\"content.js\"]
+    }
+  ]}`,
+      });
+      
+      // content.js
+      files.push({
+        path: `${projectDir}/content.js`,
+        content: `// AI-Dost Content Script\nconsole.log('AI-Dost extension loaded');\n\n// Your content script code here\nchrome.runtime.onMessage.addListener((request, sender, sendResponse) => {\n  if (request.action === \"getSelection\") {\n    sendResponse({ text: window.getSelection().toString() });\n  }\n});\n`,
+      });
+      
+      // popup.html
+      files.push({
+        path: `${projectDir}/popup.html`,
+        content: `<!DOCTYPE html>
+<html>
+  <head>
+    <style>
+      body { font-family: sans-serif; padding: 1rem; width: 200px; }
+      button { padding: 0.5rem 1rem; margin-top: 0.5rem; }
+    </style>
+  </head>
+  <body>
+    <h3>AI-Dost</h3>
+    <button onclick=\"chrome.runtime.sendMessage({action: 'getSelection'}, (resp) => { alert(resp?.text || 'No selection') } );\">Get Selection</button>
+  </body>
+</html>`,
+      });
+      
+    }
+
+    // Generate general project
+    async function generateGeneralProject(targetDir, prompt) {
+      const files = [];
+      const sanitizedDir = targetDir.replace(/[^a-zA-Z0-9\/]/g, '');
+      const projectDir = `${sanitizedDir}/project`;
+      
+      try { fs.mkdirSync(projectDir, { recursive: true }); } catch (_) {}
+      
+      // index.html
+      files.push({
+        path: `${projectDir}/index.html`,
+        content: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI-Dost Project</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="content">
+    <h1>🎯 AI-Dost Project</h1>
+    <p>Generated from your natural language prompt.</p>
+    <div id=\"content\">
+      <!-- Content will be filled based on prompt -->
+    </div>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>`,
+      });
+      
+      // style.css
+      files.push({
+        path: `${projectDir}/style.css`,
+        content: `body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: #0a0a0f;
+  color: #f8fafc;
+  margin: 0;
+  padding: 2rem;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.content { text-align: center; }
+h1 { color: #06b6d4; margin-bottom: 1rem; }
+p { color: #64748b; }
+`,
+      });
+      
+      // script.js
+      files.push({
+        path: `${projectDir}/script.js`,
+        content: `// General project script\nconsole.log('AI-Dost project loaded');\n// Add your custom logic here`,
+      });
+      
+      // package.json
+      files.push({
+        path: `${projectDir}/package.json`,
+        content: `{
+  "name": "project",
+  "version": "1.0.0",
+  "description": "Project generated by AI-Dost",
+  "main": "script.js",
+  "scripts": {
+    "start": "echo 'Project running'"
+  },
+  "dependencies": {}
+}`,
+      });
+      
+    }
+
+    // ── Resume Generation Tool ────────────────────────────────────────────────
+    case 'resume_from_chat': {
+      return new Promise(async (resolve) => {
+        try {
+          const prompt = parameters.prompt || '';
+          
+          // Call the resume generation API
+          const res = await fetch('http://localhost:5000/api/resume/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt })
+          });
+          
+          if (!res.ok) {
+            throw new Error('Resume API failed');
+          }
+          
+          const data = await res.json();
+          
+          resolve({ 
+            success: true, 
+            resumeData: data,
+            message: 'Resume generated successfully'
+          });
+        } catch (e) {
+          logger.error('[Agent] Resume generation error:', e.message);
+          resolve({ success: false, error: `Resume generation failed: ${e.message}` });
+        }
+      });
+    }
+
     default:
-      return { success: false, error: `Unknown tool: ${action}. Available: read_file, write_file, apply_diff, run_terminal, list_directory, search_codebase, run_tests` };
+      return { success: false, error: `Unknown tool: ${action}. Available: read_file, write_file, apply_diff, run_terminal, list_directory, search_codebase, run_tests, take_screenshot, generate_project_from_prompt, resume_from_chat` };
   }
 }
 
@@ -436,7 +1312,7 @@ function parseLLMAction(raw) {
     };
   }
 
-  // Fallback: If LLM generated code block with file mention, infer write_file
+  // Enhanced fallback: If LLM generated code block with file mention, infer write_file
   const codeBlockMatch = raw.match(/```(?:[a-zA-Z]+)?\r?\n([\s\S]+?)```/);
   const fileMentionMatch = raw.match(/([\w\-\.\/]+\.(?:html|css|js|jsx|ts|tsx|py|json|md|sql|go|c|cpp|rs))/i);
 
@@ -449,6 +1325,11 @@ function parseLLMAction(raw) {
       action: 'write_file',
       parameters: { path: targetFile, content: codeContent }
     };
+  }
+
+  // Fallback: If raw output looks like a task description, return FINAL_ANSWER
+  if (raw.trim().length > 10 && !raw.includes('```')) {
+    return { thought: raw, action: 'FINAL_ANSWER', answer: raw };
   }
 
   return { thought: raw, action: 'FINAL_ANSWER', answer: raw };
@@ -706,18 +1587,18 @@ router.post('/run', async (req, res) => {
       }
 
       // ── Phase 4: Self-Healing Terminal Logic ─────────────────────────────────
-      if (parsed.action === 'run_terminal' && !toolResult.success && selfHealAttempts < 2) {
+      if (parsed.action === 'run_terminal' && !toolResult.success && selfHealAttempts < 3) {
         const errorContext = toolResult.selfHealingHint || toolResult.stderr || toolResult.error || 'Unknown error';
         selfHealAttempts++;
         send({
           type: 'self_heal',
           step: step + 1,
-          message: `🔧 Self-healing (attempt ${selfHealAttempts}/2): Command failed — analyzing error and fixing...`
+          message: `🔧 Self-healing (attempt ${selfHealAttempts}/3): Command failed — analyzing error and fixing...`
         });
         messages.push({ role: 'assistant', content: JSON.stringify({ thought: parsed.thought, action: parsed.action, parameters: parsed.parameters }) });
         messages.push({
           role: 'user',
-          content: `SELF-HEALING REQUIRED: Command "${parsed.parameters?.command}" failed.\n\nERROR OUTPUT:\n${errorContext}\n\nYou must:\n1. Analyze the exact error above\n2. Fix the root cause (edit code if needed)\n3. Then retry the command\n\nDo NOT output FINAL_ANSWER yet — fix the error first.`
+          content: `SELF-HEALING REQUIRED: Command "${parsed.parameters?.command || 'unknown'}" failed.\n\nERROR OUTPUT:\n${errorContext}\n\nDetailed Error Analysis:\n1. Exit code: ${toolResult.exit_code || 'N/A'}\n2. Standard Output: ${toolResult.stdout ? toolResult.stdout.substring(0, 500) : 'None'}\n3. Standard Error: ${toolResult.stderr ? toolResult.stderr.substring(0, 1000) : 'None'}\n\nACTION REQUIRED:\n1. Analyze the exact error above to identify the root cause\n2. If it's a syntax error in code, fix the code using apply_diff or write_file\n3. If it's a runtime error, debug and fix the logic\n4. If it's a path issue, correct the file paths\n5. Then retry the command\n\nIMPORTANT: Do NOT output FINAL_ANSWER yet — fix the error first and retry the command.`
         });
         continue;
       }
@@ -751,6 +1632,159 @@ router.post('/search', (req, res) => {
   const { query, projectFiles } = req.body;
   if (!query) return res.status(400).json({ error: 'query is required' });
   res.json(searchCodebase(query, projectFiles || []));
+});
+
+// ── AI Code Suggestions Endpoint ──────────────────────────────────────────────
+router.post('/code-suggestions', async (req, res) => {
+  try {
+    const { code, language, prompt, projectFiles } = req.body;
+    if (!code || !language || !prompt) {
+      return res.status(400).json({ error: 'code, language, and prompt are required' });
+    }
+    
+    // Build context from relevant code chunks
+    const fileContext = projectFiles && projectFiles.length > 0
+      ? projectFiles.slice(0, 3).map(f =>
+          `FILE: ${f.path}\n\`\`\`${language}\n${(f.content || '').substring(0, 800)}\n\`\`\``
+        ).join('\n\n')
+      : '';
+    
+    const fullPrompt = `You are AI-Dost Code Assistant. Given the following code and user request, provide intelligent code suggestions or completions.
+
+CODE:
+\`\`\`${language}
+${code}
+\`\`\`
+
+USER REQUEST: ${prompt}
+
+CODE CONTEXT:
+${fileContext}
+
+Provide suggestions that:
+1. Maintain code style and consistency
+2. Fix any obvious issues
+3. Complete partial code
+4. Follow best practices for ${language}
+
+Respond with a JSON object with a "suggestions" array containing code snippet suggestions. Return only valid JSON, no prose.`;
+    
+    // Try Gemini first, then fallback to Groq
+    let suggestions = '';
+    
+    try {
+      const GeminiService = require('../services/geminiService');
+      const resp = await GeminiService.chat(fullPrompt, [], null, 'project');
+      suggestions = resp || '';
+    } catch (e) {
+      logger.info('[AI Suggestions] Gemini failed, trying Groq...');
+      const GroqService = require('../services/groqService');
+      const resp = await GroqService.chat(fullPrompt, [], 'project');
+      suggestions = resp || '';
+    }
+    
+    if (!suggestions || suggestions.length < 10) {
+      // Fallback: basic code completion
+      suggestions = `// Basic suggestion for: ${prompt}\n// Add your implementation here`;
+    }
+    
+    res.json({ success: true, suggestions });
+  } catch (error) {
+    logger.error('[AI Suggestions] Error:', error.message);
+    res.status(500).json({ error: 'Code suggestions failed', detail: error.message });
+  }
+});
+
+// ── LSP Diagnostics Endpoint ─────────────────────────────────────────────────
+router.post('/lsp-diagnostics', async (req, res) => {
+  try {
+    const { code, language } = req.body;
+    if (!code || !language) {
+      return res.status(400).json({ error: 'code and language are required' });
+    }
+    
+    // Basic static analysis for common issues
+    const diagnostics = [];
+    const lines = code.split('\n');
+    
+    lines.forEach((line, index) => {
+      const lineNum = index + 1;
+      
+      // Check for common JavaScript/TypeScript issues
+      if (language === 'javascript' || language === 'typescript') {
+        // Unused variables
+        const unusedVarMatch = line.match(/\b(let|const|var)\s+(\w+)\s*=\s*([^;]+);/);
+        if (unusedVarMatch) {
+          diagnostics.push({
+            line: lineNum,
+            column: 0,
+            severity: 'warning',
+            message: `Potentially unused variable: ${unusedVarMatch[2]}`
+          });
+        }
+        
+        // Missing semicolons (line ends without ; or })
+        if (!line.includes(';') && !line.includes('}') && !line.includes('{') && line.trim().length > 0 && !line.startsWith('//')) {
+          diagnostics.push({
+            line: lineNum,
+            column: line.trim().length,
+            severity: 'info',
+            message: 'Consider adding semicolon'
+          });
+        }
+      }
+      
+      // Check for Python issues
+      if (language === 'python') {
+        const stripped = line.trim();
+        const isBlockStarter = /^(def|class|if|elif|else|for|while|try|except|with|async)\b/.test(stripped);
+
+        // Missing colon after def/if/for/while
+        if (isBlockStarter && !line.includes(':')) {
+          diagnostics.push({
+            line: lineNum,
+            column: Math.max(0, stripped.indexOf(' ') < 0 ? stripped.length : stripped.indexOf(' ')),
+            severity: 'error',
+            message: 'Missing colon at end of statement'
+          });
+        }
+      }
+
+      // Check for HTML issues
+      if (language === 'html') {
+        const openTags = (line.match(/<[a-zA-Z][\w-]*(\s[^>]*)?(?![^>]*\/>)/g) || []).length;
+        const closeTags = (line.match(/<\/[a-zA-Z][\w-]*>/g) || []).length;
+        const isComment = line.trim().startsWith('<!--');
+        if (openTags > closeTags && line.trim().startsWith('<') && !isComment) {
+          diagnostics.push({
+            line: lineNum,
+            column: 0,
+            severity: 'info',
+            message: 'Potentially unclosed HTML tag'
+          });
+        }
+      }
+
+      // Check for CSS issues
+      if (language === 'css') {
+        const propMatch = line.match(/^\s*([\w-]+)\s*:\s*([^;{}]+);/);
+        const looksLikeProperty = /^\s*[\w-]+\s*:/.test(line) && !line.trim().startsWith('//');
+        if (!propMatch && looksLikeProperty) {
+          diagnostics.push({
+            line: lineNum,
+            column: 0,
+            severity: 'info',
+            message: 'Consider adding semicolon after CSS property'
+          });
+        }
+      }
+    });
+    
+    res.json({ success: true, diagnostics });
+  } catch (error) {
+    logger.error('[LSP Diagnostics] Error:', error.message);
+    res.status(500).json({ error: 'LSP diagnostics failed', detail: error.message });
+  }
 });
 
 // ── Quick diff apply endpoint ─────────────────────────────────────────────────

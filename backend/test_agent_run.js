@@ -1,6 +1,6 @@
 async function testRun() {
   console.log('Testing /api/agent/run endpoint directly...');
-  const res = await fetch('http://localhost:3000/api/agent/run', {
+  const res = await fetch('http://localhost:5000/api/agent/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

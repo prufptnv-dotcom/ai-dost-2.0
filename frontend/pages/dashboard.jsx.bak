@@ -140,44 +140,6 @@ const Dashboard = () => {
   const [copilotProjectName, setCopilotProjectName] = useState('My Project');
   const [geminiApiKey] = useState(() => process.env.NEXT_PUBLIC_GEMINI_API_KEY || '');
 
-  // Global keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (event) => {
-      const mod = event.metaKey ? 'meta' : 'ctrl';
-      const isMac = navigator.platform === 'MacIntel';
-
-      // Toggle sidebar with Cmd+K / Ctrl+K
-      if ((isMac ? event.metaKey : event.ctrlKey) && event.key === 'k') {
-        event.preventDefault();
-        setSidebarOpen(!sidebarOpen);
-        setActiveSidebarItem('chat');
-      }
-
-      // Voice assistant with Cmd+Shift+V / Ctrl+Shift+V
-      if ((isMac ? event.metaKey : event.ctrlKey) && !event.metaKey && event.shiftKey && event.key.toLowerCase() === 'v') {
-        event.preventDefault();
-        setVoiceOpen(true);
-        setSidebarOpen(false);
-      }
-
-      // Resume builder with Cmd+Shift+R / Ctrl+Shift+R
-      if ((isMac ? event.metaKey : event.ctrlKey) && !event.metaKey && event.shiftKey && event.key.toLowerCase() === 'r') {
-        event.preventDefault();
-        setResumeOpen(true);
-        setSidebarOpen(false);
-      }
-
-      // Copilot workspace with Cmd+Shift+C / Ctrl+Shift+C
-      if ((isMac ? event.metaKey : event.ctrlKey) && !event.metaKey && event.shiftKey && event.key.toLowerCase() === 'c') {
-        event.preventDefault();
-        setCopilotOpen(true);
-        setSidebarOpen(false);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-  }, [sidebarOpen, voiceOpen, resumeOpen, copilotOpen, setSidebarOpen, setVoiceOpen, setResumeOpen, setCopilotOpen]);
-
   return (
     <div className="min-h-screen text-[#f0f2f5] flex flex-col" style={{ background: '#05060a' }}>
       <Header />

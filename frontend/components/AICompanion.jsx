@@ -83,15 +83,14 @@ function formatTextWithCitations(text, query) {
 // Custom component to parse and render message content with apply button on code blocks
 function QuizCard({ content }) {
   const [selected, setSelected] = useState(null);
-  const [quizData, setQuizData] = useState(null);
-
-  useEffect(() => {
+  const [quizData, setQuizData] = useState(() => {
     try {
-      setQuizData(JSON.parse(content));
+      return JSON.parse(content);
     } catch (e) {
       console.error("Invalid quiz JSON", e);
+      return null;
     }
-  }, [content]);
+  });
 
   if (!quizData) return <div className="text-red-400 text-xs my-2">Invalid Quiz Format</div>;
 
@@ -805,6 +804,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
   const [copilotMode, setCopilotMode] = useState('chat'); // 'chat' | 'agent' | 'plan'
   const [isTyping, setIsTyping] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
   const bottomRef = useRef(null);
   const [assistantTab, setAssistantTab] = useState(null);
   
@@ -1360,6 +1360,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
 
     // ---- Normal chat ----
     setIsTyping(true);
+    setIsThinking(true);
     
     // ---- Pro Search Multi-Step Simulator ----
     if (isProSearch) {
@@ -1561,6 +1562,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
       }]);
     } finally {
       setIsTyping(false);
+      setIsThinking(false);
       setProSearchStages([]);
     }
   };
@@ -1983,9 +1985,14 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
 
         {isTyping && (!isProSearch || proSearchStages.length === 0) && (
           <div className="flex justify-start">
+            <ThinkingIndicator isThinking={isThinking} isGeneratingImage={isGeneratingImage} />
+          </div>
+        )}
+        {isThinking && (!isProSearch || proSearchStages.length === 0) && (
+          <div className="flex justify-start mt-2">
             <div className="flex items-center gap-2.5 bg-bg-card border border-border text-text-secondary px-3 py-2.5 rounded-xl text-xs">
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
-              {isGeneratingImage ? 'Generating image...' : 'Thinking...'}
+              <ThinkingPulse className="w-3.5 h-3.5 animate-spin" />
+              <span className="text-xs font-medium">Deep analysing...</span>
             </div>
           </div>
         )}
@@ -2207,5 +2214,39 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
     </div>
   );
 };
+
+// Thinking Indicator Component
+const ThinkingIndicator = ({ isThinking, isGeneratingImage }) => {
+  if (!isThinking && !isGeneratingImage) return null;
+
+  return (
+    <div className="flex justify-start">
+      <div className="flex items-center gap-2.5 bg-bg-card border border-border text-text-secondary px-3 py-2.5 rounded-xl text-xs">
+        {isGeneratingImage ? (
+          <>
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+            <span>Generating image...</span>
+          </>
+        ) : isThinking && (
+          <>
+            <ThinkingPulse className="w-3.5 h-3.5 me-2" />
+            <span>Deep analysing...</span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Thinking Pulse SVG Component
+const ThinkingPulse = () => (
+  <svg className="w-3.5 h-3.5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <line x1="12" y1="8" x2="12" y2="12" />
+    <line x1="12" y1="16" x2="12.01" y2="16" />
+  </svg>
+);
+
+ThinkingPulse.displayName = 'ThinkingPulse';
 
 export default AICompanion;

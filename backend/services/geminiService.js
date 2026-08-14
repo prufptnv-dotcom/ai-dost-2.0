@@ -1,5 +1,6 @@
 const logger = require('../logger');
 const { RobustApiClient } = require('./apiClient');
+const { exec } = require('child_process');
 
 class GeminiService {
     constructor() {
@@ -18,6 +19,26 @@ class GeminiService {
                 timeout: 60000
             }
         });
+        this.ollamaAvailable = false;
+    }
+
+    async checkOllamaAvailability() {
+        try {
+            await new Promise((resolve, reject) => {
+                exec('curl -s http://localhost:11434/api/tags', (error, stdout, stderr) => {
+                    if (!error && stdout.includes('models')) {
+                        this.ollamaAvailable = true;
+                        logger.info('✅ Ollama local model server available');
+                    } else {
+                        this.ollamaAvailable = false;
+                    }
+                    resolve();
+                });
+            });
+        } catch (e) {
+            this.ollamaAvailable = false;
+            logger.warn('⚠️ Ollama not available - will use cloud-only mode');
+        }
     }
 
     static async chat(message, history = [], fileContent = null, mode = 'project', customApiKey = null) {
@@ -119,7 +140,41 @@ Here is what you can do and what features are available to the user on this plat
                 }
             }
 
-            // All models failed
+            // All Gemini models failed - try Ollama local model fallback
+            if (this.ollamaAvailable) {
+                try {
+                    logger.info('🔄 Falling back to Ollama local model...');
+                    const ollamaPrompt = message;
+                    const ollamaBody = {
+                        model: process.env.OLLAMA_MODEL || 'qwen2.5-coder:7b',
+                        prompt: ollamaPrompt,
+                        stream: false
+                    };
+
+                    const ollamaResult = await new Promise((resolve, reject) => {
+                        exec(`curl -s -X POST http://localhost:11434/api/generate -H "Content-Type: application/json" -d '${JSON.stringify(ollamaBody)}'`, (error, stdout, stderr) => {
+                            if (error) {
+                                reject(error);
+                                return;
+                            }
+                            try {
+                                const parsed = JSON.parse(stdout);
+                                resolve(parsed.response || stdout);
+                            } catch (e) {
+                                reject(new Error('Ollama response parse error'));
+                            }
+                        });
+                    });
+
+                    logger.info('✅ Ollama local model response received');
+                    return ollamaResult;
+                } catch (ollamaError) {
+                    logger.error('❌ Ollama fallback failed:', ollamaError.message);
+                }
+            }
+
+            // All fallbacks exhausted - report error
+            logger.error('❌ All Gemini models and Ollama fallback failed');
             if (lastError?.status === 429) {
                 throw new Error('RATE_LIMIT: ' + lastError.message);
             }

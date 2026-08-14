@@ -3,11 +3,138 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
 const logger = require('./logger');
+const Database = require('better-sqlite3');
 
 // Load .env file
 dotenv.config({ path: path.join(__dirname, '.env') });
 
+// ── SQLite Initialization ─────────────────────────────────────────────
+const dbPath = path.join(__dirname, 'data', 'app.db');
+const db = new Database(dbPath);
+
+// Enable WAL mode for better concurrent performance
+db.pragma('journal_mode = WAL');
+
+// Define tables (idempotent — safe to run on every start)
+function createTables() {
+  // projects table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      created_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'Active'
+    )
+  `);
+
+  // workspace_files table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workspace_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id TEXT NOT NULL,
+      path TEXT NOT NULL,
+      content TEXT,
+      last_modified TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    )
+  `);
+
+  // chat_history table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS chat_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  // resumes table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS resumes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      prompt TEXT,
+      json_data TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+}
+
+// Run on startup
+createTables();
+
+// Helper: get project by ID from SQLite (fallback to demo data if not found)
+function getProjectById(id) {
+  const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+  if (row) return row;
+  // Demo fallback
+  if (id === 'proj_demo_1') return {
+    project_id: 'proj_demo_1',
+    project_name: 'AI-Dost Interactive Web App',
+    description: 'Glassmorphism Web IDE & Autonomous AI Copilot Workspace',
+    created_at: new Date().toISOString(),
+    status: 'Active'
+  };
+  if (id === 'proj_demo_2') return {
+    project_id: 'proj_demo_2',
+    project_name: 'Python Calculator Engine',
+    description: 'Standalone Python & Glassmorphic Web Calculator App',
+    created_at: new Date().toISOString(),
+    status: 'Completed'
+  };
+  return null;
+}
+
+// Helper: seed initial projects from existing demo data (run once)
+function seedInitialProjects() {
+  const count = db.prepare('SELECT COUNT(*) AS cnt FROM projects').get().cnt;
+  if (count === 0) {
+    const now = new Date().toISOString();
+    db.prepare('INSERT INTO projects (id, name, description, created_at, status) VALUES (?, ?, ?, ?, ?)').run(
+      'proj_demo_1',
+      'AI-Dost Interactive Web App',
+      'Glassmorphism Web IDE & Autonomous AI Copilot Workspace',
+      now,
+      'Active'
+    );
+    db.prepare('INSERT INTO projects (id, name, description, created_at, status) VALUES (?, ?, ?, ?, ?)').run(
+      'proj_demo_2',
+      'Python Calculator Engine',
+      'Standalone Python & Glassmorphic Web Calculator App',
+      now,
+      'Completed'
+    );
+    logger.info('[SQLite] seeded initial projects from demo data');
+  }
+}
+seedInitialProjects();
+
 const app = express();
+
+// Helper: save a project file to SQLite
+function saveProjectFile(projectId, filePath, content) {
+  const stmt = db.prepare(
+    `INSERT INTO workspace_files (project_id, path, content) VALUES (?, ?, ?) ON CONFLICT(path) DO UPDATE SET content = ?, last_modified = datetime('now')`
+  );
+  stmt.run(projectId, filePath, content);
+  return true;
+}
+
+// Helper: get all files for a project
+function getProjectFiles(projectId) {
+  const rows = db.prepare('SELECT path, content FROM workspace_files WHERE project_id = ?').all();
+  return rows.reduce((acc, { path, content }) => {
+    acc[path] = content || '';
+    return acc;
+  }, {});
+}
+
+// Close DB on process exit
+process.on('beforeExit', () => {
+  db.close();
+});
 
 // HTTP request logging middleware
 app.use((req, res, next) => {
@@ -47,7 +174,125 @@ app.use('/api/learning', learningRoutes);
 app.use('/api/git',      gitRoutes);
 app.use('/api/agent',    agentRoutes);
 
-// Fallback Project Memory endpoints
+// ── AI Assistant Endpoints (mounted at /api/v1/ai) ──────────────────────────
+// This allows frontend calls to /ai/code-suggestions and /ai/lsp-diagnostics
+// to resolve to /api/v1/ai/code-suggestions via the agent router.
+app.use('/api/v1/ai',    agentRoutes);
+
+// ── New API Routes ──────────────────────────────────────────────────────────
+
+// Gemini Live API ephemeral token (client-side auth for WebSocket)
+app.get('/api/gemini-live-token', (req, res) => {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return res.status(503).json({ error: 'Gemini API key not configured' });
+  // Simple JWT-like token valid for 30 minutes
+  const token = Buffer.from(JSON.stringify({ key, exp: Math.floor(Date.now() / 1000) + 1800 })).toString('base64');
+  res.json({ token, expiresIn: 1800 });
+});
+
+// Voice session management
+const voiceSessions = new Map();
+
+app.post('/api/voice/start', (req, res) => {
+  const sessionId = `voice-${Date.now()}`;
+  voiceSessions.set(sessionId, { started: new Date(), active: true });
+  res.json({ sessionId, status: 'started', message: 'Voice session started' });
+});
+
+app.post('/api/voice/stop', (req, res) => {
+  const { sessionId } = req.body;
+  if (sessionId && voiceSessions.has(sessionId)) {
+    voiceSessions.get(sessionId).active = false;
+    res.json({ sessionId, status: 'stopped' });
+  } else {
+    res.status(404).json({ error: 'Voice session not found' });
+  }
+});
+
+// Resume builder: generate structured resume from chat prompt
+app.post('/api/resume/generate', async (req, res) => {
+  const { prompt } = req.body;
+  if (!prompt || typeof prompt !== 'string') {
+    return res.status(400).json({ error: 'Prompt is required' });
+  }
+
+  const GroqService = require('./services/groqService');
+
+  const systemPrompt = `You are a resume writer. Given the user prompt, extract and return a structured JSON resume with these exact fields: fullName (string), contact (object with email+phone), summary (2-3 sentences string), experience (array of {company, role, duration, bullets}), education (array of {institution, degree, year}), skills (array of strings). Return ONLY valid JSON, no prose, no markdown formatting, no code blocks. If any field is unknown, use null or empty array.`;
+
+  try {
+    const resp = await GroqService.chat(`${systemPrompt} USER PROMPT: ${prompt}`, [], 'project', null);
+    
+    // GroqService.chat returns a string content from the LLM
+    let content = '';
+    if (typeof resp === 'string') {
+      content = resp;
+    } else if (resp && typeof resp === 'object') {
+      // Handle object response if needed
+      content = resp.content || resp.text || JSON.stringify(resp);
+    }
+
+    if (!content || content.length < 10) {
+      // Fallback: simple pattern extraction
+      const nameMatch = prompt.match(/[a-zA-Z]+ [a-zA-Z]+/);
+      const data = {
+        fullName: nameMatch ? nameMatch[0] : 'Your Name',
+        contact: null,
+        summary: 'AI-generated resume summary based on your prompt.',
+        experience: [],
+        education: [],
+        skills: []
+      };
+      const stmt = db.prepare('INSERT INTO resumes (prompt, json_data) VALUES (?, ?)');
+      stmt.run(prompt, JSON.stringify(data));
+      return res.json(data);
+    }
+
+    // Strip markdown code blocks and extra whitespace
+    const cleaned = content
+      .replace(/```json\s*/gi, '')
+      .replace(/```\s*/g, '')
+      .trim();
+
+    // Parse the JSON response
+    let jsonData;
+    try {
+      jsonData = JSON.parse(cleaned);
+    } catch (parseErr) {
+      // If LLM didn't return clean JSON, try to extract what we can
+      console.warn('[Resume] JSON parse failed, attempting recovery:', parseErr.message);
+      jsonData = {
+        fullName: 'Your Name',
+        contact: null,
+        summary: content.substring(0, 200),
+        experience: [],
+        education: [],
+        skills: []
+      };
+    }
+
+    // Save to SQLite
+    const stmt = db.prepare('INSERT INTO resumes (prompt, json_data) VALUES (?, ?)');
+    stmt.run(prompt, JSON.stringify(jsonData));
+
+    res.json(jsonData);
+  } catch (e) {
+    logger.error('Resume generation error:', e.message);
+    const fallback = {
+      fullName: 'Your Name',
+      contact: null,
+      summary: 'Resume generated with Waaw AI',
+      experience: [],
+      education: [],
+      skills: []
+    };
+    const stmt = db.prepare('INSERT INTO resumes (prompt, json_data) VALUES (?, ?)');
+    stmt.run(prompt, JSON.stringify(fallback));
+    res.status(500).json({ error: 'Resume generation failed', detail: e.message });
+  }
+});
+
+// Fallback Project Memory endpoints (existing, keep unchanged)
 app.get(['/api/v1/memory/projects', '/api/projects'], (req, res) => {
     res.json([
         {

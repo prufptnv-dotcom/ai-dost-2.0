@@ -1,18 +1,28 @@
 import React, { useState, useEffect, useRef, useImperativeHandle } from 'react';
 import Editor from '@monaco-editor/react';
-import { Terminal, Play, RotateCcw, Eye, EyeOff, Wand2, X, Copy, Trash2, Loader2 } from 'lucide-react';
+import { Terminal, Play, RotateCcw, Eye, EyeOff, Wand2, X, Copy, Trash2, Loader2, Git } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useSocket } from '../context/SocketContext';
 import api, { executeCode, API_HOST } from '../services/api';
 import { calculateOperations, applyOperations } from '../lib/ot';
 import AISuggestionPanel from './AISuggestionPanel';
+import GitControlModal from './GitControlModal';
 
 const languageOptions = [
   { value: 'javascript', label: 'JavaScript' },
   { value: 'python', label: 'Python' },
   { value: 'html', label: 'HTML' },
   { value: 'css', label: 'CSS' },
-  { value: 'java', label: 'Java' }
+  { value: 'java', label: 'Java' },
+  { value: 'typescript', label: 'TypeScript' },
+  { value: 'go', label: 'Go' },
+  { value: 'rust', label: 'Rust' },
+  { value: 'c', label: 'C' },
+  { value: 'cpp', label: 'C++' },
+  { value: 'json', label: 'JSON' },
+  { value: 'yaml', label: 'YAML' },
+  { value: 'bash', label: 'Bash' },
+  { value: 'dockerfile', label: 'Dockerfile' }
 ];
 
 function detectLanguage(filename) {
@@ -108,6 +118,10 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
   const [originalCodeSelection, setOriginalCodeSelection] = useState('');
   const [proposedCodeSelection, setProposedCodeSelection] = useState('');
   const [aiEditModel, setAiEditModel] = useState('groq');
+  const [diagnostics, setDiagnostics] = useState({});
+  const [gitStatus, setGitStatus] = useState('none');
+  const [gitModalOpen, setGitModalOpen] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
 
   const { showToast } = useToast();
   const { socket, sendMessage, collaborators, remoteCursors } = useSocket();
@@ -326,7 +340,7 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
     }, 1000); // 1.0s debounce for ghost typing
   };
 
-  const handleEditorChange = (newContent) => {
+const handleEditorChange = (newContent) => {
     const content = newContent || '';
     if (content !== code) {
       setCode(content);
@@ -338,10 +352,19 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
         doc_id: currentFile || 'default',
         changes
       });
-
+      
       // Trigger AI autocomplete check
       triggerSuggestions(content);
-
+      
+      // Post diagnostics to LSP backend
+      if (currentFile) {
+        api.post('/ai/lsp-diagnostics', {
+          code_context: content,
+          language: selectedLanguage,
+          project_id: currentFile
+        }).catch(() => {/* Silently handle LSP errors */});
+      }
+      
       // Trigger parent onChange callback
       onChange && onChange(content);
     }
@@ -367,7 +390,11 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
 
     // Register Native Monaco Ghost Text Autocomplete Provider
     try {
-      monaco.languages.registerInlineCompletionsProvider(['python', 'javascript', 'html', 'css', 'json', 'java'], {
+      const supportedLanguages = ['python', 'javascript', 'typescript', 'html', 'css', 'java', 'go', 'rust', 'c', 'cpp', 'json', 'yaml', 'bash', 'dockerfile'];
+      if (!supportedLanguages.includes(model.getLanguageId())) {
+        return;
+      }
+      monaco.languages.registerInlineCompletionsProvider(model.getLanguageId(), {
         provideInlineCompletions: async (model, position) => {
           const lineContent = model.getLineContent(position.lineNumber);
           // Trigger ghost completion only if typing at line end or after 2 characters
@@ -376,12 +403,12 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
           }
 
           try {
-            const startLine = Math.max(1, position.lineNumber - 4);
+            const startLine = Math.max(1, position.lineNumber - 5);
             const codeContext = model.getValueInRange({
               startLineNumber: startLine,
               startColumn: 1,
               endLineNumber: position.lineNumber,
-              endColumn: position.column
+              endColumn: Math.max(position.column, 1)
             });
 
             const res = await api.post('/ai/code-suggestions', {
@@ -397,12 +424,16 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
                   position.lineNumber,
                   position.column,
                   position.lineNumber,
-                  position.column
-                )
+                  position.column + 1
+                ),
+                // Ghost text label - displayed by Monaco
+                label: s.label || s.code.substring(0, 50) || 'Suggestion'
               }));
               return { items };
             }
-          } catch (e) {}
+          } catch (e) {
+            console.warn('AI code suggestions failed:', e);
+          }
 
           return { items: [] };
         },
@@ -633,6 +664,26 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
           </button>
           <button 
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition cursor-pointer ${
+              gitStatus === 'modified'
+                ? 'bg-primary/15 border-primary/40 text-primary' 
+                : 'border-border text-text-secondary hover:bg-bg-hover'
+            }`}
+            onClick={async () => {
+              setIsThinking(true);
+              try {
+                await new Promise(r => setTimeout(r, 1500));
+                setGitModalOpen(true);
+                showToast({ type: 'success', message: 'Git panel opened - create commit or browse history' });
+              } catch (e) {
+                setIsThinking(false);
+              }
+            }}
+            title="Git Control Panel"
+          >
+            <Git className="w-3.5 h-3.5" /> Git
+          </button>
+          <button 
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition cursor-pointer ${
               showPreview
                 ? 'bg-primary/15 border-primary/40 text-primary' 
                 : 'border-border text-text-secondary hover:bg-bg-hover'
@@ -856,6 +907,23 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
           </div>
         </div>
       </div>
+      {gitModalOpen && (
+        <GitControlModal
+          isOpen={gitModalOpen}
+          onClose={() => setGitModalOpen(false)}
+        />
+      )}
+      {isThinking && (
+        <div className="fixed inset-0 z-[50] flex items-center justify-center bg-black/60 backdrop-blur-xl animate-fadeIn">
+          <div className="bg-bg-card border border-primary/40 rounded-xl p-8 text-center max-w-md mx-8">
+            <div className="w-12 h-12 mx-auto mb-4 bg-gradient-to-br from-primary to-secondary rounded-2xl flex items-center justify-center">
+              <Loader2 className="w-6 h-6 text-primary animate-spin" />
+            </div>
+            <h3 className="text-lg font-bold text-text-primary mb-2">Deep analysing...</h3>
+            <p className="text-sm text-text-muted">AI-Dost is thinking... this may take a moment.</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
