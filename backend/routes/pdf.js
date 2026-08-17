@@ -74,4 +74,18 @@ router.post('/generate', async (req, res) => {
     }
 });
 
+// Serve generated PDFs from the downloads dir (standalone deployment friendly)
+router.get('/download/:name', (req, res) => {
+    const downloadsDir = path.join(__dirname, '../../frontend/public/downloads');
+    const name = path.basename(req.params.name || '');
+    if (!name || !name.endsWith('.pdf')) {
+        return res.status(400).json({ success: false, error: 'Invalid filename' });
+    }
+    const filePath = path.join(downloadsDir, name);
+    if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ success: false, error: 'PDF not found' });
+    }
+    res.download(filePath, name);
+});
+
 module.exports = router;

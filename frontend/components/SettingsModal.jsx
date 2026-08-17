@@ -38,7 +38,6 @@ export default function SettingsModal({ isOpen, onClose }) {
     const storedTheme = localStorage.getItem('theme');
     if (storedTheme) {
       document.body.classList.toggle('light-theme', storedTheme === 'light');
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsLightTheme(storedTheme === 'light');
     }
     

@@ -1,0 +1,138 @@
+द सॉवरेन एआई स्टैक: एजेंटिक एआई इकोसिस्टम के लिए 300+ निःशुल्क, ओपन-सोर्स और अनलिमिटेड एपीआई का व्यापक वास्तुकला विश्लेषण
+
+कार्यकारी सारांश: स्वायत्त बुद्धिमत्ता का लोकतंत्रीकरण (Democratization of Autonomous Intelligence)
+
+सॉवरेन स्टैक का प्रतिमान (paradigm) अब स्थिर, नियतात्मक (deterministic) कमांड निष्पा��न से हटकर गतिशील, संभाव्य (probabilistic) एजेंटिक तर्क की ओर बढ़ गया है। एक फुल-स्टैक डेवलपर और एआई इंजीनियर के लिए, यह संक्रमण एक विशिष्ट चुनौती प्रस्तुत करता है: 'बुद्धिमत्ता की लागत' (Cost of Intelligence)। पारंपरिक प्रोपराइटरी एआई स्टैक—जैसे OpenAI या Anthropic का प्रति-टोकन बिलिंग मॉडल, और वीडियो जनरेशन सेवाओं की प्रति-मिनट लागत—जटिल, मल्टी-एजेंट सिस्टम के लिए एक उच्च प्रवेश बाधा उत्पन्न करते हैं। जब हम एजेंटिक फिलॉसफी को मार्जिन या डिजिटल मार्केटिंग जैसे कार्यों के लिए मिक्स करते हैं, तो यह और भी जटिल हो ज��ता है। यदि एक व्यवसाय AI का उपयोग करना चाहता है, तो उसे AI पर खर्च को अनुकूलित करना होगा। यह एआई पर होने वाले खर्चों पर नियंत्रण प्रदान करता है, जिसे हम "बुद्धिमान लागत" या "Cost of Intelligence" कहते हैं।
+
+यह रिपोर्ट एक "सॉवरेन एआई स्टैक" (Sovereign AI Stack) के निर्माण के लिए एक व्यापक वास्तुशिल्प ब्लूप्रिंट स्थापित करती है—जो फुल-स्टैक डेवलपमेंट, कॉस्ट क्रिएशन (विशेष रूप से ऐतिहासिक वृत्तचित्र), और डिजिटल मार्केटिंग के लिए एक पूरी तरह से स्वायत्त पारिस्थितिकी तंत्र है। हमारी कार्यप्रणाली विशेष रूप से निःशुल्क, ओपन-सोर्स और अनलिमिटेड एपीआई और लाइब्रेरी पर केंद्रित है। सेल्फ-होस्टेड ओपन-सोर्स सॉफ्टवेयर (OSS) और उदार फ्री-टियर सेवाओं का लाभ उठाकर, डेवलपर्स ऐसे एजेंट बना सकते हैं जो अनुसंधान, कोडिंग, मीडिया निर्माण और उत्पाद विवरण करते हैं, बिना उन भारी खर्चों के जो पारंपरिक एआई पर एजेन्टाइज्ड एआई के साथ जुड़ा होता है।
+
+इस विश्लेषण में 300 से अधिक टूल को पांच विशिष्ट वास्तुशिल्प स्तंभों में विभाजित किया गया है, जो आपके द्वारा अपलोड की गई फ़ाइल के प्रारूप (Category, Name, URL, Type, Access, Limits) का पालन करते ह���ं।
+
+1. एजेंटिक कोर: फ्रेमवर्क, अनुमान इंजन और मेमोरी सिस्टम (The Agentic Core)
+
+किसी भी स्वायत्त प्रणाली की नींव उसकी तर्क करने, याद रखने और कोड निष्पादित करने की क्षमता में निहित है। निम्नलिखित प्रौद्योगिकियां एजेंटिक परियोजना के "मस्तिष्क" और "तंत्रिका तंत्र" का निर्माण करती हैं, जिन्हें उनकी ओपन-सोर्स प्रकृति या उच्च-मात्रा वाले निःशुल्क टियर के लिए चुना गया है।
+
+1.1. एजेंट ऑर्केस्ट्रा और तर्क (Agent Orchestration & Training)
+
+जटिल वर्कफ़्लो का प्रबंधन करने के लिए जहां कई एजेंट (जैसे, एक "पटकथा लेखक", "इतिहा���कार", और
+
+---
+
+"वीडियो संपादक") सहयोग करते हैं, कोर ऑर्केस्ट्रेटिंग अपर्याप्त है। हमें ऐसे फ्रेमवर्क की आवश्यकता है जो ग्राफ-आधारित तर्क और राज्य प्रबंधन (state management) का समर्थन करते हों।
+
+LangGraph और CrewAI जैसे फ्रेमवर्क ने इस क्षेत्र में क्रांति ला दी है। LangGraph एजेंट वर्कफ़्लो को नोड्स और किनारों (edges) के रूप में मॉडल करता है, जो चक्रीय क्षमताओं (cyclic capabilities) को सक्षम बनाता है। यह ऐतिहासिक अनुसंधान जैसे कार्यों के लिए महत्वपूर्ण है, जहां एक एजेंट को तब तक खोज करनी पड़ सकती है जब तक कि उसे संतोषजनक शीर्ष�� स्रोत न मिल जाए। इसके विपरीत, CrewAI भूमिका-आधारित एजेंटों (role-playing agents) में विशेषज्ञता रखता है जो अनुसंधान जैसे विभिन्न व्यक्तियों – जैसे “सीनियर रिसर्चर्स” या “सोशल मीडिया मैनेजर” के साथ एक “क्रू” परिभाषित करने की अनुमति देता है। ऐतिहासिक फिल्म परियोजना में, CrewAI का उपयोग करके एक शोधपरक एजेंट और स्क्रिप्टराइटर एजेंट की डेटा पास करना है, जिससे मैनुअल डेटा हैंडलिंग की आवश्यकता समाप्त हो जाती है।
+
+स्थानीय अनुमान (Local Inference) के लिए, Ollama एक गेम-चेंजर है। यह Llama 3, Mistral, और Gemma जैसे ओपन-सोर्स मॉडल को स्��ानीय रूप से चलाने की प्रक्रिया को सरल बनाता है। इसका अर्थ है कि एक ऐतिहासिक फिल्म प्रोजेक्ट के लिए, एक एजेंट बिना एक पैसा खर्च किए हजारों पृष्ठों के ऐतिहासिक ग्रंथों को पढ़ और सारांशित कर सकता है। दूसरी ओर, Groq की LPU (Language Processing Unit) वास्तुकला 500+ टोकन प्रति सेकंड की गति से अनुमान प्रदान करती है। यह अल्ट्रा-लो लेटेंसी रीअल-टाइम एजेंट इंटेरेशन या आपकी प्रोजेक्ट वेबसाइट पर इंटेरैक्टिव चैटबॉट के लिए महत्वपूर्ण है।
+
+1.2. मेमोरी सिस्टम और वेक्टर डेटाबेस (Memory Systems)
+
+एजेंटों को ऐतिहासिक तथ्यों, फिल्मों की पटकथाओं और उपयोगकर्ता इंटरैक्शन को संग्रहीत करने के लिए दीर्घकालिक स्मृति (Long-term Memory) की आवश्यकता होती है। वेक्टर डेटाबेस सिमेंटिक सर्च (कीवर्ड के बजाय अर्थ के आधार पर की खोज) की अनुमति देते हैं। Qdrant और Milvus जैसे ओपन-सोर्स विकल्प डाटारसेंट डेटा के माध्यम से सिमेंटिक सर्च प्रदान करते हैं। यह ऐतिहासिक घटनाओं को उनके मेटाडेटा (दिनांक, स्थान) के साथ संग्रहीत करने के लिए एक महत्वपूर्ण है। ChromaDB स्थानीय RAG (Retrieval Augmented Generation) परियोजनाओं के लिए एक हल्की, एम्बेडेड एम्बेडिंग डेटाबेस है, जो LangChain के स���थ आसानी से एकीकृत हो जाता है।
+
+तालिका 1.1: एआई एजेंट्स, एलएलएम और फ्रेमवर्क (AI Agents, LLMs & Frameworks)
+
+| श्रेणी (Category) | ऐप/मॉडल का नाम (App/Model Name) | वेबसाइट/रिपोजिटरी URL (Website/Repository URL) | प्रकार (Type) | एपीआई कुंजी (API Key Required) | एक्सेस का प्रकार (Type of Access) | इंस्टॉलेशन कमांड (Installation Command) | फ्री टियर लिमिट (Free Tier Limit) |
+|---|---|---|---|---|---|---|---|
+| AI | LangGr | https:// | Python | No | Open | pip | Unlimited |
+
+---
+
+| Agent Framework | aph | github.com/langchain-ai/langgraph | Library | Source | install langgraph | (Local) |
+|---|---|---|---|---|---|---|---|
+| AI Agent Framework | CrewAI | https://github.com/crewAIinc/crewAI | Python Library | No | Open Source | pip install crewai | Unlimited (Local) |
+| AI Agent Framework | Microsoft AutoGen | https://github.com/microsoft/autogen | Python Library | No | Open Source | pip install pyautogen | Unlimited (Local) |
+| AI Agent Framework | LlamaIndex | https://www.llamaindex.ai | Python Library | No | No | Open Source | pip install llama-index | Unlimited (Local) |
+| AI Agent Framework | SuperAGI | https://github.com/TransformerOptimus/SuperAGI | Framework | No | Open Source | git clone... | Unlimited (Self-Hosted) |
+| AI Agent Framework | BabyAGI | https://github.com/yoheinakajima/babyagi | Script | Yes (LLM) | Open Source | git clone... | Unlimited (Local) |
+| AI Agent Framework | MetaGPT | https://github.c | Framew | Yes | Open Source | pip install | Unlimited |
+
+---
+
+| Framework | om/geekan/MetaGPT | ork | (LLM) | | metagpt | (Local) |
+|---|---|---|---|---|---|---|---|
+| AI Agent Framework | Camel | https://github.c om/camel-ai/camel | Framework | Yes (LLM) | Open Source | pip install camel-ai | Unlimited (Local) |
+| AI Inference | Ollama | https://ollama.com | Local Tool | No | Open Source | Download Binary | Unlimited (Hardware Dependent) |
+| AI Inference | LocalAI | https://localai.io | Local API | No | Open Source | Docker | Unlimited (Hardware Dependent) |
+| AI Inference | Groq | https://console.groq.com | Cloud API | Yes | Free Beta | pip install groq | High Rate Limits (Beta) |
+| AI Inference | Google Gemini API | https://ai.google.dev | Cloud API | Yes | Free Tier | pip install google-generativeai | 15 RPM, 1M Context |
+| AI Inference | HuggingFace Inference | https://huggingface.c o/inference-api | Cloud API | Yes | Free Tier | pip install huggingface_hub | Rate Limited (Community) |
+
+---
+
+| AI Inference | Cohere API | https://cohere.com | Cloud API | Yes | Free Tier | pip install cohere | 100 RPM (Trial) |
+|---|---|---|---|---|---|---|---|
+| AI Inference | Mistral API | https://console.mistral.ai | Cloud API | Yes | Free Tier | pip install mistralai | Rate Limited |
+| AI Inference | Together AI | https://together.ai | Cloud API | Yes | Free Credit | pip install together | $25 Free Credit |
+| AI Inference | OpenRouter | https://openrouter.ai | Cloud API | Yes | Aggregator | pip install openai | Low cost/Free models |
+| AI Inference | NVIDIA NIM | https://build.nvidia.com | Cloud API | Yes | Free Trial | pip install nvidia-nim | 1000 credits |
+| Vector DB | Qdrant | https://qdrant.tech | Database | No | Open Source | C | Unlimited (Self-Hosted) |
+| Vector DB | Milvus | https://milvus.io | Database | No | Open Source | docker-compose up | Unlimited (Self-Hosted) |
+| Vector DB | ChromaDB | https://www.trychroma.com | Database | No | Open Source | pip install chromadb | Unlimited (Local) |
+
+---
+
+| Vector DB | Weaviate | https://weaviate.io | Database | No | Open Source | docker-compose up | Unlimited (Self-Hosted) |
+|---|---|---|---|---|---|---|---|
+| Vector DB | Supabase (pgvector) | https://supabase.com | BaaS | Yes | Free Tier | Web / CLI | 500MB DB / 50K MAU |
+| Vector DB | Pinecone | https://www.pinecone.io | Database | Yes | Free Tier | pip install pinecone-client | 1 Index (Starter) |
+| Vector DB | LanceDB | https://lancedb.com | Database | No | Open Source | pip install lancedb | Unlimited (Embedded) |
+| Vector DB | Faiss | https://github.c om/facebookresearch/faiss | Library | No | Open Source | pip install faiss-cpu | Unlimited (Local) |
+| Memory | MemGPT | https://github.c om/cpacker/MemGPT | Library | No | Open Source | pip install memgpt | Unlimited (Local) |
+| Tools | LangChain Community | https://github.c om/langchain-ai/langchain | Library | No | Open Source | pip install langchain-community | Unlimited |
+
+---
+
+| Tools | Composio | https://composio.dev | Platform | Yes | Free Tier | pip install composio-core | Limited Actions |
+|---|---|---|---|---|---|---|---|
+| Tools | E2B | https://e2b.dev | Sandbox | Yes | Free Tier | pip install e2b | Code Execution on Sandbox |
+
+2. क्रिएटिव इंजन: प्रोग्रामेटिक मीडिया जनरेशन (The Creative Engine)
+
+"ऐतिहासिक फिल्मों" और "कंटेंट क्रिएशन" की आवश्यकताओं को पूरा करने के लिए, हमें एक ऐसी पाइपलाइन की आवश्यकता है जहां टेक्स्ट (स्क्रिप्ट) को प्रोग्रामेटिक रूप से मल्टीमीडिया (वीडियो, ऑडियो, कथन) में परिवर्तित किया जा सके। यह केवल एआई जनरेशन नहीं है, बल्कि कोड-संपादित संपादन है।
+
+2.1. प्रोग्रामेटिक वीडियो संपादन और एनीमेशन (Programmatic Video & Animation)
+
+हम सरल "टेक्स्ट-टू-वीडियो" एआई से आगे बढ़कर प्रोग्रामेटिक वीडियो संपादन की ओर बढ़ते हैं, जह���ं पायथन कोड हर फ्रेम को नियंत्रित करता है, जिससे ऐतिहासिक सटीक एनीमेशन सुनिश्चित होती है।
+
+MoviePy वीडियो संपादन का "क्लासिक आर्मि नाइफ" है। यह एजंटों को वीडियो क्लिप को काटने, जोड़ने, संयोजित करने और प्रभाव लागू करने की अनुमति देता है। एक एजेंट ऐतिहासिक फुटेज को स्क्रैप कर सकता है, प्रासंगिक दृश्यों के टाइमस्टैम्प निर्धारित कर सकता है, और MoviePy का उपयोग करके उन्हें एक वृत्तचित्र में सिलाई कर सकता है, स्वचालित रूप से टेक्स्ट और वॉटरमार्क को ओवरले कर सकता है।
+
+Manim (मैथेमेटिकल एनीमेशन इंजन), जिसे 3BlueBrown द्वारा बनाया गया है, सटीक, उच्च-गुणवत्ता वाले प्रोग्रामेटिक एनीमेशन उत्पन्न करता है। ऐतिहासिक फिल्मों के लिए, यह एनिमेटेड नक्शे (जैसे, "रोमन साम्राज्य का विस्तार") या समयरेखा बनाने के लिए एकदम सही है। एक एजेंट ऐतिहासिक डेटा बिंदुओं का प्रतिमानित करने वाला पायथन कोड उत्पन्न कर सकता है, जिसे Manim 4K वीडियो में प्रस्तुत करेगा।
+
+Open-Sora और HunyuanVideo जैसे ओपन-सोर्स वीडियो जनरेशन मॉडल बी-रोल फुटेज (जैसे, "प्राचीन सिंधु घाटी बाजार") बनाने के लिए अमूल्य हैं जहाँ कोई ऐतिहासिक अभिलेखागार मौजूद नहीं है। यदि आपके पास GPU संसाधन (जैसे Google Colab की टियर) हैं, तो ये मॉडल Runway या Sora का एक मुफ्त विकल्प प्रदान करते हैं।
+
+2.2. वॉइस सिंथेसिस और ऑडियो इंजीनियरिंग (Voice Synthesis & Audio)
+
+---
+
+एक वृत्तचित्र को एक कथावाचक (Narrator) की आवश्यकता होती है। ओपन-सोर्स TTS अब मानव समानता तक पहुंच गया है।
+
+Coqui TTS (विशेष रूप से XTTS V2 मॉडल) वॉयस क्लोनिंग और बहुभाषी भाषण का समर्थन करता है। एक एजेंट को "कथावाचक व्यक्ति" (जैसे, एक गहरी, आधिकारिक आवाज) दिया जा सकता है और वह स्क्रिप्ट को तुरंत ऑडियो फ़ाइलों में संश्लेषित कर सकता है। Bark मानक TTS के विपरीत, गैर-भाषण ध्वनियाँ (आईई, हँसी, परिस्थिति शोर) उत्पन्न करता है। यह एक एजेंट को भावनात्मक रूप से गुंजायमान वोइस्ओवर बनाने की अनुमति देता है जो ठोस रोबोटिक और अधिक मानवीय लगते हैं। संगीत के लिए, मेटा को AudioCraft (MusicGen) टेक्स्ट-टू-म्यूजिक जनरेशन में सक्षम है। एक "निर्देशक एजेंट" एक दृश्य की भावना का विश्लेषण कर सकता है और (जैसे, "वाटरलू की लड़ाई - धीमा") और MusicGen को रॉयल्टी-मुक्त, अद्वितीय ऑर्केस्ट्रा पृष्ठभूमि ट्रैक बनाने के लिए प्रेरित कर सकता है।
+
+तालिका 2.1: वीडियो, एनीमेशन और ऑडियो टूल्स (Video, Audio & Animation)
+
+| श्रेणी (Category) | ऐप/मॉडल का नाम (App/Model Name) | वेबसाइट/रिपोजिटरी URL (Website/Repository URL) | प्रकार (Type) | एपीआई कुंजी (API Key Required) | एक्सेस का प्रकार (Type of Access) | इंस्टॉलेशन कमांड (Installation Command) | फ्री टियर लिमिट (Free Tier Limit) |
+|---|---|---|---|---|---|---|---|
+| Video Editing | MoviePy | https://github.com/Zulko/moviepy | Python Library | No | Open Source | pip install moviepy | Unlimited |
+| Animation | Manim | https://github.com/3b1b/manim | Python Library | No | Open Source | pip install manim | Unlimited |
+| Video Gen | Open-Sora | https://github.com/hpcaitech/Open-Sora | Model | No | Open Source | git clone... | Unlimited (Self-Hosted) |
+
+---
+
+| Video Gen | Hunyuanvideo | https://github.com/tencent-ailab/HunyuanVideo | Model | No | Open Source | git clone... | Unlimited (Self-Hosted) |
+|---|---|---|---|---|---|---|---|
+| Video Gen | ModelScope | https://modelscope.cn | Model Hub | No | Open Source | pip install modelscope | Unlimited |
+| Animation | Synfig Studio | https://www.synfig.org | Software | No | Download Binary | Unlimited |
+| Animation | LottieFiles | https://lottiefiles.com | Platform | No | Web Library | npm install lottie-web | Unlimited (Free Assets) |
+| Animation | Jitter | https://jitter.video | Web App | No | Web App | Browser | Unlimited (Basic) |
+| TTS | Coqui TTS | https://github.com/coqui-ai/TTS | Python Library | No | Open Source | pip install TTS | Unlimited |
+| TTS | Bark | https://github.com/suno-ai/bark | Model | No | Open Source | pip install git+... | Unlimited |
+| TTS | gTTS | https://github.com/pndurette/gTTS | Python Library | No | Open Source | pip install gTTS | Unlimited |
+
+---
+
+| TTS | pyttsx3 | https://github.com/nateshmbhat/pyttsx3 | Python Library | No | Open Source | pip install pyttsx3 | Unlimited (Offline) |
+|---|---|---|---|---|---|---|---|
+| TTS | Larynx | https://github.com/rhasspy/larynx | Python Library | No | Open Source | pip install larynx | Unlimited |
+| TTS | Mimic3 | https://github.com/MycroftAI/mimic3 | Python Library | No | Open Source | pip install mycroft-mimic3-tts | Unlimited |
+| TTS | OpenVINO TTS | https://github.com/openvinotoolkit/openvino | Python Library | No | Open Source | pip install openvino | Unlimited |
+| Audio Gen | AudioCraft (Music Gen) | https://github.com/facebookresearch/audiocraft | Model | No | Open Source | pip install git+... | Unlimited |
+| Audio Analysis | Librosa | https://librosa.org | Python Library | No | Open Source | pip install librosa | Unlimited |

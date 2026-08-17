@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef, useImperativeHandle } from 'react';
 import Editor from '@monaco-editor/react';
-import { Terminal, Play, RotateCcw, Eye, EyeOff, Wand2, X, Copy, Trash2, Loader2, Git } from 'lucide-react';
+import { Terminal, Play, RotateCcw, Eye, EyeOff, Wand2, X, Copy, Trash2, Loader2, GitBranch, ShieldCheck } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useSocket } from '../context/SocketContext';
 import api, { executeCode, API_HOST } from '../services/api';
 import { calculateOperations, applyOperations } from '../lib/ot';
 import AISuggestionPanel from './AISuggestionPanel';
 import GitControlModal from './GitControlModal';
+import CodeReviewModal from './CodeReviewModal';
 
 const languageOptions = [
   { value: 'javascript', label: 'JavaScript' },
@@ -65,7 +66,7 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
     let ws = null;
     const connectTerminalWs = () => {
       // Use standard WebSocket
-      const wsUrl = process.env.NEXT_PUBLIC_GO_WS_URL || 'ws://127.0.0.1:5005';
+      const wsUrl = process.env.NEXT_PUBLIC_GO_WS_URL || 'ws://127.0.0.1:5000';
       const wsEndpoint = wsUrl.replace('ws://', 'ws://').replace('http://', 'ws://') + '/api/terminal/ws';
       
       try {
@@ -121,6 +122,7 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
   const [diagnostics, setDiagnostics] = useState({});
   const [gitStatus, setGitStatus] = useState('none');
   const [gitModalOpen, setGitModalOpen] = useState(false);
+  const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
 
   const { showToast } = useToast();
@@ -373,6 +375,62 @@ const handleEditorChange = (newContent) => {
   const handleEditorDidMount = (editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
+
+    // Connect to LSP Proxy via WebSocket for true LSP diagnostics
+    try {
+      const wsUrl = process.env.NEXT_PUBLIC_BACKEND_URL ? process.env.NEXT_PUBLIC_BACKEND_URL.replace('http', 'ws') : 'ws://localhost:5000';
+      const lspSocket = new WebSocket(`${wsUrl}/lsp`);
+      
+      lspSocket.onopen = () => {
+        console.log('🔗 LSP Connected');
+        // Send LSP Initialize
+        lspSocket.send(JSON.stringify({
+          jsonrpc: '2.0', id: 1, method: 'initialize',
+          params: { rootUri: null, capabilities: {} }
+        }));
+      };
+
+      lspSocket.onmessage = (msg) => {
+        try {
+          const data = JSON.parse(msg.data);
+          if (data.method === 'textDocument/publishDiagnostics') {
+            const markers = data.params.diagnostics.map(d => ({
+              severity: d.severity === 1 ? monaco.MarkerSeverity.Error : 
+                        d.severity === 2 ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Info,
+              startLineNumber: d.range.start.line + 1,
+              startColumn: d.range.start.character + 1,
+              endLineNumber: d.range.end.line + 1,
+              endColumn: d.range.end.character + 1,
+              message: d.message,
+              source: d.source
+            }));
+            const model = editor.getModel();
+            if (model) monaco.editor.setModelMarkers(model, 'lsp', markers);
+          }
+        } catch (e) {}
+      };
+
+      // When code changes, send textDocument/didChange
+      editor.onDidChangeModelContent(() => {
+        if (lspSocket.readyState === WebSocket.OPEN) {
+          const content = editor.getValue();
+          lspSocket.send(JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'textDocument/didChange',
+            params: {
+              textDocument: { uri: `inmemory://model/1`, version: Date.now() },
+              contentChanges: [{ text: content }]
+            }
+          }));
+        }
+      });
+    } catch (e) {
+      console.warn('LSP Init Failed:', e);
+    }
+
+    if (code) {
+      editor.setValue(code);
+    }
 
     // Track cursor changes and emit positions to other collaborators
     editor.onDidChangeCursorPosition((e) => {
@@ -680,7 +738,18 @@ const handleEditorChange = (newContent) => {
             }}
             title="Git Control Panel"
           >
-            <Git className="w-3.5 h-3.5" /> Git
+            <GitBranch className="w-3.5 h-3.5" /> Git
+          </button>
+          <button 
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition cursor-pointer ${
+              reviewModalOpen
+                ? 'bg-primary/15 border-primary/40 text-primary' 
+                : 'border-border text-text-secondary hover:bg-bg-hover'
+            }`}
+            onClick={() => setReviewModalOpen(true)}
+            title="AI Code Security & Quality Audit"
+          >
+            <ShieldCheck className="w-3.5 h-3.5" /> Audit
           </button>
           <button 
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition cursor-pointer ${
@@ -913,6 +982,16 @@ const handleEditorChange = (newContent) => {
           onClose={() => setGitModalOpen(false)}
         />
       )}
+      <CodeReviewModal
+        isOpen={reviewModalOpen}
+        onClose={() => setReviewModalOpen(false)}
+        currentCode={code}
+        currentFile={currentFile}
+        onApplyPatch={(patched) => {
+          setCode(patched);
+          if (onChange) onChange(patched);
+        }}
+      />
       {isThinking && (
         <div className="fixed inset-0 z-[50] flex items-center justify-center bg-black/60 backdrop-blur-xl animate-fadeIn">
           <div className="bg-bg-card border border-primary/40 rounded-xl p-8 text-center max-w-md mx-8">

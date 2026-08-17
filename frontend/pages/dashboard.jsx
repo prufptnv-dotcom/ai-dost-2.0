@@ -1,451 +1,398 @@
-import { useEffect, useState, useRef } from 'react';
-import { motion } from 'framer-motion';
-import {
-  FolderOpen, Plus, BarChart3, Sparkles, Folder,
-  ChevronRight, Zap, Brain, Clock, TrendingUp, X,
-  Terminal, Bot, Activity, Star
-} from 'lucide-react';
-import ProjectCard from '../components/ProjectCard';
-import Header from '../components/Header';
-import { fetchProjects, createProject } from '../services/api';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-
-const AICompanion = dynamic(() => import('../components/AICompanion'), { 
-  ssr: false, 
-  loading: () => <div className="animate-pulse w-full h-full bg-white/5 rounded-2xl border border-white/10" /> 
-});
+import { motion, AnimatePresence } from 'framer-motion';
+import { MessageSquare, FolderOpen, Code2, Bot, Mic, Image as ImageIcon, FileText, History, Settings, CornerDownLeft, Sparkles, X, Loader2 } from 'lucide-react';
+import Sidebar from '../components/Sidebar';
+import TopBar from '../components/TopBar';
+import ChatView from '../components/views/ChatView';
+import ProjectsView from '../components/views/ProjectsView';
+import VoiceView from '../components/views/VoiceView';
+import ImageView from '../components/views/ImageView';
+import ResumeView from '../components/views/ResumeView';
+import HistoryView from '../components/views/HistoryView';
+import SettingsView from '../components/views/SettingsView';
+import McpPanel from '../components/McpPanel';
+import AgentView from '../components/views/AgentView';
+import IDEErrorBoundary from '../components/views/IDEErrorBoundary';
+import { fetchProjects, createProject } from '../services/api';
 import { useMode } from '../context/ModeContext';
+import { useRouter } from 'next/router';
 
-/* ─── Animated Progress Bar ─── */
-function ProgressBar({ value, color = '#06b6d4', delay = 0 }) {
-  const [width, setWidth] = useState(0);
-  const ref = useRef(null);
+const CopilotIDE = dynamic(() => import('../components/views/CopilotIDE'), {
+  ssr: false,
+  loading: () => <div className="h-full flex items-center justify-center"><div className="w-8 h-8 rounded-xl animate-spin" style={{ background: 'var(--gradient-primary)' }} /></div>,
+});
 
-  useEffect(() => {
-    const timer = setTimeout(() => setWidth(value), delay + 200);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
+const VIEW_META = {
+  chat: { title: 'AI-Dost Chat', subtitle: 'Kuch bhi puchho — bina judgement ke', icon: MessageSquare },
+  projects: { title: 'Projects', subtitle: 'Aapke saare projects ek jagah', icon: FolderOpen },
+  copilot: { title: 'Copilot IDE', subtitle: 'VS Code-style editor + Copilot agent', icon: Code2 },
+  agent: { title: 'Autonomous Agent', subtitle: 'Plan → Tools → Code → Screenshots', icon: Bot },
+  voice: { title: 'Voice Assistant', subtitle: 'Bolke kaam karo — Hinglish me', icon: Mic },
+  images: { title: 'Image Generator', subtitle: 'Prompt se free images — Pollinations AI', icon: ImageIcon },
+  resume: { title: 'Resume Builder', subtitle: 'Prompt se instant resume + preview', icon: FileText },
+  history: { title: 'Chat History', subtitle: 'Purani baatein — sab saved', icon: History },
+  settings: { title: 'Settings', subtitle: 'Models, keys aur preferences', icon: Settings },
+};
 
-  return (
-    <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
-      <div
-        className="h-full rounded-full transition-all duration-1000 ease-out"
-        style={{ width: `${width}%`, background: `linear-gradient(90deg, ${color}, ${color}99)`, boxShadow: `0 0 8px ${color}50` }}
-      />
-    </div>
-  );
-}
+const SIDEBAR_WIDTH = { collapsed: 72, expanded: 280 };
+const TOPBAR_H = 64;
 
-/* ─── Stat Card ─── */
-function StatCard({ icon: Icon, label, value, color, sub, delay }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, delay }}
-      className="relative rounded-2xl p-5 overflow-hidden group"
-      style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)' }}
-    >
-      <div
-        className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
-        style={{ background: `radial-gradient(200px at 50% 0%, ${color}12, transparent 70%)` }}
-      />
-      <div className="flex items-start justify-between mb-3">
-        <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: `${color}18`, border: `1px solid ${color}25` }}>
-          <Icon className="w-4 h-4" style={{ color }} />
-        </div>
-        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ background: `${color}15`, color }}>{sub}</span>
-      </div>
-      <div className="text-2xl font-black text-white mb-0.5">{value}</div>
-      <div className="text-xs text-[#64748b]">{label}</div>
-    </motion.div>
-  );
-}
+const PALETTE_ACTIONS = [
+  { id: 'chat', label: 'Chat kholo', hint: 'Ctrl+1', icon: MessageSquare },
+  { id: 'projects', label: 'Projects kholo', hint: 'Ctrl+2', icon: FolderOpen },
+  { id: 'copilot', label: 'Copilot IDE kholo', hint: 'Ctrl+3', icon: Code2 },
+  { id: 'agent', label: 'Agent kholo', hint: 'Ctrl+4', icon: Bot },
+  { id: 'voice', label: 'Voice assistant kholo', hint: 'Ctrl+5', icon: Mic },
+  { id: 'resume', label: 'Resume builder kholo', hint: 'Ctrl+6', icon: FileText },
+  { id: 'images', label: 'Images generator kholo', hint: 'Ctrl+9', icon: ImageIcon },
+  { id: 'history', label: 'History dekho', hint: 'Ctrl+7', icon: History },
+  { id: 'settings', label: 'Settings kholo', hint: 'Ctrl+8', icon: Settings },
+  { id: 'new-chat', label: 'Nayi chat shuru karo', hint: 'Ctrl+N', icon: Sparkles },
+];
 
-const Dashboard = () => {
+export default function Dashboard() {
   const { mode } = useMode();
+  const router = useRouter();
+  const [view, setView] = useState('chat');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [projects, setProjects] = useState([]);
-  const [loadError, setLoadError] = useState('');
-  const [learningProgress] = useState([
-    { topic: 'Python Basics', description: 'Variables, Lists, Dicts', progress: 85, color: '#06b6d4' },
-    { topic: 'FastAPI Development', description: 'Routing & Pydantic schemas', progress: 60, color: '#8b5cf6' },
-    { topic: 'React Components', description: 'State, hooks & lifecycle', progress: 40, color: '#10b981' },
-  ]);
-  const [loading, setLoading] = useState(true);
+  const [model, setModel] = useState('auto');
+  const [chatKey, setChatKey] = useState(0);
+  const [resumeData, setResumeData] = useState(null);
+  const [toasts, setToasts] = useState([]);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDesc, setNewProjectDesc] = useState('');
   const [creating, setCreating] = useState(false);
-  const [showProgress, setShowProgress] = useState(false);
+  const paletteRef = useRef(null);
+  const paletteInputRef = useRef(null);
+
+  // Sidebar persistence
+  useEffect(() => {
+    const saved = localStorage.getItem('ai_dost_sidebar_open');
+    if (saved !== null) setSidebarOpen(saved === '1');
+    setModel(localStorage.getItem('ai_dost_model') || 'auto');
+  }, []);
+
+  // Load projects
+  useEffect(() => {
+    (async () => {
+      try {
+        const userId = localStorage.getItem('ai_dost_user_id') || 'demo_user_id';
+        const data = await fetchProjects(userId);
+        setProjects(Array.isArray(data) ? data : []);
+      } catch (e) {
+        setProjects([]);
+      }
+    })();
+  }, []);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen(prev => {
+      localStorage.setItem('ai_dost_sidebar_open', prev ? '0' : '1');
+      return !prev;
+    });
+  }, []);
+
+  const showToast = useCallback((message, type = 'success') => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+  }, []);
 
   useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        setLoadError('');
-        let userId = localStorage.getItem('ai_dost_user_id') || 'demo_user_id';
-        const data = await fetchProjects(userId);
-        setProjects(data || []);
-      } catch (err) {
-        console.error('Failed to load projects', err);
-        setProjects([]);
-        setLoadError(err?.message || 'Failed to load projects');
-      } finally {
-        setLoading(false);
-      }
+    const handler = (e) => {
+      if (e.detail && e.detail.message) showToast(e.detail.message, e.detail.type || 'success');
     };
-    fetchDashboardData();
+    window.addEventListener('ai_dost_toast', handler);
+    return () => window.removeEventListener('ai_dost_toast', handler);
+  }, [showToast]);
+
+  const go = useCallback((v) => {
+    setView(v);
+    setPaletteOpen(false);
   }, []);
+
+  const handleNewChat = useCallback(() => {
+    setChatKey(k => k + 1);
+    go('chat');
+    showToast('Nayi chat shuru', 'success');
+  }, [go, showToast]);
+
+  const handleNewProject = useCallback(() => {
+    setShowCreateModal(true);
+  }, []);
+
+  const handleOpenResumeWithData = useCallback((data) => {
+    setResumeData(data);
+    go('resume');
+  }, [go]);
+
+  const handleOpenVoice = useCallback(() => go('voice'), [go]);
+  const handleOpenSettings = useCallback(() => go('settings'), [go]);
+  const handleVoiceTranscript = useCallback((text) => {
+    const t = text.toLowerCase();
+    if (/(resume|cv banao|cv ban|bio data)/.test(t)) { go('resume'); return; }
+    if (/(project|projects)/.test(t) && /(kholo|dekho|dikhao|show|open|list)/.test(t)) { go('projects'); return; }
+    if (/(agent|autonomous)/.test(t) && /(chalao|run|start|kholo)/.test(t)) { go('agent'); return; }
+    if (/(copilot|code editor|ide)/.test(t)) { go('copilot'); return; }
+    if (/(history|purani)/.test(t)) { go('history'); return; }
+    if (/(settings|setting)/.test(t)) { go('settings'); return; }
+  }, [go]);
+  const handleOpenPalette = useCallback(() => { setPaletteOpen(true); setPaletteQuery(''); setTimeout(() => paletteInputRef.current?.focus(), 60); }, []);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); toggleSidebar(); return; }
+      if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); handleOpenPalette(); return; }
+      if (mod && e.key.toLowerCase() === 'n' && !e.shiftKey) { e.preventDefault(); handleNewChat(); return; }
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'r') { e.preventDefault(); go('resume'); return; }
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'c') { e.preventDefault(); go('copilot'); return; }
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'g') { e.preventDefault(); go('copilot'); return; }
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'v') { e.preventDefault(); go('voice'); return; }
+      if (mod && e.key.toLowerCase() === '1') { e.preventDefault(); go('chat'); return; }
+      if (mod && e.key.toLowerCase() === '2') { e.preventDefault(); go('projects'); return; }
+      if (mod && e.key.toLowerCase() === '3') { e.preventDefault(); go('copilot'); return; }
+      if (mod && e.key.toLowerCase() === '4') { e.preventDefault(); go('agent'); return; }
+      if (mod && e.key.toLowerCase() === '5') { e.preventDefault(); go('voice'); return; }
+      if (mod && e.key.toLowerCase() === '6') { e.preventDefault(); go('resume'); return; }
+      if (mod && e.key.toLowerCase() === '9') { e.preventDefault(); go('images'); return; }
+      if (mod && e.key.toLowerCase() === '7') { e.preventDefault(); go('history'); return; }
+      if (mod && e.key.toLowerCase() === '8') { e.preventDefault(); go('settings'); return; }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [toggleSidebar, handleOpenPalette, handleNewChat, go]);
+
+  const sidebarWidth = sidebarOpen ? SIDEBAR_WIDTH.expanded : SIDEBAR_WIDTH.collapsed;
 
   const handleCreateProject = async (e) => {
     e.preventDefault();
     if (!newProjectName.trim()) return;
     setCreating(true);
     try {
-      setLoadError('');
-      let userId = localStorage.getItem('ai_dost_user_id') || 'demo_user_id';
+      const userId = localStorage.getItem('ai_dost_user_id') || 'demo_user_id';
       const newProj = await createProject(newProjectName.trim(), newProjectDesc.trim(), userId);
       if (newProj?.project_id) {
         setProjects(prev => [...prev, newProj]);
         setShowCreateModal(false);
         setNewProjectName('');
         setNewProjectDesc('');
-        window.location.href = `/project/${newProj.project_id}`;
+        showToast('Project ban gaya!', 'success');
       }
     } catch (err) {
-      console.error('Failed to create project', err);
-      setLoadError(err?.message || 'Failed to create project');
+      showToast(`Create failed: ${err?.detail || err?.message}`, 'error');
     } finally {
       setCreating(false);
     }
   };
 
-  const stats = [
-    { icon: Folder, label: 'Total Projects', value: projects.length || 0, color: '#06b6d4', sub: 'All Time', delay: 0 },
-    { icon: Zap, label: 'Agent Runs', value: 9, color: '#8b5cf6', sub: 'Today', delay: 0.05 },
-    { icon: Activity, label: 'Tests Passed', value: '9/9', color: '#10b981', sub: '100%', delay: 0.1 },
-    { icon: Clock, label: 'Avg Agent Speed', value: '1.9s', color: '#f59e0b', sub: 'Fast ⚡', delay: 0.15 },
-  ];
+  const filteredActions = PALETTE_ACTIONS.filter(a =>
+    a.label.toLowerCase().includes(paletteQuery.toLowerCase()) ||
+    (a.hint || '').toLowerCase().includes(paletteQuery.toLowerCase())
+  );
 
-  // Enhanced features state
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [activeSidebarItem, setActiveSidebarItem] = useState('chat');
-  const [voiceOpen, setVoiceOpen] = useState(false);
-  const [resumeOpen, setResumeOpen] = useState(false);
-  const [copilotOpen, setCopilotOpen] = useState(false);
-  const [terminalOpen, setTerminalOpen] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [selectedResume, setSelectedResume] = useState(null);
-  const [copilotFiles, setCopilotFiles] = useState([]);
-  const [copilotProjectName, setCopilotProjectName] = useState('My Project');
-  const [geminiApiKey] = useState(() => process.env.NEXT_PUBLIC_GEMINI_API_KEY || '');
+  const runPaletteAction = (actionId) => {
+    if (actionId === 'new-chat') handleNewChat();
+    else go(actionId);
+  };
 
-  // Global keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (event) => {
-      const mod = event.metaKey ? 'meta' : 'ctrl';
-      const isMac = navigator.platform === 'MacIntel';
-
-      // Toggle sidebar with Cmd+K / Ctrl+K
-      if ((isMac ? event.metaKey : event.ctrlKey) && event.key === 'k') {
-        event.preventDefault();
-        setSidebarOpen(!sidebarOpen);
-        setActiveSidebarItem('chat');
-      }
-
-      // Voice assistant with Cmd+Shift+V / Ctrl+Shift+V
-      if ((isMac ? event.metaKey : event.ctrlKey) && !event.metaKey && event.shiftKey && event.key.toLowerCase() === 'v') {
-        event.preventDefault();
-        setVoiceOpen(true);
-        setSidebarOpen(false);
-      }
-
-      // Resume builder with Cmd+Shift+R / Ctrl+Shift+R
-      if ((isMac ? event.metaKey : event.ctrlKey) && !event.metaKey && event.shiftKey && event.key.toLowerCase() === 'r') {
-        event.preventDefault();
-        setResumeOpen(true);
-        setSidebarOpen(false);
-      }
-
-      // Copilot workspace with Cmd+Shift+C / Ctrl+Shift+C
-      if ((isMac ? event.metaKey : event.ctrlKey) && !event.metaKey && event.shiftKey && event.key.toLowerCase() === 'c') {
-        event.preventDefault();
-        setCopilotOpen(true);
-        setSidebarOpen(false);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-  }, [sidebarOpen, voiceOpen, resumeOpen, copilotOpen, setSidebarOpen, setVoiceOpen, setResumeOpen, setCopilotOpen]);
+  const meta = VIEW_META[view];
 
   return (
-    <div className="min-h-screen text-[#f0f2f5] flex flex-col" style={{ background: '#05060a' }}>
-      <Header />
+    <div className="h-screen w-screen overflow-hidden" style={{ background: 'var(--color-bg)' }}>
+      <Sidebar
+        isOpen={sidebarOpen}
+        onToggle={toggleSidebar}
+        activeItem={view}
+        onItemClick={go}
+        userProjects={projects}
+        onNewProject={handleNewProject}
+        onNewChat={handleNewChat}
+      />
 
-      {mode === 'chat' ? (
-        <div className="flex-1 flex pt-14 w-full justify-center">
-          <div className="w-full h-[calc(100vh-56px)] animate-fadeIn">
-            <AICompanion />
-          </div>
+      <TopBar
+        sidebarPadding={sidebarWidth}
+        title={meta.title}
+        subtitle={meta.subtitle}
+        model={model}
+        onModelChange={setModel}
+        onOpenVoice={handleOpenVoice}
+        onOpenSettings={handleOpenSettings}
+        onOpenCommandPalette={handleOpenPalette}
+      />
+
+      {/* Main content */}
+      <main
+        className="absolute top-0 right-0 bottom-0 transition-[padding] duration-300"
+        style={{ left: sidebarWidth, paddingTop: TOPBAR_H }}
+      >
+        <div className="h-full w-full overflow-hidden">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={view + chatKey}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.18 }}
+              className="h-full w-full"
+            >
+              {view === 'chat' && <ChatView key={chatKey} model={model} onModelChange={setModel} onOpenResumeWithData={handleOpenResumeWithData} onOpenVoice={handleOpenVoice} onNavigate={go} />}
+              {view === 'projects' && <ProjectsView onOpenProject={(id) => router.push(`/project/${id}`)} onToast={showToast} />}
+              {view === 'copilot' && (
+                <IDEErrorBoundary>
+                  <CopilotIDE projectId="copilot-workspace" projectName="Copilot Workspace" onToast={showToast} />
+                </IDEErrorBoundary>
+              )}
+              {view === 'agent' && <AgentView onToast={showToast} />}
+              {view === 'voice' && <VoiceView onToast={showToast} onTranscript={handleVoiceTranscript} onClose={() => go('chat')} />}
+              {view === 'images' && <ImageView onToast={showToast} />}
+              {view === 'resume' && <ResumeView initialResume={resumeData} onToast={showToast} onClose={() => go('chat')} />}
+              {view === 'history' && <HistoryView onToast={showToast} />}
+              {view === 'settings' && <SettingsView onToast={showToast} onModelChange={setModel} />}
+              {view === 'mcp' && <McpPanel />}
+            </motion.div>
+          </AnimatePresence>
         </div>
-      ) : (
-        <div className="flex-1 flex pt-14 overflow-hidden">
-          {/* ─── Left: AI Companion ─── */}
-          <div className="hidden md:flex w-[340px] lg:w-[370px] shrink-0 h-[calc(100vh-56px)] sticky top-14 flex-col"
-            style={{ borderRight: '1px solid rgba(255,255,255,0.05)' }}>
-            <AICompanion />
-          </div>
+      </main>
 
-          {/* ─── Center: Dashboard ─── */}
-          <div className="flex-1 min-w-0 overflow-y-auto">
-            <div className="max-w-5xl mx-auto px-5 py-7 space-y-7">
+      {/* Toasts */}
+      <div className="fixed bottom-5 right-5 z-[100] space-y-2">
+        <AnimatePresence>
+          {toasts.map(t => (
+            <motion.div
+              key={t.id}
+              initial={{ opacity: 0, x: 60 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 60 }}
+              className="flex items-center gap-2 px-4 py-3 rounded-xl text-xs font-medium shadow-2xl"
+              style={{
+                background: t.type === 'error' ? 'rgba(248,113,113,0.15)' : t.type === 'warning' ? 'rgba(250,204,21,0.15)' : 'rgba(52,211,153,0.15)',
+                border: `1px solid ${t.type === 'error' ? 'rgba(248,113,113,0.3)' : t.type === 'warning' ? 'rgba(250,204,21,0.3)' : 'rgba(52,211,153,0.3)'}`,
+                color: t.type === 'error' ? '#f87171' : t.type === 'warning' ? '#facc15' : '#34d399',
+                backdropFilter: 'blur(12px)',
+              }}
+            >
+              {t.message}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
 
-              {/* Greeting + Actions */}
-              <div className="flex items-end justify-between">
-                <motion.div initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.4 }}>
-                  <p className="text-xs font-medium text-[#06b6d4] tracking-widest uppercase mb-1">Welcome back 👋</p>
-                  <h1 className="text-2xl font-black text-white tracking-tight">Your Projects</h1>
-                </motion.div>
-                <motion.div
-                  initial={{ opacity: 0, x: 16 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.4 }}
-                  className="flex items-center gap-2"
-                >
-                  <button
-                    onClick={() => setShowProgress(!showProgress)}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all duration-200 cursor-pointer"
-                    style={{
-                      background: showProgress ? 'rgba(6,182,212,0.12)' : 'rgba(255,255,255,0.04)',
-                      border: showProgress ? '1px solid rgba(6,182,212,0.3)' : '1px solid rgba(255,255,255,0.07)',
-                      color: showProgress ? '#06b6d4' : '#64748b',
-                    }}
-                  >
-                    <BarChart3 className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Skill Progress</span>
-                  </button>
-                  <button
-                    onClick={() => setShowCreateModal(true)}
-                    className="gradient-btn flex items-center gap-1.5 px-4 py-2 text-white font-semibold rounded-xl text-sm cursor-pointer hover:scale-105 active:scale-95 transition-transform"
-                  >
-                    <Plus className="w-4 h-4" /> New Project
-                  </button>
-                </motion.div>
+      {/* Command Palette */}
+      <AnimatePresence>
+        {paletteOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[90]" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
+              onClick={() => setPaletteOpen(false)}
+            />
+            <motion.div
+              ref={paletteRef}
+              initial={{ opacity: 0, scale: 0.96, y: -10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: -10 }}
+              transition={{ duration: 0.15 }}
+              className="fixed left-1/2 top-24 -translate-x-1/2 z-[95] w-full max-w-md rounded-2xl overflow-hidden shadow-2xl"
+              style={{ background: 'rgba(20,22,30,0.98)', border: '1px solid var(--color-border)', backdropFilter: 'blur(20px)' }}
+            >
+              <div className="flex items-center gap-3 px-4 py-3.5 border-b" style={{ borderColor: 'var(--color-border)' }}>
+                <Sparkles className="w-4 h-4" style={{ color: 'var(--color-primary)' }} />
+                <input
+                  ref={paletteInputRef}
+                  value={paletteQuery}
+                  onChange={(e) => setPaletteQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && filteredActions.length > 0) runPaletteAction(filteredActions[0].id);
+                    if (e.key === 'Escape') setPaletteOpen(false);
+                  }}
+                  placeholder="Kya karna hai? Type karo..."
+                  className="flex-1 bg-transparent text-sm focus:outline-none"
+                  style={{ color: 'var(--color-text-primary)' }}
+                />
+                <kbd className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--color-text-muted)' }}>ESC</kbd>
               </div>
-
-              {/* Stats Row */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                {stats.map((s, i) => <StatCard key={i} {...s} />)}
-              </div>
-
-              {loadError && (
-                <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                  <div className="font-semibold text-red-100">Project data unavailable</div>
-                  <div className="mt-1 text-red-200/90">{loadError}</div>
-                </div>
-              )}
-
-              {/* Projects Grid */}
-              {loading ? (
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {[1, 2, 3].map(i => (
-                    <div key={i} className="skeleton rounded-2xl h-40" />
-                  ))}
-                </div>
-              ) : projects.length === 0 ? (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5 }}
-                  className="flex flex-col items-center justify-center py-24 text-center rounded-2xl relative overflow-hidden group"
-                  style={{ background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.08)' }}
-                >
-                  <div
-                    className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-700"
-                    style={{ background: 'radial-gradient(400px at 50% 50%, rgba(6,182,212,0.05), transparent 70%)' }}
-                  />
-                  <div
-                    className="w-16 h-16 rounded-2xl flex items-center justify-center mb-5"
-                    style={{ background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.15)' }}
-                  >
-                    <Bot className="w-8 h-8 text-cyan-400" strokeWidth={1.5} />
-                  </div>
-                  <h3 className="text-lg font-bold text-white mb-2">Start Your Next Big Idea</h3>
-                  <p className="text-sm text-[#64748b] mb-7 max-w-sm">
-                    Give AI Dost a prompt and watch it build your entire project autonomously — files, tests, everything.
-                  </p>
+              <div className="max-h-72 overflow-y-auto py-2">
+                {filteredActions.length === 0 && (
+                  <div className="px-4 py-6 text-center text-xs" style={{ color: 'var(--color-text-muted)' }}>Kuch nahi mila</div>
+                )}
+                {filteredActions.map((a, i) => (
                   <button
-                    onClick={() => setShowCreateModal(true)}
-                    className="gradient-btn flex items-center gap-2 px-7 py-3 text-white font-semibold rounded-xl text-sm cursor-pointer hover:scale-105 active:scale-95 transition-transform"
+                    key={a.id}
+                    onClick={() => runPaletteAction(a.id)}
+                    onMouseEnter={(e) => e.currentTarget.scrollIntoView({ block: 'nearest' })}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left cursor-pointer"
+                    style={{ background: i === 0 ? 'rgba(75,139,252,0.12)' : 'transparent' }}
                   >
-                    <Plus className="w-4 h-4" /> Create First Project
+                    <a.icon className="w-4 h-4" style={{ color: 'var(--color-primary)' }} />
+                    <span className="flex-1 text-sm" style={{ color: 'var(--color-text-primary)' }}>{a.label}</span>
+                    <kbd className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--color-text-muted)' }}>{a.hint}</kbd>
                   </button>
-                </motion.div>
-              ) : (
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {projects.map((project, i) => (
-                    <motion.div
-                      key={project.project_id || project._id}
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ duration: 0.3, delay: i * 0.07 }}
-                    >
-                      <ProjectCard project={project} />
-                    </motion.div>
-                  ))}
-                </div>
-              )}
-
-              {/* Skill Progress Panel (inline, collapsible) */}
-              {showProgress && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="rounded-2xl p-5 overflow-hidden"
-                  style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)' }}
-                >
-                  <div className="flex items-center justify-between mb-5">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(6,182,212,0.12)', border: '1px solid rgba(6,182,212,0.2)' }}>
-                        <TrendingUp className="w-4 h-4 text-cyan-400" />
-                      </div>
-                      <div>
-                        <h2 className="text-sm font-bold text-white">Skill Progress</h2>
-                        <p className="text-[11px] text-[#64748b]">Your coding journey tracker</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setShowProgress(false)}
-                      className="w-7 h-7 rounded-lg flex items-center justify-center text-[#64748b] hover:text-white hover:bg-white/5 transition-all cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  <div className="grid md:grid-cols-3 gap-5">
-                    {learningProgress.map((item, i) => (
-                      <div key={item.topic}>
-                        <div className="flex justify-between items-center mb-1">
-                          <span className="text-sm font-semibold text-white">{item.topic}</span>
-                          <span className="text-xs font-bold" style={{ color: item.color }}>{item.progress}%</span>
-                        </div>
-                        <p className="text-[11px] text-[#64748b] mb-2">{item.description}</p>
-                        <ProgressBar value={item.progress} color={item.color} delay={i * 200} />
-                      </div>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-            </div>
-          </div>
-
-          {/* ─── Right: Progress Sidebar (lg+) ─── */}
-          {showProgress && (
-            <div className="hidden xl:block w-64 shrink-0 h-[calc(100vh-56px)] sticky top-14 py-7 pr-5"
-              style={{ borderLeft: '1px solid rgba(255,255,255,0.05)' }}>
-              <div className="rounded-2xl p-4 space-y-4" style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                <div className="flex items-center gap-2">
-                  <Star className="w-4 h-4 text-yellow-400" />
-                  <span className="text-sm font-bold text-white">Your Skills</span>
-                </div>
-                {learningProgress.map((item, i) => (
-                  <div key={item.topic} className="space-y-1.5">
-                    <div className="flex justify-between">
-                      <span className="text-xs font-medium text-[#e2e8f0]">{item.topic}</span>
-                      <span className="text-xs font-bold" style={{ color: item.color }}>{item.progress}%</span>
-                    </div>
-                    <ProgressBar value={item.progress} color={item.color} delay={i * 200} />
-                  </div>
                 ))}
               </div>
-            </div>
-          )}
-        </div>
-      )}
+              <div className="px-4 py-2.5 border-t text-[10px]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}>
+                <CornerDownLeft className="w-3 h-3 inline mr-1" /> Enter = select
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
-      {/* ─── Create Project Modal ─── */}
-      {showCreateModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fadeIn"
-          style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(12px)' }}
-          onClick={e => { if (e.target === e.currentTarget) setShowCreateModal(false); }}
-        >
-          <div
-            className="w-full max-w-sm rounded-2xl shadow-2xl animate-scaleIn relative overflow-hidden"
-            style={{ background: 'rgba(10,11,18,0.97)', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 0 0 1px rgba(6,182,212,0.06), 0 24px 64px rgba(0,0,0,0.7)' }}
-          >
-            {/* Top gradient line */}
-            <div className="absolute top-0 left-0 right-0 h-px" style={{ background: 'var(--gradient-primary)' }} />
-
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-5">
-                <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'rgba(6,182,212,0.12)', border: '1px solid rgba(6,182,212,0.2)' }}>
-                    <Plus className="w-4 h-4 text-cyan-400" />
-                  </div>
-                  New Project
-                </h2>
-                <button
-                  onClick={() => setShowCreateModal(false)}
-                  className="w-7 h-7 rounded-lg flex items-center justify-center text-[#64748b] hover:text-white hover:bg-white/5 transition-all cursor-pointer"
-                >
+      {/* Create Project Modal */}
+      <AnimatePresence>
+        {showCreateModal && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[90]" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
+              onClick={() => setShowCreateModal(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[95] w-full max-w-sm rounded-2xl p-6 shadow-2xl"
+              style={{ background: 'rgba(20,22,30,0.98)', border: '1px solid var(--color-border)', backdropFilter: 'blur(20px)' }}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-bold" style={{ color: 'var(--color-text-primary)' }}>Naya Project</h3>
+                <button onClick={() => setShowCreateModal(false)} className="cursor-pointer" style={{ color: 'var(--color-text-muted)' }}>
                   <X className="w-4 h-4" />
                 </button>
               </div>
-
-              <form onSubmit={handleCreateProject} className="space-y-4">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-[#64748b] uppercase tracking-wider">Project Name</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. My Awesome App"
-                    className="w-full h-10 px-3.5 rounded-xl text-sm text-white placeholder-[#334155] focus:outline-none transition-all"
-                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
-                    value={newProjectName}
-                    onChange={e => setNewProjectName(e.target.value)}
-                    onFocus={e => { e.target.style.borderColor = 'rgba(6,182,212,0.4)'; e.target.style.boxShadow = '0 0 12px rgba(6,182,212,0.12)'; }}
-                    onBlur={e => { e.target.style.borderColor = 'rgba(255,255,255,0.08)'; e.target.style.boxShadow = 'none'; }}
-                    required
-                    autoFocus
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-[#64748b] uppercase tracking-wider">Description</label>
-                  <textarea
-                    placeholder="What is this project about?"
-                    rows="3"
-                    className="w-full px-3.5 py-3 rounded-xl text-sm text-white placeholder-[#334155] focus:outline-none transition-all resize-none"
-                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
-                    value={newProjectDesc}
-                    onChange={e => setNewProjectDesc(e.target.value)}
-                    onFocus={e => { e.target.style.borderColor = 'rgba(6,182,212,0.4)'; e.target.style.boxShadow = '0 0 12px rgba(6,182,212,0.12)'; }}
-                    onBlur={e => { e.target.style.borderColor = 'rgba(255,255,255,0.08)'; e.target.style.boxShadow = 'none'; }}
-                  />
-                </div>
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateModal(false)}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-[#64748b] hover:text-white transition-all cursor-pointer"
-                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={creating}
-                    className="flex-1 gradient-btn py-2.5 rounded-xl text-sm font-semibold text-white cursor-pointer disabled:opacity-60"
-                  >
-                    {creating ? 'Creating...' : 'Create Project'}
-                  </button>
-                </div>
+              <form onSubmit={handleCreateProject} className="space-y-3">
+                <input
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  placeholder="Project ka naam (e.g. my-website)"
+                  className="w-full px-3.5 py-2.5 rounded-xl text-sm focus:outline-none"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}
+                />
+                <textarea
+                  value={newProjectDesc}
+                  onChange={(e) => setNewProjectDesc(e.target.value)}
+                  placeholder="Description (optional)"
+                  rows={2}
+                  className="w-full px-3.5 py-2.5 rounded-xl text-sm focus:outline-none resize-none"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}
+                />
+                <button
+                  type="submit"
+                  disabled={!newProjectName.trim() || creating}
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold cursor-pointer disabled:opacity-40"
+                  style={{ background: 'var(--gradient-primary)', color: '#fff' }}
+                >
+                  {creating ? <Loader2 className="w-4 h-4 inline animate-spin" /> : 'Project Banao'}
+                </button>
               </form>
-            </div>
-          </div>
-        </div>
-      )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
-};
-
-export default Dashboard;
+}

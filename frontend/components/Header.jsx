@@ -4,7 +4,6 @@ import { useRouter } from 'next/router';
 import { Settings, X, Key, Save, ChevronDown, Mic, Music, Bot, Folder, LayoutDashboard, MessageSquare, Image as ImageIcon, Zap, Trash2, Eye, EyeOff, Sun, Moon, Palette, Lifejacket, ArrowLeftArrowRight, Lock, Shield, Volume2, VolumeX, MicOff, Bot as BotIcon, Paperclip, Send, Library, ThumbsUp, ThumbsDown, Maximize2, Minimize2, MoveHorizontal, Search, Play, FolderOpen, GitBranch, Terminal, Code, CheckCircle, Loader2, Plus, XCircle, Info, User, ListTodo, LogOut, Menu, Sparkles } from 'lucide-react';
 import { useMode } from '../context/ModeContext';
 import { useToast } from '../context/ToastContext';
-import SettingsModal from './SettingsModal';
 import PersonalBrainModal from './PersonalBrainModal';
 
 /* ─── Tooltip ─── */
@@ -43,7 +42,7 @@ function IconBtn({ onClick, icon: Icon, label, active, color, suppressHydrationW
   );
 }
 
-const Header = () => {
+const Header = ({ sidebarPadding = 0 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const { mode, setMode } = useMode();
   const { showToast } = useToast();
@@ -90,6 +89,13 @@ const Header = () => {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
+  // Open settings from sidebar (dispatched by dashboard)
+  useEffect(() => {
+    const openSettings = () => setShowSettings(true);
+    window.addEventListener('ai-dost:open-settings', openSettings);
+    return () => window.removeEventListener('ai-dost:open-settings', openSettings);
+  }, []);
+
   useEffect(() => {
     if (typeof window !== 'undefined' && localStorage.getItem('theme') === 'light') {
       document.body.classList.add('light-theme');
@@ -115,7 +121,7 @@ const Header = () => {
     if (newCount >= 7) {
       setSettingsClicks(0);
       setShowSettings(false);
-setShowSecretBrainModal(true);
+      setShowSettingsModal(true);
       showToast?.({ type: 'success', message: '🔓 Secret Developer Brain Mode Unlocked!' });
     } else {
       if (newCount >= 3) showToast?.({ type: 'info', message: `Tap ${7 - newCount} more times to unlock Secret Developer Brain Mode...` });
@@ -153,6 +159,7 @@ setShowSecretBrainModal(true);
           WebkitBackdropFilter: 'blur(24px)',
           borderBottom: '1px solid rgba(255,255,255,0.06)',
           boxShadow: scrolled ? '0 4px 32px rgba(0,0,0,0.5)' : 'none',
+          paddingLeft: sidebarPadding || undefined,
         }}
       >
         <div className="max-w-screen-2xl mx-auto px-4 sm:px-5 h-14 flex items-center justify-between gap-4">
@@ -317,8 +324,6 @@ setShowSecretBrainModal(true);
           </div>
 
           <div className="space-y-5 text-sm">
-            {/* Voice Assistant */}
-            <SettingsModal isOpen={false} />
 
             {/* Auto Save */}
             <div className="flex flex-col gap-2">
@@ -411,6 +416,9 @@ setShowSecretBrainModal(true);
         </div>
       </div>
     )}
+
+    {/* ─── Secret Brain Modal ─── */}
+    <PersonalBrainModal isOpen={showSettingsModal} onClose={() => setShowSettingsModal(false)} />
     </>
   );
 };

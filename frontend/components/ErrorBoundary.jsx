@@ -20,36 +20,45 @@ class ErrorBoundary extends React.Component {
 
   render() {
     if (this.state.hasError) {
-      // You can render any custom fallback UI
       return (
-        <div className="min-h-screen bg-gray-900 text-gray-100 flex items-center justify-center p-4">
-          <div className="bg-gray-800 p-8 rounded-xl shadow-2xl max-w-lg w-full text-center border border-red-500/20">
+        <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: 'var(--color-bg-default)' }}>
+          <div className="p-8 rounded-xl shadow-2xl max-w-lg w-full text-center" style={{ backgroundColor: 'var(--color-bg-elevated)', border: '1px solid rgba(248,113,113,0.2)' }}>
             <div className="flex justify-center mb-6">
-              <div className="p-4 bg-red-500/10 rounded-full">
-                <AlertCircle className="w-12 h-12 text-red-400" />
+              <div className="p-4 rounded-full" style={{ background: 'rgba(248,113,113,0.1)' }}>
+                <AlertCircle className="w-12 h-12" style={{ color: 'var(--color-warning)' }} />
               </div>
             </div>
             
-            <h1 className="text-2xl font-bold mb-4">Something went wrong</h1>
-            <p className="text-gray-400 mb-6">
-              An unexpected error occurred in the application interface.
+            <h1 className="text-2xl font-bold mb-4" style={{ color: 'var(--color-text-primary)' }}>UI Crashed</h1>
+            <p className="mb-6" style={{ color: 'var(--color-text-secondary)' }}>
+              An unexpected error occurred in the React tree. Don't worry, your backend and workspace are safe.
             </p>
             
             {this.state.error && (
-              <div className="bg-gray-950 p-4 rounded-lg text-left overflow-auto max-h-48 mb-6 border border-gray-700">
-                <code className="text-sm text-red-400 block whitespace-pre-wrap font-mono">
+              <div className="p-4 rounded-lg text-left overflow-auto max-h-48 mb-6" style={{ background: 'var(--color-bg-input)', border: '1px solid var(--color-border)' }}>
+                <code className="text-sm block whitespace-pre-wrap font-mono" style={{ color: 'var(--color-warning)' }}>
                   {this.state.error.toString()}
                 </code>
               </div>
             )}
             
-            <button
-              onClick={() => window.location.reload()}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-cyan-500 hover:bg-cyan-600 text-white rounded-lg transition-colors font-medium shadow-lg shadow-cyan-500/20"
-            >
-              <RefreshCw className="w-5 h-5" />
-              Reload Application
-            </button>
+            <div className="flex justify-center gap-3">
+              <button
+                onClick={() => this.setState({ hasError: false, error: null })}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg transition-colors font-medium cursor-pointer hover:opacity-90"
+                style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-primary)', border: '1px solid var(--color-border)' }}
+              >
+                Try to Recover
+              </button>
+              <button
+                onClick={() => window.location.reload()}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg transition-colors font-medium shadow-lg cursor-pointer hover:opacity-90"
+                style={{ background: 'var(--gradient-primary)', color: '#fff' }}
+              >
+                <RefreshCw className="w-4 h-4" />
+                Reload Window
+              </button>
+            </div>
           </div>
         </div>
       );

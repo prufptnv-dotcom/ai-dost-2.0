@@ -1,0 +1,686 @@
+यहाँ एआई प्रोजेक्ट प्लान PDF के प्रत्येक पृष्ठ का विस्तृत विवरण हिंदी और अंग्रेजी दोनों भाषाओं में दिया गया है:
+
+---
+
+**Page 1 (छवि 1):**
+
+यह पृष्ठ एक तालिका प्रस्तुत करता है जिसमें विभिन्न AI और डेटा-संबंधित उपकरणों और APIs का विवरण दिया गया है।
+
+**Table Headers (तालिका शीर्षक):**
+*   **श्रेणी (Category)**
+*   **ऐप/मॉडल का नाम (App/Model Name)**
+*   **वेबसाइट/रिपोजिटरी यूआरएल (Website/Repository URL)**
+*   **प्रकार (Type)**
+*   **एपीआई कुंजी (API Key)**
+*   **एक्सेस का प्रकार (Access Type)**
+*   **इंस्टॉलेशन/उपयोग (Installation/Usage)**
+*   **फ्री टियर/लिमिट (Free Tier/Limit)**
+
+**Table Content (तालिका सामग्री):**
+
+**1. Audio Manipulation (ऑडियो मैनिपुलेशन)**
+*   **Pydub**
+    *   URL: `https://github.com/jiaaro/pydub`
+    *   Type: Python Library
+    *   API Key: No
+    *   Access: Open Source
+    *   Installation: `pip install pydub`
+    *   Free Tier: Unlimited
+
+**2. Audio I/O (ऑडियो इनपुट/आउटपुट)**
+*   **SoundFile**
+    *   URL: `https://github.com/bastibe/python-soundfile`
+    *   Type: Python Library
+    *   API Key: No
+    *   Access: Open Source
+    *   Installation: `pip install soundfile`
+    *   Free Tier: Unlimited
+
+**3. Image Generation (इमेज जेनरेशन)**
+*   **Stable Diffusion (Diffusers)**
+    *   URL: `https://github.com/huggingface/diffusers`
+    *   Type: Python Library
+    *   API Key: No
+    *   Access: Open Source
+    *   Installation: `pip install diffusers`
+    *   Free Tier: Unlimited (Self-Hosted)
+
+*   **Leonardo.ai API (लियोनार्डो.एआई एपीआई)**
+    *   URL: `https://leonard.ai`
+    *   Type: Cloud API
+    *   API Key: Yes
+    *   Access: Free Tier
+    *   Installation: REST API
+    *   Free Tier: 150 Credits/Day
+
+**4. Stock Media (स्टॉक मीडिया)**
+*   **Pexels API (पेक्सेल्स एपीआई)**
+    *   URL: `https://www.pexels.com/api`
+    *   Type: REST API
+    *   API Key: Yes
+    *   Access: Web API
+    *   Installation: `pip install pexels-api`
+    *   Free Tier: Unlimited (Attribution)
+
+*   **Pixabay API (पिक्साबे एपीआई)**
+    *   URL: `https://pixabay.com/api`
+    *   Type: REST API
+    *   API Key: Yes
+    *   Access: Web API
+    *   Installation: REST API
+    *   Free Tier: 5000 requests/hour
+
+*   **Unsplash API (अनस्प्लैश एपीआई)**
+    *   URL: `https://unsplash.com/api`
+    *   Type: REST API
+    *   API Key: Yes
+    *   Access: Web API
+    *   Installation: `pip install unsplash-python`
+    *   Free Tier: 50 requests/hour
+
+---
+
+**Page 2 (छवि 2):**
+
+यह पृष्ठ तालिका के कुछ और प्रविष्टियों के साथ शुरू होता है और फिर एक नया खंड "ज्ञान तिजोरी" प्रस्तुत करता है।
+
+**Table Content (तालिका सामग्री - जारी):**
+
+**1. Stock Media (स्टॉक मीडिया - जारी)**
+*   **Coverr**
+    *   URL: `https://coverr.co`
+    *   Type: Website
+    *   API Key: No
+    *   Access: Download
+    *   Installation: Browse
+    *   Free Tier: Unlimited
+
+*   **Mixkit**
+    *   URL: `https://mixkit.co`
+    *   Type: Website
+    *   API Key: No
+    *   Access: Download
+    *   Installation: Browse
+    *   Free Tier: Unlimited
+
+**2. 3D (थ्रीडी)**
+*   **Blender (Python API)**
+    *   URL: `https://www.blender.org`
+    *   Type: Software
+    *   API Key: No
+    *   Access: Open Source
+    *   Installation: Download Blender
+    *   Free Tier: Unlimited (Binary)
+
+*   **Panda3D**
+    *   URL: `https://www.panda3d.org`
+    *   Type: Engine
+    *   API Key: No
+    *   Access: Open Source
+    *   Installation: `pip install panda3d`
+    *   Free Tier: Unlimited
+
+*   **Open3D**
+    *   URL: `https://www.open3d.org`
+    *   Type: Library
+    *   API Key: No
+    *   Access: Open Source
+    *   Installation: `pip install open3d`
+    *   Free Tier: Unlimited
+
+*   **Trimesh**
+    *   URL: `https://github.com/mikedh/trimesh`
+    *   Type: Library
+    *   API Key: No
+    *   Access: Open Source
+    *   Installation: `pip install trimesh`
+    *   Free Tier: Unlimited
+
+*   **PyVista**
+    *   URL: `https://pyvista.org`
+    *   Type: Library
+    *   API Key: No
+    *   Access: Open Source
+    *   Installation: `pip install pyvista`
+    *   Free Tier: Unlimited
+
+---
+
+**3. ज्ञान तिजोरी: ऐतिहासिक डेटा, संग्रहालय और अनुसंधान (The Knowledge Vault: Historical Data, Museums and Research)**
+
+**Hindi Description (हिंदी विवरण):**
+"ऐतिहासिक फ़िल्मों" बनाने के लिए जो सटीक हों, एजेंटों को प्राथमिक स्रोतों, कलाकृतियों और समयरेखा डेटा तक पहुंच की आवश्यकता होती है। यह खंड उन एपीआई को सूचीबद्ध करता है जो यह कच्चा माल प्रदान करते हैं।
+
+**English Description (अंग्रेजी विवरण):**
+To create accurate "historical films," agents need access to primary sources, artifacts, and timeline data. This section lists APIs that provide this raw material.
+
+---
+
+**Page 3 (छवि 3):**
+
+यह पृष्ठ "ज्ञान तिजोरी" खंड के उप-खंडों और उससे संबंधित तालिका की शुरुआत करता है।
+
+**3.1. संग्रहालय और अभिलेखीय एपीआई (Museum & Archival APIs)**
+
+**Hindi Description (हिंदी विवरण):**
+एपीआई कलाकृतियों के मेटाडेटा और उच्च-रिज़ॉल्यूशन वाली छवियां प्रदान करते हैं, जो अक्सर क्रिएटिव कॉमन्स जीरो (CCO) लाइसेंस के तहत होती हैं।
+मेट्रोपॉलिटन म्यूजियम ऑफ आर्ट एपीआई और क्लीवलैंड म्यूजियम ऑफ आर्ट एपीआई 470,000 से अधिक कलाकृतियों तक मुफ्त पहुंच प्रदान करते हैं। एक एजेंट फिल्म में दृश्य संपत्ति के रूप में उपयोग करने के लिए "सिंधु घाटी सभ्यता" की मुहरों, गहनों और बर्तनों की छवियों को पुनः प्राप्त कर सकता है। इंटरनेट आर्काइव्ड एपीआई लाइब्रेरी पुस्तकों, फिल्मों और ऑडियो फ़ाइलों का खजाना है। इंटरनेटआर्काइव पायथन लाइब्रेरी एजेंटों को सार्वजनिक डोमेन फुटेज (जैसे, "1940 के न्यूज़रील") खोजने और उन्हें नई सामग्री में रीमिक्स करने के लिए प्रोग्रामेटिक रूप से डाउनलोड करने की अनुमति देती है 20।
+भारतीय संदर्भ के लिए, भारतीय पुरातत्व सर्वेक्षण (ASI) और राष्ट्रीय संग्रहालय, नई दिल्ली की डिजिटल रिपोजिटरी महत्वपूर्ण होती है। हालांकि उनके एपीआई काफी मानकपिक नहीं हो सकते हैं, data.gov.in के माध्यम से उपलब्ध हेरोडॉट भारतीय स्मारकों और विरासत स्थलों के बारे में विस्तृत जानकारी प्रदान करते हैं 22।
+
+**English Description (अंग्रेजी विवरण):**
+APIs provide metadata and high-resolution images of artifacts, often under Creative Commons Zero (CCO) licenses.
+The Metropolitan Museum of Art API and Cleveland Museum of Art API offer free access to over 470,000 artifacts. An agent can retrieve images of "Indus Valley Civilization" seals, jewelry, and pottery for use as visual assets in films. The Internet Archived APIs are a treasure trove of books, films, and audio files. The InternetArchive Python library allows agents to programmatically download public domain footage (e.g., "1940s newsreels") for finding and remixing into new content 20.
+For the Indian context, the digital repositories of the Archaeological Survey of India (ASI) and the National Museum, New Delhi, are important. Although their APIs may not be very standard, data.gov.in provides detailed information about Herodotean Indian monuments and heritage sites 22.
+
+**3.2. ऐतिहासिक भूगोल और घटनाएँ (Historical Geography & Events)**
+
+**Hindi Description (हिंदी विवरण):**
+OpenHistoricalMap "मानचित्रों की टाइम मशीन" है। यह एक समय आयाम के साथ मानचित्र डेटा संग्रहीत करता है। एजेंट ऐतिहासिक प्रवृत्तियों के लिए महत्वपूर्ण, सदियों स�� बदलती सीमाओं को दिखाने वाले मानचित्रों को प्रस्तुत करने के लिए वेक्टर डेटा निकाल सकते हैं 23। प्रोजेक्ट गुटेनबर्ग एपीआई (Gutenberg.ex API) एजेंटों को उद्धरण प्राप्त करने, घटनाओं को सारांशित करने, या प्राथमिक स्रोतों के आधार पर स्क्रिप्ट लिखने के लिए क्लासिक साहित्य और ऐतिहासिक ग्रंथों को निकालने की अनुमति देता है 24। GDELT प्रोजेक्ट घटनाओं, भाषा और टोन का एक वैश्विक डेटाबेस है, जो ऐतिहासिक सामाजिक भावनाओं के विश्लेषण के लिए अद्वितीय है।
+
+**English Description (अंग्रेजी विवरण):**
+OpenHistoricalMap is a "time machine for maps." It stores map data with a time dimension. Agents can extract vector data to represent maps showing changing borders over centuries, which is crucial for historical trends 23. The Project Gutenberg API (Gutenberg.ex API) allows agents to retrieve quotes, summarize events, or extract classic literature and historical texts for scriptwriting based on primary sources 24. The GDELT Project is a global database of events, language, and tone, which is unique for analyzing historical social sentiments.
+
+**तालिका 3.1: ऐतिहासिक डेटा, संग्रहालय और अनुसंधान एपीआई (Historical & Museum APIs)**
+
+**Table Headers (तालिका शीर्षक):**
+*   **श्रेणी (Category)**
+*   **ऐप/मॉडल का नाम (App/Model Name)**
+*   **वेबसाइट/रिपोजिटरी यूआरएल (Website/Repository URL)**
+*   **प्रकार (Type)**
+*   **एपीआई कुंजी (API Key)**
+*   **एक्सेस का प्रकार (Access Type)**
+*   **इंस्टॉलेशन/उपयोग (Installation/Usage)**
+*   **फ्री टियर/लिमिट (Free Tier/Limit)**
+
+**Table Content (तालिक�� सामग्री):**
+
+*   **Met Museum m API**
+    *   Category: Museum
+    *   URL: `https://metmuseum.github.io`
+    *   Type: REST API
+    *   API Key: No
+    *   Access: Open Access
+    *   Installation: REST API
+    *   Free Tier: Unlimited
+
+---
+
+**Page 4 (छवि 4):**
+
+यह पृष्ठ तालिका 3.1: ऐतिहासिक डेटा, संग्रहालय और अनुसंधान एपीआई को जारी रखता है।
+
+**Table Content (तालिका सामग्री - जारी):**
+
+*   **Cooper Hewitt API**
+    *   Category: Museum
+    *   URL: `https://collection.cooperhewitt.org/api`
+    *   Type: REST API
+    *   API Key: Yes
+    *   Access: Key Required
+    *   Installation: REST API
+    *   Free Tier: 5000 req/hour
+
+*   **Cleveland Museum Art**
+    *   Category: Museum
+    *   URL: `https://openaccess-api.clevelandart.org`
+    *   Type: REST API
+    *   API Key: No
+    *   Access: Open Access
+    *   Installation: REST API
+    *   Free Tier: Unlimited
+
+*   **Rijksmuseum API**
+    *   Category: Museum
+    *   URL: `https://www.rijksmuseum.nl/en/api`
+    *   Type: REST API
+    *   API Key: Yes
+    *   Access: Key Required
+    *   Installation: REST API
+    *   Free Tier: 10000 req/day
+
+*   **Harvard Art Museums**
+    *   Category: Museum
+    *   URL: `https://github.com/harvardartmuseums/api-docs`
+    *   Type: REST API
+    *   API Key: Yes
+    *   Access: Key Required
+    *   Installation: REST API
+    *   Free Tier: Unlimited
+
+*   **V&A Museum API**
+    *   Category: Museum
+    *   URL: `https://developers.vam.ac.uk`
+    *   Type: REST API
+    *   API Key: No
+    *   Access: Open Access
+    *   Installation: REST API
+    *   Free Tier: Unlimited
+
+*   **Smithsonian Open Access**
+    *   Category: Museum
+    *   URL: `https://www.si.edu/openaccess`
+    *   Type: API/Data
+    *   API Key: No
+    *   Access: Open Access
+    *   Installation: REST API
+    *   Free Tier: Unlimited
+
+---
+
+**Page 5 (छवि 5):**
+
+यह पृष्ठ तालिका 3.1: ऐतिहासिक डेटा, संग्रहालय और अनुसंधान एपीआई को जारी रखता है।
+
+**Table Content (तालिका सामग्री - जारी):**
+
+*   **Art Institut O Chicago**
+    *   Category: Museum
+    *   URL: `https://api.artic.edu/docs`
+    *   Type: REST API
+    *   API Key: No
+    *   Access: Open Access
+    *   Installation: REST API
+    *   Free Tier: Unlimited
+
+*   **Europeana API**
+    *   Category: Museum
+    *   URL: `https://pro.europeana.eu/page/apis`
+    *   Type: REST API
+    *   API Key: Yes
+    *   Access: Key Required
+    *   Installation: REST API
+    *   Free Tier: High Limits
+
+*   **DPLA API**
+    *   Category: Museum
+    *   URL: `https://dp.la/info/developers/codex`
+    *   Type: REST API
+    *   API Key: Yes
+    *   Access: Key Required
+    *   Installation: REST API
+    *   Free Tier: Unlimited
+
+*   **Internet Archive API**
+    *   Category: Archive
+    *   URL: `https://archive.org/services/docs/api`
+    *   Type: REST API
+    *   API Key: No
+    *   Access: Open Access
+    *   Installation: `pip install internetarchive`
+    *   Free Tier: Unlimited
+
+*   **Chronicling America**
+    *   Category: Archive
+    *   URL: `https://chroniclingamerica.loc.gov/about/api`
+    *   Type: REST API
+    *   API Key: No
+    *   Access: Open Access
+    *   Installation: REST API
+    *   Free Tier: Unlimited
+
+*   **National Archives (NARA)**
+    *   Category: Archive
+    *   URL: `https://www.archives.gov/developer`
+    *   Type: REST API
+    *   API Key: No
+    *   Access: Open Access
+    *   Installation: REST API
+    *   Free Tier: Unlimited
+
+*   **Project Gutenberg API**
+    *   Category: Books
+    *   URL: `https://gutenberg.ex.com`
+    *   Type: REST API
+    *   API Key: No
+    *   Access: Open Access
+    *   Installation: REST API
+    *   Free Tier: Unlimited
+
+---
+
+**Page 6 (छवि 6):**
+
+यह पृष्ठ तालिका 3.1: ऐतिहासिक डेटा, संग्रहालय और अनुसंधान एपीआई को जारी रखता है।
+
+**Table Content (तालिका सामग्री - जारी):**
+
+*   **Open Library API**
+    *   Category: Books
+    *   URL: `https://openlibrary.org/developers/api`
+    *   Type: REST API
+    *   API Key: No
+    *   Access: Open Access
+    *   Installation: REST API
+    *   Free Tier: Unlimited
+
+*   **Google Books API**
+    *   Category: Books
+    *   URL: `https://developers.google.com/books`
+    *   Type: REST API
+    *   API Key: Yes
+    *   Access: Free Tier
+    *   Installation: `pip install google-api-python-client`
+    *   Free Tier: 1000 req/day
+
+*   **LibriVox API**
+    *   Category: Audiobooks
+    *   URL: `https://librivox.org/api/info`
+    *   Type: REST API
+    *   API Key: No
+    *   Access: Open Access
+    *   Installation: REST API
+    *   Free Tier: Unlimited
+
+*   **OpenHistoricalMap**
+    *   Category: Maps
+    *   URL: `https://www.openhistoricalmap.org`
+    *   Type: Map Data
+    *   API Key: No
+    *   Access: Open Data
+    *   Installation: Vector Tiles
+    *   Free Tier: Unlimited
+
+*   **OpenStreetMap**
+    *   Category: Maps
+    *   URL: `https://www.openstreetmap.org`
+    *   Type: Map Data
+    *   API Key: No
+    *   Access: Open Data
+    *   Installation: `pip install osmnx`
+    *   Free Tier: Unlimited
+
+*   **NASA API**
+    *   Category: Maps
+    *   URL: `https://api.nasa.gov`
+    *   Type: REST API
+    *   API Key: Yes
+    *   Access: Free Tier
+    *   Installation: REST API
+    *   Free Tier: 1000 req/hour
+
+*   **Rest Countries**
+    *   Category: Data
+    *   URL: `https://restcountries.com`
+    *   Type: REST API
+    *   API Key: No
+    *   Access: Open Access
+    *   Installation: REST API
+    *   Free Tier: Unlimited
+
+*   **World Bank API**
+    *   Category: Data
+    *   URL: `data.worldbank.org/`
+    *   Type: API
+    *   API Key: No
+    *   Access: Open Access
+    *   Installation: REST API
+    *   Free Tier: Unlimited
+
+---
+
+**Page 7 (छवि 7):**
+
+यह पृष्ठ तालिका 3.1: ऐतिहासिक डेटा, संग्रहालय और अनुसंधान एपीआई को जारी रखता है।
+
+**Table Content (तालिका सामग्री - जारी):**
+
+*   **GDELT Project**
+    *   Category: Data
+    *   URL: `https://www.gdeltproject.org`
+    *   Type: Data/API
+    *   API Key: No
+    *   Access: Open Access
+    *   Installation: BigQuery/Files
+    *   Free Tier: Unlimited
+
+*   **Wikidata**
+    *   Category: Knowledge
+    *   URL: `https://www.wikidata.org`
+    *   Type: SPARQL
+    *   API Key: No
+    *   Access: Open Access
+    *   Installation: `pip install wikidata`
+    *   Free Tier: Unlimited
+
+*   **DBpedia**
+    *   Category: Knowledge
+    *   URL: `https://wiki.dbpedia.org`
+    *   Type: SPARQL
+    *   API Key: No
+    *   Access: Open Access
+    *   Installation: SPARQL
+    *   Free Tier: Unlimited
+
+*   **Wikimedia Enterprise**
+    *   Category: Knowledge
+    *   URL: `https://www.wikimediaenterprise.com`
+    *   Type: API
+    *   API Key: No
+    *   Access: Free Tier
+    *   Installation: REST API
+    *   Free Tier: High Volume
+
+*   **Data.gov.in (OGD)**
+    *   Category: Indian Data
+    *   URL: `https://data.gov.in/apis`
+    *   Type: REST API
+    *   API Key: Yes
+    *   Access: Open Gov
+    *   Installation: REST API
+    *   Free Tier: Unlimited
+
+*   **IndiAPI S**
+    *   Category: Indian Data
+    *   URL: `https://lightblue.titan.git.hub.io/indiapis`
+    *   Type: R Package
+    *   API Key: No
+    *   Access: Open Source
+    *   Installation: R Library
+    *   Free Tier: Unlimited
+
+*   **Historical Events API**
+    *   Category: Events
+    *   URL: `https://api-ninjas.com/api/hist_oricalevents`
+    *   Type: REST API
+    *   API Key: Yes
+    *   Access: Free Tier
+    *   Installation: REST API
+    *   Free Tier: Limited
+
+*   **Today In History**
+    *   Category: Events
+    *   URL: `https://history.muffinlabs.com`
+    *   Type: REST API
+    *   API Key: No
+    *   Access: Open Access
+    *   Installation: REST API
+    *   Free Tier: Unlimited
+
+---
+
+**Page 8 (छवि 8):**
+
+यह पृष्ठ एक नया मुख्य खंड "विकास झुंड: डिजिटल मार्केटिंग और एनालिटिक्स" और उसके उप-खंडों को प्रस्तुत करता है, साथ ही एक नई तालिका की शुरुआत करता है।
+
+**4. विकास झुंड: डिजिटल मार्केटिंग और एनालिटिक्स (The Growth Swarm: Digital Marketing & Analytics)**
+
+**Hindi Description (हिंदी विवरण):**
+एक बार सामग्री बन जाने के बाद, इसे वितरित किया जाना चाहिए। यह स्तंभ "डिजिटल मार्केटिंग" एजेंटों को स्वचालित करता है जो एसईओ, सोशल मीडिया और एनालिटिक्स को स्वचालित उपयोग करते हैं।
+
+**English Description (अंग्रेजी विवरण):**
+Once content has been created, it needs to be distributed. This pillar automates "digital marketing" agents who use SEO, social media, and analytics for automated usage.
+
+**4.1. सोशल मीडिया स्वचालन (Social Media Automation)**
+
+**Hindi Description (हिंदी विवरण):**
+Postiz एक ओपन-सोर्स सोशल मीडिया शेड्यूलर है और HootSuite का एक शक्तिशाली स्व-होस्टेड विकल्प है। यह X (Twitter), LinkedIn, Facebook आदि का समर्थन करता है। एकीकृतः एक एजेंट एक वीडियो बनाता है, एक एलएलएम का उपयोग करके कैप्शन लिखता है, और Postiz एपीआई का उपयोग करके इसे सभी प्लेटफार्मों पर एक साथ शेड्यूल करता है 29। Instagrapi Instagram के लिए एक अनौपचारिक एपीआई रैपर है जो एजेंटों को फोन के बिना फोटो/वीडियो अपलोड करने और इंटरैक्ट करने की अनुमति देता है 30।
+
+**English Description (अंग्रेजी विवरण):**
+Postiz is an open-source social media scheduler and a powerful self-hosted alternative to Hootsuite. It supports X (Twitter), LinkedIn, Facebook, etc. Integration: An agent creates a video, writes a caption using an LLM, and schedules it across all platforms simultaneously using the Postiz API 29. Instagrapi is an unofficial API wrapper for Instagram that allows agents to upload photos/videos and interact without needing a phone 30.
+
+**4.2. एसईओ और वेब विश्लेषण (SEO & Web Analysis)**
+
+**Hindi Description (हिंदी विवरण):**
+Python SEO Analyzer साइट की संरचना का विश्लेषण करता है, पृष्ठों को क्रॉल करता है, और एसईओ मुद्दों (मिसिंग मेटा टैग, टूटे हुए लिंक) की पहचान करता है। एजेंट का कार्य: समय-समय पर आपकी प्रोजेक्ट वेबसाइट का ऑडिट करें और सुधारों की रिपोर्ट तैयार करें 31। Google Search Console API खोज प्रदर्शन पर डेटा प्रदान करता है। एक "विश्लेषक एज��ंट" कम प्रदर्शन वाले कीवर्ड खोजने के लिए इस एपीआईआई का उपयोग कर सकता है और एक "लेखक एजेंट" को उन शब्दों को लक्षित करने हुए नए ब्लॉग पोस्ट बनाने का निर्देश दे सकता है 33। Matomo और Plausible जैसे ओपन-सोर्स एनालिटिक्स टूल Google Analytics के गोपनीय-अनुकूल विकल्प प्रदान करते हैं। इनका डेटा एजेंटों को यह समझने में मदद करता है कि कौन सी ऐतिहासिक फ़िल्में या ब्लॉग पोस्ट सबसे अच्छा प्रदर्शन कर रहे हैं, जिससे "स्व-सुधार लूप" (Self-Correction Loop) संभव होता है।
+
+**English Description (अंग्रेजी विवरण):**
+Python SEO Analyzer analyzes site structure, crawls pages, and identifies SEO issues (missing meta tags, broken links). Agent's task: periodically audit your project website and prepare reports on improvements 31. Google Search Console API provides data on search performance. An "analyst agent" can use this API to find underperforming keywords and instruct a "writer agent" to create new blog posts targeting those words 33. Open-source analytics tools like Matomo and Plausible offer privacy-friendly alternatives to Google Analytics. Their data helps agents understand which historical films or blog posts are performing best, enabling a "Self-Correction Loop."
+
+**तालिका 4.1: डिजिटल मार्केटिंग और ऑटोमेशन (Digital Marketing & Automation)**
+
+**Table Headers (तालिका शीर्षक):**
+*   **श्रेणी (Category)**
+*   **ऐप/मॉडल का नाम (App/Model Name)**
+*   **वेबसाइट/रिपोजिटरी यूआरएल (Website/Repository URL)**
+*   **प्रकार (Type)**
+*   **लाइसेंस/एक्सेस (License/Access)**
+*   **विवरण (Description)**
+*   **इंस्टॉलेशन (Installation)**
+
+**Table Content (तालिका सामग्री):**
+
+*   **Postiz**
+    *   Category: Social Media
+    *   URL: `https://github.com/gitroomhq/postiz-app`
+    *   Type: Scheduler
+    *   License: AGPL-3.0
+    *   Description: Self-hosted social schedule.
+    *   Installation: Docker
+
+---
+
+**Page 9 (छवि 9):**
+
+यह पृष्ठ तालिका 4.1: डिजिटल मार्केटिंग और ऑटोमेशन को जारी रखता है।
+
+**Table Content (तालिका सामग्री - जारी):**
+
+*   **Instagrapi**
+    *   Category: Social Media
+    *   URL: `https://github.com/subzeroid/instagrapi`
+    *   Type: Library
+    *   License: MIT
+    *   Description: Unofficial Instagram automation.
+    *   Installation: `pip install instagrapi`
+
+*   **Facebook Graph API**
+    *   Category: Social Media
+    *   URL: `https://developers.facebook.com`
+    *   Type: REST API
+    *   License: Free/Key
+    *   Description: Official FB/Insta API.
+    *   Installation: REST API
+
+*   **LinkedIn API**
+    *   Category: Social Media
+    *   URL: `https://developers.linkedin.com`
+    *   Type: REST API
+    *   License: Free/Key
+    *   Description: Professional network data.
+    *   Installation: REST API
+
+*   **Reddit API**
+    *   Category: Social Media
+    *   URL: `https://www.reddit.com/dev/api`
+    *   Type: REST API
+    *   License: Free Tier
+    *   Description: Reddit automation.
+    *   Installation: `pip praw` (assuming `praw` is the Python wrapper for Reddit API)
+
+*   **Mixpost**
+    *   Category: Social Media
+    *   URL: `https://mixpost.app`
+    *   Type: Scheduler
+    *   License: Open Source
+    *   Description: Self-hosted social manager.
+    *   Installation: Laravel/Docker
+
+*   **Mautic**
+    *   Category: Marketing
+    *   URL: `https://www.mautic.org`
+    *   Type: Automation
+    *   License: GPL
+    *   Description: Marketing automation platform.
+    *   Installation: Docker/PHP
+
+---
+
+**Page 10 (छवि 10):**
+
+यह पृष्ठ तालिका 4.1: डिजिटल मार्केटिंग और ऑटोमेशन को जारी रखता है।
+
+**Table Content (तालिका सामग्री - जारी):**
+
+*   **Listmonk**
+    *   Category: Marketing
+    *   URL: `https://listmonk.app`
+    *   Type: Email
+    *   License: AGPL-3.0
+    *   Description: Newsletter manager.
+    *   Installation: Docker
+
+*   **Mailjet**
+    *   Category: Email API
+    *   URL: `https://www.mailjet.com`
+    *   Type: API
+    *   License: Free Tier
+    *   Description: 6k emails/month.
+    *   Installation: REST API
+
+*   **SendGrid**
+    *   Category: Email API
+    *   URL: `https://sendgrid.com`
+    *   Type: API
+    *   License: Free Tier
+    *   Description: 100 emails/day.
+    *   Installation: REST API
+
+*   **Resend**
+    *   Category: Email API
+    *   URL: `https://resend.com`
+    *   Type: API
+    *   License: Free Tier
+    *   Description: Developer-first email.
+    *   Installation: REST API
+
+*   **Mailgun**
+    *   Category: Email API
+    *   URL: `https://www.mailgun.com`
+    *   Type: API
+    *   License: Free Tier
+    *   Description: Transactional email.
+    *   Installation: REST API
+
+*   **Brevo**
+    *   Category: Email API
+    *   URL: `https://www.brevo.com`
+    *   Type: API
+    *   License: Free Tier
+    *   Description: 300 emails/day.
+    *   Installation: REST API
+
+*   **Scrapy**
+    *   Category: SEO
+    *   URL: `https://scrapy.org`
+    *   Type: Framework
+    *   License: BSD
+    *   Description: Web crawling framework.
+    *   Installation: `pip install scrapy`
+
+*   **Beautiful Soup**
+    *   Category: SEO
+    *   URL: `https://www.crummy.com/software/BeautifulSoup`
+    *   Type: Library
+    *   License: MIT
+    *   Description: HTML/XML parsing.
+    *   Installation: `pip install beautifulsoup4`
+
+*   **Python SEO**
+    *   Category: SEO
+    *   URL: `https://github.com/python-s` (assuming this is the intended URL based on installation)
+    *   Type: Library
+    *   License: MIT
+    *   Description: Site structure.
+    *   Installation: `pip install python-s`
+
+---

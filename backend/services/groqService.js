@@ -6,16 +6,16 @@ class GroqService {
         this.client = new RobustApiClient({
             baseUrl: 'https://api.groq.com/openai/v1',
             serviceName: 'Groq',
-            timeout: 15000,
+            timeout: 60000,
             maxRetries: 3,
             retryDelay: 1000,
             rateLimiter: {
-                maxRequests: 20,
+                maxRequests: 500, // Unlimited for personal project
                 windowMs: 60000
             },
             circuitBreaker: {
-                failureThreshold: 5,
-                timeout: 60000
+                failureThreshold: 10,
+                timeout: 30000
             }
         });
     }
@@ -58,15 +58,54 @@ Key Response Guidelines:
             }
 
             const messagesPayload = [];
+            let hasImage = false;
+            
+            const processContent = (text) => {
+                if (typeof text !== 'string') return text;
+                const imgRegex = /\[IMAGE_BASE64:([^\]]+)\]/g;
+                if (!imgRegex.test(text)) return text;
+                
+                hasImage = true;
+                const parts = [];
+                let lastIndex = 0;
+                let match;
+                
+                // Reset regex state just in case
+                imgRegex.lastIndex = 0;
+                
+                while ((match = imgRegex.exec(text)) !== null) {
+                    if (match.index > lastIndex) {
+                        parts.push({ type: 'text', text: text.substring(lastIndex, match.index) });
+                    }
+                    // Extract base64 and append as image_url
+                    parts.push({
+                        type: 'image_url',
+                        image_url: { url: `data:image/png;base64,${match[1]}` }
+                    });
+                    lastIndex = imgRegex.lastIndex;
+                }
+                
+                if (lastIndex < text.length) {
+                    parts.push({ type: 'text', text: text.substring(lastIndex) });
+                }
+                
+                return parts;
+            };
+
             if (systemPrompt) {
                 messagesPayload.push({ role: 'system', content: systemPrompt });
             }
             if (history && history.length > 0) {
-                messagesPayload.push(...history);
+                history.forEach(h => {
+                    messagesPayload.push({ role: h.role, content: processContent(h.content) });
+                });
             }
-            messagesPayload.push({ role: 'user', content: message });
+            messagesPayload.push({ role: 'user', content: processContent(message) });
 
-            const primaryModel = mode === 'chat' ? 'llama-3.3-70b-versatile' : 'llama-3.1-8b-instant';
+            let primaryModel = mode === 'chat' || mode === 'agent' ? 'llama-3.3-70b-versatile' : 'llama-3.1-8b-instant';
+            if (hasImage) {
+                primaryModel = 'llama-3.2-11b-vision-preview'; // Switch to vision model!
+            }
             const fallbackModel = 'llama-3.1-8b-instant';
 
             const tryModel = async (model) => {
@@ -75,7 +114,7 @@ Key Response Guidelines:
                         model,
                         messages: messagesPayload,
                         temperature: 0.1,
-                        max_tokens: 2500
+                        max_tokens: 8192
                     }, {
                         'Authorization': `Bearer ${API_KEY}`
                     });

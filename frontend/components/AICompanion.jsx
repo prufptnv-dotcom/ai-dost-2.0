@@ -1021,7 +1021,7 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
   useEffect(() => {
     const fetchLocalModels = async () => {
       try {
-        const baseUrl = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/api\/v1\/?$/, '') || 'http://localhost:5005';
+        const baseUrl = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/api\/v1\/?$/, '') || 'http://localhost:5000';
         const res = await fetch(`${baseUrl}/api/chat/local-models`);
         const data = await res.json();
         if (data.success && data.models) {
@@ -1299,6 +1299,62 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  
+  const handleResumeAutonomous = async (threadId, approved, mcp_cmd, mcp_args) => {
+    setIsTyping(true);
+    setIsThinking(true);
+    try {
+      setMessages(prev => {
+        const newMsg = [...prev];
+        const lastMsg = newMsg[newMsg.length - 1];
+        if (lastMsg.sender === 'ai' && lastMsg.requiresApproval) {
+            lastMsg.requiresApproval = false;
+            lastMsg.text += approved ? "\n✅ **Approved!** Resuming..." : "\n❌ **Denied!** Canceling task...";
+        }
+        return newMsg;
+      });
+
+      const response = await fetch(`${API_HOST}/api/agent/autonomous/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            thread_id: threadId,
+            approved: approved,
+            mcp_command: mcp_cmd,
+            mcp_args: mcp_args
+        })
+      });
+      const data = await response.json();
+      
+      if (data.status === 'requires_approval') {
+        const toolCall = data.tool_call || {};
+        const toolName = toolCall.name || 'unknown_tool';
+        const toolArgs = toolCall.args || toolCall.arguments || {};
+        
+        setMessages(prev => [...prev, {
+          sender: 'ai',
+          text: `**Thought Stream:** The agent wants to execute \`${toolName}\`.`,
+          requiresApproval: true,
+          threadId: threadId,
+          toolName: toolName,
+          toolArgs: typeof toolArgs === 'object' ? JSON.stringify(toolArgs, null, 2) : String(toolArgs),
+          mcpCmd: mcp_cmd,
+          mcpArgs: mcp_args
+        }]);
+      } else {
+        setMessages(prev => [...prev, {
+          sender: 'ai',
+          text: data.result || 'Task completed via autonomous agent.',
+        }]);
+      }
+    } catch (err) {
+      console.error(err);
+      setMessages(prev => [...prev, { sender: 'ai', text: 'Error in autonomous resume: ' + err.message }]);
+    }
+    setIsTyping(false);
+    setIsThinking(false);
+  };
+
   const handleSend = async () => {
     if (!input.trim() && !attachedFile) return;
 
@@ -1429,6 +1485,100 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
         requestPayload.fileContent = currentCode;
         requestPayload.section = 'coding';
       }
+
+      
+      
+      // ---- Swarm Agent Mode Intercept ----
+      if (copilotMode === 'swarm') {
+         const threadId = 'thread_' + Date.now();
+         try {
+            const res = await fetch(`${API_HOST}/api/agent/autonomous/swarm`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prompt: apiPrompt,
+                    thread_id: threadId,
+                    mcp_command: "python", 
+                    mcp_args: []
+                })
+            });
+            const data = await res.json();
+            
+            if (data.status === 'requires_approval') {
+                const toolCall = data.tool_call || {};
+                const toolName = toolCall.name || 'unknown_tool';
+                const toolArgs = toolCall.args || toolCall.arguments || {};
+                
+                setMessages(prev => [...prev, {
+                    sender: 'ai',
+                    text: `**Swarm Activity:** A Swarm agent wants to execute \`${toolName}\`.`,
+                    requiresApproval: true,
+                    threadId: threadId,
+                    toolName: toolName,
+                    toolArgs: typeof toolArgs === 'object' ? JSON.stringify(toolArgs, null, 2) : String(toolArgs),
+                    mcpCmd: "python",
+                    mcpArgs: []
+                }]);
+            } else {
+                setMessages(prev => [...prev, {
+                    sender: 'ai',
+                    text: data.result || 'Swarm task complete.'
+                }]);
+            }
+         } catch(err) {
+            setMessages(prev => [...prev, { sender: 'ai', text: 'Swarm Run Error: ' + err.message }]);
+         }
+         setIsTyping(false);
+         setIsThinking(false);
+         return;
+      }
+      // ---- End Swarm ----
+
+      // ---- Autonomous Agent Mode Intercept ----
+      if (copilotMode === 'autonomous') {
+         const threadId = 'thread_' + Date.now();
+         try {
+            const res = await fetch(`${API_HOST}/api/agent/autonomous/run`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prompt: apiPrompt,
+                    thread_id: threadId,
+                    mcp_command: "python", // default or can be dynamic
+                    mcp_args: []
+                })
+            });
+            const data = await res.json();
+            
+            if (data.status === 'requires_approval') {
+                const toolCall = data.tool_call || {};
+                const toolName = toolCall.name || 'unknown_tool';
+                const toolArgs = toolCall.args || toolCall.arguments || {};
+                
+                setMessages(prev => [...prev, {
+                    sender: 'ai',
+                    text: `**Thought Stream:** The agent wants to execute \`${toolName}\`.`,
+                    requiresApproval: true,
+                    threadId: threadId,
+                    toolName: toolName,
+                    toolArgs: typeof toolArgs === 'object' ? JSON.stringify(toolArgs, null, 2) : String(toolArgs),
+                    mcpCmd: "python",
+                    mcpArgs: []
+                }]);
+            } else {
+                setMessages(prev => [...prev, {
+                    sender: 'ai',
+                    text: data.result || 'Autonomous task complete.'
+                }]);
+            }
+         } catch(err) {
+            setMessages(prev => [...prev, { sender: 'ai', text: 'Autonomous Run Error: ' + err.message }]);
+         }
+         setIsTyping(false);
+         setIsThinking(false);
+         return;
+      }
+      // ---- End Autonomous ----
 
       const response = await fetch(`${API_HOST}/api/chat`, {
         method: 'POST',
@@ -2066,6 +2216,8 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
               <option value="chat">💬 Chat Mode</option>
               <option value="agent">🤖 Agent Mode</option>
               <option value="plan">✨ Plan Mode</option>
+              <option value="autonomous">⚡ Autonomous (MCP)</option>
+              <option value="swarm">👥 Teamwork (Swarm)</option>
             </select>
           ) : (
             /* General Chat Voice & Speaker Controls */

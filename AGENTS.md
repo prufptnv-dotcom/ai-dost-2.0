@@ -12,6 +12,12 @@ node server.js
 cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\frontend"
 npm run dev
 # Frontend runs on: http://localhost:3001
+
+# 3. Start Python AI Engine (LlamaIndex RAG, optional)
+cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\ai-engine"
+start_ai_engine.bat
+# AI Engine runs on: http://127.0.0.1:8001
+# Node backend auto-falls back if engine is down
 ```
 
 ## 📋 Setup Checklist
@@ -32,6 +38,23 @@ npm run dev
    - Get key from: https://tavily.com
    - Add to `.env`: `TAVILY_API_KEY=your_key_here`
    - Free tier: 1000 searches/month
+
+4. **Cerebras Inference** (Optional, was free 1M tokens/day — 2026 me card verify required):
+   - Get key from: https://cloud.cerebras.ai → API Keys
+   - Add to `.env`: `CEREBRAS_API_KEY=your_key_here`
+   - Note: Free tier ab card verification mangta hai ($5 free credits, no charge unless purchased)
+   - Models: `gpt-oss-120b`, `zai-glm-4.7` (llama3.1-8b/llama-3.3-70b deprecate ho chuke)
+   - Wired in: chat cascade + crew (`model=cerebras`) — ready, key activate hote hi chalega
+
+5. **Edge TTS (FREE unlimited voice, no key)**:
+   - AI replies sunne ke liye — ChatView me Volume2 button
+   - Backend: `POST /api/agent/ai/tts` → ai-engine `/ai/tts` (edge-tts, venv me installed)
+   - Hindi voice: `hi-IN-SwaraNeural`, English: `en-IN-PrabhatNeural`
+
+6. **OpenRouter free models** (2026 — purane free models hat chuke):
+   - Verified working: `openai/gpt-oss-20b:free` (primary)
+   - Fallbacks: `cohere/north-mini-code:free`, `z-ai/glm-5.2:free`, `google/gemma-4-31b-it:free`, `liquid/lfm-2.5-2.6b:free`
+   - Free models flaky hote hain (temporary 429/503/empty) — service auto-fallback karta hai
 
 ### Environment Files
 - `.env.example` created with all required variables
@@ -76,9 +99,9 @@ npm run dev
 
 ### 6. Multi-Model AI Cascade
 - **Primary**: Google Gemini 1.5 Flash (free: 1500 req/day)
-- **Fallback**: Groq, NVIDIA, Together, DeepSeek, Mistral
+- **Fallback**: Groq, Gemini, NVIDIA, Together, DeepSeek, Mistral, HuggingFace, OpenRouter
 - **Local Fallback**: Ollama `qwen2.5-coder:7b` (16GB+ RAM)
-- **Order**: Groq → Gemini → NVIDIA → Together → DeepSeek → Mistral → Ollama
+- **Order**: Groq → Gemini → NVIDIA → Together → DeepSeek → Mistral → HuggingFace → OpenRouter → Ollama
 
 ### 7. Resume Builder with Preview
 - **Template Selection**: Professional, Creative, Tech, Academic
@@ -133,10 +156,14 @@ npm run dev
 
 ```
 ai-dost version 2.o/
+├── ai-engine/                   # Python AI Engine (FastAPI + LlamaIndex, optional)
+│   ├── main.py                  # RAG endpoints (/health, /ai/rag/query, /ai/rag/index)
+│   ├── requirements.txt         # fastapi, uvicorn, llama-index (+ ollama llms/embeddings)
+│   └── start_ai_engine.bat      # venv setup + uvicorn starter
 ├── backend/                    # Node.js + Express + SQLite
 │   ├── server.js               # Main server entry point
 │   ├── routes/                 # API routes (chat, agent, git, etc.)
-│   ├── services/               # AI services (Gemini, Groq, Ollama)
+│   ├── services/               # AI services (Gemini, Groq, Ollama, pythonEngine bridge)
 │   ├── agent/                  # Modular agent orchestrator
 │   ├── models/                 # Data models (Chat, Project, Resume)
 │   └── tests/                  # Jest test suites

@@ -7,16 +7,16 @@ class GeminiService {
         this.client = new RobustApiClient({
             baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
             serviceName: 'Gemini',
-            timeout: 15000,
+            timeout: 60000,
             maxRetries: 3,
             retryDelay: 1000,
             rateLimiter: {
-                maxRequests: 50,
+                maxRequests: 500, // Increased for personal unlimited use
                 windowMs: 60000
             },
             circuitBreaker: {
-                failureThreshold: 5,
-                timeout: 60000
+                failureThreshold: 10,
+                timeout: 30000
             }
         });
         this.ollamaAvailable = false;
@@ -110,7 +110,7 @@ Here is what you can do and what features are available to the user on this plat
             }
 
             // Try multiple models in order — free tier quota varies per model/key
-            const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+            const models = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite'];
             let lastError = null;
 
             for (const model of models) {

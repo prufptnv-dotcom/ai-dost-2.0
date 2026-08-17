@@ -44,24 +44,49 @@ class OpenRouterService {
             messages.push(...history);
             messages.push({ role: 'user', content: message });
 
-            const result = await this.client.post('/chat/completions', {
-                model: 'meta-llama/llama-3.1-8b-instruct',
-                messages: messages,
-                temperature: 0.1,
-                max_tokens: 2500
-            }, {
-                'Authorization': `Bearer ${API_KEY}`,
-                'HTTP-Referer': 'http://localhost:3000',
-                'X-Title': 'AI-Dost'
-            });
+            // Free models (2026) — pehle walo ka free tier hat chuka hai.
+            // Verified working: openai/gpt-oss-20b:free. Baaki provider availability pe depend karte hain.
+            const freeModels = [
+                'openai/gpt-oss-20b:free',
+                'cohere/north-mini-code:free',
+                'z-ai/glm-5.2:free',
+                'google/gemma-4-31b-it:free',
+                'liquid/lfm-2.5-2.6b:free'
+            ];
 
-            logger.info('✅ OpenRouter response received');
+            let lastError = null;
+            for (const model of freeModels) {
+                try {
+                    const result = await this.client.post('/chat/completions', {
+                        model,
+                        messages: messages,
+                        temperature: 0.1,
+                        max_tokens: 16384
+                    }, {
+                        'Authorization': `Bearer ${API_KEY}`,
+                        'HTTP-Referer': 'http://localhost:3000',
+                        'X-Title': 'AI-Dost'
+                    });
 
-            if (result.data.choices && result.data.choices[0] && result.data.choices[0].message) {
-                return result.data.choices[0].message.content;
-            } else {
-                return 'OpenRouter returned empty content.';
+                    logger.info(`✅ OpenRouter response received (${model})`);
+
+                    if (result.data.choices && result.data.choices[0] && result.data.choices[0].message) {
+                        const content = result.data.choices[0].message.content;
+                        if (content && content.trim()) {
+                            return content;
+                        }
+                        lastError = `empty content from ${model}`;
+                    } else {
+                        lastError = `empty response from ${model}`;
+                    }
+                } catch (error) {
+                    lastError = error.message;
+                    logger.warn(`⚠️ OpenRouter model ${model} failed: ${error.message}`);
+                    continue;
+                }
             }
+
+            throw new Error(lastError || 'All OpenRouter free models failed');
 
         } catch (error) {
             logger.error('❌ OpenRouter Service Error:', error.message);

@@ -1,20 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FileText, Folder, Settings, CheckCircle, Loader2, X, Plus, Sync, Mic, Trash2, Git, File, Terminal, FileJson } from 'lucide-react';
+import { FileText, Folder, Settings, CheckCircle, Loader2, X, Plus, RefreshCw, Mic, Trash2, GitBranch, File, Terminal, FileJson } from 'lucide-react';
 import MonacoEditor from '@monaco-editor/react';
-import { useResizeObserver } from '@juggle/resize-observer';
-
-// Language definitions loaded lazily inside component
-const defaultLanguages = {
-  'javascript': require('monaco-editor/esm/vs/language/javascript/javascript'),
-  'typescript': require('monaco-editor/esm/vs/language/typescript/typescript'),
-  'python': require('monaco-editor/esm/vs/language/python/python'),
-  'html': require('monaco-editor/esm/vs/language/html/html'),
-  'css': require('monaco-editor/esm/vs/language/css/css'),
-  'json': require('monaco-editor/esm/vs/language/json/json'),
-  'bash': require('monaco-editor/esm/vs/language/bash/bash'),
-  'terminal': require('monaco-editor/esm/vs/language/null/null'),
-};
 
 const EditorTheme = {
   base: 'vs-dark',
@@ -38,10 +25,10 @@ export default function CopilotWorkspace({
   isOpen,
   onClose,
   initialFiles = [],
-  onFileChange,
-  onGenerateProject,
-  userProjects,
-  onNewProject,
+  onFileChange = () => {},
+  onGenerateProject = () => {},
+  userProjects = [],
+  onNewProject = () => {},
 }) {
   const [files, setFiles] = useState(
     initialFiles.map(f => ({ ...f, content: f.content || '' }))
@@ -51,7 +38,6 @@ export default function CopilotWorkspace({
     initialFiles[0]?.path || 
     'main.js'
   );
-  const [languageMap, setLanguageMap] = useState({});
   const [isGenerating, setIsGenerating] = useState(false);
   const [workspaceName, setWorkspaceName] = useState('My Project');
   const [terminalOutput, setTerminalOutput] = useState('');
@@ -59,19 +45,6 @@ export default function CopilotWorkspace({
   const [isRunning, setIsRunning] = useState(false);
   const [history, setHistory] = useState(['Welcome to Waaw Copilot Workspace']);
   const [historyIndex, setHistoryIndex] = useState(0);
-
-  const [resize] = useResizeObserver(document.querySelector('.workspace-main') || document.body);
-
-  // Initialize Monaco with loaded languages
-  useEffect(() => {
-    // Set default languages if not already loaded
-    Object.entries(defaultLanguages).forEach(([langId, langMod]) => {
-      if (langMod && !monaco.editor.getLanguage(langId)) {
-        monaco.editor.defineLanguage(langId, langMod);
-      }
-    });
-    setLanguageMap(prev => ({ ...prev, initialized: true }));
-  }, []);
 
   // Add a new file
   const addFile = useCallback((filePath, content = '', language = 'javascript') => {
@@ -211,7 +184,7 @@ export default function CopilotWorkspace({
       '.sh': 'Terminal',
       '.yml': 'File',
       '.yaml': 'File',
-      '.gitignore': 'Git',
+      '.gitignore': 'GitBranch',
     };
     const iconName = icons[`.${ext}`] || 'FileText';
     const iconMap = {
@@ -219,7 +192,7 @@ export default function CopilotWorkspace({
       'FileJson': FileJson,
       'FileText': FileText,
       'Terminal': Terminal,
-      'Git': Git,
+      'GitBranch': GitBranch,
     };
     const Icon = iconMap[iconName] || File;
     return <Icon className="w-4 h-4" />;
@@ -423,7 +396,7 @@ export default function CopilotWorkspace({
                   style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
                   aria-label="Create .gitignore"
                 >
-                  <Git className="w-3 h-3 mr-2" /> .gitignore
+                  <GitBranch className="w-3 h-3 mr-2" /> .gitignore
                 </button>
               </div>
 
@@ -432,43 +405,32 @@ export default function CopilotWorkspace({
                 style={{ overflow: 'auto' }}
               >
                 <MonacoEditor
-                  ref={ref => {
-                    if (ref) {
-                      // Get the editor instance
-                      const editor = monaco.editor.getEditorProxy().instance;
-                      if (editor) {
-                        // Set theme
-                        monaco.editor.setTheme('vs-dark');
+                  onMount={(editor, monaco) => {
+                    if (editor) {
+                      monaco.editor.setTheme('vs-dark');
 
-                        // Set language based on active file
-                        const active = files.find(f => f.path === activeFile);
-                        if (active) {
-                          monaco.editor.setLanguage(active.language || 'javascript', editor);
-                        }
-
-                        // Handle content changes
-                        editor.onDidChangeModelContent(() => {
-                          const model = editor.getModel();
-                          if (model) {
-                            const path = model.uri.path.split('/').pop();
-                            const content = model.getValue();
-
-                            // Update file in state
-                            setFiles(prev => {
-                              const idx = prev.findIndex(f => f.path === activeFile);
-                              if (idx !== -1) {
-                                prev[idx].content = content;
-                              }
-                              return prev;
-                            });
-                          }
-                        });
-
-                        // Auto-save on close or command-s
-                        editor.addCommand(monaco.KeyMod.CtrlCmd | 83 /* S */, () => {
-                          saveProject();
-                        });
+                      const active = files.find(f => f.path === activeFile);
+                      if (active) {
+                        monaco.editor.setModelLanguage(editor.getModel(), active.language || 'javascript');
                       }
+
+                      editor.onDidChangeModelContent(() => {
+                        const model = editor.getModel();
+                        if (model) {
+                          const content = model.getValue();
+                          setFiles(prev => {
+                            const idx = prev.findIndex(f => f.path === activeFile);
+                            if (idx !== -1) {
+                              prev[idx].content = content;
+                            }
+                            return prev;
+                          });
+                        }
+                      });
+
+                      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+                        saveProject();
+                      });
                     }
                   }}
                   value={files.find(f => f.path === activeFile)?.content || ''}
@@ -477,23 +439,6 @@ export default function CopilotWorkspace({
                   automaticLayout
                   width="100%"
                   height="100%"
-                  asMonaco={async (monaco) => {
-                    // Wait for Monaco to be fully loaded
-                    await new Promise(resolve => setTimeout(resolve, 100));
-
-                    // Define extra languages on demand
-                    if (languageMap.initialized) {
-                      // All common languages are already defined via defaultLanguages imports
-                      // but we can add more here if needed
-                      try {
-                        // Try to define bash language
-                        const bashMod = await import('monaco-editor/esm/vs/language/bash/bash');
-                        monaco.editor.defineLanguage('bash', bashMod);
-                      } catch (e) {
-                        console.debug('bash language not available:', e.message);
-                      }
-                    }
-                  }}
                 />
               </div>
             </div>
@@ -554,7 +499,7 @@ export default function CopilotWorkspace({
                       }}
                       aria-label="Execute command"
                     >
-                      <Sync className="w-4 h-4" />
+                      <RefreshCw className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
@@ -648,7 +593,7 @@ export default function CopilotWorkspace({
             onClick={saveProject}
             aria-label="Save project"
           >
-            <Sync className="w-6 h-6 text-white" />
+            <RefreshCw className="w-6 h-6 text-white" />
           </motion.button>
         </div>
       </motion.div>

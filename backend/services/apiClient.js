@@ -180,7 +180,12 @@ class RobustApiClient {
                         const isQuotaExhausted = errorText.includes('limit: 0') || 
                                                  errorText.includes('RESOURCE_EXHAUSTED') ||
                                                  errorText.includes('quota exhausted') ||
-                                                 errorText.includes('Quota exceeded');
+                                                 errorText.includes('Quota exceeded') ||
+                                                 // Daily token budgets (e.g. Groq TPD) won't recover for hours —
+                                                 // fail fast so the failover chain moves to the next provider now.
+                                                 errorText.includes('tokens per day') ||
+                                                 errorText.includes('(TPD)') ||
+                                                 errorText.includes('tokens per day (TPD)');
                         
                         const retryAfter = response.headers.get('Retry-After');
                         const retryAfterMs = retryAfter ? parseInt(retryAfter) * 1000 : NaN;

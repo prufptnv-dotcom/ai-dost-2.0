@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { FileText, CheckCircle, Copy, Download, X, Loader2, Plus } from 'lucide-react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { useToast } from '../context/ToastContext';
 
 const ResumeBuilder = ({
   isOpen,
@@ -15,6 +16,11 @@ const ResumeBuilder = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewMode, setPreviewMode] = useState('split');
+  const { showToast } = useToast();
+
+  const renderMarkdown = useCallback((html) => DOMPurify.sanitize(html), []);
 
   const templates = [
     { id: 'professional', label: 'Professional', description: 'Clean corporate style with section dividers' },
@@ -142,7 +148,7 @@ const ResumeBuilder = ({
     } finally {
       setIsGenerating(false);
     }
-  }, [setSelectedResume]);
+  }, [setSelectedResume, showToast]);
 
   return (
     <AnimatePresence>

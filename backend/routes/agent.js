@@ -19,7 +19,13 @@ const OpenRouterService = require('../services/openrouterService');
 const NvidiaService     = require('../services/nvidiaService');
 const GeminiService     = require('../services/geminiService');
 const MistralService    = require('../services/mistralService');
+const TogetherService   = require('../services/togetherService');
+const DeepSeekService   = require('../services/deepseekService');
+const HuggingFaceService = require('../services/huggingfaceService');
+const CerebrasService   = require('../services/cerebrasService');
+const PythonEngine      = require('../services/pythonEngineService');
 const AgentOrchestrator = require('../agent/orchestrator');
+const McpClientManager  = require('../mcp/McpClientManager');
 
 // ── Agent System Prompt ───────────────────────────────────────────────────────
 const AGENT_SYSTEM_PROMPT = `You are AI-Dost Agent, an autonomous AI coding assistant — similar to GitHub Copilot Agent Mode.
@@ -36,11 +42,11 @@ TOOLS AVAILABLE:
 3. apply_diff(path, search, replace) — Surgically replace a code block in a file (PREFERRED for edits)
 4. run_terminal(command) — Execute a shell command, get stdout+stderr
 5. list_directory(path) — List all files in a folder
-5. search_codebase(query) — Semantic keyword search across all project files, returns top 5 matching code chunks
-6. run_tests(framework) — Auto-detect and execute unit tests (e.g. pytest, unittest, jest, npm test) and return pass/fail report
-7. take_screenshot(url) — Take a full-page screenshot of a running app (default: http://localhost:3001). Returns base64 PNG. Use this to visually inspect the UI for bugs.
-8. generate_project_from_prompt(prompt, targetDir) — Plan and create a complete full-stack project from a single prompt. Writes all files, runs npm install, starts dev server.
-9. resume_from_chat(prompt) — Generate a structured resume from a user prompt. Returns JSON resume data.
+6. search_codebase(query) — Advanced Semantic RAG Search across the entire workspace. Use this to ask questions about the codebase architecture, locate features, or find where specific components are defined. Returns an AI-synthesized answer and relevant source code snippets.
+7. run_tests(framework) — Auto-detect and execute unit tests (e.g. pytest, unittest, jest, npm test) and return pass/fail report
+8. take_screenshot(url) — Take a full-page screenshot of a running app (default: http://localhost:3001). Returns base64 PNG. Use this to visually inspect the UI for bugs.
+9. generate_project_from_prompt(prompt, targetDir) — Plan and create a complete full-stack project from a single prompt. Writes all files, runs npm install, starts dev server.
+10. resume_from_chat(prompt) — Generate a structured resume from a user prompt. Returns JSON resume data.
 
 STRICT OUTPUT FORMAT — Respond ONLY with valid JSON, nothing else:
 
@@ -144,7 +150,7 @@ function searchCodebase(query, projectFiles) {
 }
 
 // ── Tool Executor ─────────────────────────────────────────────────────────────
-async function executeTool(action, parameters, projectPath, projectFiles) {
+async function executeTool(action, parameters, projectPath, projectFiles, onProgress = null) {
   switch (action) {
 
     case 'read_file': {
@@ -249,74 +255,63 @@ async function executeTool(action, parameters, projectPath, projectFiles) {
     }
 
     case 'run_terminal': {
+      const { runInSessionAuto } = require('../sockets/terminal');
       return new Promise((resolve) => {
         const cmd = parameters.command || '';
-        const BLOCKED = ['rm -rf /', 'format c:', 'del /f /s /q c:\\', 'shutdown', 'rmdir /s /q c:'];
-        if (BLOCKED.some(b => cmd.toLowerCase().includes(b))) {
-          return resolve({ success: false, error: 'Command blocked for safety.', exit_code: 1 });
-        }
-        const child = exec(cmd, { cwd: projectPath, timeout: 20000 }, (err, stdout, stderr) => {
-          const exitCode = err ? (err.code !== undefined ? err.code : 1) : 0;
+        runInSessionAuto(projectId, projectPath, cmd, 20000).then((result) => {
           resolve({
-            success: exitCode === 0,
-            stdout: (stdout || '').substring(0, 3000),
-            stderr: (stderr || '').substring(0, 3000),
-            exit_code: exitCode,
-            // Self-healing hint for LLM
-            selfHealingHint: exitCode !== 0
-              ? `Command failed with exit code ${exitCode}. Stderr: ${(stderr || '').substring(0, 500)}. Analyze the error and fix the code before retrying.`
+            success: result.success,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            exit_code: result.exit_code,
+            selfHealingHint: result.exit_code !== 0
+              ? `Command failed with exit code ${result.exit_code}. Stderr: ${(result.stderr || '').substring(0, 500)}. Analyze the error and fix the code before retrying.`
               : null
           });
         });
-        try { child.stdin.end('User\nFriend1\nFriend2\n'); } catch (_) {}
       });
     }
 
     // ── Enhanced: Terminal with auto-retry on common errors ───────────────────
     case 'run_terminal_auto': {
+      const { runInSessionAuto } = require('../sockets/terminal');
       return new Promise((resolve) => {
         const cmd = parameters.command || '';
-        const BLOCKED = ['rm -rf /', 'format c:', 'del /f /s /q c:\\', 'shutdown', 'rmdir /s /q c:'];
-        if (BLOCKED.some(b => cmd.toLowerCase().includes(b))) {
-          return resolve({ success: false, error: 'Command blocked for safety.', exit_code: 1 });
-        }
-        let attempt = 0;
-        const maxAttempts = 3;
-        
-        function runCommand() {
-          exec(cmd, { cwd: projectPath, timeout: 20000 }, (err, stdout, stderr) => {
-            const exitCode = err ? (err.code !== undefined ? err.code : 1) : 0;
-            if (exitCode === 0) {
-              resolve({
-                success: true,
-                stdout: (stdout || '').substring(0, 3000),
-                stderr: (stderr || '').substring(0, 3000),
-                exit_code: exitCode,
-                attempt: attempt + 1
-              });
-            } else if (attempt < maxAttempts - 1) {
-              attempt++;
-              // Auto-retry with hint
-              setTimeout(runCommand, 500);
-            } else {
-              resolve({
-                success: false,
-                stdout: (stdout || '').substring(0, 3000),
-                stderr: (stderr || '').substring(0, 3000),
-                exit_code: exitCode,
-                attempt: attempt + 1,
-                selfHealingHint: `Command failed after ${maxAttempts} attempts. Stderr: ${(stderr || '').substring(0, 500)}. Analyze the error and fix the code before retrying manually.`
-              });
-            }
+        runInSessionAuto(projectId, projectPath, cmd, 20000).then((result) => {
+          resolve({
+            success: result.success,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            exit_code: result.exit_code,
+            selfHealingHint: result.exit_code !== 0
+              ? `Command failed with exit code ${result.exit_code}. Stderr: ${(result.stderr || '').substring(0, 500)}. Analyze the error and fix the code before retrying.`
+              : null
           });
-        }
-        runCommand();
+        });
       });
     }
 
-    // ── Phase 3: RAG Search Tool ──────────────────────────────────────────────
+    // ── Phase 3: True RAG Search Tool (Python AI Engine) ──────────────────────
     case 'search_codebase': {
       const query = parameters.query || '';
+      try {
+        const aiEngineUrl = process.env.PYTHON_AI_ENGINE_URL || 'http://127.0.0.1:8001';
+        const response = await fetch(`${aiEngineUrl}/ai/rag/query`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ directory: projectPath, question: query, top_k: 5, rebuild: false })
+        });
+        if (response.ok) {
+          const ragResult = await response.json();
+          return { success: true, results: ragResult };
+        } else {
+          logger.warn('Python AI Engine RAG failed, falling back to legacy JS searchCodebase. Status:', response.status);
+        }
+      } catch (err) {
+        logger.warn('Python AI Engine unreachable, falling back to legacy JS searchCodebase:', err.message);
+      }
+      
+      // Fallback
       return searchCodebase(query, projectFiles);
     }
 
@@ -478,33 +473,82 @@ async function executeTool(action, parameters, projectPath, projectFiles) {
         try {
           const prompt = parameters.prompt || '';
           const targetDir = parameters.targetDir || projectPath;
-          const orchestrator = new AgentOrchestrator({ groqService: GroqService, geminiService: GeminiService });
           
-          // Analyze prompt to determine project type
-          const cleanPrompt = prompt.toLowerCase();
-          const projectType = orchestrator.detectProjectType(cleanPrompt);
+          logger.info(`[Agent] Generating full-stack project for prompt: "${prompt}"`);
+          if (onProgress) onProgress({ type: 'step', stepLog: { action: 'Generating architecture', thought: 'Analyzing prompt and generating file tree...' } });
           
-          // Generate project based on type
-          const projectFiles = await orchestrator.generateProjectFiles(projectType, prompt, targetDir);
+          // 1. Prompt Gemini to scaffold the project
+          const GeminiService = require('../services/geminiService');
+          const systemPrompt = `You are an expert full-stack scaffolding AI. 
+Generate a complete, working codebase for the following prompt: "${prompt}".
+Return ONLY a valid JSON object containing an array of files. 
+Do not wrap it in markdown blockquotes, just raw JSON.
+Example format:
+{
+  "files": [
+    { "path": "index.html", "content": "<!DOCTYPE html>..." },
+    { "path": "style.css", "content": "body { ... }" },
+    { "path": "package.json", "content": "{ \"name\": \"app\" }" }
+  ]
+}`;
+
+          const rawResponse = await GeminiService.chat(systemPrompt, [], null, 'agent');
+          if (onProgress) onProgress({ type: 'step', stepLog: { action: 'Parsing files', thought: 'Extracting project structure...' } });
           
-          // Initialize git repo
+          // 2. Parse JSON
+          let parsedData;
           try {
-            await exec('git init', { cwd: targetDir, timeout: 10000 });
-          } catch (_) {}
-          
-          // Install dependencies if package.json was created
-          if (projectFiles.some(f => f.path === 'package.json')) {
+            const cleaned = rawResponse.replace(/\`\`\`json\s*/gi, '').replace(/\`\`\`\s*$/gi, '').trim();
+            parsedData = JSON.parse(cleaned);
+          } catch (err) {
+            // repair attempt
             try {
-              await exec('npm install', { cwd: targetDir, timeout: 120000 });
-            } catch (e) {
-              logger.info('[Agent] npm install partial or failed, continuing...');
+              const repaired = rawResponse.replace(/(?<=:\s*"[\s\S]*?)\r?\n(?=[\s\S]*?")/g, '\\n');
+              parsedData = JSON.parse(repaired);
+            } catch (err2) {
+              throw new Error('Failed to parse scaffolding JSON from AI.');
             }
           }
           
+          if (!parsedData || !Array.isArray(parsedData.files)) {
+            throw new Error('AI returned an invalid project structure format.');
+          }
+
+          // 3. Write files to workspace
+          const writtenFiles = [];
+          for (const file of parsedData.files) {
+            const safePath = safeJoin(targetDir, file.path);
+            fs.mkdirSync(path.dirname(safePath), { recursive: true });
+            fs.writeFileSync(safePath, file.content || '', 'utf-8');
+            writtenFiles.push({ path: file.path, size: Buffer.from(file.content || '').length });
+            
+            // Auto-emit event so frontend IDE file tree updates in real-time
+            fileEvents.emit('fileChanged', { projectId: null, action: 'add', path: file.path, content: file.content });
+          }
+
+          // 4. Initialize Git
+          try {
+            await new Promise((res) => exec('git init', { cwd: targetDir, timeout: 5000 }, res));
+          } catch (_) {}
+
+          // 5. Install Dependencies if package.json exists
+          if (parsedData.files.some(f => f.path.endsWith('package.json'))) {
+             if (onProgress) onProgress({ type: 'step', stepLog: { action: 'Installing dependencies', thought: 'Running npm install...' } });
+             try {
+               await new Promise((res, rej) => {
+                 exec('npm install', { cwd: targetDir, timeout: 120000 }, (error) => {
+                   if (error) rej(error); else res();
+                 });
+               });
+             } catch (e) {
+               logger.info('[Agent] npm install partial or failed, continuing...');
+             }
+          }
+
           resolve({ 
             success: true, 
-            message: `Project generated: ${projectType}`,
-            generatedFiles: projectFiles.map(f => ({ path: f.path, size: Buffer.from(f.content).length })),
+            message: `Successfully generated ${parsedData.files.length} files.`,
+            generatedFiles: writtenFiles,
             targetDir: targetDir
           });
         } catch (e) {
@@ -513,598 +557,6 @@ async function executeTool(action, parameters, projectPath, projectFiles) {
         }
       });
     }
-
-    // Helper: Detect project type from user prompt
-    function detectProjectType(cleanPrompt) {
-      if (cleanPrompt.includes('todo') || cleanPrompt.includes('task') || cleanPrompt.includes('dolist')) return 'todo';
-      if (cleanPrompt.includes('calc') || cleanPrompt.includes('calculator') || cleanPrompt.includes('math')) return 'calculator';
-      if (cleanPrompt.includes('web') || cleanPrompt.includes('website') || cleanPrompt.includes('portfolio')) return 'web';
-      if (cleanPrompt.includes('api') || cleanPrompt.includes('backend') || cleanPrompt.includes('server')) return 'api';
-      if (cleanPrompt.includes('react') || cleanPrompt.includes('next') || cleanPrompt.includes('vue')) return 'react';
-      if (cleanPrompt.includes('python') || cleanPrompt.includes('flask') || cleanPrompt.includes('django')) return 'python';
-      if (cleanPrompt.includes('chrome') || cleanPrompt.includes('extension') || cleanPrompt.includes('browser')) return 'extension';
-      return 'general';
-    }
-
-    // Helper: Generate project files based on type
-    async function generateProjectFiles(projectType, prompt, targetDir) {
-      const files = [];
-      
-      switch (projectType) {
-        case 'todo': {
-          files.push(...await generateTodoProject(targetDir, prompt));
-          break;
-        }
-        case 'calculator': {
-          files.push(...await generateCalculatorProject(targetDir, prompt));
-          break;
-        }
-        case 'web': {
-          files.push(...await generateWebProject(targetDir, prompt));
-          break;
-        }
-        case 'api': {
-          files.push(...await generateApiProject(targetDir, prompt));
-          break;
-        }
-        case 'react': {
-          files.push(...await generateReactProject(targetDir, prompt));
-          break;
-        }
-        case 'python': {
-          files.push(...await generatePythonProject(targetDir, prompt));
-          break;
-        }
-        case 'extension': {
-          files.push(...await generateExtensionProject(targetDir, prompt));
-          break;
-        }
-        default: {
-          files.push(...await generateGeneralProject(targetDir, prompt));
-          break;
-        }
-      }
-      
-      return files;
-    }
-
-    // Generate Todo App project
-    async function generateTodoProject(targetDir, prompt) {
-      const files = [];
-      const sanitizedDir = targetDir.replace(/[^a-zA-Z0-9\/]/g, '');
-      const projectDir = `${sanitizedDir}/todo-app`;
-      
-      // Create directory structure
-      try { fs.mkdirSync(projectDir, { recursive: true }); } catch (_) {}
-      
-      // index.html
-      files.push({
-        path: `${projectDir}/index.html`,
-        content: `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Todo App - AI Generated</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <div class="container">
-    <h1>📝 Todo App</h1>
-    <input type="text" id="new-task" placeholder="Add a task...">
-    <button onclick="addTask()">Add</button>
-    <ul id="task-list"></ul>
-  </div>
-  <script src="script.js"></script>
-</body>
-</html>`,
-      });
-      
-      // style.css
-      files.push({
-        path: `${projectDir}/style.css`,
-        content: `body {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background: #f0f2f5;
-  margin: 0;
-  padding: 2rem;
-}
-
-.container {
-  max-width: 500px;
-  margin: 0 auto;
-  background: white;
-  padding: 2rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-}
-
-input[type="text"] {
-  width: 70%;
-  padding: 0.5rem;
-  margin-right: 0.5rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-}
-
-button {
-  padding: 0.5rem 1rem;
-  background: #06b6d4;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-button:hover {
-  background: #0891b2;
-}
-
-ul {
-  margin-top: 1rem;
-  list-style: none;
-}
-
-li {
-  background: #f8f9fa;
-  margin: 0.5rem 0;
-  padding: 0.5rem;
-  border-radius: 4px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}`,
-      });
-      
-      // script.js
-      files.push({
-        path: `${projectDir}/script.js`,
-        content: `// Todo List
-const taskList = JSON.parse(localStorage.getItem('tasks') || '[]');
-const taskListEl = document.getElementById('task-list');
-const inputEl = document.getElementById('new-task');
-
-function renderTasks() {
-  taskListEl.innerHTML = '';
-  taskList.forEach((task, i) => {
-    const li = document.createElement('li');
-    li.innerHTML = \`
-      <span>\${task}</span>
-      <button onclick="deleteTask(\${i})">✕</button>
-    \`;
-    taskListEl.appendChild(li);
-  });
-}
-
-function addTask() {
-  const task = inputEl.value.trim();
-  if (task) {
-    taskList.push(task);
-    localStorage.setItem('tasks', JSON.stringify(taskList));
-    renderTasks();
-    inputEl.value = '';
-  }
-}
-
-function deleteTask(i) {
-  taskList.splice(i, 1);
-  localStorage.setItem('tasks', JSON.stringify(taskList));
-  renderTasks();
-}
-
-// Render on load
-renderTasks();
-`,
-      });
-      
-      // package.json
-      files.push({
-        path: `${projectDir}/package.json`,
-        content: `{
-  "name": "todo-app",
-  "version": "1.0.0",
-  "description": "Todo application generated by AI-Dost",
-  "main": "script.js",
-  "scripts": {
-    "start": "node -e \"console.log('Starting dev server...')\""
-  },
-      "dependencies": {}
-}`,
-      });
-      
-    }
-
-    // Generate Calculator project
-    async function generateCalculatorProject(targetDir, prompt) {
-      const files = [];
-      const sanitizedDir = targetDir.replace(/[^a-zA-Z0-9\/]/g, '');
-      const projectDir = `${sanitizedDir}/calculator`;
-      
-      try { fs.mkdirSync(projectDir, { recursive: true }); } catch (_) {}
-      
-      // index.html
-      files.push({
-        path: `${projectDir}/index.html`,
-        content: `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Calculator - AI Generated</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <div class="calculator">
-    <input type="text" id="display" disabled>
-    <div class="keys">
-      <button onclick="clearDisplay()">AC</button>
-      <button onclick="appendDisplay('/')">/</button>
-      <button onclick="appendDisplay('*')">*</button>
-      <button onclick="appendDisplay('-')">-</button>
-      <button onclick="calculate()">=</button>
-    </div>
-    <input type="text" id="history" disabled>
-  </div>
-  <script src="script.js"></script>
-</body>
-</html>`,
-      });
-      
-      // style.css
-      files.push({
-        path: `${projectDir}/style.css`,
-        content: `body {
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-  background: #1a1a2e;
-  color: #e94560;
-  margin: 0;
-  padding: 2rem;
-  display: flex;
-  justify-content: center;
-}
-
-.calculator {
-  background: #16213e;
-  padding: 2rem;
-  border-radius: 12px;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-  width: 300px;
-}
-
-#display {
-  width: 100%;
-  height: 40px;
-  font-size: 1.5rem;
-  margin-bottom: 1rem;
-  padding: 0.5rem;
-  background: #2a3548;
-  color: #e94560;
-  border: none;
-  border-radius: 4px;
-  text-align: right;
-}
-
-.keys {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 0.5rem;
-}
-
-.keys button {
-  background: #06b6d4;
-  color: white;
-  border: none;
-  padding: 1rem;
-  border-radius: 6px;
-  font-size: 1.2rem;
-  cursor: pointer;
-}
-
-.keys button:hover {
-  background: #0891b2;
-}`,
-      });
-      
-      // script.js
-      files.push({
-        path: `${projectDir}/script.js`,
-        content: `// Calculator
-const display = document.getElementById('display');
-const history = document.getElementById('history');
-
-function appendDisplay(val) {
-  display.value += val;
-}
-
-function clearDisplay() {
-  display.value = '';
-}
-
-function calculate() {
-  try {
-    display.value = eval(display.value);
-    history.value = display.value;
-  } catch (e) {
-    display.value = 'Error';
-    setTimeout(() => display.value = '', 1000);
-  }
-}
-`,
-      });
-      
-      // package.json
-      files.push({
-        path: `${projectDir}/package.json`,
-        content: `{
-  "name": "calculator",
-  "version": "1.0.0",
-  "description": "Calculator app generated by AI-Dost",
-  "main": "script.js",
-  "scripts": {
-    "start": "echo 'Calculator running'"
-  },
-  "dependencies": {}
-}`,
-      });
-      
-    }
-
-    // Generate general web project
-    async function generateWebProject(targetDir, prompt) {
-      const files = [];
-      const sanitizedDir = targetDir.replace(/[^a-zA-Z0-9\/]/g, '');
-      const projectDir = `${sanitizedDir}/web-app`;
-      
-      try { fs.mkdirSync(projectDir, { recursive: true }); } catch (_) {}
-      
-      files.push({
-        path: `${projectDir}/index.html`,
-        content: `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI-Generated Web App</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <header>
-    <h1>👋 Welcome to AI-Dost Generated App</h1>
-  </header>
-  <main>
-    <section class="hero">
-      <h2>Created with AI assistance</h2>
-      <p>This project was generated from your prompt.</p>
-    </section>
-  </main>
-  <script src="script.js"></script>
-</body>
-</html>`,
-      });
-      
-      files.push({
-        path: `${projectDir}/style.css`,
-        content: `body {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  margin: 0;
-  padding: 0;
-  background: #0a0a0f;
-  color: #f8fafc;
-  min-height: 100vh;
-}
-
-header {
-  background: #16213e;
-  padding: 1rem 2rem;
-  text-align: center;
-}
-
-.hero {
-  padding: 3rem;
-  text-align: center;
-}
-
-h1 { color: #06b6d4; }
-h2 { color: #67e8f9; }
-p { color: #a0aec0; }
-`,
-      });
-      
-      files.push({
-        path: `${projectDir}/script.js`,
-        content: `// General Web App
-console.log('AI-Dost generated web application');
-
-// Add your custom JavaScript here
-`,
-      });
-      
-      // package.json
-      files.push({
-        path: `${projectDir}/package.json`,
-        content: `{
-  "name": "web-app",
-  "version": "1.0.0",
-  "description": "Web application generated by AI-Dost",
-  "main": "script.js",
-  "scripts": {
-    "start": "echo 'Web app running'"
-  },
-  "dependencies": {}
-}`,
-      });
-      
-    }
-
-    // Generate Python project
-    async function generatePythonProject(targetDir, prompt) {
-      const files = [];
-      const sanitizedDir = targetDir.replace(/[^a-zA-Z0-9\/]/g, '');
-      const projectDir = `${sanitizedDir}/python-project`;
-      
-      try { fs.mkdirSync(projectDir, { recursive: true }); } catch (_) {}
-      
-      // main.py
-      files.push({
-        path: `${projectDir}/main.py`,
-        content: `#!/usr/bin/env python3
-\"\"\"\nGenerated Python Project by AI-Dost\n\"\"\"\n\nimport sys\nimport os\n\ndef main():\n    print(\"🐍 AI-Dost Generated Python Project\")\n    print(f\"Project: {prompt[:50] if prompt else 'General'}\")\n    \n    # Get current directory\n    current_dir = os.path.dirname(os.path.abspath(__file__))\n    print(f\"Working in: {current_dir}\")\n    \n    # List files in current directory\n    try:\n        files = os.listdir(current_dir)\n        print(\"Files:\")\n        for f in files:\n            print(f\"  - {f}\")\n    except Exception as e:\n        print(f\"Error listing files: {e}\")\n\nif __name__ == \"__main__\":\n    main()\n`,
-      });
-      
-      // requirements.txt
-      files.push({
-        path: `${projectDir}/requirements.txt`,
-        content: `# AI-Dost Generated Python Project\n# Add your dependencies here\n`,
-      });
-      
-      // README.md
-      files.push({
-        path: `${projectDir}/README.md`,
-        content: `# AI-Dost Generated Python Project\n\nGenerated from prompt: ${prompt}\n\n## Usage\n\nRun with: python main.py\n\n## Description\n\nThis project was automatically generated by AI-Dost.`,
-      });
-      
-      // package.json (for Python with PyScript if needed)
-      files.push({
-        path: `${projectDir}/package.json`,
-        content: `{
-  "name": "python-project",
-  "version": "1.0.0",
-  "description": "Python project generated by AI-Dost",
-  "main": "main.py",
-  "scripts": {
-    "start": "python main.py"
-  },
-  "dependencies": {}
-}`,
-      });
-      
-    }
-
-    // Generate Chrome extension project
-    async function generateExtensionProject(targetDir, prompt) {
-      const files = [];
-      const sanitizedDir = targetDir.replace(/[^a-zA-Z0-9\/]/g, '');
-      const projectDir = `${sanitizedDir}/chrome-extension`;
-      
-      try { fs.mkdirSync(projectDir, { recursive: true }); } catch (_) {}
-      
-      // manifest.json
-      files.push({
-        path: `${projectDir}/manifest.json`,
-        content: `{
-  \"manifest_version\": 3,
-  \"name\": \"AI-Dost Extension\",
-  \"version\": \"1.0.0\",
-  \"description\": \"Generated by AI-Dost\",
-  \"permissions\": [\"activeTab\", \"storage\"],
-  \"content_scripts\": [
-    {
-      \"matches\": [\"<all_urls>\"],
-      \"js\": [\"content.js\"]
-    }
-  ]}`,
-      });
-      
-      // content.js
-      files.push({
-        path: `${projectDir}/content.js`,
-        content: `// AI-Dost Content Script\nconsole.log('AI-Dost extension loaded');\n\n// Your content script code here\nchrome.runtime.onMessage.addListener((request, sender, sendResponse) => {\n  if (request.action === \"getSelection\") {\n    sendResponse({ text: window.getSelection().toString() });\n  }\n});\n`,
-      });
-      
-      // popup.html
-      files.push({
-        path: `${projectDir}/popup.html`,
-        content: `<!DOCTYPE html>
-<html>
-  <head>
-    <style>
-      body { font-family: sans-serif; padding: 1rem; width: 200px; }
-      button { padding: 0.5rem 1rem; margin-top: 0.5rem; }
-    </style>
-  </head>
-  <body>
-    <h3>AI-Dost</h3>
-    <button onclick=\"chrome.runtime.sendMessage({action: 'getSelection'}, (resp) => { alert(resp?.text || 'No selection') } );\">Get Selection</button>
-  </body>
-</html>`,
-      });
-      
-    }
-
-    // Generate general project
-    async function generateGeneralProject(targetDir, prompt) {
-      const files = [];
-      const sanitizedDir = targetDir.replace(/[^a-zA-Z0-9\/]/g, '');
-      const projectDir = `${sanitizedDir}/project`;
-      
-      try { fs.mkdirSync(projectDir, { recursive: true }); } catch (_) {}
-      
-      // index.html
-      files.push({
-        path: `${projectDir}/index.html`,
-        content: `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI-Dost Project</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <div class="content">
-    <h1>🎯 AI-Dost Project</h1>
-    <p>Generated from your natural language prompt.</p>
-    <div id=\"content\">
-      <!-- Content will be filled based on prompt -->
-    </div>
-  </div>
-  <script src="script.js"></script>
-</body>
-</html>`,
-      });
-      
-      // style.css
-      files.push({
-        path: `${projectDir}/style.css`,
-        content: `body {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background: #0a0a0f;
-  color: #f8fafc;
-  margin: 0;
-  padding: 2rem;
-  max-width: 800px;
-  margin: 0 auto;
-}
-
-.content { text-align: center; }
-h1 { color: #06b6d4; margin-bottom: 1rem; }
-p { color: #64748b; }
-`,
-      });
-      
-      // script.js
-      files.push({
-        path: `${projectDir}/script.js`,
-        content: `// General project script\nconsole.log('AI-Dost project loaded');\n// Add your custom logic here`,
-      });
-      
-      // package.json
-      files.push({
-        path: `${projectDir}/package.json`,
-        content: `{
-  "name": "project",
-  "version": "1.0.0",
-  "description": "Project generated by AI-Dost",
-  "main": "script.js",
-  "scripts": {
-    "start": "echo 'Project running'"
-  },
-  "dependencies": {}
-}`,
-      });
-      
-    }
-
     // ── Resume Generation Tool ────────────────────────────────────────────────
     case 'resume_from_chat': {
       return new Promise(async (resolve) => {
@@ -1233,13 +685,37 @@ async function callLLM(messages, customKeys = null, onFallbackNotice = null) {
     if (!isErrorResp(resp)) return resp;
   } catch (e) { logger.info('[Agent] Gemini failed:', e.message); }
 
-  // 3. Try NVIDIA NIM
+// 3. Try NVIDIA NIM
   try {
     const resp = await NvidiaService.chat(agentPrompt, [], customKeys?.nvidia, 'agent');
     if (!isErrorResp(resp)) return resp;
   } catch (e) { logger.info('[Agent] NVIDIA failed:', e.message); }
 
-  // 4. Try OpenRouter
+  // 4. Try Together AI
+  try {
+    const resp = await TogetherService.chat(agentPrompt, [], customKeys?.together);
+    if (!isErrorResp(resp)) return resp;
+  } catch (e) { logger.info('[Agent] Together failed:', e.message); }
+
+  // 5. Try DeepSeek
+  try {
+    const resp = await DeepSeekService.chat(agentPrompt, [], customKeys?.deepseek);
+    if (!isErrorResp(resp)) return resp;
+  } catch (e) { logger.info('[Agent] DeepSeek failed:', e.message); }
+
+  // 6. Try Mistral
+  try {
+    const resp = await MistralService.chat(agentPrompt, [], customKeys?.mistral, 'agent');
+    if (!isErrorResp(resp)) return resp;
+  } catch (e) { logger.info('[Agent] Mistral failed:', e.message); }
+
+  // 6b. Try Hugging Face
+  try {
+    const resp = await HuggingFaceService.chat(agentPrompt);
+    if (!isErrorResp(resp)) return resp;
+  } catch (e) { logger.info('[Agent] HuggingFace failed:', e.message); }
+
+  // 7. Try OpenRouter
   try {
     const resp = await OpenRouterService.chat(agentPrompt, [], customKeys?.openrouter, 'agent');
     if (!isErrorResp(resp)) return resp;
@@ -1368,6 +844,16 @@ function generateTaskPlan(userPrompt) {
   return { summary, tasks };
 }
 
+// ── Plan-only endpoint (plan → approve gate) ──────────────────────────────────
+router.post('/plan', (req, res) => {
+  const { userPrompt } = req.body;
+  if (!userPrompt || typeof userPrompt !== 'string' || !userPrompt.trim()) {
+    return res.status(400).json({ error: 'userPrompt is required and must be a non-empty string' });
+  }
+  const plan = generateTaskPlan(userPrompt.trim());
+  return res.json({ success: true, plan });
+});
+
 // ── ReAct Loop API Endpoint (SSE Streaming) ───────────────────────────────────
 router.post('/run', async (req, res) => {
   const { userPrompt, projectPath, projectFiles, projectId, customKeys } = req.body;
@@ -1384,10 +870,10 @@ router.post('/run', async (req, res) => {
   if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
   let isAborted = false;
-  req.on('close', () => {
-    isAborted = true;
-    logger.info('[Agent] Client disconnected. Cancelling ReAct loop.');
-  });
+  // req.on('close', () => {
+  //   isAborted = true;
+  //   logger.info('[Agent] Client disconnected. Cancelling ReAct loop.');
+  // });
 
   const send = (data) => {
     if (isAborted) return;
@@ -1447,10 +933,33 @@ router.post('/run', async (req, res) => {
 
   // Build file context (RAG: most relevant files via search first)
   let fileContext = '';
-  const relevantFiles = searchCodebase(userPrompt, projectFiles).results;
-  if (relevantFiles.length > 0) {
-    fileContext = '=== RELEVANT CODE (via semantic search) ===\n' +
-      relevantFiles.map(r => `FILE: ${r.file} (line ${r.startLine})\n\`\`\`\n${r.snippet}\n\`\`\``).join('\n\n');
+  try {
+    const relevantFiles = searchCodebase(userPrompt, projectFiles).results;
+    if (relevantFiles.length > 0) {
+      fileContext = '=== RELEVANT CODE (via semantic search) ===\n' +
+        relevantFiles.map(r => `FILE: ${r.file} (line ${r.startLine})\n\`\`\`\n${r.snippet}\n\`\`\``).join('\n\n');
+    }
+  } catch (searchErr) {
+    logger.info('[Agent] Semantic search skipped:', searchErr?.message || searchErr);
+  }
+
+  // Python AI Engine (LlamaIndex RAG) — semantic Q&A over workspace files.
+  // Fail-safe: engine down/error -> silently skip, existing context stays.
+  if (fileContext && workspacePath) {
+    try {
+      const rag = await PythonEngine.queryRag(workspacePath, userPrompt, 3);
+      if (rag.ok && rag.data?.answer && String(rag.data.answer).trim().length > 3) {
+        const ragSources = (rag.data.sources || [])
+          .filter(s => s && s.file)
+          .map(s => `${s.file} (score ${s.score ?? '?'})`).join(', ');
+        fileContext += '\n\n=== SEMANTIC CONTEXT (LlamaIndex RAG) ===\n' +
+          `Q: ${userPrompt}\nA: ${String(rag.data.answer).substring(0, 1200)}` +
+          (ragSources ? `\nSources: ${ragSources}` : '');
+        logger.info('[Agent] RAG context merged from Python engine');
+      }
+    } catch (ragErr) {
+      logger.info('[Agent] Python RAG skipped:', ragErr?.message || ragErr);
+    }
   }
   if (!fileContext && projectFiles && projectFiles.length > 0) {
     fileContext = projectFiles.slice(0, 5).map(f =>
@@ -1478,6 +987,10 @@ router.post('/run', async (req, res) => {
   let activeTaskId = 1;
 
   for (let step = 0; step < MAX_STEPS; step++) {
+    if (isAborted) {
+      logger.info('[Agent] Aborting ReAct loop because client disconnected.');
+      break;
+    }
     try {
       const activeTask = plan.tasks.find(t => t.id === activeTaskId) || plan.tasks[0];
       send({ 
@@ -1565,7 +1078,7 @@ router.post('/run', async (req, res) => {
         thought: parsed.thought
       });
 
-      const toolResult = await executeTool(parsed.action, parsed.parameters || {}, workspacePath, projectFiles);
+      const toolResult = await executeTool(parsed.action, parsed.parameters || {}, workspacePath, projectFiles, send);
       stepLog.result = toolResult;
       steps.push(stepLog);
       send({ type: 'step', stepLog });
@@ -1817,6 +1330,73 @@ router.post('/checkpoint', (req, res) => {
       message: err ? (stderr || err.message) : stdout.trim()
     });
   });
+});
+
+// ── Python AI Engine: LlamaIndex RAG (semantic Q&A over a directory) ──────────
+router.post('/ai/rag', async (req, res) => {
+  const { directory, question, topK, rebuild } = req.body;
+  if (!directory || !question) return res.status(400).json({ error: 'directory aur question required hain' });
+  if (!fs.existsSync(directory)) return res.status(400).json({ error: 'directory exist nahi karti' });
+  const result = await PythonEngine.queryRag(directory, question, topK || 4, !!rebuild);
+  if (!result.ok) {
+    return res.status(502).json({ error: `AI Engine unavailable: ${result.error || 'unknown'}` });
+  }
+  res.json(result.data);
+});
+
+// ── Python AI Engine health (frontend status chip) ────────────────────────────
+router.get('/ai/engine-status', async (_req, res) => {
+  const h = await PythonEngine.health();
+  res.json(h ? { ...h, connected: true } : { connected: false, status: 'down' });
+});
+
+// ── CrewAI multi-agent crew (Pillar 1: Agentic Core) ──────────────────────────
+router.post('/ai/crew', async (req, res) => {
+  const { prompt, mode, model, directory } = req.body;
+  if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+    return res.status(400).json({ error: 'prompt required hai' });
+  }
+  const result = await PythonEngine.runCrew(prompt.trim(), { mode, model, directory });
+  if (!result.ok) {
+    return res.status(502).json({ error: `AI Engine unavailable: ${result.error || 'unknown'}` });
+  }
+  res.json(result.data);
+});
+
+// ── Edge TTS (free unlimited voice, no API key) ───────────────────────────────
+router.post('/ai/tts', async (req, res) => {
+  const { text, voice, rate } = req.body || {};
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    return res.status(400).json({ error: 'text required hai' });
+  }
+  const result = await PythonEngine.tts(text.trim(), voice, rate);
+  if (!result.ok) {
+    return res.status(502).json({ error: `AI Engine unavailable: ${result.error || 'unknown'}` });
+  }
+  res.set('Content-Type', 'audio/mpeg');
+  res.set('Cache-Control', 'no-store');
+  res.send(result.data);
+});
+
+// ── API quota + circuit breaker status (troubleshooting) ──────────────────────
+router.get('/quota-status', (_req, res) => {
+  const serviceClasses = {
+    groq: GroqService, gemini: GeminiService, nvidia: NvidiaService,
+    together: TogetherService, deepseek: DeepSeekService, mistral: MistralService,
+    huggingface: HuggingFaceService, openrouter: OpenRouterService, cerebras: CerebrasService,
+  };
+  const status = {};
+  for (const [name, Svc] of Object.entries(serviceClasses)) {
+    try {
+      const inst = new Svc();
+      const clients = Array.isArray(inst.clients) ? inst.clients : [inst.client];
+      const states = clients.map(c => c?.circuitBreaker?.getState?.() || 'unknown');
+      status[name] = { state: [...new Set(states)].join('/') || 'unknown' };
+    } catch {
+      status[name] = { state: 'unknown' };
+    }
+  }
+  res.json({ circuitBreakers: status });
 });
 
 router.parseLLMAction = parseLLMAction;

@@ -1,8 +1,53 @@
 {
-  "totalFeedback": 29,
+  "totalFeedback": 34,
   "positiveCount": 25,
-  "negativeCount": 4,
+  "negativeCount": 9,
   "feedbackLogs": [
+    {
+      "id": "1786807413877",
+      "type": "down",
+      "category": "general",
+      "message": "",
+      "aiReply": "",
+      "correction": "Always use arrow functions in JavaScript.",
+      "timestamp": "2026-08-15T15:23:33.877Z"
+    },
+    {
+      "id": "1786708424919",
+      "type": "negative",
+      "category": "general",
+      "message": "thumbs down",
+      "aiReply": "",
+      "correction": "",
+      "timestamp": "2026-08-14T11:53:44.919Z"
+    },
+    {
+      "id": "1786708414837",
+      "type": "positive",
+      "category": "general",
+      "message": "thumbs up",
+      "aiReply": "",
+      "correction": "",
+      "timestamp": "2026-08-14T11:53:34.837Z"
+    },
+    {
+      "id": "1786708413152",
+      "type": "negative",
+      "category": "general",
+      "message": "thumbs down",
+      "aiReply": "",
+      "correction": "",
+      "timestamp": "2026-08-14T11:53:33.152Z"
+    },
+    {
+      "id": "1786708411234",
+      "type": "negative",
+      "category": "general",
+      "message": "thumbs down",
+      "aiReply": "",
+      "correction": "",
+      "timestamp": "2026-08-14T11:53:31.234Z"
+    },
     {
       "id": "711279545",
       "type": "down",
@@ -273,7 +318,8 @@
     "Enforce 100% autonomous execution for all multi-step file generation requests.",
     "Correction: test correction",
     "Correction: test correction",
-    "Correction: test correction"
+    "Correction: test correction",
+    "Correction from User: Always use arrow functions in JavaScript."
   ],
   "scannedFiles": [
     "main.py",

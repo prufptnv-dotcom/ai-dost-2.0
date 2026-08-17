@@ -68,6 +68,15 @@ router.post('/feedback', async (req, res) => {
             memory.negativeCount += 1;
             if (correction) {
                 memory.learnedRules.push(`Correction from User: ${correction}`);
+            
+            // Sync with Python AI Engine Long-Term Vector Memory (ChromaDB)
+            
+                fetch('http://127.0.0.1:8001/ai/agent/learn', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: `Rule: ${correction}` })
+                }).catch(err => console.error("Failed to sync memory with Python AI Engine:", err));
+            
             }
         }
 

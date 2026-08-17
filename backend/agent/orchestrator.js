@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
+const { promisify } = require('util');
+const execPromise = promisify(exec);
 const os = require('os');
 
 class AgentOrchestrator {
@@ -52,7 +54,7 @@ RULES:
 - For "create a full project" requests, use 'generate_project_from_prompt' to build the entire project autonomously.
 - For resume requests, use 'resume_from_chat' to generate structured resume data.
 - Never output prose before or after JSON — respond strictly with the JSON object.
-- Max 14 steps total. Output FINAL_ANSWER when complete.
+- Take as many steps as needed (no limit). Output FINAL_ANSWER when complete.
 `;
     
     this.services = {
@@ -138,25 +140,32 @@ RULES:
       }
 
       case 'run_terminal': {
-        return new Promise((resolve) => {
+        return (async () => {
           const cmd = parameters.command || '';
           const BLOCKED = ['rm -rf /', 'format c:', 'del /f /s /q c:\\', 'shutdown', 'rmdir /s /q c:'];
           if (BLOCKED.some(b => cmd.toLowerCase().includes(b))) {
-            return resolve({ success: false, error: 'Command blocked for safety.', exit_code: 1 });
+            return { success: false, error: 'Command blocked for safety.', exit_code: 1 };
           }
-          exec(cmd, { cwd: this.projectPath, timeout: 20000 }, (err, stdout, stderr) => {
-            const exitCode = err ? (err.code !== undefined ? err.code : 1) : 0;
-            resolve({
-              success: exitCode === 0,
-              stdout: (stdout || '').substring(0, 3000),
-              stderr: (stderr || '').substring(0, 3000),
-              exit_code: exitCode,
-              selfHealingHint: exitCode !== 0
-                ? `Command failed with exit code ${exitCode}. Stderr: ${(stderr || '').substring(0, 500)}. Analyze the error and fix the code before retrying.`
+          try {
+            if (!this.sandbox) {
+              const SandboxManager = require('../sandbox/SandboxManager');
+              this.sandbox = new SandboxManager(this.projectId || 'orchestrator-task', this.projectPath);
+              await this.sandbox.start();
+            }
+            const r = await this.sandbox.executeCommand(cmd, 20000);
+            return {
+              success: r.success,
+              stdout: (r.stdout || '').substring(0, 3000),
+              stderr: (r.stderr || '').substring(0, 3000),
+              exit_code: r.exit_code,
+              selfHealingHint: r.exit_code !== 0
+                ? `Command failed with exit code ${r.exit_code}. Stderr: ${(r.stderr || '').substring(0, 500)}. Analyze the error and fix the code before retrying.`
                 : null
-            });
-          });
-        });
+            };
+          } catch (err) {
+            return { success: false, error: err.message, exit_code: 1 };
+          }
+        })();
       }
 
       case 'search_codebase': {
@@ -230,13 +239,13 @@ RULES:
             
             // Initialize git repo
             try {
-              await exec('git init', { cwd: targetDir, timeout: 10000 });
+              await execPromise('git init', { cwd: targetDir, timeout: 10000 });
             } catch (_) {}
             
             // Install dependencies if package.json was created
             if (projectFiles.some(f => f.path === 'package.json')) {
               try {
-                await exec('npm install', { cwd: targetDir, timeout: 120000 });
+                await execPromise('npm install', { cwd: targetDir, timeout: 120000 });
               } catch (e) {
                 // npm install partial or failed, continuing...
               }
@@ -285,7 +294,7 @@ RULES:
 
   async generateProjectFiles(projectType, prompt, targetDir) {
     const files = [];
-    const sanitizedDir = targetDir.replace(/[^a-zA-Z0-9\/]/g, '');
+    const sanitizedDir = path.normalize(targetDir);
     const projectDir = `${sanitizedDir}/${this.getProjectNameFromType(projectType)}`;
     
     try { fs.mkdirSync(projectDir, { recursive: true }); } catch (_) {}
@@ -457,6 +466,7 @@ renderTasks();`,
   },
   "dependencies": {}`,
     });
+    return files;
   }
 
   // Generate Calculator project
@@ -576,6 +586,7 @@ function calculate() {
   },
   "dependencies": {}`,
     });
+    return files;
   }
 
   // Generate general web project
@@ -650,6 +661,7 @@ console.log('AI-Dost generated web application');
   },
   "dependencies": {}`,
     });
+    return files;
   }
 
   // Generate Python project
@@ -701,6 +713,7 @@ if __name__ == \"__main__\":
   },
   "dependencies": {}`,
     });
+    return files;
   }
 
   // Generate Chrome extension project
@@ -732,6 +745,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });`,
     });
+    return files;
   }
 
   // Generate general project

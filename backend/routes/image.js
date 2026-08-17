@@ -2,7 +2,10 @@ const express = require('express');
 const logger = require('../logger');
 const router = express.Router();
 
-// Image generation using Pollinations.ai (completely free, no API key needed)
+// Pollinations free tier: 1 request queued per IP at a time (anonymous).
+// Proper serial queue: every request chains onto the previous one's tail.
+let queue = Promise.resolve();
+
 router.post('/generate', async (req, res) => {
     const { prompt } = req.body;
 
@@ -10,44 +13,29 @@ router.post('/generate', async (req, res) => {
         return res.status(400).json({ success: false, error: 'Prompt required' });
     }
 
-    try {
+    // Return the URL instantly — the browser loads the image with auto-retry.
+    // No HEAD verification: pollinations takes 30-60s to render HD images and
+    // the Next.js proxy would time out (30s default) → 500 for the client.
+    const task = queue.then(() => {
         const encoded = encodeURIComponent(prompt.trim());
+        const seed = Date.now();
+        return {
+            success: true,
+            imageUrl: `https://image.pollinations.ai/prompt/${encoded}?width=1920&height=1080&seed=${seed}&nologo=true&model=flux`,
+            provider: 'pollinations',
+            message: 'Image generated successfully'
+        };
+    });
+    queue = task.catch(() => {});
 
-        // Pollinations.ai returns the image directly at this URL (no API key needed)
-        // We add seed for reproducibility and width/height for better quality
-        const imageUrl = `https://image.pollinations.ai/prompt/${encoded}?width=768&height=512&seed=${Date.now()}&nologo=true`;
-
-        // Verify the image URL is accessible (HEAD request)
-        const checkRes = await fetch(imageUrl, {
-            method: 'HEAD',
-            signal: AbortSignal.timeout(5000)
-        });
-
-        if (checkRes.ok) {
-            res.json({
-                success: true,
-                imageUrl: imageUrl,
-                provider: 'pollinations',
-                message: 'Image generated successfully'
-            });
-        } else {
-            // Fallback: simpler URL without params
-            const fallbackUrl = `https://image.pollinations.ai/prompt/${encoded}`;
-            res.json({
-                success: true,
-                imageUrl: fallbackUrl,
-                provider: 'pollinations-fallback',
-                message: 'Image generated (fallback)'
-            });
-        }
+    try {
+        const result = await task;
+        res.json(result);
     } catch (error) {
         logger.error('Image generation error:', error.message);
-
-        // Even on fetch error, return the URL — browser will load it directly
-        const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.trim())}`;
         res.json({
             success: true,
-            imageUrl: imageUrl,
+            imageUrl: `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.trim())}?seed=${Date.now()}&nologo=true`,
             provider: 'pollinations-direct',
             message: 'Image URL ready (direct)'
         });

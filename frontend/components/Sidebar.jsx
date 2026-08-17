@@ -1,23 +1,24 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Menu, X, Bot, Sparkles, History, Settings,
   FolderOpen, Plus, ChevronRight, ChevronLeft,
-  MessageSquare, Terminal, Brain, Mic, Music,
-  FileText, Code, GitBranch, LayoutDashboard
+  MessageSquare, Terminal, Brain, Mic,
+  FileText, Code2, LayoutDashboard, Compass, Image as ImageIcon
 } from 'lucide-react';
 
 const SIDEBAR_WIDTH_COLLAPSED = 72;
 const SIDEBAR_WIDTH_EXPANDED = 280;
-const SIDEBAR_ANIMATION = { type: 'spring', stiffness: 300, damping: 30 };
 
 const navItems = [
   { id: 'chat', label: 'Chat', icon: MessageSquare, badge: null },
   { id: 'projects', label: 'Projects', icon: FolderOpen, badge: null },
+  { id: 'copilot', label: 'Copilot IDE', icon: Code2, badge: 'New' },
   { id: 'agent', label: 'Agent', icon: Bot, badge: 'Beta' },
   { id: 'voice', label: 'Voice', icon: Mic, badge: 'Live' },
+  { id: 'mcp', label: 'MCP Connectors', icon: Compass, badge: 'Beta' },
+  { id: 'images', label: 'Images', icon: ImageIcon, badge: null },
   { id: 'resume', label: 'Resume', icon: FileText, badge: null },
-  { id: 'terminal', label: 'Terminal', icon: Terminal, badge: null },
   { id: 'history', label: 'History', icon: History, badge: null },
   { id: 'settings', label: 'Settings', icon: Settings, badge: null },
 ];
@@ -33,9 +34,10 @@ export default function Sidebar({
 }) {
   const [hoveredItem, setHoveredItem] = useState(null);
 
+  const primaryIds = ['chat', 'copilot', 'agent', 'voice', 'resume'];
+
   return (
     <>
-      {/* Overlay for mobile */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -50,17 +52,14 @@ export default function Sidebar({
         )}
       </AnimatePresence>
 
-      {/* Sidebar */}
       <motion.aside
         initial={false}
-        animate={{
-          width: isOpen ? SIDEBAR_WIDTH_EXPANDED : SIDEBAR_WIDTH_COLLAPSED,
-        }}
+        animate={{ width: isOpen ? SIDEBAR_WIDTH_EXPANDED : SIDEBAR_WIDTH_COLLAPSED }}
         transition={{ type: 'spring', stiffness: 300, damping: 30 }}
         className="fixed left-0 top-0 z-50 h-full flex flex-col overflow-hidden"
         style={{
-          background: 'rgba(10, 11, 18, 0.95)',
-          borderRight: '1px solid rgba(255,255,255,0.06)',
+          background: 'rgba(17, 19, 27, 0.96)',
+          borderRight: '1px solid var(--color-border)',
           backdropFilter: 'blur(20px)',
           boxShadow: '4px 0 30px rgba(0,0,0,0.4)',
         }}
@@ -68,26 +67,30 @@ export default function Sidebar({
         aria-label="Main navigation"
       >
         {/* Top: Logo & Toggle */}
-        <div className="flex items-center justify-between h-16 px-4 border-b border-white/5 relative">
+        <div className="flex items-center justify-between h-16 px-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: isOpen ? 1 : 0, x: isOpen ? 0 : -20 }}
             transition={{ duration: 0.2 }}
             className="flex items-center gap-3 min-w-0"
           >
-            <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ background: 'linear-gradient(135deg, #06b6d4 0%, #8b5cf6 100%)' }}>
+            <div
+              className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: 'var(--gradient-primary)', boxShadow: '0 0 16px var(--color-primary-glow)' }}
+            >
               <Sparkles className="w-5 h-5 text-white" />
             </div>
-            <span className="font-bold text-white text-lg truncate">Waaw</span>
+            <span className="font-display font-bold text-white text-lg truncate">
+              AI-<span className="gradient-text">Dost</span>
+            </span>
           </motion.div>
 
           <button
             onClick={onToggle}
-            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-200 hover:bg-white/5"
+            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-200 hover:bg-white/5 cursor-pointer"
             style={{
-              background: isOpen ? 'rgba(6,182,212,0.1)' : 'transparent',
-              border: isOpen ? '1px solid rgba(6,182,212,0.2)' : 'none',
+              background: isOpen ? 'rgba(75,139,252,0.1)' : 'transparent',
+              border: isOpen ? '1px solid rgba(75,139,252,0.25)' : 'none',
             }}
             aria-label={isOpen ? 'Collapse sidebar' : 'Expand sidebar'}
             aria-expanded={isOpen}
@@ -96,16 +99,19 @@ export default function Sidebar({
               animate={{ rotate: isOpen ? 180 : 0 }}
               transition={{ type: 'spring', stiffness: 300, damping: 20 }}
             >
-              {isOpen ? <ChevronLeft className="w-4 h-4 text-cyan-400" /> : <ChevronRight className="w-4 h-4 text-[#64748b]" />}
+              {isOpen ? (
+                <ChevronLeft className="w-4 h-4 text-[var(--color-primary)]" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-[var(--color-text-muted)]" />
+              )}
             </motion.span>
           </button>
         </div>
 
         {/* Navigation Items */}
         <nav className="flex-1 overflow-y-auto px-2 py-4 space-y-1" role="navigation" aria-label="Main menu">
-          {/* Primary Actions */}
           <div className="space-y-1">
-            {['chat', 'agent', 'voice', 'resume'].map((itemId) => {
+            {primaryIds.map((itemId) => {
               const item = navItems.find(n => n.id === itemId);
               const Icon = item.icon;
               const isActive = activeItem === itemId;
@@ -115,14 +121,15 @@ export default function Sidebar({
                   onClick={() => onItemClick(itemId)}
                   onMouseEnter={() => setHoveredItem(itemId)}
                   onMouseLeave={() => setHoveredItem(null)}
-                  className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 relative overflow-hidden group
+                  className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 relative overflow-hidden group cursor-pointer hover-lift
                     ${isActive
-                      ? 'bg-gradient-to-r from-cyan-500/10 to-purple-500/10 text-white border border-cyan-500/20'
-                      : 'text-[#94a3b8] hover:text-white hover:bg-white/5'
+                      ? 'text-white'
+                      : 'text-[var(--color-text-muted)] hover:text-white hover:bg-white/5'
                     }
                   `}
                   style={{
-                    borderLeft: isActive ? '3px solid #06b6d4' : 'none',
+                    background: isActive ? 'var(--gradient-primary)' : 'transparent',
+                    boxShadow: isActive ? '0 4px 20px var(--color-primary-glow)' : 'none',
                   }}
                   aria-current={isActive ? 'page' : undefined}
                   aria-label={item.label}
@@ -133,16 +140,12 @@ export default function Sidebar({
                     transition={{ type: 'spring', stiffness: 400, damping: 17 }}
                     className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
                     style={{
-                      background: isActive
-                        ? 'rgba(6,182,212,0.2)'
-                        : 'rgba(255,255,255,0.04)',
-                      border: isActive
-                        ? '1px solid rgba(6,182,212,0.3)'
-                        : '1px solid rgba(255,255,255,0.06)',
+                      background: isActive ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.04)',
+                      border: isActive ? '1px solid rgba(255,255,255,0.2)' : '1px solid var(--color-border)',
                     }}
                   >
                     <Icon
-                      className={`w-5 h-5 ${isActive ? 'text-cyan-400' : 'text-[#94a3b8]'}`}
+                      className={`w-5 h-5 ${isActive ? 'text-white' : 'text-[var(--color-text-muted)]'}`}
                       strokeWidth={isActive ? 2.5 : 2}
                     />
                   </motion.div>
@@ -169,23 +172,13 @@ export default function Sidebar({
                       exit={{ scale: 0 }}
                       className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"
                       style={{
-                        background: item.badge === 'Live' ? 'rgba(16,185,129,0.2)' : 'rgba(139,92,246,0.2)',
-                        color: item.badge === 'Live' ? '#10b981' : '#8b5cf6',
-                        border: item.badge === 'Live' ? '1px solid rgba(16,185,129,0.3)' : '1px solid rgba(139,92,246,0.3)',
+                        background: item.badge === 'Live' ? 'rgba(52,211,153,0.2)' : 'rgba(161,66,244,0.25)',
+                        color: item.badge === 'Live' ? '#34d399' : '#c8a2ff',
+                        border: item.badge === 'Live' ? '1px solid rgba(52,211,153,0.3)' : '1px solid rgba(161,66,244,0.35)',
                       }}
                     >
                       {item.badge}
                     </motion.span>
-                  )}
-
-                  {isActive && (
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: '100%' }}
-                      exit={{ width: 0 }}
-                      className="absolute left-0 top-0 bottom-0"
-                      style={{ background: 'linear-gradient(90deg, rgba(6,182,212,0.08), transparent)' }}
-                    />
                   )}
                 </button>
               );
@@ -196,7 +189,8 @@ export default function Sidebar({
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: isOpen ? 1 : 0 }}
-            className="my-4 border-t border-white/5"
+            className="my-4 border-t"
+            style={{ borderColor: 'var(--color-border)' }}
           />
 
           {/* Projects Section */}
@@ -210,10 +204,13 @@ export default function Sidebar({
                   exit={{ opacity: 0, y: -10 }}
                   className="px-3 py-2 flex items-center justify-between"
                 >
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-[#475569]">Projects</span>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">
+                    Projects
+                  </span>
                   <button
                     onClick={onNewProject}
-                    className="w-6 h-6 rounded-lg flex items-center justify-center hover:bg-white/5 transition-colors text-[#64748b] hover:text-cyan-400"
+                    className="w-6 h-6 rounded-lg flex items-center justify-center hover:bg-white/5 transition-colors cursor-pointer"
+                    style={{ color: 'var(--color-text-muted)' }}
                     aria-label="Create new project"
                   >
                     <Plus className="w-4 h-4" />
@@ -223,7 +220,7 @@ export default function Sidebar({
             </AnimatePresence>
 
             <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
-              {userProjects.map((project, index) => {
+              {userProjects.map((project) => {
                 const projectId = project.project_id || project.id;
                 const projectKey = `project-${projectId}`;
                 const isActive = activeItem === projectKey;
@@ -231,10 +228,10 @@ export default function Sidebar({
                   <button
                     key={projectId}
                     onClick={() => onItemClick(projectKey)}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 text-sm truncate
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 text-sm truncate cursor-pointer hover-lift
                       ${isActive
-                        ? 'bg-cyan-500/10 text-cyan-400'
-                        : 'text-[#94a3b8] hover:text-white hover:bg-white/5'
+                        ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
+                        : 'text-[var(--color-text-muted)] hover:text-white hover:bg-white/5'
                       }
                     `}
                     aria-current={isActive ? 'page' : undefined}
@@ -260,7 +257,7 @@ export default function Sidebar({
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="px-3 py-4 text-center text-[#475569] text-sm"
+                  className="px-3 py-4 text-center text-[var(--color-text-muted)] text-sm"
                 >
                   No projects yet. Click + to create one.
                 </motion.div>
@@ -270,14 +267,14 @@ export default function Sidebar({
         </nav>
 
         {/* Bottom: New Chat + User Info */}
-        <div className="p-4 border-t border-white/5 space-y-3">
+        <div className="p-4 border-t space-y-3" style={{ borderColor: 'var(--color-border)' }}>
           <button
             onClick={onNewChat}
-            className="w-full flex items-center gap-3 px-3 py-3 rounded-xl font-semibold text-sm transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+            className="w-full flex items-center gap-3 px-3 py-3 rounded-xl font-semibold text-sm transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
             style={{
-              background: 'linear-gradient(135deg, rgba(6,182,212,0.2) 0%, rgba(139,92,246,0.2) 100%)',
-              border: '1px solid rgba(6,182,212,0.3)',
-              color: '#06b6d4',
+              background: 'var(--gradient-primary)',
+              color: 'white',
+              boxShadow: '0 4px 18px var(--color-primary-glow)',
             }}
             aria-label="Start new chat"
           >
@@ -304,15 +301,17 @@ export default function Sidebar({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 className="flex items-center gap-3 px-2 py-2 rounded-xl"
-                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}
+                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--color-border)' }}
               >
-                <div className="w-8 h-8 rounded-xl flex items-center justify-center"
-                  style={{ background: 'rgba(6,182,212,0.15)', border: '1px solid rgba(6,182,212,0.2)' }}>
-                  <Bot className="w-4 h-4 text-cyan-400" />
+                <div
+                  className="w-8 h-8 rounded-xl flex items-center justify-center"
+                  style={{ background: 'rgba(75,139,252,0.15)', border: '1px solid rgba(75,139,252,0.25)' }}
+                >
+                  <Bot className="w-4 h-4 text-[var(--color-primary)]" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="font-medium text-white text-sm truncate">Developer</p>
-                  <p className="text-[11px] text-[#64748b] truncate">waaw.local</p>
+                  <p className="text-[11px] text-[var(--color-text-muted)] truncate">ai-dost.local</p>
                 </div>
               </motion.div>
             )}

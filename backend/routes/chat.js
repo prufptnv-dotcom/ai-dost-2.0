@@ -9,6 +9,7 @@ const NvidiaService = require('../services/nvidiaService');
 const OpenRouterService = require('../services/openrouterService');
 const MistralService = require('../services/mistralService');
 const TogetherService = require('../services/togetherService');
+const CerebrasService = require('../services/cerebrasService');
 
 // Helper to check if response indicates rate limit or error
 function isRateLimitedOrError(response) {
@@ -131,7 +132,7 @@ router.get('/health/services', async (req, res) => {
 router.post('/', async (req, res) => {
     const startTime = Date.now();
     try {
-        const { message, model, section, fileContent, history, mode, customKeys, uploadedDocs } = req.body;
+        const { message, model, section, fileContent, history, mode, customKeys, uploadedDocs, persona } = req.body;
         
         if (!message || !message.trim()) {
             return res.status(400).json({
@@ -141,7 +142,16 @@ router.post('/', async (req, res) => {
             });
         }
         
+        // Persona tone control (hinglish / english / formal)
+        const PERSONAS = {
+            hinglish: 'Tone: Always reply in Hinglish (Hindi written in Roman script, mixed with English). Be friendly, casual and fun. Use light emojis. Keep technical accuracy. ',
+            english: 'Tone: Reply in clear simple English. Friendly but professional. ',
+            formal: 'Tone: Reply in formal, professional Hindi or English. Polite, structured, no slang, no emojis. '
+        };
         let processedMessage = message;
+        if (persona && PERSONAS[persona]) {
+            processedMessage = `${PERSONAS[persona]}\n\n${message}`;
+        }
         if (uploadedDocs && uploadedDocs.length > 0) {
             const docsContext = uploadedDocs.map(doc => `--- START OF DOCUMENT: ${doc.name} ---\n${doc.content}\n--- END OF DOCUMENT: ${doc.name} ---`).join('\n\n');
             processedMessage = `Knowledge Base / Document Library Context:\n${docsContext}\n\nUser Message:\n${message}`;
@@ -230,6 +240,7 @@ router.post('/', async (req, res) => {
                         [groqMsg, cleanHistory, mode, customKeys?.groq],
                         [
                             { name: 'gemini', fn: GeminiService.chat, args: [processedMessage, cleanHistory, fileContent, mode, customKeys?.gemini] },
+                            { name: 'cerebras', fn: CerebrasService.chat, args: [groqMsg, cleanHistory, mode, customKeys?.cerebras] },
                             { name: 'nvidia', fn: NvidiaService.chat, args: [groqMsg, cleanHistory, customKeys?.nvidia] },
                             { name: 'openrouter', fn: OpenRouterService.chat, args: [groqMsg, cleanHistory, customKeys?.openrouter] },
                             { name: 'together', fn: TogetherService.chat, args: [groqMsg, cleanHistory, customKeys?.together] },
@@ -249,6 +260,7 @@ router.post('/', async (req, res) => {
                         [processedMessage, cleanHistory, fileContent, mode, customKeys?.gemini],
                         [
                             { name: 'groq', fn: GroqService.chat, args: [groqMsg, cleanHistory, mode, customKeys?.groq] },
+                            { name: 'cerebras', fn: CerebrasService.chat, args: [groqMsg, cleanHistory, mode, customKeys?.cerebras] },
                             { name: 'nvidia', fn: NvidiaService.chat, args: [groqMsg, cleanHistory, customKeys?.nvidia] },
                             { name: 'openrouter', fn: OpenRouterService.chat, args: [groqMsg, cleanHistory, customKeys?.openrouter] }
                         ]
@@ -264,6 +276,7 @@ router.post('/', async (req, res) => {
                         [groqMsg, cleanHistory, customKeys?.nvidia],
                         [
                             { name: 'groq', fn: GroqService.chat, args: [groqMsg, cleanHistory, mode, customKeys?.groq] },
+                            { name: 'cerebras', fn: CerebrasService.chat, args: [groqMsg, cleanHistory, mode, customKeys?.cerebras] },
                             { name: 'gemini', fn: GeminiService.chat, args: [processedMessage, cleanHistory, fileContent, mode, customKeys?.gemini] },
                             { name: 'openrouter', fn: OpenRouterService.chat, args: [groqMsg, cleanHistory, customKeys?.openrouter] }
                         ]
@@ -274,6 +287,9 @@ router.post('/', async (req, res) => {
                 }
                 case 'deepseek':
                     response = await DeepSeekService.chat(groqMsg, cleanHistory, customKeys?.deepseek);
+                    break;
+                case 'cerebras':
+                    response = await CerebrasService.chat(groqMsg, cleanHistory, mode, customKeys?.cerebras);
                     break;
                 case 'openrouter':
                     response = await OpenRouterService.chat(groqMsg, cleanHistory, customKeys?.openrouter);
@@ -334,6 +350,11 @@ async function executeCascadingFailover(message, groqMsg, cleanHistory, fileCont
             check: (r) => isValidResponse(r)
         },
         { 
+            name: 'Cerebras (Llama 3.3 70B)', 
+            fn: () => CerebrasService.chat(groqMsg, cleanHistory, mode, customKeys?.cerebras),
+            check: (r) => isValidResponse(r)
+        },
+        { 
             name: 'NVIDIA NIM (Llama 3.1 70B)', 
             fn: () => NvidiaService.chat(groqMsg, cleanHistory, customKeys?.nvidia),
             check: (r) => isValidResponse(r)
@@ -344,7 +365,7 @@ async function executeCascadingFailover(message, groqMsg, cleanHistory, fileCont
             check: (r) => isValidResponse(r)
         },
         { 
-            name: 'OpenRouter (Llama 3.1 8B)', 
+            name: 'OpenRouter (GPT-OSS 20B free)', 
             fn: () => OpenRouterService.chat(groqMsg, cleanHistory, customKeys?.openrouter),
             check: (r) => isValidResponse(r)
         },
@@ -471,5 +492,193 @@ async function autoSelectModel(message, section, fileContent, cleanHistory, mode
         return { response, model: 'auto-general' };
     }
 }
+
+// ── Web Search with sources (Perplexity-style) ────────────────────────────────
+router.post('/search', async (req, res) => {
+    const { message } = req.body;
+    if (!message || !message.trim()) {
+        return res.status(400).json({ success: false, error: 'message is required' });
+    }
+    const query = message.trim();
+
+    // 1) Gemini with Google Search grounding (free tier, uses existing key)
+    try {
+        const API_KEY = process.env.GEMINI_API_KEY;
+        if (API_KEY) {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${API_KEY}`;
+            const payload = {
+                contents: [{ role: 'user', parts: [{ text: query }] }],
+                tools: [{ googleSearch: {} }],
+                generationConfig: { temperature: 0.4 }
+            };
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 25000);
+            const r = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                signal: controller.signal
+            });
+            clearTimeout(timer);
+            const data = await r.json();
+            const text = (data?.candidates?.[0]?.content?.parts || [])
+                .map((p) => p.text).filter(Boolean).join('\n');
+            if (text && text.length > 10) {
+                const chunks = data?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+                const sources = chunks
+                    .filter((c) => c.web)
+                    .map((c) => ({ title: c.web.title || c.web.uri, url: c.web.uri }))
+                    .filter((s) => s.url)
+                    .slice(0, 6);
+                return res.json({ success: true, reply: text, sources, provider: 'gemini-grounding' });
+            }
+        }
+    } catch (e) {
+        logger.warn('[Search] Gemini grounding failed:', e.message);
+    }
+
+    // 2) Wikipedia search + summary fallback (free, no API key, fast)
+    try {
+        const wikiRes = await fetch(
+            `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&srlimit=4&utf8=1`,
+            { signal: AbortSignal.timeout(8000) }
+        );
+        const wikiData = await wikiRes.json();
+        const hits = (wikiData?.query?.search || []).slice(0, 4);
+        if (hits.length > 0) {
+            const sources = hits.map((s) => ({
+                title: s.title,
+                url: `https://en.wikipedia.org/wiki/${encodeURIComponent(s.title.replace(/ /g, '_'))}`
+            }));
+            // Get a short extract from the top result
+            const summaryRes = await fetch(
+                `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(hits[0].title.replace(/ /g, '_'))}`,
+                { signal: AbortSignal.timeout(8000) }
+            );
+            const summary = await summaryRes.json();
+            const extract = summary?.extract || hits[0].snippet?.replace(/<[^>]+>/g, '') || '';
+            if (extract) {
+                return res.json({
+                    success: true,
+                    reply: `**${hits[0].title}**\n\n${extract}`,
+                    sources,
+                    provider: 'wikipedia'
+                });
+            }
+        }
+    } catch (e) {
+        logger.warn('[Search] Wikipedia failed:', e.message);
+    }
+
+    // 3) DuckDuckGo Instant Answer fallback
+    try {
+        const r = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&no_redirect=1`, {
+            signal: AbortSignal.timeout(12000)
+        });
+        const data = await r.json();
+        let reply = data?.AbstractText || data?.Answer || '';
+        const sources = [];
+        (data?.RelatedTopics || []).forEach((t) => {
+            if (t.Text && t.FirstURL) sources.push({ title: t.Text.slice(0, 90), url: t.FirstURL });
+        });
+        if (data?.AbstractURL) sources.unshift({ title: data?.Heading || 'Source', url: data.AbstractURL });
+        if (!reply && sources.length === 0) {
+            reply = 'Dhundhne me kuch khaas nahi mila — thoda specific prompt try karo.';
+        }
+        return res.json({
+            success: true,
+            reply: reply || 'Ye raha summary — sources niche hain.',
+            sources: sources.slice(0, 6),
+            provider: 'duckduckgo'
+        });
+    } catch (e) {
+        logger.warn('[Search] DuckDuckGo failed:', e.message);
+    }
+
+    // 4) Last resort: normal cascading chat
+    try {
+        const result = await autoSelectModel(query, 'chat', null, [], 'chat', null);
+        return res.json({ success: true, reply: result.response, sources: [], provider: 'chat-fallback' });
+    } catch (e) {
+        logger.error('[Search] All methods failed:', e.message);
+        return res.status(500).json({ success: false, error: 'Search failed', detail: e.message });
+    }
+});
+
+// ── File/image/PDF analysis (Gemini vision + pdf-parse) ──────────────────────
+const pdfParse = require('pdf-parse');
+
+router.post('/analyze', async (req, res) => {
+    const { message, text, imageBase64, imageMime, pdfBase64 } = req.body;
+    if (!message && !text && !imageBase64 && !pdfBase64) {
+        return res.status(400).json({ success: false, error: 'Nothing to analyze' });
+    }
+
+    let contextText = text || '';
+
+    // PDF → extract text
+    if (pdfBase64) {
+        try {
+            const buf = Buffer.from(pdfBase64, 'base64');
+            const parsed = await pdfParse(buf);
+            contextText = (contextText + '\n' + parsed.text).trim().slice(0, 20000);
+        } catch (e) {
+            logger.warn('[Analyze] pdf-parse failed:', e.message);
+            return res.json({ success: true, reply: 'PDF ko padh nahi paya — file corrupt ya encrypted ho sakti hai.', provider: 'pdf-error' });
+        }
+    }
+
+    try {
+        const API_KEY = process.env.GEMINI_API_KEY;
+        const userText = message || 'Is file ka analysis do — Hinglish me, important points ke saath.';
+        let parts = [];
+        if (contextText) parts.push({ text: `FILE CONTENT:\n${contextText.slice(0, 20000)}\n\nUSER: ${userText}` });
+        else parts.push({ text: userText });
+        if (imageBase64 && imageMime) {
+            parts = [
+                { inlineData: { mimeType: imageMime || 'image/png', data: imageBase64 } },
+                { text: userText }
+            ];
+        }
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 40000);
+        const r = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${API_KEY}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents: [{ role: 'user', parts }] }),
+                signal: controller.signal
+            }
+        );
+        clearTimeout(timer);
+        const data = await r.json();
+        const reply = (data?.candidates?.[0]?.content?.parts || [])
+            .map((p) => p.text).filter(Boolean).join('\n');
+        if (reply && reply.length > 10) {
+            return res.json({ success: true, reply, provider: imageBase64 ? 'gemini-vision' : 'gemini-file' });
+        }
+        logger.warn('[Analyze] Gemini empty:', JSON.stringify(data?.error || {}).slice(0, 200));
+    } catch (e) {
+        logger.warn('[Analyze] Gemini failed:', e.message);
+    }
+
+    // Fallback: Groq with file text context
+    try {
+        const GroqService = require('../services/groqService');
+        const prompt = contextText
+            ? `FILE CONTENT:\n${contextText.slice(0, 8000)}\n\nUSER: ${message || 'analyze this'}`
+            : message || 'analyze this file';
+        const reply = await GroqService.chat(prompt, [], 'chat');
+        if (reply && !reply.startsWith('Groq')) {
+            return res.json({ success: true, reply, provider: 'groq-file' });
+        }
+    } catch (e) {
+        logger.warn('[Analyze] Groq failed:', e.message);
+    }
+
+    return res.json({ success: true, reply: 'File ka analysis nahi ho paya — dobara try karo.', provider: 'none' });
+});
 
 module.exports = router;

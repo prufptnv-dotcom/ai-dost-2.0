@@ -33,10 +33,11 @@ const COMMAND_PALLETE_SHORTCUT = 'Mod+c';
 export default function VoiceAssistant({
   isOpen,
   onClose,
-  onTranscript,
-  onSpeak,
+  onTranscript = () => {},
+  onSpeak = () => {},
   geminiApiKey,
 }) {
+  const { showToast } = useToast();
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [waveformData, setWaveformData] = useState(

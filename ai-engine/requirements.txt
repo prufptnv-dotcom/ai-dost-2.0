@@ -1,0 +1,15 @@
+fastapi>=0.110
+uvicorn>=0.29
+llama-index-core>=0.11
+llama-index-embeddings-ollama>=0.2
+llama-index-readers-file>=0.1
+llama-index-llms-ollama>=0.3
+chromadb
+llama-index-vector-stores-chroma
+beautifulsoup4
+requests
+mcp
+langchain
+langchain-ollama
+langgraph
+crewai
