@@ -108,13 +108,21 @@ Key Response Guidelines:
             }
             const fallbackModel = 'qwen/qwen3.6-27b';
 
+            // Groq per-model max OUTPUT tokens (8192 hardcoded → 413 "Request too large"!)
+            // gpt-oss-120b: 2048, qwen3.6-27b: 4096 (verified)
+            const MAX_OUTPUT_TOKENS = {
+                'openai/gpt-oss-120b': 2048,
+                'qwen/qwen3.6-27b': 4096,
+            };
+            const maxTokensFor = (model) => MAX_OUTPUT_TOKENS[model] || 4096;
+
             const tryModel = async (model) => {
                 try {
                     const result = await this.client.post('/chat/completions', {
                         model,
                         messages: messagesPayload,
                         temperature: 0.1,
-                        max_tokens: 8192
+                        max_tokens: maxTokensFor(model)
                     }, {
                         'Authorization': `Bearer ${API_KEY}`
                     });
