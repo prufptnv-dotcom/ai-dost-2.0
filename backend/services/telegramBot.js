@@ -218,14 +218,20 @@ class TelegramBot {
                 `*/crew <task>* — 3-agent crew files likhega\n` +
                 `*/tts <text>* — voice message (Edge TTS)\n` +
                 `*/image <desc>* — image banao (Flux, free)\n` +
+                `*/doc <type> <topic>* — document banao (pdf|docx|pptx|csv|xlsx)\n` +
+                `*/research <query>* — web search with sources (Tavily)\n` +
+                `*/correct <correction>* — bot ko correction sikhao\n` +
                 `*/status* — servers + quota check\n\n` +
-                `_Ya sirf text bhejo — seedha chat hoga._`);
+                `_Ya sirf text bhejo — seedha chat hoga. Keywords: pdf, excel, ppt, doc bhi kaam karte hain._`);
         }
         if (t === '/status') return this.statusHandler(chatId);
+        if (t.startsWith('/doc')) return this.docExplicitHandler(chatId, t.slice(4).trim());
         if (t.startsWith('/chat')) return this.chatHandler(chatId, t.slice(5).trim());
         if (t.startsWith('/crew')) return this.crewHandler(chatId, t.slice(5).trim());
         if (t.startsWith('/tts')) return this.ttsHandler(chatId, t.slice(4).trim());
         if (t.startsWith('/image')) return this.imageHandler(chatId, t.slice(6).trim());
+        if (t.startsWith('/research')) return this.researchHandler(chatId, t.slice(9).trim());
+        if (t.startsWith('/correct')) return this.correctHandler(chatId, t.slice(8).trim());
         // Document intent (pdf/docx/pptx/csv) — jo format keyword aaya → wahi file
         const docIntent = detectDocIntent(t);
         if (docIntent) return this.docHandler(chatId, t, docIntent.type);
@@ -237,12 +243,19 @@ class TelegramBot {
         if (!prompt) return this.sendMessage(chatId, 'Format: `/chat <sawaal>`');
         await this.typing(chatId);
         try {
+            // Retrieve relevant learnings for this user
+            const PythonEngine = require('./pythonEngineService');
+            const mem = await PythonEngine.retrieveLearning(String(chatId), prompt, 3);
+            let memoryContext = '';
+            if (mem.ok && mem.data?.learnings?.length) {
+                memoryContext = `\n\n[Relevant past context for this user:\n${mem.data.learnings.join('\n')}\n]`;
+            }
             const ctrl = new AbortController();
             const t = setTimeout(() => ctrl.abort(), 120000);
             const res = await fetch(`${BACKEND}/api/v1/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: prompt, model: 'auto', mode: 'chat' }),
+                body: JSON.stringify({ message: prompt + memoryContext, model: 'auto', mode: 'chat' }),
                 signal: ctrl.signal,
             });
             clearTimeout(t);
@@ -250,6 +263,8 @@ class TelegramBot {
             const reply = data?.reply || 'Koi jawab nahi mila — backend check karo.';
             const model = data?.model ? `\n\n_(${data.model})_` : '';
             await this.sendMessage(chatId, reply.slice(0, 3500) + model);
+            // Auto-learn: save user's question as context
+            await PythonEngine.saveLearning(String(chatId), `User asked: ${prompt}`);
         } catch (e) {
             await this.sendMessage(chatId, `⚠️ Chat error: ${e.message}`);
         }
@@ -319,8 +334,59 @@ class TelegramBot {
         }
     }
 
+    async researchHandler(chatId, query) {
+        if (!query) return this.sendMessage(chatId, 'Format: `/research <sawaal>`\nExample: `/research latest AI news 2024`');
+        await this.typing(chatId);
+        await this.sendMessage(chatId, '🔍 *Web search chalu...* (Tavily se sources ke saath)');
+        try {
+            const PythonEngine = require('./pythonEngineService');
+            const result = await PythonEngine.webSearch(query, { max_results: 5, search_depth: 'basic' });
+            if (!result.ok) return this.sendMessage(chatId, `⚠️ Research fail: ${result.error}`);
+            const data = result.data;
+            const answer = data.answer || 'Koi direct answer nahi mila.';
+            const results = data.results || [];
+            let msg = `🔍 *Research: ${query}*\n\n`;
+            msg += `💡 *Answer:* ${answer.slice(0, 1500)}\n\n`;
+            if (results.length > 0) {
+                msg += `📚 *Sources:*\n`;
+                results.slice(0, 3).forEach((r, i) => {
+                    msg += `${i + 1}. [${r.title.slice(0, 80)}](${r.url})\n   ${r.content.slice(0, 120)}...\n\n`;
+                });
+            }
+            msg += `\n_Response time: ${data.response_time?.toFixed(2) || 0}s_`;
+            await this.sendMessage(chatId, msg.slice(0, 4000));
+        } catch (e) {
+            await this.sendMessage(chatId, `⚠️ Research error: ${e.message}`);
+        }
+    }
+
+    async correctHandler(chatId, correction) {
+        if (!correction) return this.sendMessage(chatId, 'Format: `/correct <galat tha, sahi ye hai>`\nExample: `/correct Bihar ki rajdhani Patna hai, Ranchi nahi`');
+        await this.typing(chatId);
+        try {
+            const PythonEngine = require('./pythonEngineService');
+            const result = await PythonEngine.saveLearning(String(chatId), `Correction: ${correction}`);
+            if (!result.ok) return this.sendMessage(chatId, `⚠️ Correction save fail: ${result.error}`);
+            await this.sendMessage(chatId, `✅ *Correction saved!* Main ye yaad rakhunga: ${correction}`);
+        } catch (e) {
+            await this.sendMessage(chatId, `⚠️ Correction error: ${e.message}`);
+        }
+    }
+
+    // Explicit /doc command: /doc <type> <topic> — type: pdf|docx|pptx|csv|xlsx
+    async docExplicitHandler(chatId, text) {
+        if (!text) return this.sendMessage(chatId, 'Format: `/doc <pdf|docx|pptx|csv|xlsx> <topic>`\nExample: `/doc pdf bihar report`');
+        const parts = text.trim().split(/\s+/);
+        const type = parts[0].toLowerCase();
+        const topic = parts.slice(1).join(' ');
+        if (!topic) return this.sendMessage(chatId, 'Topic khali hai. Example: `/doc pdf bihar report`');
+        const validTypes = ['pdf', 'docx', 'pptx', 'csv', 'xlsx'];
+        if (!validTypes.includes(type)) return this.sendMessage(chatId, `Invalid type. Valid: ${validTypes.join(', ')}`);
+        await this.docHandler(chatId, topic, type);
+    }
+
     async docHandler(chatId, text, type) {
-        const typeLabel = { docx: 'Word', pptx: 'PowerPoint', csv: 'Excel/CSV', pdf: 'PDF' }[type] || type.toUpperCase();
+        const typeLabel = { docx: 'Word', pptx: 'PowerPoint', csv: 'CSV', xlsx: 'Excel', pdf: 'PDF' }[type] || type.toUpperCase();
         await this.typing(chatId);
         await this.sendMessage(chatId, `📄 *${typeLabel} ban rahi hai...* (thoda wait karo)`);
         try {

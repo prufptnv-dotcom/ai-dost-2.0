@@ -13,3 +13,5 @@ langchain
 langchain-ollama
 langgraph
 crewai
+openpyxl>=3.1
+tavily-python>=0.3

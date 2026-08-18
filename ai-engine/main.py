@@ -237,6 +237,83 @@ def scrape_url(req: ScrapeRequest):
         raise HTTPException(500, f"Scrape error: {e}")
 
 
+# ------------------------------------------------------------------------------
+# TAVILY WEB SEARCH — Real-time web search with sources
+# ------------------------------------------------------------------------------
+class TavilySearchRequest(BaseModel):
+    query: str
+    max_results: int = 5
+    search_depth: str = "basic"  # basic | advanced
+    include_domains: Optional[List[str]] = None
+    exclude_domains: Optional[List[str]] = None
+
+
+class TavilySearchResult(BaseModel):
+    query: str
+    results: List[dict]
+    answer: Optional[str] = None
+    response_time: float
+
+
+@app.post("/ai/web/search", response_model=TavilySearchResult)
+def tavily_search(req: TavilySearchRequest):
+    """Search the web using Tavily API. Returns structured results with sources."""
+    import os
+    import time
+    import requests
+
+    api_key = os.environ.get("TAVILY_API_KEY")
+    if not api_key:
+        raise HTTPException(400, "TAVILY_API_KEY not set in environment")
+
+    query = req.query.strip()
+    if not query:
+        raise HTTPException(400, "Query khali hai")
+
+    start_time = time.time()
+    try:
+        url = "https://api.tavily.com/search"
+        payload = {
+            "api_key": api_key,
+            "query": query,
+            "max_results": req.max_results,
+            "search_depth": req.search_depth,
+            "include_answer": True,
+            "include_raw_content": False,
+        }
+        if req.include_domains:
+            payload["include_domains"] = req.include_domains
+        if req.exclude_domains:
+            payload["exclude_domains"] = req.exclude_domains
+
+        response = requests.post(url, json=payload, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+
+        results = data.get("results", [])
+        formatted = []
+        for r in results:
+            formatted.append({
+                "title": r.get("title", ""),
+                "url": r.get("url", ""),
+                "content": r.get("content", "")[:500],
+                "score": r.get("score", 0),
+            })
+
+        return TavilySearchResult(
+            query=query,
+            results=formatted,
+            answer=data.get("answer"),
+            response_time=time.time() - start_time
+        )
+    except requests.HTTPError as e:
+        if e.response.status_code == 429:
+            raise HTTPException(429, "Tavily rate limit exceeded")
+        raise HTTPException(500, f"Tavily API error: {e}")
+    except Exception as e:
+        raise HTTPException(500, f"Tavily search error: {e}")
+
+
 class AgentRunRequest(BaseModel):
     thread_id: str
     prompt: str
@@ -826,6 +903,116 @@ def crew_run(req: CrewRunRequest):
         raise
     except Exception as e:
         raise HTTPException(500, f"Crew run error: {e}")
+
+
+# ------------------------------------------------------------------------------
+# XLSX GENERATION — Real Excel with openpyxl
+# ------------------------------------------------------------------------------
+class XLSXRequest(BaseModel):
+    topic: str
+    title: str = ""
+    columns: Optional[List[str]] = None  # Optional custom columns
+    rows: int = 20
+
+
+class XLSXResult(BaseModel):
+    status: str
+    file_path: str
+    rows_written: int
+    columns: List[str]
+
+
+@app.post("/ai/xlsx/generate", response_model=XLSXResult)
+def xlsx_generate(req: XLSXRequest):
+    """Generate a real .xlsx file with openpyxl. Returns file path for download."""
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    import tempfile
+    import os
+    from datetime import datetime
+
+    topic = req.topic.strip()
+    if not topic:
+        raise HTTPException(400, "Topic khali hai")
+
+    # Create workbook
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data"
+
+    # Determine columns from topic or use custom
+    if req.columns:
+        columns = req.columns
+    else:
+        # Smart column detection based on topic
+        topic_lower = topic.lower()
+        if any(kw in topic_lower for kw in ['shaheed', 'martyr', 'jawan', 'soldier']):
+            columns = ['Name', 'Rank', 'Regiment', 'Date', 'Place', 'State', 'Conflict']
+        elif any(kw in topic_lower for kw in ['employee', 'staff', 'worker']):
+            columns = ['Name', 'ID', 'Department', 'Role', 'Join Date', 'Salary']
+        elif any(kw in topic_lower for kw in ['product', 'item', 'inventory']):
+            columns = ['Product', 'Category', 'Price', 'Stock', 'SKU', 'Supplier']
+        elif any(kw in topic_lower for kw in ['student', 'marks', 'grade']):
+            columns = ['Name', 'Roll No', 'Subject', 'Marks', 'Grade', 'Semester']
+        else:
+            columns = ['Name', 'Category', 'Detail', 'Date', 'Notes']
+
+    # Header style
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+    header_alignment = Alignment(horizontal="center", wrap_text=True)
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+
+    # Write headers
+    for col_idx, col_name in enumerate(columns, 1):
+        cell = ws.cell(row=1, column=col_idx, value=col_name)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    # Generate sample data rows (in production, LLM would provide real data)
+    # For now, generate placeholder rows with topic-relevant content
+    for row_idx in range(2, req.rows + 2):
+        for col_idx, col_name in enumerate(columns, 1):
+            # Simple placeholder generation
+            if col_name.lower() == 'name':
+                value = f"{topic} Entry {row_idx - 1}"
+            elif col_name.lower() == 'date':
+                value = datetime.now().strftime("%Y-%m-%d")
+            elif col_name.lower() in ['rank', 'role', 'category', 'grade']:
+                value = "TBD"
+            elif col_name.lower() in ['price', 'salary', 'marks']:
+                value = 0
+            else:
+                value = f"{topic} - {col_name} {row_idx - 1}"
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.border = thin_border
+            cell.alignment = Alignment(wrap_text=True)
+
+    # Auto-fit column widths
+    for col_idx in range(1, len(columns) + 1):
+        max_length = len(columns[col_idx - 1])
+        for row_idx in range(2, min(req.rows + 2, 22)):
+            cell_val = str(ws.cell(row=row_idx, column=col_idx).value or "")
+            max_length = max(max_length, len(cell_val))
+        ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = min(max_length + 4, 40)
+
+    # Save to temp file
+    temp_dir = tempfile.gettempdir()
+    filename = f"xlsx_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{abs(hash(topic)) % 10000}.xlsx"
+    file_path = os.path.join(temp_dir, filename)
+    wb.save(file_path)
+
+    return XLSXResult(
+        status="completed",
+        file_path=file_path,
+        rows_written=req.rows,
+        columns=columns
+    )
 
 
 # ------------------------------------------------------------------------------

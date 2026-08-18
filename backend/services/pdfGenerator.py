@@ -1,6 +1,7 @@
 import sys
 import json
 import os
+import re
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
@@ -8,6 +9,37 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+
+# Font setup: Noto Sans Devanagari (bundled, cross-platform)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FONT_DIR = os.path.join(BASE_DIR, '..', 'fonts')
+NOTO_REGULAR = os.path.join(FONT_DIR, 'NotoSansDevanagari-Regular.ttf')
+NOTO_BOLD = os.path.join(FONT_DIR, 'NotoSansDevanagari-Bold.ttf')
+
+# Register Noto fonts at module load
+_DEFAULT_FONT = 'Helvetica'
+_DEFAULT_BOLD = 'Helvetica-Bold'
+if os.path.exists(NOTO_REGULAR) and os.path.exists(NOTO_BOLD):
+    try:
+        pdfmetrics.registerFont(TTFont('NotoDevanagari', NOTO_REGULAR))
+        pdfmetrics.registerFont(TTFont('NotoDevanagari-Bold', NOTO_BOLD))
+        _DEFAULT_FONT = 'NotoDevanagari'
+        _DEFAULT_BOLD = 'NotoDevanagari-Bold'
+        print("[OK] Noto Sans Devanagari fonts registered")
+    except Exception as e:
+        print(f"[WARN] Font register warning: {e}")
+
+def _has_devanagari(text):
+    """Check if text contains Devanagari characters."""
+    return bool(re.search(r'[\u0900-\u097F]', text))
+
+def _get_font_for_text(text):
+    """Return appropriate font name based on text content."""
+    return _DEFAULT_FONT if _has_devanagari(text) else 'Helvetica'
+
+def _get_bold_font_for_text(text):
+    """Return appropriate bold font name based on text content."""
+    return _DEFAULT_BOLD if _has_devanagari(text) else 'Helvetica-Bold'
 
 def generate_pdf(json_path, output_pdf_path):
     try:
@@ -20,23 +52,6 @@ def generate_pdf(json_path, output_pdf_path):
         # Ensure directories exist
         os.makedirs(os.path.dirname(output_pdf_path), exist_ok=True)
         
-        # Unicode / Devanagari Font Registration
-        default_font_name = 'Helvetica'
-        default_bold_font_name = 'Helvetica-Bold'
-        
-        for font_dir in [r"C:\Windows\Fonts", "/usr/share/fonts/truetype/dejavu", "/Library/Fonts"]:
-            mangal_file = os.path.join(font_dir, "Mangal.ttf")
-            mangalb_file = os.path.join(font_dir, "Mangalb.ttf")
-            if os.path.exists(mangal_file) and os.path.exists(mangalb_file):
-                try:
-                    pdfmetrics.registerFont(TTFont('Mangal', mangal_file))
-                    pdfmetrics.registerFont(TTFont('Mangal-Bold', mangalb_file))
-                    default_font_name = 'Mangal'
-                    default_bold_font_name = 'Mangal-Bold'
-                    break
-                except Exception as e:
-                    print(f"Font register warning: {e}")
-
         doc = SimpleDocTemplate(
             output_pdf_path,
             pagesize=letter,
@@ -45,22 +60,27 @@ def generate_pdf(json_path, output_pdf_path):
         
         styles = getSampleStyleSheet()
         
+        # Determine fonts based on content (supports Devanagari via Noto)
+        title_font = _get_bold_font_for_text(title)
+        body_font = _get_font_for_text(content)
+        bold_font = _get_bold_font_for_text(content)
+        
         # Custom styles for a clean, readable print PDF
         title_style = ParagraphStyle(
             'TitleStyle',
             parent=styles['Title'],
-            fontName=default_bold_font_name,
+            fontName=title_font,
             fontSize=20,
             leading=24,
             textColor=colors.HexColor('#1E1E2F'),
             spaceAfter=15,
-            alignment=0 # Left aligned
+            alignment=0
         )
         
         heading_style = ParagraphStyle(
             'HeadingStyle',
             parent=styles['Heading2'],
-            fontName=default_bold_font_name,
+            fontName=bold_font,
             fontSize=13,
             leading=17,
             textColor=colors.HexColor('#0056b3'),
@@ -71,7 +91,7 @@ def generate_pdf(json_path, output_pdf_path):
         body_style = ParagraphStyle(
             'BodyStyle',
             parent=styles['BodyText'],
-            fontName=default_font_name,
+            fontName=body_font,
             fontSize=10,
             leading=14,
             textColor=colors.HexColor('#333333'),
@@ -85,7 +105,6 @@ def generate_pdf(json_path, output_pdf_path):
         story.append(Spacer(1, 0.15 * inch))
         
         # Split content into paragraphs
-        import re
         lines = content.split('\n')
         for line in lines:
             line = line.strip()
@@ -97,26 +116,29 @@ def generate_pdf(json_path, output_pdf_path):
             line = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', line)
             line = re.sub(r'\*(.*?)\*', r'<i>\1</i>', line)
             
+            # Determine per-line font for mixed content
+            line_font = _get_font_for_text(line)
+            line_bold_font = _get_bold_font_for_text(line)
+            
             # Check if heading
             if line.startswith('### '):
-                story.append(Paragraph(line[4:], heading_style))
+                h_style = ParagraphStyle('H3', parent=heading_style, fontName=line_bold_font)
+                story.append(Paragraph(line[4:], h_style))
             elif line.startswith('## '):
-                story.append(Paragraph(line[3:], heading_style))
+                h_style = ParagraphStyle('H2', parent=heading_style, fontName=line_bold_font)
+                story.append(Paragraph(line[3:], h_style))
             elif line.startswith('# '):
-                story.append(Paragraph(line[2:], title_style))
+                t_style = ParagraphStyle('H1', parent=title_style, fontName=line_bold_font)
+                story.append(Paragraph(line[2:], t_style))
             elif line.startswith('<b>') and line.endswith('</b>') and len(line) < 100:
-                # Treat pure bold markdown lines as subheadings for clean PDF spacing
-                story.append(Paragraph(line, heading_style))
+                h_style = ParagraphStyle('BoldLine', parent=heading_style, fontName=line_bold_font)
+                story.append(Paragraph(line, h_style))
             elif line.startswith('- ') or line.startswith('* '):
-                # Bullet points
-                bullet_style = ParagraphStyle(
-                    'BulletStyle',
-                    parent=body_style,
-                    leftIndent=15
-                )
-                story.append(Paragraph(f"&bull; {line[2:]}", bullet_style))
+                b_style = ParagraphStyle('BulletStyle', parent=body_style, fontName=line_font, leftIndent=15)
+                story.append(Paragraph(f"&bull; {line[2:]}", b_style))
             else:
-                story.append(Paragraph(line, body_style))
+                b_style = ParagraphStyle('Body', parent=body_style, fontName=line_font)
+                story.append(Paragraph(line, b_style))
                 
         # Build document
         doc.build(story)

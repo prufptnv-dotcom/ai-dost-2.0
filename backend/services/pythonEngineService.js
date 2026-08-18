@@ -85,4 +85,80 @@ async function tts(text, voice = 'en-IN-PrabhatNeural', rate = '+0%') {
   }
 }
 
-module.exports = { health, queryRag, buildIndex, runCrew, tts, BASE };
+async function xlsxGenerate(topic, title = '', options = {}) {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 120000);
+    const res = await fetch(`${BASE}/ai/xlsx/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic, title, ...options }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (!res.ok) return { ok: false, error: `engine ${res.status}` };
+    const data = await res.json();
+    if (!data.ok && data.error) return { ok: false, error: data.error };
+    return { ok: true, data };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function webSearch(query, options = {}) {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 30000);
+    const res = await fetch(`${BASE}/ai/web/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, ...options }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (!res.ok) return { ok: false, error: `engine ${res.status}` };
+    const data = await res.json();
+    if (!data.ok && data.error) return { ok: false, error: data.error };
+    return { ok: true, data };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function saveLearning(userId, text) {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 10000);
+    const res = await fetch(`${BASE}/ai/agent/learn`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: `[User:${userId}] ${text}` }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (!res.ok) return { ok: false, error: `engine ${res.status}` };
+    return { ok: true, data: await res.json() };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function retrieveLearning(userId, query, topK = 3) {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 10000);
+    const res = await fetch(`${BASE}/ai/agent/memory/retrieve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, top_k: topK }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (!res.ok) return { ok: false, error: `engine ${res.status}` };
+    return { ok: true, data: await res.json() };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+module.exports = { health, queryRag, buildIndex, runCrew, tts, xlsxGenerate, webSearch, saveLearning, retrieveLearning, BASE };

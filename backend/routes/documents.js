@@ -225,14 +225,20 @@ Rules:
     csv: `Return ONLY CSV (header + 15-25 data rows) about: {TOPIC}. No markdown, no commentary.
 Columns: relevant to topic (e.g., for martyrs: Name,Rank,Regiment,Date,Place,State).
 First row = headers. No commas inside fields. Language: match topic.`,
+    xlsx: `Return ONLY JSON for Excel columns and sample rows about: {TOPIC}.
+Schema: {"columns": ["col1","col2",...], "rows": [["val1","val2",...], ...]}
+Rules:
+- Columns: relevant to topic (martyrs: Name,Rank,Regiment,Date,Place,State,Conflict).
+- 15-25 rows of realistic sample data.
+- DO NOT include anything except the JSON. No markdown fences.`,
 };
 
-const TYPE_EXT = { docx: '.docx', pptx: '.pptx', csv: '.csv', pdf: '.pdf' };
+const TYPE_EXT = { docx: '.docx', pptx: '.pptx', csv: '.csv', pdf: '.pdf', xlsx: '.xlsx' };
 
 router.post('/generate', async (req, res) => {
     const { type, topic, title } = req.body;
     const t = (type || '').toLowerCase();
-    if (!PROMPTS[t]) return res.status(400).json({ success: false, error: 'type must be docx | pptx | csv' });
+    if (!PROMPTS[t]) return res.status(400).json({ success: false, error: 'type must be docx | pptx | csv | pdf | xlsx' });
     if (!topic || !topic.trim()) return res.status(400).json({ success: false, error: 'Topic required' });
 
     try {
@@ -264,6 +270,18 @@ router.post('/generate', async (req, res) => {
             const deck = extractJson(content);
             if (!Array.isArray(deck.slides) || deck.slides.length < 3) throw new Error('Not enough slides generated');
             finalName = await buildPptx(deck, deck.title || safeTitle, filename);
+        } else if (t === 'xlsx') {
+            // xlsx: call python engine for real Excel generation
+            const PythonEngine = require('../services/pythonEngineService');
+            const xlsxResult = await PythonEngine.xlsxGenerate(topic, safeTitle);
+            if (!xlsxResult.ok) throw new Error(xlsxResult.error || 'XLSX generation failed');
+            // Copy file from temp to downloads
+            const fs = require('fs');
+            const path = require('path');
+            const src = xlsxResult.data.file_path;
+            const dest = path.join(DOWNLOADS_DIR, filename);
+            fs.copyFileSync(src, dest);
+            finalName = filename;
         } else {
             finalName = buildCsv(content, filename);
         }

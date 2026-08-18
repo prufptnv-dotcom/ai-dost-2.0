@@ -36,12 +36,13 @@ const PROJECT_INTENT =
   /\b(fullstack|project|app|website|web ?site|portfolio|mern|crud|clone|todo|blog|e-?commerce|chatbot|dashboard|landing page)\b.*\b(banao|bana|banake|make|create|build|generate)\b|\b(banao|bana|banake|make|create|build|generate)\b.*\b(project|app|website|web ?site|fullstack)\b/i;
 
 // Document keywords: input me jo format keyword aaya → wahi file banao (banao/likho ki zaroorat nahi)
-// "jaise hi input me pdf ho → pdf, excel ho → excel, csv ho → csv, ppt ho → ppt"
+// "jaise hi input me pdf ho → pdf, excel/xlsx ho → xlsx, csv ho → csv, ppt ho → ppt"
 // Message me jo keyword SABSE PEHLE aata hai, wahi type jeet ta hai.
 const DOC_KEYWORDS = [
   { type: 'pdf', re: /pdf/i },
   { type: 'pptx', re: /ppt[a-z]*|powerpoint|presentation|slides?/i },
-  { type: 'csv', re: /csv|excel|spreadsheet|sheet/i },
+  { type: 'xlsx', re: /xlsx|excel\b/i },           // exact "excel" or "xlsx" → real Excel
+  { type: 'csv', re: /csv|spreadsheet|sheet/i },  // csv only
   { type: 'docx', re: /\bdocx?\b|\bdoct\b|word ?file|word ?document|document|report/i },
 ];
 
