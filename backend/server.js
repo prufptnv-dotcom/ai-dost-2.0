@@ -420,6 +420,10 @@ const resumeGenerateHandler = async (req, res) => {
 app.post('/api/resume/generate', resumeGenerateHandler);
 app.post('/api/v1/resume/generate', resumeGenerateHandler);
 
+// ── Document engine (docx / pptx / csv) ────────────────────────────────────
+const documentRoutes = require('./routes/documents');
+app.use('/api/document', documentRoutes);
+
 // ── Project Memory endpoints (SQLite-backed) ──────────────────────────────
 app.get(['/api/v1/memory/projects', '/api/projects'], (req, res) => {
     const rows = db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all();

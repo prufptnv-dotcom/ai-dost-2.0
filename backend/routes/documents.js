@@ -1,0 +1,215 @@
+/**
+ * AI-Dost Document Engine — chat se Word (.docx), PowerPoint (.pptx), CSV/Excel files.
+ * Flow: LLM (cascade) content generate karta hai → file build → /downloads/ me save → URL return.
+ */
+const express = require('express');
+const logger = require('../logger');
+const router = express.Router();
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+const DOWNLOADS_DIR = path.join(__dirname, '../../frontend/public/downloads');
+fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
+const BASE = `http://127.0.0.1:${process.env.PORT || 5000}`;
+
+// ── LLM content via full cascade ───────────────────────────────────────────
+async function llmContent(systemPrompt, userPrompt, timeoutMs = 150000) {
+    const res = await fetch(`${BASE}/api/v1/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            message: `${systemPrompt}\n\nTOPIC/TASK: ${userPrompt}`,
+            model: 'auto',
+            mode: 'chat',
+            section: 'document',
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+    });
+    const data = await res.json();
+    const content = data.reply || data.message || '';
+    if (!content || content.length < 50) throw new Error('LLM returned empty content');
+    return content;
+}
+
+// ── Word (.docx) ───────────────────────────────────────────────────────────
+async function buildDocx(markdown, title, filename) {
+    const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = require('docx');
+
+    const children = [];
+    children.push(new Paragraph({
+        heading: HeadingLevel.TITLE,
+        alignment: AlignmentType.CENTER,
+        children: [new TextRun({ text: title, bold: true, size: 40, color: '1C2030' })],
+        spacing: { after: 300 },
+    }));
+
+    for (const rawLine of markdown.split('\n')) {
+        const line = rawLine.trim();
+        if (!line) continue;
+
+        // Bold inline **text** → TextRuns
+        const runs = [];
+        const parts = line.split(/\*\*(.+?)\*\*/g);
+        for (let i = 0; i < parts.length; i++) {
+            if (!parts[i]) continue;
+            runs.push(new TextRun({ text: parts[i], bold: i % 2 === 1 }));
+        }
+
+        if (line.startsWith('### ')) {
+            children.push(new Paragraph({ heading: HeadingLevel.HEADING_3, children: runs, spacing: { before: 200, after: 100 } }));
+        } else if (line.startsWith('## ')) {
+            children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: runs, spacing: { before: 260, after: 120 } }));
+        } else if (line.startsWith('# ')) {
+            children.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: runs, spacing: { before: 320, after: 160 } }));
+        } else if (/^[-*•] /.test(line)) {
+            children.push(new Paragraph({
+                bullet: { level: 0 },
+                children: runs,
+                spacing: { after: 60 },
+            }));
+        } else if (/^\d+\. /.test(line)) {
+            children.push(new Paragraph({
+                numbering: { reference: 'ordered-list', level: 0 },
+                children: runs,
+                spacing: { after: 60 },
+            }));
+        } else {
+            children.push(new Paragraph({ children: runs, spacing: { after: 120 } }));
+        }
+    }
+
+    const doc = new Document({
+        numbering: { config: [{ reference: 'ordered-list', levels: [{ level: 0, format: 'decimal', text: '%1.', alignment: 'left' }] }] },
+        styles: {
+            default: { document: { run: { font: 'Calibri', size: 22 } } },
+        },
+        sections: [{ children }],
+    });
+
+    const buffer = await Packer.toBuffer(doc);
+    const filePath = path.join(DOWNLOADS_DIR, filename);
+    fs.writeFileSync(filePath, buffer);
+    return filename;
+}
+
+// ── PowerPoint (.pptx) ─────────────────────────────────────────────────────
+async function buildPptx(deckJson, title, filename) {
+    const pptxgen = require('pptxgenjs');
+    const pptx = new pptxgen();
+    pptx.defineLayout({ name: 'WIDE', width: 13.33, height: 7.5 });
+    pptx.layout = 'WIDE';
+    pptx.author = 'AI-Dost';
+    pptx.subject = title;
+
+    const ACCENT = '4B8BFC';
+    const DARK = '1C2030';
+
+    // Title slide
+    const s0 = pptx.addSlide();
+    s0.background = { color: DARK };
+    s0.addText(title, { x: 0.8, y: 2.3, w: 11.7, h: 1.8, fontSize: 40, bold: true, color: 'FFFFFF', align: 'center', fontFace: 'Segoe UI' });
+    s0.addText('AI-Dost Presentation', { x: 0.8, y: 4.3, w: 11.7, h: 0.6, fontSize: 16, color: ACCENT, align: 'center' });
+
+    const slides = (deckJson.slides || []).slice(0, 14);
+    for (const [idx, s] of slides.entries()) {
+        const slide = pptx.addSlide();
+        slide.background = { color: 'FFFFFF' };
+        slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.33, h: 0.16, fill: { color: ACCENT } });
+        slide.addText(s.title || `Slide ${idx + 1}`, { x: 0.7, y: 0.45, w: 11.9, h: 0.9, fontSize: 28, bold: true, color: DARK, fontFace: 'Segoe UI' });
+        const points = (s.points || []).map(p => ({ text: p, options: { bullet: true, color: '333333', fontSize: 18, breakLine: true, paraSpaceAfter: 10 } }));
+        slide.addText(points, { x: 0.9, y: 1.6, w: 11.5, h: 5.3, valign: 'top', fontFace: 'Segoe UI' });
+    }
+
+    await pptx.writeFile({ fileName: path.join(DOWNLOADS_DIR, filename) });
+    // v4 API: fileName (capital N) — lib file seedha destination pe likhta hai
+    const filePath = path.join(DOWNLOADS_DIR, filename);
+    if (!fs.existsSync(filePath) || fs.statSync(filePath).size < 1000) {
+        throw new Error('PPTX file write failed');
+    }
+    return filename;
+}
+
+// ── CSV ────────────────────────────────────────────────────────────────────
+function buildCsv(csvText, filename) {
+    const cleaned = String(csvText).replace(/```csv\s*/gi, '').replace(/```\s*/g, '').trim();
+    // Ensure header + at least 3 rows
+    const rows = cleaned.split('\n').filter(r => r.trim().length > 1);
+    if (rows.length < 4) throw new Error('CSV content too short');
+    const filePath = path.join(DOWNLOADS_DIR, filename);
+    fs.writeFileSync(filePath, '\uFEFF' + cleaned + '\n', 'utf-8'); // BOM → Excel me Hindi theek dikhe
+    return filename;
+}
+
+// ── Parse JSON from LLM output ─────────────────────────────────────────────
+function extractJson(content) {
+    const cleaned = String(content).replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start === -1 || end === -1 || end <= start) throw new Error('No JSON found');
+    return JSON.parse(cleaned.slice(start, end + 1));
+}
+
+const PROMPTS = {
+    docx: `You are a professional report writer. Write a DETAILED, well-structured document in Markdown format about the topic.
+Rules:
+- Start with a title using "# ".
+- Use "## " for main sections and "### " for subsections.
+- Use "- " for bullet points and "**bold**" for key terms/numbers.
+- Include facts, figures, history, current status, challenges, and future outlook where relevant.
+- Length: 600-1200 words. Write in the language of the topic (Hindi/Hinglish content allowed, keep headings English or Hindi as fits).
+- Only Markdown, no extra commentary.`,
+    pptx: `You are a presentation designer. Create a professional PowerPoint deck as JSON ONLY (no markdown, no prose):
+{"title": "<Deck Title>", "slides": [{"title": "<Slide Title>", "points": ["<point 1>", "<point 2>", "<point 3>", "<point 4>"]}]}
+Rules:
+- 8-12 slides. First slides: intro/agenda. Middle: key facts, sections. Last: conclusion/summary.
+- Each slide exactly 4-5 concise points (max 15 words each), fact-rich.
+- Topic ki language me likho (Hindi/Hinglish allowed).
+- Valid JSON only.`,
+    csv: `You are a data analyst. Create a CSV dataset about the topic. Return ONLY the CSV (first row = headers, then data rows).
+Rules:
+- 15-30 rows of realistic, well-researched data.
+- Use exact columns relevant to the topic (e.g., for martyrs: Name, Rank, Regiment, Date, Place, State).
+- No commas inside fields; no extra commentary; no markdown fences.`,
+};
+
+const TYPE_EXT = { docx: '.docx', pptx: '.pptx', csv: '.csv' };
+
+router.post('/generate', async (req, res) => {
+    const { type, topic, title } = req.body;
+    const t = (type || '').toLowerCase();
+    if (!PROMPTS[t]) return res.status(400).json({ success: false, error: 'type must be docx | pptx | csv' });
+    if (!topic || !topic.trim()) return res.status(400).json({ success: false, error: 'Topic required' });
+
+    try {
+        const safeTitle = (title || topic).trim().slice(0, 60);
+        const content = await llmContent(PROMPTS[t], topic);
+        const fileId = crypto.randomUUID().substring(0, 8);
+        const filename = `${safeTitle.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40)}_${fileId}${TYPE_EXT[t]}`;
+
+        let finalName;
+        if (t === 'docx') {
+            finalName = await buildDocx(content, safeTitle, filename);
+        } else if (t === 'pptx') {
+            const deck = extractJson(content);
+            if (!Array.isArray(deck.slides) || deck.slides.length < 3) throw new Error('Not enough slides generated');
+            finalName = await buildPptx(deck, deck.title || safeTitle, filename);
+        } else {
+            finalName = buildCsv(content, filename);
+        }
+
+        logger.info(`📄 ${t.toUpperCase()} generated: ${finalName}`);
+        res.json({
+            success: true,
+            type: t,
+            downloadUrl: `/downloads/${finalName}`,
+            filename: finalName,
+            message: `${t.toUpperCase()} file ready!`,
+        });
+    } catch (e) {
+        logger.error(`Document generation (${t}) error:`, e.message);
+        res.status(500).json({ success: false, error: `Document generation failed: ${e.message}` });
+    }
+});
+
+module.exports = router;

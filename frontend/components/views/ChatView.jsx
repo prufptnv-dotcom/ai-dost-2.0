@@ -35,6 +35,13 @@ const IMAGE_CREATE_INTENT =
 const PROJECT_INTENT =
   /\b(fullstack|project|app|website|web ?site|portfolio|mern|crud|clone|todo|blog|e-?commerce|chatbot|dashboard|landing page)\b.*\b(banao|bana|banake|make|create|build|generate)\b|\b(banao|bana|banake|make|create|build|generate)\b.*\b(project|app|website|web ?site|fullstack)\b/i;
 
+// Document intents: Word / PowerPoint / Excel-CSV — MS Office ka kaam chat se
+const DOC_INTENTS = [
+  { type: 'docx', re: /\b(docx?|word file|word document|doc file|document|report)\b.*\b(banao|bana|banake|make|create|generate|likho|likh|research)\b|\b(banao|bana|banake|make|create|generate|likho|likh|research)\b.*\b(docx?|word file|document|report)\b/i },
+  { type: 'pptx', re: /\b(ppt|pptx|powerpoint|presentation|slides?)\b.*\b(banao|bana|banake|make|create|generate)\b|\b(banao|bana|banake|make|create|generate)\b.*\b(ppt|pptx|presentation|slides?)\b/i },
+  { type: 'csv', re: /\b(csv|excel|spreadsheet|sheet|table)\b.*\b(banao|bana|banake|make|create|generate|do|de)\b|\b(banao|bana|banake|make|create|generate|do|de)\b.*\b(csv|excel|sheet|list|table)\b/i },
+];
+
 // Chat se koi bhi view directly kholo — universal interface
 const NAV_INTENTS = [
   { re: /\b(projects?|meri projects?|my projects?)\b.*\b(kholo|dikhao|dikha|open|show|list)\b/i, view: 'projects' },
@@ -511,6 +518,40 @@ export default function ChatView({
         }
       } catch (e) {
         /* image API fail → fall through to normal chat */
+      }
+    }
+
+    // ── Document intent: docx / pptx / csv — MS Office ka kaam chat se ──
+    const docIntent = DOC_INTENTS.find((d) => d.re.test(content));
+    if (docIntent) {
+      try {
+        const topic = content.replace(docIntent.re, '').replace(/^(bihar|india|15 august|independence day|raksha|shaheed|shahid|martyr)[\s,:-]*/i, '').trim() || content;
+        const typeLabel = { docx: 'Word', pptx: 'PowerPoint', csv: 'Excel/CSV' }[docIntent.type];
+        const toast = { role: 'assistant', content: `⏳ **${typeLabel} file ban rahi hai...** Research + file generation me 30-90s lag sakte hain.`, timestamp: new Date().toISOString() };
+        setMessages((prev) => [...prev, toast]);
+        setTypingIndex(messages.length + 1);
+        const r = await api.post('/document/generate', { type: docIntent.type, topic, title: content.slice(0, 50) });
+        if (r.data?.success && r.data.downloadUrl) {
+          const readyMsg = {
+            role: 'assistant',
+            content: `✅ **${typeLabel} file ready!**\n\n📄 **${r.data.filename}**\n\n[⬇️ Download karo](${api.defaults.baseURL}${r.data.downloadUrl}) • [🔗 Naye tab me kholo](${api.defaults.baseURL}${r.data.downloadUrl})\n\nAur kuch chahiye to batao — title, content, sections — sab change kar dunga! ✨`,
+            timestamp: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, readyMsg]);
+          setTypingIndex(messages.length + 1);
+          setLastReply(readyMsg.content);
+          setTimeout(() => {
+            setTypingIndex(null);
+            setShowFollowUps(true);
+          }, Math.min(1500, 200 + readyMsg.content.length * 2));
+        } else {
+          setMessages((prev) => [...prev, { role: 'assistant', content: `⚠️ File ban nahi payi: ${r.data?.error || 'unknown error'}`, timestamp: new Date().toISOString() }]);
+          setTypingIndex(null);
+        }
+        setThinking(false);
+        return;
+      } catch (e) {
+        /* document API fail → normal chat fallback */
       }
     }
 
