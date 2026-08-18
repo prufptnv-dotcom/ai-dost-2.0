@@ -1,8 +1,26 @@
 {
-  "totalFeedback": 34,
+  "totalFeedback": 36,
   "positiveCount": 25,
-  "negativeCount": 9,
+  "negativeCount": 11,
   "feedbackLogs": [
+    {
+      "id": "1787032700535",
+      "type": "positive",
+      "category": "general",
+      "message": "thumbs up",
+      "aiReply": "",
+      "correction": "",
+      "timestamp": "2026-08-18T05:58:20.535Z"
+    },
+    {
+      "id": "1787032670262",
+      "type": "positive",
+      "category": "general",
+      "message": "thumbs up",
+      "aiReply": "",
+      "correction": "",
+      "timestamp": "2026-08-18T05:57:50.262Z"
+    },
     {
       "id": "1786807413877",
       "type": "down",
