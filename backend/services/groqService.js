@@ -102,11 +102,11 @@ Key Response Guidelines:
             }
             messagesPayload.push({ role: 'user', content: processContent(message) });
 
-            let primaryModel = mode === 'chat' || mode === 'agent' ? 'llama-3.3-70b-versatile' : 'llama-3.1-8b-instant';
+            let primaryModel = mode === 'chat' || mode === 'agent' ? 'openai/gpt-oss-120b' : 'qwen/qwen3.6-27b';
             if (hasImage) {
-                primaryModel = 'llama-3.2-11b-vision-preview'; // Switch to vision model!
+                primaryModel = 'openai/gpt-oss-120b'; // Vision support (llama-3.2-11b-vision-preview deprecate ho chuka)
             }
-            const fallbackModel = 'llama-3.1-8b-instant';
+            const fallbackModel = 'qwen/qwen3.6-27b';
 
             const tryModel = async (model) => {
                 try {
