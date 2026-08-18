@@ -423,6 +423,7 @@ app.post('/api/v1/resume/generate', resumeGenerateHandler);
 // ── Document engine (docx / pptx / csv) ────────────────────────────────────
 const documentRoutes = require('./routes/documents');
 app.use('/api/document', documentRoutes);
+app.use('/api/v1/document', documentRoutes);
 
 // ── Project Memory endpoints (SQLite-backed) ──────────────────────────────
 app.get(['/api/v1/memory/projects', '/api/projects'], (req, res) => {

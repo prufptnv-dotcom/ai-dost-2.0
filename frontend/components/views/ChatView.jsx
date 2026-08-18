@@ -36,10 +36,11 @@ const PROJECT_INTENT =
   /\b(fullstack|project|app|website|web ?site|portfolio|mern|crud|clone|todo|blog|e-?commerce|chatbot|dashboard|landing page)\b.*\b(banao|bana|banake|make|create|build|generate)\b|\b(banao|bana|banake|make|create|build|generate)\b.*\b(project|app|website|web ?site|fullstack)\b/i;
 
 // Document intents: Word / PowerPoint / Excel-CSV — MS Office ka kaam chat se
+// Fuzzy patterns: "doct", "docc", "ppt" typos bhi match ho (doc[a-z]* prefix match)
 const DOC_INTENTS = [
-  { type: 'docx', re: /\b(docx?|word file|word document|doc file|document|report)\b.*\b(banao|bana|banake|make|create|generate|likho|likh|research)\b|\b(banao|bana|banake|make|create|generate|likho|likh|research)\b.*\b(docx?|word file|document|report)\b/i },
-  { type: 'pptx', re: /\b(ppt|pptx|powerpoint|presentation|slides?)\b.*\b(banao|bana|banake|make|create|generate)\b|\b(banao|bana|banake|make|create|generate)\b.*\b(ppt|pptx|presentation|slides?)\b/i },
-  { type: 'csv', re: /\b(csv|excel|spreadsheet|sheet|table)\b.*\b(banao|bana|banake|make|create|generate|do|de)\b|\b(banao|bana|banake|make|create|generate|do|de)\b.*\b(csv|excel|sheet|list|table)\b/i },
+  { type: 'docx', re: /\b(doc[a-z]*|word ?file|word ?document|document|report)\b.*\b(banao|bana|banake|make|create|generate|likho|likh|research|report|chahiye)\b|\b(banao|bana|banake|make|create|generate|likho|likh|research|report|chahiye)\b.*\b(doc[a-z]*|word ?file|word ?document|document|report)\b/i },
+  { type: 'pptx', re: /\b(ppt[a-z]*|powerpoint|presentation|slides?)\b.*\b(banao|bana|banake|make|create|generate)\b|\b(banao|bana|banake|make|create|generate)\b.*\b(ppt[a-z]*|powerpoint|presentation|slides?)\b/i },
+  { type: 'csv', re: /\b(csv|excel|spreadsheet|sheet|table|list)\b.*\b(banao|bana|banake|make|create|generate|do|de|dijiye)\b|\b(banao|bana|banake|make|create|generate|do|de|dijiye)\b.*\b(csv|excel|spreadsheet|sheet|table|list)\b/i },
 ];
 
 // Chat se koi bhi view directly kholo — universal interface
@@ -534,7 +535,7 @@ export default function ChatView({
         if (r.data?.success && r.data.downloadUrl) {
           const readyMsg = {
             role: 'assistant',
-            content: `✅ **${typeLabel} file ready!**\n\n📄 **${r.data.filename}**\n\n[⬇️ Download karo](${api.defaults.baseURL}${r.data.downloadUrl}) • [🔗 Naye tab me kholo](${api.defaults.baseURL}${r.data.downloadUrl})\n\nAur kuch chahiye to batao — title, content, sections — sab change kar dunga! ✨`,
+            content: `✅ **${typeLabel} file ready!**\n\n📄 **${r.data.filename}**\n\n[⬇️ Download karo](${r.data.downloadUrl}) • [🔗 Naye tab me kholo](${r.data.downloadUrl})\n\nAur kuch chahiye to batao — title, content, sections — sab change kar dunga! ✨`,
             timestamp: new Date().toISOString(),
           };
           setMessages((prev) => [...prev, readyMsg]);
@@ -551,7 +552,10 @@ export default function ChatView({
         setThinking(false);
         return;
       } catch (e) {
-        /* document API fail → normal chat fallback */
+        setMessages((prev) => [...prev, { role: 'assistant', content: `⚠️ File banane me problem aayi: ${e?.message || 'backend down?'} — dobara try karo ya thodi der baad.`, timestamp: new Date().toISOString() }]);
+        setTypingIndex(null);
+        setThinking(false);
+        return;
       }
     }
 
