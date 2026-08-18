@@ -68,6 +68,14 @@ start_ai_engine.bat
    - User: "image banao: ..." → `POST /api/image/generate` (Pollinations, free no key, 30-60s render)
    - AI reply me `[GENERATE_IMAGE: prompt]` tag aaye → ChatView auto-convert karke Pollinations URL se image card dikhata hai
 
+9. **Document Engine (MS Office via chat)**:
+   - `POST /api/document/generate` `{type: docx|pptx|csv, topic, title}` → files `frontend/public/downloads/` me save, `/downloads/` se serve
+   - Flow: LLM (cascade) content → build file (docx / pptxgenjs v4 / CSV with BOM) → download URL return
+   - Chat intents: "bihar research karo doc banao" → docx, "15 august presentation banao" → pptx, "shaheed jawan list csv/excel me" → csv
+   - Code: `backend/routes/documents.js`; ChatView `DOC_INTENTS` (line ~38)
+   - pptxgenjs v4 API: `writeFile({ fileName })` — capital N! (`filename` silently ignored, `nodebuffer` outputType unsupported)
+   - Files git-ignored (generated)
+
 ### Environment Files
 - `.env.example` created with all required variables
 - Copy `.env.example` → `.env` and fill in your keys
