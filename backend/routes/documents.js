@@ -15,8 +15,10 @@ const BASE = `http://127.0.0.1:${process.env.PORT || 5000}`;
 
 // ── LLM content via full cascade (2 attempts) ──────────────────────────────
 async function llmContent(systemPrompt, userPrompt, timeoutMs = 120000) {
+    // systemPrompt is the template with {TOPIC} placeholder; userPrompt is the actual topic
+    const prompt = systemPrompt.replace('{TOPIC}', userPrompt);
     const body = {
-        message: `${systemPrompt} ${userPrompt}`,
+        message: prompt,
         model: 'auto',
         mode: 'chat',
         section: 'document',
@@ -196,12 +198,33 @@ function extractJson(content) {
     return JSON.parse(cleaned.slice(start, end + 1));
 }
 
-// Compact prompts (chhota = Groq/Gemini quota me safe). Detail quality LLM se, length safety yahan se.
+// Structured prompts with strong guardrails — compact but specific. Keeps LLM on topic.
 const PROMPTS = {
-    pdf: `Write a detailed Markdown report about: `,
-    docx: `Write a detailed Markdown report about: `,
-    pptx: `Return ONLY JSON {"title":"...","slides":[{"title":"...","points":["4-5 concise points"]}...]} - 8-10 slides deck about: `,
-    csv: `Return ONLY CSV rows (header first, 15-25 rows, no markdown, no commentary). Topic: `,
+    pdf: `Write a detailed Markdown report ONLY about: {TOPIC}.
+Rules:
+- Title as "# {TOPIC}"
+- Sections with "## " headings: Overview, History/Background, Key Facts, Current Status, Challenges, Conclusion
+- Use "- " bullets with concrete facts, figures, dates, names
+- Language: match topic (Hindi/Hinglish/English). No fluff.
+- DO NOT write about anything else. No generic disclaimers.
+- Length: 800-1500 words. Valid Markdown only.`,
+    docx: `Write a detailed Markdown report ONLY about: {TOPIC}.
+Rules:
+- Title as "# {TOPIC}"
+- Sections with "## " headings: Overview, History/Background, Key Facts, Current Status, Challenges, Conclusion
+- Use "- " bullets with concrete facts, figures, dates, names
+- Language: match topic (Hindi/Hinglish/English). No fluff.
+- DO NOT write about anything else. No generic disclaimers.
+- Length: 800-1500 words. Valid Markdown only.`,
+    pptx: `Return ONLY valid JSON for an 8-10 slide deck about: {TOPIC}.
+Schema: {"title": "{TOPIC}", "slides": [{"title": "...", "points": ["pt1","pt2","pt3","pt4"]}, ...]}
+Rules:
+- Slide 1: Introduction. Slides 2-7: Key sections with 4-5 fact-rich points each. Slide 8: Challenges. Slide 9: Future. Slide 10: Conclusion.
+- Points: max 15 words, concrete facts. Language matches topic.
+- DO NOT include anything except the JSON. No markdown fences.`,
+    csv: `Return ONLY CSV (header + 15-25 data rows) about: {TOPIC}. No markdown, no commentary.
+Columns: relevant to topic (e.g., for martyrs: Name,Rank,Regiment,Date,Place,State).
+First row = headers. No commas inside fields. Language: match topic.`,
 };
 
 const TYPE_EXT = { docx: '.docx', pptx: '.pptx', csv: '.csv', pdf: '.pdf' };
@@ -217,9 +240,16 @@ router.post('/generate', async (req, res) => {
         let content;
         try {
             content = await llmContent(PROMPTS[t], topic);
+            // Quality check: ensure content is actually about the topic
+            const topicKeywords = topic.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+            const hasTopic = topicKeywords.some(kw => content.toLowerCase().includes(kw));
+            if (!hasTopic && topicKeywords.length > 0) {
+                logger.warn(`📄 LLM content off-topic (no ${topicKeywords.join(',')} found) → template fallback`);
+                throw new Error('Content quality check failed');
+            }
             logger.info(`📄 LLM content ready for ${t} (${content.length} chars)`);
         } catch (e) {
-            logger.warn(`📄 LLM unavailable → template fallback: ${e.message}`);
+            logger.warn(`📄 LLM unavailable/off-topic → template fallback: ${e.message}`);
             content = templateContent(t, topic);
         }
         const fileId = crypto.randomUUID().substring(0, 8);
