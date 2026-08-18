@@ -350,7 +350,7 @@ async function executeCascadingFailover(message, groqMsg, cleanHistory, fileCont
             check: (r) => isValidResponse(r)
         },
         { 
-            name: 'Cerebras (Llama 3.3 70B)', 
+            name: 'Cerebras (GPT-OSS 120B)', 
             fn: () => CerebrasService.chat(groqMsg, cleanHistory, mode, customKeys?.cerebras),
             check: (r) => isValidResponse(r)
         },

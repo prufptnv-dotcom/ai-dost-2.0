@@ -56,6 +56,18 @@ start_ai_engine.bat
    - Fallbacks: `cohere/north-mini-code:free`, `z-ai/glm-5.2:free`, `google/gemma-4-31b-it:free`, `liquid/lfm-2.5-2.6b:free`
    - Free models flaky hote hain (temporary 429/503/empty) — service auto-fallback karta hai
 
+7. **Telegram Bot** (100% free, phone se AI-Dost control):
+   - Token: @BotFather → `/newbot` → `TELEGRAM_BOT_TOKEN` in `.env`
+   - Optional: `TELEGRAM_ALLOWED_IDS=123,456` (sirf in chat IDs ko allow karo; khali = sab)
+   - Long polling (no webhook) — local dev me bhi chalta hai, koi port nahi chahiye
+   - Commands: `/chat <msg>`, `/crew <task>`, `/tts <text>`, `/image <desc>`, `/status`, `/help` (plain text = chat)
+   - Code: `backend/services/telegramBot.js` — native fetch (koi dependency nahi)
+   - Server start pe auto-enable hoga agar token set hai
+
+8. **Chat Image Generation**:
+   - User: "image banao: ..." → `POST /api/image/generate` (Pollinations, free no key, 30-60s render)
+   - AI reply me `[GENERATE_IMAGE: prompt]` tag aaye → ChatView auto-convert karke Pollinations URL se image card dikhata hai
+
 ### Environment Files
 - `.env.example` created with all required variables
 - Copy `.env.example` → `.env` and fill in your keys
