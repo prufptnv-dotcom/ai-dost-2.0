@@ -35,14 +35,14 @@ const IMAGE_CREATE_INTENT =
 const PROJECT_INTENT =
   /\b(fullstack|project|app|website|web ?site|portfolio|mern|crud|clone|todo|blog|e-?commerce|chatbot|dashboard|landing page)\b.*\b(banao|bana|banake|make|create|build|generate)\b|\b(banao|bana|banake|make|create|build|generate)\b.*\b(project|app|website|web ?site|fullstack)\b/i;
 
-// Document intents: PDF / Word / PowerPoint / Excel-CSV — MS Office ka kaam chat se
-// Fuzzy patterns: "doct", "docc", "ppt" typos bhi match ho (doc[a-z]* prefix match)
-// Order matters — pehla match jeet ta hai. PDF sabse pehle (specific).
-const DOC_INTENTS = [
-  { type: 'pdf', re: /\b(pdf|pdf file)\b.*\b(banao|bana|banake|make|create|generate|likho|likh|chahiye)\b|\b(banao|bana|banake|make|create|generate|likho|likh|chahiye)\b.*\b(pdf|pdf file)\b/i },
-  { type: 'docx', re: /\b(doc[a-z]*|word ?file|word ?document|document|report)\b.*\b(banao|bana|banake|make|create|generate|likho|likh|research|report|chahiye)\b|\b(banao|bana|banake|make|create|generate|likho|likh|research|report|chahiye)\b.*\b(doc[a-z]*|word ?file|word ?document|document|report)\b/i },
-  { type: 'pptx', re: /\b(ppt[a-z]*|powerpoint|presentation|slides?)\b.*\b(banao|bana|banake|make|create|generate)\b|\b(banao|bana|banake|make|create|generate)\b.*\b(ppt[a-z]*|powerpoint|presentation|slides?)\b/i },
-  { type: 'csv', re: /\b(csv|excel|spreadsheet|sheet)\b.*\b(banao|bana|banake|make|create|generate|do|de|dijiye)\b|\b(banao|bana|banake|make|create|generate|do|de|dijiye)\b.*\b(csv|excel|spreadsheet|sheet)\b/i },
+// Document keywords: input me jo format keyword aaya → wahi file banao (banao/likho ki zaroorat nahi)
+// "jaise hi input me pdf ho → pdf, excel ho → excel, csv ho → csv, ppt ho → ppt"
+// Message me jo keyword SABSE PEHLE aata hai, wahi type jeet ta hai.
+const DOC_KEYWORDS = [
+  { type: 'pdf', re: /pdf/i },
+  { type: 'pptx', re: /ppt[a-z]*|powerpoint|presentation|slides?/i },
+  { type: 'csv', re: /csv|excel|spreadsheet|sheet/i },
+  { type: 'docx', re: /\bdocx?\b|\bdoct\b|word ?file|word ?document|document|report/i },
 ];
 
 // Chat se koi bhi view directly kholo — universal interface
@@ -524,8 +524,16 @@ export default function ChatView({
       }
     }
 
-    // ── Document intent: docx / pptx / csv — MS Office ka kaam chat se ──
-    const docIntent = DOC_INTENTS.find((d) => d.re.test(content));
+    // ── Document intent: pdf / docx / pptx / csv — jo manga jaaye wahi banao ──
+    // Specific format (pdf/csv/ppt) hamesha generic words (report/document) pe jeeta hai —
+    // "report pdf me chahiye" → pdf. Sirf specific format nahi hai to docx keywords.
+    const specificDoc = DOC_KEYWORDS
+      .filter((k) => k.type !== 'docx')
+      .map((k) => ({ type: k.type, pos: content.search(k.re) }))
+      .filter((m) => m.pos >= 0)
+      .sort((a, b) => a.pos - b.pos)[0];
+    const docxKeyword = DOC_KEYWORDS.find((k) => k.type === 'docx');
+    const docIntent = specificDoc || (content.search(docxKeyword.re) >= 0 ? docxKeyword : null);
     if (docIntent) {
       try {
         const topic = content.replace(docIntent.re, '').replace(/^(bihar|india|15 august|independence day|raksha|shaheed|shahid|martyr)[\s,:-]*/i, '').trim() || content;
