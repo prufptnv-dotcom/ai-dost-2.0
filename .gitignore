@@ -48,4 +48,4 @@ yarn-error.log*
 
 # Database
 .data/
-memory-brain/.data/
+memory-brain/.data/frontend/public/downloads/
