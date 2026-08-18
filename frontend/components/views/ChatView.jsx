@@ -35,12 +35,14 @@ const IMAGE_CREATE_INTENT =
 const PROJECT_INTENT =
   /\b(fullstack|project|app|website|web ?site|portfolio|mern|crud|clone|todo|blog|e-?commerce|chatbot|dashboard|landing page)\b.*\b(banao|bana|banake|make|create|build|generate)\b|\b(banao|bana|banake|make|create|build|generate)\b.*\b(project|app|website|web ?site|fullstack)\b/i;
 
-// Document intents: Word / PowerPoint / Excel-CSV — MS Office ka kaam chat se
+// Document intents: PDF / Word / PowerPoint / Excel-CSV — MS Office ka kaam chat se
 // Fuzzy patterns: "doct", "docc", "ppt" typos bhi match ho (doc[a-z]* prefix match)
+// Order matters — pehla match jeet ta hai. PDF sabse pehle (specific).
 const DOC_INTENTS = [
+  { type: 'pdf', re: /\b(pdf|pdf file)\b.*\b(banao|bana|banake|make|create|generate|likho|likh|chahiye)\b|\b(banao|bana|banake|make|create|generate|likho|likh|chahiye)\b.*\b(pdf|pdf file)\b/i },
   { type: 'docx', re: /\b(doc[a-z]*|word ?file|word ?document|document|report)\b.*\b(banao|bana|banake|make|create|generate|likho|likh|research|report|chahiye)\b|\b(banao|bana|banake|make|create|generate|likho|likh|research|report|chahiye)\b.*\b(doc[a-z]*|word ?file|word ?document|document|report)\b/i },
   { type: 'pptx', re: /\b(ppt[a-z]*|powerpoint|presentation|slides?)\b.*\b(banao|bana|banake|make|create|generate)\b|\b(banao|bana|banake|make|create|generate)\b.*\b(ppt[a-z]*|powerpoint|presentation|slides?)\b/i },
-  { type: 'csv', re: /\b(csv|excel|spreadsheet|sheet|table|list)\b.*\b(banao|bana|banake|make|create|generate|do|de|dijiye)\b|\b(banao|bana|banake|make|create|generate|do|de|dijiye)\b.*\b(csv|excel|spreadsheet|sheet|table|list)\b/i },
+  { type: 'csv', re: /\b(csv|excel|spreadsheet|sheet)\b.*\b(banao|bana|banake|make|create|generate|do|de|dijiye)\b|\b(banao|bana|banake|make|create|generate|do|de|dijiye)\b.*\b(csv|excel|spreadsheet|sheet)\b/i },
 ];
 
 // Chat se koi bhi view directly kholo — universal interface
@@ -527,7 +529,7 @@ export default function ChatView({
     if (docIntent) {
       try {
         const topic = content.replace(docIntent.re, '').replace(/^(bihar|india|15 august|independence day|raksha|shaheed|shahid|martyr)[\s,:-]*/i, '').trim() || content;
-        const typeLabel = { docx: 'Word', pptx: 'PowerPoint', csv: 'Excel/CSV' }[docIntent.type];
+        const typeLabel = { docx: 'Word', pptx: 'PowerPoint', csv: 'Excel/CSV', pdf: 'PDF' }[docIntent.type];
         const toast = { role: 'assistant', content: `⏳ **${typeLabel} file ban rahi hai...** Research + file generation me 30-90s lag sakte hain.`, timestamp: new Date().toISOString() };
         setMessages((prev) => [...prev, toast]);
         setTypingIndex(messages.length + 1);

@@ -93,6 +93,19 @@ async function buildDocx(markdown, title, filename) {
     return filename;
 }
 
+// ── PDF (reuse existing pdf.js → python pdfGenerator.py) ───────────────────
+async function buildPdf(markdown, title, filename) {
+    const res = await fetch(`${BASE}/api/pdf/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, content: markdown }),
+        signal: AbortSignal.timeout(60000),
+    });
+    const data = await res.json();
+    if (!data.success || !data.downloadUrl) throw new Error(data.error || 'PDF build failed');
+    return data.filename;
+}
+
 // ── PowerPoint (.pptx) ─────────────────────────────────────────────────────
 async function buildPptx(deckJson, title, filename) {
     const pptxgen = require('pptxgenjs');
@@ -151,6 +164,14 @@ function extractJson(content) {
 }
 
 const PROMPTS = {
+    pdf: `You are a professional report writer. Write a DETAILED, well-structured document in Markdown format about the topic.
+Rules:
+- Start with a title using "# ".
+- Use "## " for main sections and "### " for subsections.
+- Use "- " for bullet points and "**bold**" for key terms/numbers.
+- Include facts, figures, history, current status, challenges, and future outlook where relevant.
+- Length: 600-1200 words. Write in the language of the topic (Hindi/Hinglish content allowed).
+- Only Markdown, no extra commentary.`,
     docx: `You are a professional report writer. Write a DETAILED, well-structured document in Markdown format about the topic.
 Rules:
 - Start with a title using "# ".
@@ -173,7 +194,7 @@ Rules:
 - No commas inside fields; no extra commentary; no markdown fences.`,
 };
 
-const TYPE_EXT = { docx: '.docx', pptx: '.pptx', csv: '.csv' };
+const TYPE_EXT = { docx: '.docx', pptx: '.pptx', csv: '.csv', pdf: '.pdf' };
 
 router.post('/generate', async (req, res) => {
     const { type, topic, title } = req.body;
@@ -188,7 +209,9 @@ router.post('/generate', async (req, res) => {
         const filename = `${safeTitle.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40)}_${fileId}${TYPE_EXT[t]}`;
 
         let finalName;
-        if (t === 'docx') {
+        if (t === 'pdf') {
+            finalName = await buildPdf(content, safeTitle, filename);
+        } else if (t === 'docx') {
             finalName = await buildDocx(content, safeTitle, filename);
         } else if (t === 'pptx') {
             const deck = extractJson(content);
