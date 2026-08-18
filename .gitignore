@@ -49,3 +49,6 @@ yarn-error.log*
 # Database
 .data/
 memory-brain/.data/frontend/public/downloads/
+
+# Generated document downloads
+frontend/public/downloads/*
