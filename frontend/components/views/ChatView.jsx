@@ -598,6 +598,17 @@ export default function ChatView({
         persona,
       });
       const reply = res.data?.reply || res.data?.message || 'Sorry, response nahi mil paya. Dobara try karo.';
+
+      // ── AI ne [GENERATE_IMAGE: prompt] tag diya → Pollinations se image banao ──
+      const imageTagRegex = /\[GENERATE_IMAGE:\s*(.*?)\]/i;
+      const imageMatch = reply.match(imageTagRegex);
+      if (imageMatch) {
+        const imagePromptText = imageMatch[1].trim();
+        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePromptText)}?width=768&height=512&nologo=true`;
+        reply = reply.replace(imageTagRegex, '🎨 Image ban gayi — neeche dekho:').trim();
+        reply += `\n\n![Generated: ${imagePromptText}](${pollinationsUrl})`;
+      }
+
       const aiMsg = { role: 'assistant', content: reply, timestamp: new Date().toISOString() };
       setMessages((prev) => [...prev, aiMsg]);
       setTypingIndex(messages.length + 1);

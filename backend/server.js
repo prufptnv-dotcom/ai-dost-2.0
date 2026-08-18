@@ -636,3 +636,11 @@ server.listen(PORT, () => {
     logger.info(`   Image  : http://localhost:${PORT}/api/image/generate`);
     logger.info(`   Test   : http://localhost:${PORT}/api/test/all`);
 });
+
+// ── Telegram bot (optional — TELEGRAM_BOT_TOKEN env se enable) ──────────────
+try {
+    const { startTelegramBot } = require('./services/telegramBot');
+    startTelegramBot();
+} catch (e) {
+    logger.warn('⚠️ Telegram bot start fail:', e.message);
+}
