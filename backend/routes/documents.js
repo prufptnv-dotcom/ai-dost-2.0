@@ -14,7 +14,7 @@ fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
 const BASE = `http://127.0.0.1:${process.env.PORT || 5000}`;
 
 // ── LLM content via full cascade (2 attempts) ──────────────────────────────
-async function llmContent(systemPrompt, userPrompt, timeoutMs = 120000) {
+async function llmContent(systemPrompt, userPrompt, timeoutMs = 60000) {
     // systemPrompt is the template with {TOPIC} placeholder; userPrompt is the actual topic
     const prompt = systemPrompt.replace('{TOPIC}', userPrompt);
     const body = {
@@ -24,12 +24,13 @@ async function llmContent(systemPrompt, userPrompt, timeoutMs = 120000) {
         section: 'document',
     };
     for (let attempt = 1; attempt <= 2; attempt++) {
+        const attemptTimeout = attempt === 1 ? Math.min(timeoutMs, 30000) : Math.min(timeoutMs / 2, 15000);
         try {
             const res = await fetch(`${BASE}/api/v1/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
-                signal: AbortSignal.timeout(timeoutMs),
+                signal: AbortSignal.timeout(attemptTimeout),
             });
             const data = await res.json();
             const content = data.reply || data.message || '';
@@ -132,7 +133,7 @@ async function buildDocx(markdown, title, filename) {
 async function buildPdf(markdown, title, filename) {
     const res = await fetch(`${BASE}/api/pdf/generate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
         body: JSON.stringify({ title, content: markdown }),
         signal: AbortSignal.timeout(60000),
     });
@@ -259,7 +260,11 @@ router.post('/generate', async (req, res) => {
             content = templateContent(t, topic);
         }
         const fileId = crypto.randomUUID().substring(0, 8);
-        const filename = `${safeTitle.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40)}_${fileId}${TYPE_EXT[t]}`;
+        const slug = safeTitle.toLowerCase()
+            .replace(/[^a-z0-9\u0900-\u097F]+/g, '_')  // keep Devanagari + latin + digits
+            .replace(/^_+|_+$/g, '')
+            .slice(0, 40);
+        const filename = `${slug}_${fileId}${TYPE_EXT[t]}`;
 
         let finalName;
         if (t === 'pdf') {

@@ -38,6 +38,7 @@ start_ai_engine.bat
    - Get key from: https://tavily.com
    - Add to `.env`: `TAVILY_API_KEY=your_key_here`
    - Free tier: 1000 searches/month
+   - **Required for**: `/research` Telegram command, web search with sources
 
 4. **Cerebras Inference** (Optional, was free 1M tokens/day — 2026 me card verify required):
    - Get key from: https://cloud.cerebras.ai → API Keys
@@ -61,6 +62,7 @@ start_ai_engine.bat
    - Optional: `TELEGRAM_ALLOWED_IDS=123,456` (sirf in chat IDs ko allow karo; khali = sab)
    - Long polling (no webhook) — local dev me bhi chalta hai, koi port nahi chahiye
    - Commands: `/chat <msg>`, `/crew <task>`, `/tts <text>`, `/image <desc>`, `/status`, `/help` (plain text = chat)
+   - **New commands**: `/doc <pdf|docx|pptx|csv|xlsx> <topic>`, `/research <query>`, `/correct <correction>`
    - Code: `backend/services/telegramBot.js` — native fetch (koi dependency nahi)
    - Server start pe auto-enable hoga agar token set hai
 
@@ -69,14 +71,15 @@ start_ai_engine.bat
    - AI reply me `[GENERATE_IMAGE: prompt]` tag aaye → ChatView auto-convert karke Pollinations URL se image card dikhata hai
 
 9. **Document Engine (MS Office via chat)**:
-   - `POST /api/document/generate` `{type: docx|pptx|csv|pdf, topic, title}` → files `frontend/public/downloads/` me save, `/downloads/` se serve
-   - Flow: LLM (cascade, 2 attempts) content → build file (docx / pptxgenjs v4 / CSV with BOM / pdf via python) → download URL return
-   - **Keyword matching (not intent-pairs)**: input me format keyword aaya → wahi file. `pdf`→PDF, `excel|sheet|csv`→CSV, `ppt|presentation|slides`→PPTX, `doc|word|report|document`→DOCX. Specific format (pdf/csv/ppt) hamesha generic (report/document) pe jeeta — "report pdf me chahiye" → pdf. Koi action word (banao) zaroori nahi
+   - `POST /api/document/generate` `{type: docx|pptx|csv|pdf|xlsx, topic, title}` → files `frontend/public/downloads/` me save, `/downloads/` se serve
+   - Flow: LLM (cascade, 2 attempts) content → build file (docx / pptxgenjs v4 / CSV with BOM / pdf via python / xlsx via openpyxl) → download URL return
+   - **Keyword matching (not intent-pairs)**: input me format keyword aaya → wahi file. `pdf`→PDF, `excel|xlsx`→XLSX, `csv|spreadsheet|sheet`→CSV, `ppt|presentation|slides`→PPTX, `doc|word|report|document`→DOCX. Specific format (pdf/csv/ppt/xlsx) hamesha generic (report/document) pe jeeta — "report pdf me chahiye" → pdf. Koi action word (banao) zaroori nahi
    - **Template fallback**: saare AI providers fail ho to 500 NAHI — `templateContent(type, topic)` se file ban jaati hai
-   - Chat intents: "bihar research karo doc banao" → docx, "15 august presentation banao" → pptx, "shaheed jawan list csv/excel me" → csv
+   - Chat intents: "bihar research karo doc banao" → docx, "15 august presentation banao" → pptx, "shaheed jawan list csv/excel me" → csv, "sales data xlsx me" → xlsx
    - Code: `backend/routes/documents.js`; ChatView `DOC_KEYWORDS` (line ~38)
    - pptxgenjs v4 API: `writeFile({ fileName })` — capital N! (`filename` silently ignored, `nodebuffer` outputType unsupported)
    - PDF via existing `/api/pdf/generate` (python pdfGenerator.py), Noto Hindi font
+   - XLSX via ai-engine `/ai/xlsx/generate` (openpyxl, styled headers, smart columns)
    - Files git-ignored (generated)
 
 ### Environment Files
@@ -132,6 +135,18 @@ start_ai_engine.bat
 - **Download**: PDF generation with one click
 - **Hinglish Support**: Responds in user's language (Hinglish/Hindi/English)
 
+### 8. PWA / Mobile Install
+- **Manifest**: `frontend/public/manifest.json` — name "AI-Dost", icons, shortcuts
+- **Service Worker**: `frontend/public/sw.js` — offline shell caching, cache-first for static, network-first for API
+- **Install Prompt**: Browser "Install AI-Dost" on mobile/desktop
+- **Next.js Integration**: `@ducanh2912/next-pwa` with auto-register in production
+
+### 9. Agent Memory & Learning
+- **Persistent Memory**: ai-engine `/ai/agent/learn` + `/ai/agent/memory/retrieve`
+- **Auto-Learn**: Telegram chat handler injects retrieved memory + auto-saves user questions
+- **Corrections**: `/correct <text>` saves user corrections for future context
+- **Cross-Session**: Memory persists across restarts (SQLite in ai-engine)
+
 ## ⌃ Keyboard Shortcuts
 
 | Shortcut | Action |
@@ -145,6 +160,20 @@ start_ai_engine.bat
 | `Ctrl+Enter` | Send AI chat message |
 | `Ctrl+I` | Open inline AI edit panel |
 | `Mod+Shift+P` | Toggle dark/light theme |
+
+## 🤖 Telegram Bot Commands (v2.0)
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `/chat <msg>` | General AI chat | `/chat hello` |
+| `/doc <type> <topic>` | Generate document (pdf, docx, pptx, csv, xlsx) | `/doc pdf bihar report` |
+| `/research <query>` | Web search with sources (needs Tavily) | `/research latest AI news` |
+| `/correct <text>` | Teach correction for memory | `/correct Bihar ki rajdhani Patna hai` |
+| `/tts <text>` | Text-to-speech (Edge TTS) | `/tts namaste` |
+| `/image <desc>` | Generate image (Pollinations) | `/image sunset over bihar` |
+| `/status` | Server health + quota status | `/status` |
+| `/help` | Show all commands | `/help` |
+| Plain text | Treated as `/chat` | `hello` |
 
 ## 🐛 Troubleshooting
 
@@ -180,12 +209,12 @@ start_ai_engine.bat
 ```
 ai-dost version 2.o/
 ├── ai-engine/                   # Python AI Engine (FastAPI + LlamaIndex, optional)
-│   ├── main.py                  # RAG endpoints (/health, /ai/rag/query, /ai/rag/index)
-│   ├── requirements.txt         # fastapi, uvicorn, llama-index (+ ollama llms/embeddings)
+│   ├── main.py                  # RAG endpoints (/health, /ai/rag/query, /ai/rag/index, /ai/xlsx/generate, /ai/web/search)
+│   ├── requirements.txt         # fastapi, uvicorn, llama-index, openpyxl, tavily-python
 │   └── start_ai_engine.bat      # venv setup + uvicorn starter
 ├── backend/                    # Node.js + Express + SQLite
 │   ├── server.js               # Main server entry point
-│   ├── routes/                 # API routes (chat, agent, git, etc.)
+│   ├── routes/                 # API routes (chat, agent, git, documents, etc.)
 │   ├── services/               # AI services (Gemini, Groq, Ollama, pythonEngine bridge)
 │   ├── agent/                  # Modular agent orchestrator
 │   ├── models/                 # Data models (Chat, Project, Resume)
@@ -215,6 +244,18 @@ node test_agent_run.js
 # ESLint check
 cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\frontend"
 npm run lint
+
+# Document generation test (all 5 types)
+curl -X POST http://localhost:5000/api/document/generate -H "Content-Type: application/json" -d '{"type":"pdf","topic":"test"}'
+curl -X POST http://localhost:5000/api/document/generate -H "Content-Type: application/json" -d '{"type":"docx","topic":"test"}'
+curl -X POST http://localhost:5000/api/document/generate -H "Content-Type: application/json" -d '{"type":"pptx","topic":"test"}'
+curl -X POST http://localhost:5000/api/document/generate -H "Content-Type: application/json" -d '{"type":"csv","topic":"test"}'
+curl -X POST http://localhost:5000/api/document/generate -H "Content-Type: application/json" -d '{"type":"xlsx","topic":"test"}'
+
+# AI Engine verification
+curl http://127.0.0.1:8001/health
+curl -X POST http://127.0.0.1:8001/ai/xlsx/generate -H "Content-Type: application/json" -d '{"topic":"test","rows":3}'
+curl -X POST http://127.0.0.1:8001/ai/web/search -H "Content-Type: application/json" -d '{"query":"test"}'
 ```
 
 ## 🚀 Deployment

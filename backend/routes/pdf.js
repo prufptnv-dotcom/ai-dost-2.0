@@ -15,7 +15,7 @@ router.post('/generate', async (req, res) => {
 
     try {
         const fileId = crypto.randomUUID();
-        const filename = `${title.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${fileId.substring(0, 8)}.pdf`;
+        const filename = `${title.toLowerCase().replace(/[^a-z0-9\u0900-\u097F]/g, '_')}_${fileId.substring(0, 8)}.pdf`;
         
         // Define paths
         const tempDir = path.join(__dirname, '../temp');
