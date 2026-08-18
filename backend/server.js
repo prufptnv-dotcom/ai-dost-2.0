@@ -187,6 +187,8 @@ app.use(express.static(path.join(__dirname, '../frontend')));
 
 // Generated images (Gemini fallback saves yahan)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Serve generated documents from frontend/public/downloads
+app.use('/downloads', express.static(path.join(__dirname, '../frontend/public/downloads')));
 
 // Routes
 const chatRoutes    = require('./routes/chat');

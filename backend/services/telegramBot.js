@@ -1,6 +1,6 @@
 /**
  * AI-Dost Telegram Bot — phone se AI-Dost control karo (100% free).
- * Long polling (no webhook) → local dev + free hosting dono me chalta hai.
+ * Long polling (no webhook) — local dev + free hosting dono me chalta hai.
  * Commands:
  *   /chat <msg>   — AI chat (full free cascade)
  *   /crew <task>  — CrewAI run (3 agents, files likhte hain)
@@ -16,6 +16,25 @@ const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ALLOWED_IDS = (process.env.TELEGRAM_ALLOWED_IDS || '')
     .split(',').map(s => s.trim()).filter(Boolean);
 const BACKEND = `http://127.0.0.1:${process.env.PORT || 5000}`;
+
+// Document keywords — same as ChatView: input me jo format keyword aaya → wahi file
+// Specific format (pdf/csv/ppt) hamesha generic (report/document) pe jeeta
+const DOC_KEYWORDS = [
+    { type: 'pdf', re: /pdf/i },
+    { type: 'pptx', re: /ppt[a-z]*|powerpoint|presentation|slides?/i },
+    { type: 'csv', re: /csv|excel|spreadsheet|sheet/i },
+    { type: 'docx', re: /\bdocx?\b|\bdoct\b|word ?file|word ?document|document|report/i },
+];
+
+function detectDocIntent(text) {
+    const specificDoc = DOC_KEYWORDS
+        .filter((k) => k.type !== 'docx')
+        .map((k) => ({ type: k.type, pos: text.search(k.re) }))
+        .filter((m) => m.pos >= 0)
+        .sort((a, b) => a.pos - b.pos)[0];
+    const docxKeyword = DOC_KEYWORDS.find((k) => k.type === 'docx');
+    return specificDoc || (text.search(docxKeyword.re) >= 0 ? docxKeyword : null);
+}
 
 class TelegramBot {
     constructor(token) {
@@ -121,6 +140,25 @@ class TelegramBot {
         }
     }
 
+    async sendDocument(chatId, buffer, filename, caption) {
+        try {
+            const fd = new FormData();
+            fd.append('chat_id', String(chatId));
+            fd.append('document', new Blob([buffer]), filename);
+            if (caption) fd.append('caption', String(caption).slice(0, 1024));
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), 60000);
+            const res = await fetch(`${this.api}/sendDocument`, { method: 'POST', body: fd, signal: ctrl.signal });
+            clearTimeout(t);
+            const data = await res.json();
+            if (!data.ok) logger.warn(`⚠️ TG sendDocument: ${data.description}`);
+            return data;
+        } catch (e) {
+            logger.warn(`⚠️ Telegram sendDocument error: ${e.message}`);
+            return { ok: false };
+        }
+    }
+
     typing(chatId) {
         return this.call('sendChatAction', { chat_id: chatId, action: 'typing' }, 10000).catch(() => {});
     }
@@ -188,6 +226,9 @@ class TelegramBot {
         if (t.startsWith('/crew')) return this.crewHandler(chatId, t.slice(5).trim());
         if (t.startsWith('/tts')) return this.ttsHandler(chatId, t.slice(4).trim());
         if (t.startsWith('/image')) return this.imageHandler(chatId, t.slice(6).trim());
+        // Document intent (pdf/docx/pptx/csv) — jo format keyword aaya → wahi file
+        const docIntent = detectDocIntent(t);
+        if (docIntent) return this.docHandler(chatId, t, docIntent.type);
         return this.chatHandler(chatId, t);
     }
 
@@ -275,6 +316,40 @@ class TelegramBot {
             await this.sendMessage(chatId, `Image ready hai par yahan bhej nahi paya — ye kholo:\n${imageUrl}`);
         } catch (e) {
             await this.sendMessage(chatId, `⚠️ Image error: ${e.message}`);
+        }
+    }
+
+    async docHandler(chatId, text, type) {
+        const typeLabel = { docx: 'Word', pptx: 'PowerPoint', csv: 'Excel/CSV', pdf: 'PDF' }[type] || type.toUpperCase();
+        await this.typing(chatId);
+        await this.sendMessage(chatId, `📄 *${typeLabel} ban rahi hai...* (thoda wait karo)`);
+        try {
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), 180000);
+            const res = await fetch(`${BACKEND}/api/v1/document/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type, topic: text, title: text.slice(0, 50) }),
+                signal: ctrl.signal,
+            });
+            clearTimeout(t);
+            const data = await res.json();
+            if (!data.success || !data.downloadUrl) {
+                return this.sendMessage(chatId, `⚠️ ${typeLabel} ban nahi paya — dobara try karo.`);
+            }
+            const downloadUrl = `http://127.0.0.1:${process.env.PORT || 5000}${data.downloadUrl}`;
+            // Download the file from backend
+            const fileRes = await fetch(downloadUrl);
+            if (!fileRes.ok) throw new Error(`Download failed: ${fileRes.status}`);
+            const buf = Buffer.from(await fileRes.arrayBuffer());
+            const filename = data.downloadUrl.split('/').pop();
+            // Send as document (works for PDF, DOCX, etc.)
+            const r = await this.sendDocument(chatId, buf, filename, `📄 ${typeLabel} ready: ${text.slice(0, 100)}`);
+            if (r.ok) return;
+            // Fallback: send link
+            await this.sendMessage(chatId, `${typeLabel} ready hai par file bhej nahi paya — ye kholo:\n${downloadUrl}`);
+        } catch (e) {
+            await this.sendMessage(chatId, `⚠️ ${typeLabel} error: ${e.message}`);
         }
     }
 
