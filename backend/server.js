@@ -8,6 +8,11 @@ const os = require('os');
 const logger = require('./logger');
 const Database = require('better-sqlite3');
 const { Server } = require('socket.io');
+const dns = require('dns');
+
+// Windows pe IPv6 route kabhi-kabhi blackhole hota hai → Node fetch hang.
+// IPv4 pehle try karo (Pollinations/Gemini/Telegram sab IPv4 se reliable).
+dns.setDefaultResultOrder('ipv4first');
 
 // Load .env file
 dotenv.config({ path: path.join(__dirname, '.env') });
@@ -179,6 +184,9 @@ app.use(express.json({ limit: '50mb' }));
 
 // Serve frontend static files
 app.use(express.static(path.join(__dirname, '../frontend')));
+
+// Generated images (Gemini fallback saves yahan)
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Routes
 const chatRoutes    = require('./routes/chat');

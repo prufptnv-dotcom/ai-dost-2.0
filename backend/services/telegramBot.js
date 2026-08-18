@@ -37,9 +37,7 @@ class TelegramBot {
                 signal: ctrl.signal,
             });
             const data = await res.json();
-            if (!data.ok && method !== 'getUpdates') {
-                logger.warn(`⚠️ Telegram ${method}: ${data.description || 'unknown error'}`);
-            }
+            if (!data.ok) logger.warn(`⚠️ Telegram ${method}: ${data.description || 'unknown error'}`);
             return data;
         } catch (e) {
             if (e.name !== 'AbortError') logger.warn(`⚠️ Telegram ${method} error: ${e.message}`);
@@ -80,6 +78,49 @@ class TelegramBot {
         return this.call('sendPhoto', { chat_id: chatId, photo: url, caption: String(caption || '').slice(0, 1024) }, 60000);
     }
 
+    /** Pollinations se image download karo — render ready hone tak retry (max ~2 min). */
+    async fetchImageWithRetry(url, maxAttempts = 8) {
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            try {
+                const ctrl = new AbortController();
+                const t = setTimeout(() => ctrl.abort(), 25000);
+                const res = await fetch(url, { signal: ctrl.signal });
+                clearTimeout(t);
+                const type = res.headers.get('content-type') || '';
+                const len = res.headers.get('content-length') || '?';
+                logger.info(`🖼️ Pollinations attempt ${attempt + 1}: HTTP ${res.status}, type=${type}, len=${len}`);
+                if (res.ok && type.startsWith('image/')) {
+                    const buf = Buffer.from(await res.arrayBuffer());
+                    logger.info(`🖼️ Image downloaded: ${buf.length} bytes`);
+                    return buf;
+                }
+            } catch (e) {
+                logger.warn(`🖼️ Pollinations attempt ${attempt + 1} error: ${e.message}`);
+            }
+            await new Promise(r => setTimeout(r, 10000));
+        }
+        return null;
+    }
+
+    async sendPhotoBuffer(chatId, buffer, caption) {
+        try {
+            const fd = new FormData();
+            fd.append('chat_id', String(chatId));
+            fd.append('photo', new Blob([buffer], { type: 'image/jpeg' }), 'ai-dost.jpg');
+            if (caption) fd.append('caption', String(caption).slice(0, 1024));
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), 60000);
+            const res = await fetch(`${this.api}/sendPhoto`, { method: 'POST', body: fd, signal: ctrl.signal });
+            clearTimeout(t);
+            const data = await res.json();
+            if (!data.ok) logger.warn(`⚠️ TG sendPhotoBuffer: ${data.description}`);
+            return data;
+        } catch (e) {
+            logger.warn(`⚠️ Telegram sendPhoto buffer error: ${e.message}`);
+            return { ok: false };
+        }
+    }
+
     typing(chatId) {
         return this.call('sendChatAction', { chat_id: chatId, action: 'typing' }, 10000).catch(() => {});
     }
@@ -112,6 +153,7 @@ class TelegramBot {
         const msg = update.message;
         if (!msg || typeof msg.text !== 'string') return;
         const chatId = msg.chat.id;
+        logger.info(`🤖 TG update from ${chatId}: "${msg.text.slice(0, 60)}"`);
 
         if (!this.isAllowed(chatId)) {
             return this.sendMessage(chatId, 'Sorry — ye bot private hai, sirf allowed users ke liye.');
@@ -211,12 +253,26 @@ class TelegramBot {
     async imageHandler(chatId, desc) {
         if (!desc) return this.sendMessage(chatId, 'Format: `/image <description>`');
         await this.typing(chatId);
+        await this.sendMessage(chatId, '🎨 Image ban rahi hai... (30-90s, wait karo)');
         try {
-            const r = await this.call('sendChatAction', { chat_id: chatId, action: 'upload_photo' }, 10000);
-            void r;
-            const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(desc)}?width=1024&height=768&nologo=true&seed=${Date.now()}`;
-            const ok = await this.sendPhoto(chatId, url, `🎨 ${desc.slice(0, 200)}`);
-            if (!ok.ok) await this.sendMessage(chatId, `🖼️ Image URL (Pollinations 30-60s render hota hai):\n${url}`);
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), 180000);
+            const res = await fetch(`${BACKEND}/api/image/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt: desc }),
+                signal: ctrl.signal,
+            });
+            clearTimeout(t);
+            const data = await res.json();
+            const imageUrl = data?.imageUrl;
+            if (!imageUrl) return this.sendMessage(chatId, '⚠️ Image ban nahi paya — dobara try karo.');
+            const buf = await this.fetchImageWithRetry(imageUrl, 3);
+            if (buf) {
+                const r = await this.sendPhotoBuffer(chatId, buf, `🎨 ${desc.slice(0, 200)}`);
+                if (r.ok) return;
+            }
+            await this.sendMessage(chatId, `Image ready hai par yahan bhej nahi paya — ye kholo:\n${imageUrl}`);
         } catch (e) {
             await this.sendMessage(chatId, `⚠️ Image error: ${e.message}`);
         }
