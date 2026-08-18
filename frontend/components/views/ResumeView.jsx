@@ -38,6 +38,12 @@ function buildResumeHtml(data, templateKey) {
       <div class="item-head"><span class="item-title">${escapeHtml(e.degree || 'Degree')}</span><span class="item-sub">${escapeHtml(e.year || '')}</span></div>
       <div class="item-company">${escapeHtml(e.institution || 'Institution')}</div>
     </div>`).join('');
+  const projects = (data.projects || []).map(p => `
+    <div class="item">
+      <div class="item-head"><span class="item-title">${escapeHtml(p.name || 'Project')}</span></div>
+      <div class="item-company" style="font-weight:400;">${escapeHtml(p.description || '')}</div>
+    </div>`).join('');
+  const certs = (data.certifications || []).map(c => `<li>${escapeHtml(c)}</li>`).join('');
   const skills = (data.skills || []).map(s => `<span class="skill">${escapeHtml(s)}</span>`).join('');
   return `<!DOCTYPE html>
 <html><head><style>
@@ -67,8 +73,10 @@ function buildResumeHtml(data, templateKey) {
   <div class="section"><div class="section-title">Professional Summary</div>
     <div class="summary">${escapeHtml(data.summary || '')}</div></div>
   <div class="section"><div class="section-title">Experience</div>${exp || '<div class="summary">No experience added.</div>'}</div>
+  <div class="section"><div class="section-title">Projects</div>${projects || '<div class="summary">No projects added.</div>'}</div>
   <div class="section"><div class="section-title">Education</div>${edu || '<div class="summary">No education added.</div>'}</div>
   <div class="section"><div class="section-title">Skills</div><div class="skills">${skills || '—'}</div></div>
+  ${certs ? `<div class="section"><div class="section-title">Certifications</div><ul class="item">${certs}</ul></div>` : ''}
 </body></html>`;
 }
 

@@ -276,67 +276,126 @@ app.post('/api/v1/voice/stop', (req, res) => {
   }
 });
 
-// Resume builder: generate structured resume from chat prompt
+// Resume builder: generate detailed structured resume from chat prompt
+const resumeSystemPrompt = `You are a professional resume writer. Create a COMPLETE, DETAILED resume JSON from the user's prompt.
+
+Return ONLY valid JSON (no markdown, no code fences, no prose) with EXACTLY this schema:
+{
+  "fullName": "string",
+  "contact": { "email": "string", "phone": "string" },
+  "summary": "string - 3-4 detailed sentences: who they are, top skills, key achievements, career goal",
+  "experience": [ { "company": "string", "role": "string", "duration": "string", "bullets": ["3-5 detailed strings"] } ],
+  "education": [ { "institution": "string", "degree": "string", "year": "string" } ],
+  "skills": ["8-15 strings grouped by category like 'Languages: JavaScript, Python'"],
+  "projects": [ { "name": "string", "description": "string - 1-2 sentences with tech used and result" } ],
+  "certifications": ["string"]
+}
+
+STRICT RULES:
+- NEVER return empty arrays or null. If the user gave few details, GENERATE realistic placeholder content matching their stated role/domain — the user will edit it later. Example for a React developer: experience [{company: "Tech Solutions Pvt Ltd", role: "React Developer", duration: "2023 - Present", bullets: ["Built 20+ responsive React components...", "Reduced page load time by 40% via code splitting...", ...]}], skills like "Frontend: React, Next.js, Tailwind", "Backend: Node.js, Express".
+- Experience: 1-3 jobs, each with 3-5 bullets using action verbs + measurable results (% faster, X users, Y% growth).
+- Summary: minimum 3 sentences, never 1 line.
+- Extract everything available from the user's prompt (real name, company, college, years, skills) and USE it.
+- If user says nothing about a field, create plausible placeholders a fresher/that role would have.
+- Keep section labels English; content can be Hindi/Hinglish if the user wrote in Hindi.
+- Double-check the JSON is valid and complete before responding.`;
+
+const parseResumeJson = (content) => {
+    const cleaned = String(content)
+        .replace(/```json\s*/gi, '')
+        .replace(/```\s*/g, '')
+        .trim();
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start === -1 || end === -1 || end <= start) throw new Error('No JSON object found');
+    return JSON.parse(cleaned.slice(start, end + 1));
+};
+
+// Safety net — agar LLM ne khali arrays diye to realistic placeholders bhar do
+const enrichResume = (data, prompt) => {
+    const role = (data.experience && data.experience[0] && data.experience[0].role) ||
+        (prompt.match(/([A-Za-z ]+developer|engineer|designer|analyst|manager|student)/i) || [null, 'Software Developer'])[1];
+    if (!data.summary || data.summary.length < 30) {
+        data.summary = `Passionate ${role} with hands-on experience building and shipping real products. Skilled in modern tools and best practices, focused on writing clean, maintainable code and solving problems end-to-end. Always learning, always shipping.`;
+    }
+    if (!Array.isArray(data.experience) || data.experience.length === 0) {
+        data.experience = [{
+            company: 'Tech Solutions Pvt Ltd',
+            role,
+            duration: '2023 - Present',
+            bullets: [
+                'Built and shipped key features used by 1,000+ users',
+                'Improved performance — cut page load time by 40%',
+                'Collaborated with designers and PMs to deliver on time',
+            ],
+        }];
+    }
+    data.experience = data.experience.map((e) => ({
+        company: e.company || 'Company',
+        role: e.role || role,
+        duration: e.duration || '2022 - Present',
+        bullets: Array.isArray(e.bullets) && e.bullets.length >= 2
+            ? e.bullets
+            : [
+                'Built and shipped key features used by 1,000+ users',
+                'Improved performance — cut page load time by 40%',
+                'Collaborated with designers and PMs to deliver on time',
+            ],
+    }));
+    if (!Array.isArray(data.education) || data.education.length === 0) {
+        data.education = [{ institution: 'Your College / University', degree: 'B.Tech / B.Sc — Computer Science', year: '2021 - 2025' }];
+    }
+    if (!Array.isArray(data.skills) || data.skills.length === 0) {
+        data.skills = ['Languages: JavaScript, Python, HTML/CSS', 'Frameworks: React, Node.js', 'Tools: Git, VS Code, Docker', 'Soft Skills: Communication, Problem Solving'];
+    }
+    if (!Array.isArray(data.projects)) data.projects = [];
+    if (!Array.isArray(data.certifications)) data.certifications = [];
+    return data;
+};
+
 const resumeGenerateHandler = async (req, res) => {
   const { prompt } = req.body;
   if (!prompt || typeof prompt !== 'string') {
     return res.status(400).json({ error: 'Prompt is required' });
   }
 
-  const GroqService = require('./services/groqService');
-
-  const systemPrompt = `You are a resume writer. Given the user prompt, extract and return a structured JSON resume with these exact fields: fullName (string), contact (object with email+phone), summary (2-3 sentences string), experience (array of {company, role, duration, bullets}), education (array of {institution, degree, year}), skills (array of strings). Return ONLY valid JSON, no prose, no markdown formatting, no code blocks. If any field is unknown, use null or empty array.`;
-
   try {
-    const resp = await GroqService.chat(`${systemPrompt} USER PROMPT: ${prompt}`, [], 'project', null);
-    
-    // GroqService.chat returns a string content from the LLM
-    let content = '';
-    if (typeof resp === 'string') {
-      content = resp;
-    } else if (resp && typeof resp === 'object') {
-      // Handle object response if needed
-      content = resp.content || resp.text || JSON.stringify(resp);
+    // Pura cascade use karo (Groq → Cerebras → Gemini → NVIDIA → ...) — sirf Groq nahi
+    const chatRes = await fetch(`http://127.0.0.1:${process.env.PORT || 5000}/api/v1/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: `${resumeSystemPrompt}\n\nUSER PROMPT: ${prompt}`,
+        model: 'auto',
+        mode: 'chat',
+        section: 'resume',
+      }),
+      signal: AbortSignal.timeout(120000),
+    });
+    const chatData = await chatRes.json();
+    const content = chatData.reply || chatData.message || '';
+
+    if (!content || content.length < 30) {
+      throw new Error('LLM returned empty response for resume');
     }
 
-    if (!content || content.length < 10) {
-      // Fallback: simple pattern extraction
-      const nameMatch = prompt.match(/[a-zA-Z]+ [a-zA-Z]+/);
-      const data = {
-        fullName: nameMatch ? nameMatch[0] : 'Your Name',
-        contact: null,
-        summary: 'AI-generated resume summary based on your prompt.',
-        experience: [],
-        education: [],
-        skills: []
-      };
-      const stmt = db.prepare('INSERT INTO resumes (prompt, json_data) VALUES (?, ?)');
-      stmt.run(prompt, JSON.stringify(data));
-      return res.json(data);
-    }
-
-    // Strip markdown code blocks and extra whitespace
-    const cleaned = content
-      .replace(/```json\s*/gi, '')
-      .replace(/```\s*/g, '')
-      .trim();
-
-    // Parse the JSON response
     let jsonData;
     try {
-      jsonData = JSON.parse(cleaned);
+      jsonData = parseResumeJson(content);
     } catch (parseErr) {
-      // If LLM didn't return clean JSON, try to extract what we can
-      console.warn('[Resume] JSON parse failed, attempting recovery:', parseErr.message);
+      logger.warn('[Resume] JSON parse failed, attempting recovery:', parseErr.message);
+      const nameMatch = prompt.match(/[a-zA-Z]+ [a-zA-Z]+/);
       jsonData = {
-        fullName: 'Your Name',
+        fullName: nameMatch ? nameMatch[0] : 'Your Name',
         contact: null,
-        summary: content.substring(0, 200),
+        summary: content.substring(0, 300),
         experience: [],
         education: [],
-        skills: []
+        skills: [],
       };
     }
+
+    jsonData = enrichResume(jsonData, prompt);
 
     // Save to SQLite
     const stmt = db.prepare('INSERT INTO resumes (prompt, json_data) VALUES (?, ?)');
@@ -345,14 +404,14 @@ const resumeGenerateHandler = async (req, res) => {
     res.json(jsonData);
   } catch (e) {
     logger.error('Resume generation error:', e.message);
-    const fallback = {
+    const fallback = enrichResume({
       fullName: 'Your Name',
       contact: null,
-      summary: 'Resume generated with Waaw AI',
+      summary: '',
       experience: [],
       education: [],
-      skills: []
-    };
+      skills: [],
+    }, prompt);
     const stmt = db.prepare('INSERT INTO resumes (prompt, json_data) VALUES (?, ?)');
     stmt.run(prompt, JSON.stringify(fallback));
     res.status(500).json({ error: 'Resume generation failed', detail: e.message });
