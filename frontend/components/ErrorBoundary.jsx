@@ -31,7 +31,7 @@ class ErrorBoundary extends React.Component {
             
             <h1 className="text-2xl font-bold mb-4" style={{ color: 'var(--color-text-primary)' }}>UI Crashed</h1>
             <p className="mb-6" style={{ color: 'var(--color-text-secondary)' }}>
-              An unexpected error occurred in the React tree. Don't worry, your backend and workspace are safe.
+              An unexpected error occurred in the React tree. Don&apos;t worry, your backend and workspace are safe.
             </p>
             
             {this.state.error && (

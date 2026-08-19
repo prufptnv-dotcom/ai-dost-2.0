@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FolderOpen, Plus, Trash2, Code2, X, RefreshCw,
@@ -14,9 +14,9 @@ export default function ProjectsView({ onOpenProject, onToast }) {
   const [desc, setDesc] = useState('');
   const [creating, setCreating] = useState(false);
 
-  const showToast = onToast || ((m, t) => {
+  const showToast = useMemo(() => onToast || ((m, t) => {
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('ai_dost_toast', { detail: { type: t || 'success', message: m } }));
-  });
+  }), [onToast]);
 
   const load = useCallback(async () => {
     setLoading(true);

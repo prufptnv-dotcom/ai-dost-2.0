@@ -69,6 +69,46 @@ const nextConfig = {
         destination: `${BACKEND_URL}/api/agent/:path*`
       },
       {
+        source: '/api/sandbox',
+        destination: `${BACKEND_URL}/api/sandbox`
+      },
+      {
+        source: '/api/sandbox/:path*',
+        destination: `${BACKEND_URL}/api/sandbox/:path*`
+      },
+      {
+        source: '/api/figma',
+        destination: `${BACKEND_URL}/api/figma`
+      },
+      {
+        source: '/api/figma/:path*',
+        destination: `${BACKEND_URL}/api/figma/:path*`
+      },
+      {
+        source: '/api/deploy',
+        destination: `${BACKEND_URL}/api/deploy`
+      },
+      {
+        source: '/api/deploy/:path*',
+        destination: `${BACKEND_URL}/api/deploy/:path*`
+      },
+      {
+        source: '/api/document',
+        destination: `${BACKEND_URL}/api/document`
+      },
+      {
+        source: '/api/document/:path*',
+        destination: `${BACKEND_URL}/api/document/:path*`
+      },
+      {
+        source: '/api/eval',
+        destination: `${BACKEND_URL}/api/eval`
+      },
+      {
+        source: '/api/eval/:path*',
+        destination: `${BACKEND_URL}/api/eval/:path*`
+      },
+      {
         source: '/api/image',
         destination: `${BACKEND_URL}/api/image`
       },

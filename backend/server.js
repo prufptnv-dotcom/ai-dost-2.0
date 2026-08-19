@@ -9,6 +9,7 @@ const logger = require('./logger');
 const Database = require('better-sqlite3');
 const { Server } = require('socket.io');
 const dns = require('dns');
+const crypto = require('crypto');
 
 // Windows pe IPv6 route kabhi-kabhi blackhole hota hai → Node fetch hang.
 // IPv4 pehle try karo (Pollinations/Gemini/Telegram sab IPv4 se reliable).
@@ -198,8 +199,11 @@ const pdfRoutes     = require('./routes/pdf');
 const learningRoutes = require('./routes/learning');
 const gitRoutes     = require('./routes/git');
 const agentRoutes   = require('./routes/agent');
+const figmaRoutes   = require('./routes/figma');
 const previewRoutes = require('./routes/preview');
 const terminalRoutes = require('./routes/terminal');
+const sandboxRoutes = require('./sandbox/routes');
+const deployRoutes = require('./routes/deploy');
 
 app.use('/api/chat',     chatRoutes);
 app.use('/api/test',     testRoutes);
@@ -207,9 +211,16 @@ app.use('/api/image',    imageRoutes);
 app.use('/api/pdf',      pdfRoutes);
 app.use('/api/learning', learningRoutes);
 app.use('/api/git',      gitRoutes);
-app.use('/api/agent',    agentRoutes);
-app.use('/api/preview',  previewRoutes);
+app.use('/api/agent', agentRoutes);
+app.use('/api/figma', figmaRoutes);
+app.use('/api/preview', previewRoutes);
 app.use('/api/terminal', terminalRoutes);
+app.use('/api/sandbox',  sandboxRoutes);
+app.use('/api/deploy',   deployRoutes);
+
+// Troubleshooting aliases (documented in AGENTS.md) — same data as /api/agent/quota-status
+app.get('/api/quota-status', (_req, res) => res.redirect('/api/agent/quota-status'));
+app.get('/api/circuit-breaker', (_req, res) => res.redirect('/api/agent/quota-status'));
 
 // v1 aliases so the frontend API client (baseURL /api/v1) resolves correctly
 app.use('/api/v1/chat',     chatRoutes);
@@ -220,6 +231,8 @@ app.use('/api/v1/learning', learningRoutes);
 app.use('/api/v1/git',      gitRoutes);
 app.use('/api/v1/agent',    agentRoutes);
 app.use('/api/v1/terminal', terminalRoutes);
+app.use('/api/v1/sandbox',  sandboxRoutes);
+app.use('/api/v1/deploy',   deployRoutes);
 
 // ── AI Assistant Endpoints (mounted at /api/v1/ai) ──────────────────────────
 // This allows frontend calls to /ai/code-suggestions and /ai/lsp-diagnostics
@@ -424,7 +437,9 @@ app.post('/api/v1/resume/generate', resumeGenerateHandler);
 
 // ── Document engine (docx / pptx / csv) ────────────────────────────────────
 const documentRoutes = require('./routes/documents');
+const evalRoutes     = require('./routes/eval');
 app.use('/api/document', documentRoutes);
+app.use('/api/eval', evalRoutes);
 app.use('/api/v1/document', documentRoutes);
 
 // ── Project Memory endpoints (SQLite-backed) ──────────────────────────────
@@ -599,14 +614,21 @@ app.get(['/api/v1/memory/project/:id/search', '/api/project/:id/search'], (req, 
     }
 });
 
-// Chat history persistence endpoints
-app.get('/api/v1/chat/history', (req, res) => {
+// Chat history persistence endpoints (registered under both /api and /api/v1 —
+// frontend proxies /api/chat/history; keep aliases in sync)
+function getChatHistory(req, res) {
     const sessionId = req.query.session_id || 'default';
     const rows = db.prepare('SELECT id, role, content, timestamp FROM chat_history WHERE session_id = ? ORDER BY id ASC').all(sessionId);
     res.json({ success: true, session_id: sessionId, messages: rows });
-});
+}
 
-app.post('/api/v1/chat/save', (req, res) => {
+function deleteChatHistory(req, res) {
+    const sessionId = req.query.session_id || 'default';
+    db.prepare('DELETE FROM chat_history WHERE session_id = ?').run(sessionId);
+    res.json({ success: true, message: 'History cleared' });
+}
+
+function saveChatHistory(req, res) {
     const { session_id, messages } = req.body;
     if (!Array.isArray(messages)) return res.status(400).json({ error: 'messages array required' });
     const sid = session_id || 'default';
@@ -619,17 +641,18 @@ app.post('/api/v1/chat/save', (req, res) => {
     });
     tx(messages);
     res.json({ success: true, saved: messages.length, cleared: del.changes });
-});
+}
 
-app.delete('/api/v1/chat/history', (req, res) => {
-    const sessionId = req.query.session_id || 'default';
-    db.prepare('DELETE FROM chat_history WHERE session_id = ?').run(sessionId);
-    res.json({ success: true, message: 'History cleared' });
-});
+app.get('/api/chat/history', getChatHistory);
+app.get('/api/v1/chat/history', getChatHistory);
+app.delete('/api/chat/history', deleteChatHistory);
+app.delete('/api/v1/chat/history', deleteChatHistory);
+app.post('/api/chat/save', saveChatHistory);
+app.post('/api/v1/chat/save', saveChatHistory);
 
 // Root redirect to frontend dev server
 app.get('/', (req, res) => {
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     res.redirect(frontendUrl);
 });
 
@@ -665,20 +688,39 @@ app.use((req, res, next) => {
     next();
 });
 
-// Global error handler
+// ── Error-normalization middleware ──────────────────────────────────────
+// Converts any thrown/rejected error into a consistent JSON envelope.
+// Handles: AppError, JSON parse errors, body-parser errors, timeouts.
+const { toAppError } = require('./utils/errors');
+
 app.use((err, req, res, next) => {
-    logger.error('Server Error:', err.message, err.stack);
+    // Body-parser / JSON parse errors (malformed request body)
+    if (err && (err.type === 'entity.parse.failed' || err instanceof SyntaxError)) {
+        return res.status(400).json({ error: 'Invalid JSON in request body', code: 'BAD_JSON' });
+    }
+    if (err && err.type === 'entity.too.large') {
+        return res.status(413).json({ error: 'Request body too large', code: 'PAYLOAD_TOO_LARGE' });
+    }
+    if (err && err.type && err.type.startsWith('entity.')) {
+        return res.status(400).json({ error: err.message || 'Malformed request body', code: 'BAD_BODY' });
+    }
+
+    const normalized = toAppError(err);
+    logger.error(`[${req.method} ${req.originalUrl}] ${normalized.code}: ${normalized.message}`);
+    if (normalized.status >= 500) logger.error(normalized.stack || '');
+
     if (!res.headersSent) {
-        res.status(500).json({
-            error: 'Internal server error',
-            message: err.message || 'An unexpected error occurred',
+        res.status(normalized.status).json({
+            error: normalized.message,
+            code: normalized.code,
+            ...(normalized.details ? { details: normalized.details } : {}),
         });
     }
 });
 
 // Global process error catchers — prevent crashes
 process.on('uncaughtException', (err) => {
-    logger.error('💥 Uncaught Exception:', err.message, err.stack);
+    logger.error('💥 Uncaught Exception:', err?.message, err?.stack);
 });
 
 process.on('unhandledRejection', (reason) => {
@@ -695,26 +737,46 @@ const io = new Server(server, {
     methods: ['GET', 'POST'],
   },
   transports: ['websocket', 'polling'],
+  allowEIO3: true,
+  pingTimeout: 60000,
+  pingInterval: 25000,
 });
 const { setupTerminalSocket } = require('./sockets/terminal');
 setupTerminalSocket(io);
+
+// ── Sandbox WebSocket Server ──────────────────────────────────────
+const SandboxWebSocketServer = require('./sandbox/wsServer');
+const sandboxWs = new SandboxWebSocketServer(server);
+sandboxWs.on('log', (data) => logger.info(`[Sandbox:${data.sandboxId}] ${data.message}`));
 
 // ── LSP Proxy ───────────────────────────────────────────────────────
 const { setupLspServer } = require('./lsp/lspServer');
 setupLspServer(server);
 
-server.listen(PORT, () => {
-    logger.info(`🚀 AI Dost Server running on http://localhost:${PORT}`);
-    logger.info(`   Health : http://localhost:${PORT}/health`);
-    logger.info(`   Chat   : http://localhost:${PORT}/api/chat`);
-    logger.info(`   Image  : http://localhost:${PORT}/api/image/generate`);
-    logger.info(`   Test   : http://localhost:${PORT}/api/test/all`);
-});
+// ── Raw Terminal WebSocket (CodeEditor widget) ─────────────────────
+const { setupTerminalWsServer } = require('./sockets/terminalWs');
+setupTerminalWsServer(server);
 
-// ── Telegram bot (optional — TELEGRAM_BOT_TOKEN env se enable) ──────────────
-try {
+function startServer(port = PORT) {
+  return server.listen(port, () => {
+    logger.info(`🚀 AI Dost Server running on http://localhost:${port}`);
+    logger.info(`   Health : http://localhost:${port}/health`);
+    logger.info(`   Chat   : http://localhost:${port}/api/chat`);
+    logger.info(`   Image  : http://localhost:${port}/api/image/generate`);
+    logger.info(`   Test   : http://localhost:${port}/api/test/all`);
+  });
+}
+
+if (require.main === module) {
+  startServer();
+
+  // ── Telegram bot (optional — TELEGRAM_BOT_TOKEN env se enable) ──────────────
+  try {
     const { startTelegramBot } = require('./services/telegramBot');
     startTelegramBot();
-} catch (e) {
+  } catch (e) {
     logger.warn('⚠️ Telegram bot start fail:', e.message);
+  }
 }
+
+module.exports = { app, server, io, sandboxWs, db, startServer, PORT };

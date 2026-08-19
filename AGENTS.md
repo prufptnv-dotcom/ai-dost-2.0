@@ -8,10 +8,11 @@ cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\backend"
 node server.js
 # Server runs on: http://localhost:5000
 
-# 2. Start Frontend
+# 2. Start Frontend (Next.js 16 + Turbopack)
 cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\frontend"
 npm run dev
-# Frontend runs on: http://localhost:3001
+# Frontend runs on: http://localhost:3000 (verified — NOT 3001)
+# /api/* rewrites proxy to backend :5000 (chat, agent, sandbox, figma, deploy, document, eval, ...)
 
 # 3. Start Python AI Engine (LlamaIndex RAG, optional)
 cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\ai-engine"
@@ -175,6 +176,16 @@ start_ai_engine.bat
 | `/help` | Show all commands | `/help` |
 | Plain text | Treated as `/chat` | `hello` |
 
+## 🔌 Phase-1..4 API Surface (backend :5000)
+
+- **Sandbox (Docker)**: `POST /api/sandbox/create` `{projectId, options.ports[]}` → container + `/workspace` volume; `GET /api/sandbox/:id`; `POST /:id/exec`; `GET|POST /:id/files/{read,write,list}`; `POST /:id/dev/{detect,start,stop,build}`; `GET /:id/dev/status`; `POST /:id/ports/expose`; `DELETE /:id`; `GET /project/:projectId`. Errors: `400` invalid path (traversal blocked), `404` unknown sandbox, `503` Docker down. WS: `/api/sandbox/ws` (create/exec/write/read/list/dev:* /destroy messages). Max 10 containers; idle cleanup 30min.
+- **Planner**: `POST /api/agent/plan` `{userPrompt}` → `{plan}` (400 if empty); `POST /api/agent/run` (SSE) — agent tools include `plan_project`, `execute_plan`, `list_templates` (see `backend/services/plannerService.js` — react-vite/nextjs/astro/sveltekit templates). `GET /api/agent/tasks` → `{tasks:[]}` (Kanban state is client-side).
+- **Figma MCP**: `GET /api/figma/health`; `GET /file/:fileKey`; `GET /components`; `GET /design-to-code?fileKey=&nodeId=`; `GET /export?fileKey=&nodeId=&format=`. No key → `503 FIGMA_NO_KEY`.
+- **Eval harness**: `GET /api/eval/status` (5 scenarios); `POST /api/eval` `{scenario|all, verbose}` → per-scenario score/feedback. Runs real agent via `/api/agent/run` (LLM-dependent pass rates).
+- **Deploy**: `GET /api/deploy/targets` → vercel/netlify/cloudflare/static; `POST /api/deploy`; `POST /api/deploy/validate`.
+- **Docs**: `POST /api/document/generate` (docx/pptx/csv/pdf/xlsx) — files in `frontend/public/downloads/`.
+- Frontend proxies all of the above via rewrites in `frontend/next.config.mjs` (keep in sync when adding new `/api/*` routes!).
+
 ## 🐛 Troubleshooting
 
 ### Common Issues
@@ -232,30 +243,59 @@ ai-dost version 2.o/
 ## 🧪 Running Tests
 
 ```powershell
-# Frontend tests
+# Frontend: unit + component (Jest 30 + RTL, jsdom, 0 LLM calls)
 cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\frontend"
-npm test
+npm test                    # 24 tests / 5 suites
+npm test -- --coverage      # coverage thresholds enforced (4% baseline, grows as suites expand)
 
-# Backend verification
+# Backend: unit + integration (node:test, 0 LLM calls, ephemeral port)
 cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\backend"
-node test_apiClient.js
-node test_agent_run.js
+npm run test:unit           # 58 tests total (unit+integration)
+npm run test:integration
+node --test tests/unit.test.js tests/integration.test.js
 
-# ESLint check
+# E2E smoke (Playwright, needs both servers on :3000 + :5000; config reuses them)
+cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\backend"
+npx playwright test         # 16 flows — pages, sidebar nav, chat send, Ctrl+K, voice, agent, docs
+
+# ESLint check (0 errors / 0 warnings expected)
 cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\frontend"
 npm run lint
 
-# Document generation test (all 5 types)
+# CI: .github/workflows/ci.yml runs all of the above (frontend lint+test+cov, backend node:test, E2E)
+```
+
+### Test notes
+- `backend/tests/unit.test.js` — agent `parseLLMAction`, RAG search, CircuitBreaker/RateLimiter/RobustApiClient, `utils/errors`, sandbox path-traversal guard. Zero network.
+- `backend/tests/integration.test.js` — boots real Express app on port 0 (no listener, no Telegram): health, error envelopes (BAD_JSON/404), chat validation, chat history save/load round-trip, agent plan/tasks, eval status + bad ID, document validation, figma 503, deploy targets, sandbox 404s, root redirect. Zero LLM.
+- `backend/tests/e2e/smoke.spec.js` + `backend/playwright.config.js` — UI-deterministic; LLM replies asserted softly so free-tier rate limits don't flake CI.
+- `frontend/tests/` — Sidebar (10 nav items — regression for the 5 dead items fix), KanbanBoard (add-task + TDZ crash regression), ProjectsView (api mocked via jest.mock), useWebContainer (boot lifecycle + retry + runCommand contract, `@webcontainer/api` mocked virtual), AICompanion.
+- `jest.setup.js` polyfills TextEncoder/TextDecoder/Streams (jsdom lacks them).
+- `eslint.config.mjs` ignores `coverage/`, `test-results/`, `playwright-report/`, `downloads/`.
+- npm audit residual (non-exploitable here): backend 2×high via pptxgenjs→image-size (only if user-supplied images parsed — none in doc flow); frontend 1×high serialize-javascript via workbox-build (build-time only) + moderates via monaco's internal dompurify 3.3.1 (sanitizes only monaco's own markup; root dompurify is fixed 3.4.13). `npm audit fix` safe path already applied.
+
+### Bugs the test suites caught (all fixed)
+1. `GET /` redirected to dead port 3001 → now 3000 (or `FRONTEND_URL`).
+2. `/api/chat/history` + `/api/chat/save` only existed under `/api/v1` — frontend called `/api/chat/*` and got 404 (HistoryView broken). Now registered under both.
+3. `server.js` handle leaks — sandbox cleanup + WS heartbeat `setInterval`s kept Node alive after shutdown → `.unref()`.
+4. `KanbanBoard.jsx` — undefined `draggedTask` + `addNewTask` declared after `return` (TDZ crash on Enter) → fixed + regression test.
+5. `Sidebar.jsx` — only 5 of 10 nav items rendered; Projects/Images/History/Settings/MCP unreachable → now renders all `navItems`.
+6. KanbanBoard "Add" buttons: `Add`/`+` buttons now call addNewTask properly (was dead code).
+7. Socket.IO WebSocket dead — `ws@>=8.18` `WebSocket.Server({ server, path })` aborts NON-matching upgrades with `abortHandshake(400)`, corrupting sockets socket.io already upgraded (101) → sandbox wss switched to `noServer: true` + manual path check (`sandbox/wsServer.js`). Symptom: browser `Invalid frame header` on `ws://:5000/socket.io/`, terminal falls back to REST.
+8. Agent (copilot) one-prompt full-stack generation broken — 4 bugs in `backend/routes/agent.js`, all fixed + regression tests (`parseLLMAction` suite):
+   - `fileEvents is not defined` crash in `generate_project_from_prompt` (dead line) → removed.
+   - `parseLLMAction` `normalizedParams` dropped `prompt`/`targetDir` keys → now keeps them (+ sandbox keys: `projectId|sandboxId|filePath|dirPath|customCommand|containerPort|options`; snake_case variants normalized).
+   - Relative `targetDir` resolved against backend cwd (files + `node_modules` landed in `backend/todo-app/`) → now `path.isAbsolute ? requestedDir : safeJoin(projectPath, requestedDir)` (workspace `%TEMP%\agent-ws-default\<project>`).
+   - Scaffold LLM hard-wired to Gemini (quota 429) and accepted first non-error response even if garbage → `callScaffoldLLM` mini-cascade (Groq→Gemini→Cerebras→NVIDIA→Together→DeepSeek→Mistral→HuggingFace→OpenRouter→Ollama) with strict `{files:[...]}` JSON validation — invalid JSON skips to next provider. Prompt shortened to reduce free-tier model garbage.
+   - Verified E2E: 15-file React+Vite+Express todo app generated + `npm install` + agent continues with `list_directory` self-check. Note: Docker not running → `sandbox_create` fails with 503 (environment, not code).
+
+### Document generation test (all 5 types)
+```bash
 curl -X POST http://localhost:5000/api/document/generate -H "Content-Type: application/json" -d '{"type":"pdf","topic":"test"}'
 curl -X POST http://localhost:5000/api/document/generate -H "Content-Type: application/json" -d '{"type":"docx","topic":"test"}'
 curl -X POST http://localhost:5000/api/document/generate -H "Content-Type: application/json" -d '{"type":"pptx","topic":"test"}'
 curl -X POST http://localhost:5000/api/document/generate -H "Content-Type: application/json" -d '{"type":"csv","topic":"test"}'
 curl -X POST http://localhost:5000/api/document/generate -H "Content-Type: application/json" -d '{"type":"xlsx","topic":"test"}'
-
-# AI Engine verification
-curl http://127.0.0.1:8001/health
-curl -X POST http://127.0.0.1:8001/ai/xlsx/generate -H "Content-Type: application/json" -d '{"topic":"test","rows":3}'
-curl -X POST http://127.0.0.1:8001/ai/web/search -H "Content-Type: application/json" -d '{"query":"test"}'
 ```
 
 ## 🚀 Deployment

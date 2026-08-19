@@ -103,7 +103,7 @@ export default function CopilotWorkspace({
       setTerminalOutput(`Error: ${err.message}`);
       setHistory(prev => [...prev, `Error: ${err.message}`]);
     }
-  }, []);
+  }, [addFile]);
 
   // Generate project from prompt
   const handleGenerateProject = useCallback(async (prompt) => {
@@ -144,7 +144,7 @@ export default function CopilotWorkspace({
       setHistory(prev => [...prev, `❌ Generation failed: ${err.message}`]);
       setIsGenerating(false);
     }
-  }, [isGenerating]);
+  }, [isGenerating, addFile]);
 
   // Save project
   const saveProject = useCallback(() => {

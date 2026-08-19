@@ -114,7 +114,7 @@ export default function McpPanel({ onConfigSelect }) {
           Model Context Protocol (MCP) allows your autonomous agent to securely connect to local and remote resources.
         </p>
         <p className="text-xs text-slate-400">
-          When you click "Use this Server", the connection settings will be passed to the Agent Workspace. The agent will then discover available tools (like database queries) and use them autonomously.
+          When you click &quot;Use this Server&quot;, the connection settings will be passed to the Agent Workspace. The agent will then discover available tools (like database queries) and use them autonomously.
         </p>
       </div>
     </div>

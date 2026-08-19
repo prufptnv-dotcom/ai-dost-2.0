@@ -606,3 +606,87 @@ code, pre, .font-mono { font-family: var(--font-mono) !important; }
     transition: none !important;
   }
 }
+
+/* ═══════════════════════════════════════
+   AI STUDIO / COPILOT MARKDOWN STYLES
+   ═══════════════════════════════════════ */
+.ai-studio-markdown {
+  color: #e4e4e7;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.ai-studio-markdown h1,
+.ai-studio-markdown h2,
+.ai-studio-markdown h3,
+.ai-studio-markdown h4 {
+  color: #ffffff;
+  font-weight: 700;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.3;
+}
+.ai-studio-markdown h1 { font-size: 15px; }
+.ai-studio-markdown h2 { font-size: 14px; color: #f4f4f5; }
+.ai-studio-markdown h3 { font-size: 13px; color: #93c5fd; }
+.ai-studio-markdown h4 { font-size: 12px; }
+
+.ai-studio-markdown p {
+  margin-top: 0.35rem;
+  margin-bottom: 0.5rem;
+  color: #d4d4d8;
+}
+
+.ai-studio-markdown ul,
+.ai-studio-markdown ol {
+  padding-left: 1.2rem;
+  margin-top: 0.35rem;
+  margin-bottom: 0.5rem;
+  space-y: 0.3rem;
+}
+.ai-studio-markdown li {
+  margin-bottom: 0.35rem;
+  color: #d4d4d8;
+}
+.ai-studio-markdown li::marker {
+  color: #60a5fa;
+}
+
+.ai-studio-markdown strong,
+.ai-studio-markdown b {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.ai-studio-markdown code {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #93c5fd;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 0.15rem 0.35rem;
+  border-radius: 4px;
+}
+
+.ai-studio-markdown pre {
+  background: #09090b;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  padding: 0.75rem;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+.ai-studio-markdown pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: #a5f3c5;
+}
+
+.ai-studio-markdown blockquote {
+  border-left: 3px solid #3b82f6;
+  padding-left: 0.75rem;
+  margin: 0.5rem 0;
+  color: #a1a1aa;
+  font-style: italic;
+}
+

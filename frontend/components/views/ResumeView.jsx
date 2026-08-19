@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { FileText, Download, Sparkles, X, LayoutTemplate, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { marked } from 'marked';
@@ -93,7 +93,7 @@ export default function ResumeView({
   const [template, setTemplate] = useState('professional');
   const [previewHtml, setPreviewHtml] = useState(null);
 
-  const showToast = onToast || ((m, t) => { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('ai_dost_toast', { detail: { type: t || 'success', message: m } })); });
+  const showToast = useMemo(() => onToast || ((m, t) => { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('ai_dost_toast', { detail: { type: t || 'success', message: m } })); }), [onToast]);
 
   const generate = useCallback(async (text) => {
     const p = (text || prompt).trim();

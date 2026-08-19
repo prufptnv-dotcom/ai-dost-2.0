@@ -178,7 +178,6 @@ export default function ImageView({ onToast }) {
                   <SmartImg src={img.url} alt={img.prompt} delay={i * 900} className="w-full aspect-[3/2] object-cover transition-transform duration-300 group-hover:scale-105" />
                   <div className="absolute inset-x-0 bottom-0 flex items-center justify-between p-2 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.8))' }}>
                     <span className="text-[10px] truncate max-w-[70%]" style={{ color: '#e2e8f0' }}>Variant {i + 1}</span>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <a href={img.url} download={`ai-dost-${i + 1}.png`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold" style={{ background: 'rgba(255,255,255,0.15)', color: '#fff' }}>
                       <Download className="w-3 h-3" /> Save
                     </a>

@@ -5,6 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const os = require('os');
+const sandboxManager = require('../sandbox/sandboxManager');
+const devServerManager = require('../sandbox/devServerManager');
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  AI-Dost Autonomous Agent Core — ReAct Loop Engine v2
@@ -26,6 +28,8 @@ const CerebrasService   = require('../services/cerebrasService');
 const PythonEngine      = require('../services/pythonEngineService');
 const AgentOrchestrator = require('../agent/orchestrator');
 const McpClientManager  = require('../mcp/McpClientManager');
+const PlannerService    = require('../services/plannerService');
+const SpecService       = require('../services/specService');
 
 // ── Agent System Prompt ───────────────────────────────────────────────────────
 const AGENT_SYSTEM_PROMPT = `You are AI-Dost Agent, an autonomous AI coding assistant — similar to GitHub Copilot Agent Mode.
@@ -48,6 +52,18 @@ TOOLS AVAILABLE:
 9. generate_project_from_prompt(prompt, targetDir) — Plan and create a complete full-stack project from a single prompt. Writes all files, runs npm install, starts dev server.
 10. resume_from_chat(prompt) — Generate a structured resume from a user prompt. Returns JSON resume data.
 
+SANDBOX TOOLS (isolated Docker containers for safe code execution):
+11. sandbox_create(projectId, options) — Create a new isolated sandbox container for a project
+12. sandbox_exec(sandboxId, command, options) — Execute a command in the sandbox
+13. sandbox_write(sandboxId, filePath, content) — Write a file in the sandbox
+14. sandbox_read(sandboxId, filePath) — Read a file from the sandbox
+15. sandbox_list(sandboxId, dirPath) — List files in the sandbox
+16. sandbox_dev_start(sandboxId, projectPath, customCommand) — Start a dev server (Vite/Next.js/Astro) in the sandbox
+17. sandbox_dev_stop(sandboxId) — Stop the dev server
+18. sandbox_dev_build(sandboxId, projectPath) — Build the project for production
+19. sandbox_expose(sandboxId, containerPort) — Expose a container port to host
+20. sandbox_destroy(sandboxId) — Destroy the sandbox container
+
 STRICT OUTPUT FORMAT — Respond ONLY with valid JSON, nothing else:
 
 Shape 1 (Tool Call):
@@ -64,7 +80,7 @@ Shape 2 (Final Answer):
 {
   "thought": "Task is complete.",
   "action": "FINAL_ANSWER",
-  "answer": "Summary of what was done and what files were changed."
+  "answer": "Detailed, professional Markdown response (Google AI Studio / v0 style):\n1. Clear statement of what was created or modified.\n2. Bullet points with bold titles (e.g. • **Feature Name**: Detailed explanation) detailing the exact changes, architecture, logic, and UI upgrades.\n3. Inline code tags (e.g. \`src/App.jsx\`, \`npm install\`, \`useState\`) for files and components.\n4. Clear instructions on how to test and run the app.\n5. Respond in the user's preferred language (Hindi, Hinglish, or English)."
 }
 
 RULES:
@@ -74,8 +90,9 @@ RULES:
 - For visual UI bugs, use 'take_screenshot' to capture the rendered app, then analyze with vision.
 - For "create a full project" requests, use 'generate_project_from_prompt' to build the entire project autonomously.
 - For resume requests, use 'resume_from_chat' to generate structured resume data.
+- For isolated code execution, testing, or running dev servers, use sandbox tools.
 - Never output prose before or after JSON — respond strictly with the JSON object.
-- Max 14 steps total. Output FINAL_ANSWER when complete.
+- Max 14 steps total. Output FINAL_ANSWER with rich formatted explanation when complete.
 `;
 
 // ── Phase 3: Lightweight TF-IDF Codebase Search (RAG) ────────────────────────
@@ -471,59 +488,55 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
     case 'generate_project_from_prompt': {
       return new Promise(async (resolve) => {
         try {
-          const prompt = parameters.prompt || '';
-          const targetDir = parameters.targetDir || projectPath;
+const prompt = parameters.prompt || '';
+          const requestedDir = parameters.targetDir || projectPath;
+          const targetDir = path.isAbsolute(requestedDir) ? requestedDir : safeJoin(projectPath, requestedDir);
           
           logger.info(`[Agent] Generating full-stack project for prompt: "${prompt}"`);
           if (onProgress) onProgress({ type: 'step', stepLog: { action: 'Generating architecture', thought: 'Analyzing prompt and generating file tree...' } });
           
-          // 1. Prompt Gemini to scaffold the project
-          const GeminiService = require('../services/geminiService');
-          const systemPrompt = `You are an expert full-stack scaffolding AI. 
-Generate a complete, working codebase for the following prompt: "${prompt}".
-Return ONLY a valid JSON object containing an array of files. 
-Do not wrap it in markdown blockquotes, just raw JSON.
-Example format:
-{
-  "files": [
-    { "path": "index.html", "content": "<!DOCTYPE html>..." },
-    { "path": "style.css", "content": "body { ... }" },
-    { "path": "package.json", "content": "{ \"name\": \"app\" }" }
-  ]
-}`;
+// 1. Prompt LLM cascade to scaffold the project
+          const systemPrompt = `You are an expert full-stack scaffolding AI.
+Generate a complete, working codebase for: "${prompt}".
+Return ONLY raw valid JSON (no markdown fences, no prose) with this exact shape:
+{"files":[{"path":"relative/path","content":"full file content"}]}
+Rules: use full file contents; escape quotes/newlines inside strings properly; include package.json with dependencies and scripts; include README.md with run instructions.`;
 
-          const rawResponse = await GeminiService.chat(systemPrompt, [], null, 'agent');
+          const rawResponse = await callScaffoldLLM(systemPrompt);
           if (onProgress) onProgress({ type: 'step', stepLog: { action: 'Parsing files', thought: 'Extracting project structure...' } });
           
-          // 2. Parse JSON
+          // 2. Parse JSON (fence-strip + extract object + newline repair)
           let parsedData;
-          try {
-            const cleaned = rawResponse.replace(/\`\`\`json\s*/gi, '').replace(/\`\`\`\s*$/gi, '').trim();
-            parsedData = JSON.parse(cleaned);
-          } catch (err) {
-            // repair attempt
+          const tryParseJson = (text) => {
+            const stripped = String(text || '').replace(/```(?:json)?\s*/gi, '').trim();
+            const jsonBlock = stripped.match(/\{[\s\S]*\}/);
+            const candidate = jsonBlock ? jsonBlock[0] : stripped;
             try {
-              const repaired = rawResponse.replace(/(?<=:\s*"[\s\S]*?)\r?\n(?=[\s\S]*?")/g, '\\n');
-              parsedData = JSON.parse(repaired);
-            } catch (err2) {
-              throw new Error('Failed to parse scaffolding JSON from AI.');
+              return JSON.parse(candidate);
+            } catch (_) {
+              return null;
             }
+          };
+          parsedData = tryParseJson(rawResponse);
+          if (!parsedData) {
+            const repaired = String(rawResponse || '').replace(/(?<=:\s*"[\s\S]*?)\r?\n(?=[\s\S]*?")/g, '\\n');
+            parsedData = tryParseJson(repaired);
+          }
+          if (!parsedData) {
+            throw new Error('Failed to parse scaffolding JSON from AI.');
           }
           
           if (!parsedData || !Array.isArray(parsedData.files)) {
             throw new Error('AI returned an invalid project structure format.');
           }
 
-          // 3. Write files to workspace
+// 3. Write files to workspace
           const writtenFiles = [];
           for (const file of parsedData.files) {
             const safePath = safeJoin(targetDir, file.path);
             fs.mkdirSync(path.dirname(safePath), { recursive: true });
             fs.writeFileSync(safePath, file.content || '', 'utf-8');
             writtenFiles.push({ path: file.path, size: Buffer.from(file.content || '').length });
-            
-            // Auto-emit event so frontend IDE file tree updates in real-time
-            fileEvents.emit('fileChanged', { projectId: null, action: 'add', path: file.path, content: file.content });
           }
 
           // 4. Initialize Git
@@ -588,8 +601,155 @@ Example format:
       });
     }
 
+    // ── Sandbox Tools ──────────────────────────────────────────────────────────
+    case 'sandbox_create': {
+      try {
+        const { projectId: spId, options } = parameters;
+        const sandbox = await sandboxManager.createSandbox(spId || projectId, options);
+        return { success: true, sandbox: { id: sandbox.id, projectId: sandbox.projectId, path: sandbox.path, createdAt: sandbox.createdAt } };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
+    case 'sandbox_exec': {
+      try {
+        const { sandboxId, command, options } = parameters;
+        const result = await sandboxManager.exec(sandboxId, command, options);
+        return { success: result.success, stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
+    case 'sandbox_write': {
+      try {
+        const { sandboxId, filePath, content } = parameters;
+        await sandboxManager.writeFile(sandboxId, filePath, content || '');
+        return { success: true, message: `File written: ${filePath}` };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
+    case 'sandbox_read': {
+      try {
+        const { sandboxId, filePath } = parameters;
+        const content = await sandboxManager.readFile(sandboxId, filePath);
+        return { success: true, content };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
+    case 'sandbox_list': {
+      try {
+        const { sandboxId, dirPath } = parameters;
+        const files = await sandboxManager.listFiles(sandboxId, dirPath || '.');
+        return { success: true, files };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
+    case 'sandbox_dev_start': {
+      try {
+        const { sandboxId, projectPath, customCommand } = parameters;
+        const result = await devServerManager.startDevServer(sandboxId, projectPath || '.', { customCommand });
+        return { success: true, result };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
+    case 'sandbox_dev_stop': {
+      try {
+        const { sandboxId } = parameters;
+        await devServerManager.stopDevServer(sandboxId);
+        return { success: true };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
+    case 'sandbox_dev_build': {
+      try {
+        const { sandboxId, projectPath } = parameters;
+        const result = await devServerManager.buildProject(sandboxId, projectPath || '.');
+        return { success: result.success, output: result.output, error: result.error };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
+    case 'sandbox_expose': {
+      try {
+        const { sandboxId, containerPort } = parameters;
+        const result = await sandboxManager.exposePort(sandboxId, containerPort);
+        return { success: true, result };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
+    case 'sandbox_destroy': {
+      try {
+        const { sandboxId } = parameters;
+        await sandboxManager.destroy(sandboxId);
+        return { success: true };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
+    case 'sandbox_destroy': {
+      try {
+        const { sandboxId } = parameters;
+        await sandboxManager.destroy(sandboxId);
+        return { success: true };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
+    // ── Planner Tools ────────────────────────────────────────────────────────
+    case 'plan_project': {
+      try {
+        const { prompt, options } = parameters;
+        if (!prompt) return { success: false, error: 'prompt is required' };
+        const plan = await PlannerService.createPlan(prompt, options);
+        return { success: true, plan };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
+    case 'execute_plan': {
+      try {
+        const { planId } = parameters;
+        if (!planId) return { success: false, error: 'planId is required' };
+        
+        // We can't use async callback here, so return the plan for agent to execute step by step
+        const plan = PlannerService.getPlan(planId);
+        if (!plan) return { success: false, error: `Plan ${planId} not found` };
+        
+        return { success: true, plan, message: 'Plan retrieved. Execute steps sequentially using sandbox tools.' };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
+    case 'list_templates': {
+      try {
+        const templates = PlannerService.listTemplates();
+        return { success: true, templates };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
     default:
-      return { success: false, error: `Unknown tool: ${action}. Available: read_file, write_file, apply_diff, run_terminal, list_directory, search_codebase, run_tests, take_screenshot, generate_project_from_prompt, resume_from_chat` };
+      return { success: false, error: `Unknown tool: ${action}. Available: read_file, write_file, apply_diff, run_terminal, list_directory, search_codebase, run_tests, take_screenshot, generate_project_from_prompt, resume_from_chat, sandbox_create, sandbox_exec, sandbox_write, sandbox_read, sandbox_list, sandbox_dev_start, sandbox_dev_stop, sandbox_dev_build, sandbox_expose, sandbox_destroy, plan_project, execute_plan, list_templates` };
   }
 }
 
@@ -733,6 +893,63 @@ async function callLLM(messages, customKeys = null, onFallbackNotice = null) {
   throw new Error('All cloud AI providers failed and local Ollama is offline. Please check API keys in Settings or start Ollama locally (ollama serve).');
 }
 
+// ── Scaffolding LLM (mini-cascade for generate_project_from_prompt) ──────────
+async function callScaffoldLLM(scaffoldPrompt, customKeys = null) {
+  const isErrorResp = (r) => !r || typeof r !== 'string' ||
+    r.includes('API key set nahi') || r.includes('API error') ||
+    r.includes('service me error') || r.includes('Rate limit') ||
+    r.includes('rate_limit_exceeded') || r.includes('Credit limit') ||
+    r.includes('Quota exceeded') || r.includes('429') || r.trim().length <= 5;
+
+  const extractFiles = (resp) => {
+    const stripped = String(resp || '').replace(/```(?:json)?\s*/gi, '').trim();
+    const jsonBlock = stripped.match(/\{[\s\S]*\}/);
+    if (!jsonBlock) return null;
+    try {
+      const parsed = JSON.parse(jsonBlock[0]);
+      return parsed && Array.isArray(parsed.files) && parsed.files.length > 0 ? parsed.files : null;
+    } catch (_) {
+      return null;
+    }
+  };
+
+  const providers = [
+    { name: 'Groq', fn: () => GroqService.chat(scaffoldPrompt, [], 'agent', customKeys?.groq) },
+    { name: 'Gemini', fn: () => GeminiService.chat(scaffoldPrompt, [], null, 'agent', customKeys?.gemini) },
+    { name: 'Cerebras', fn: () => CerebrasService.chat(scaffoldPrompt, [], 'agent', customKeys?.cerebras) },
+    { name: 'NVIDIA', fn: () => NvidiaService.chat(scaffoldPrompt, [], customKeys?.nvidia, 'agent') },
+    { name: 'Together', fn: () => TogetherService.chat(scaffoldPrompt, [], customKeys?.together) },
+    { name: 'DeepSeek', fn: () => DeepSeekService.chat(scaffoldPrompt, [], customKeys?.deepseek) },
+    { name: 'Mistral', fn: () => MistralService.chat(scaffoldPrompt, [], customKeys?.mistral, 'agent') },
+    { name: 'HuggingFace', fn: () => HuggingFaceService.chat(scaffoldPrompt) },
+    { name: 'OpenRouter', fn: () => OpenRouterService.chat(scaffoldPrompt, [], customKeys?.openrouter, 'agent') },
+  ];
+
+  for (const provider of providers) {
+    try {
+      const resp = await provider.fn();
+      if (isErrorResp(resp)) continue;
+      const files = extractFiles(resp);
+      if (files) {
+        logger.info(`[Agent] Scaffold ${provider.name} returned ${files.length} files`);
+        return resp;
+      }
+      logger.info(`[Agent] Scaffold ${provider.name} returned invalid JSON (trying next)`);
+    } catch (e) {
+      logger.info(`[Agent] Scaffold ${provider.name} failed:`, e.message || e);
+    }
+  }
+
+  try {
+    const resp = await callOllamaLocal(scaffoldPrompt);
+    if (resp && extractFiles(resp)) return resp;
+  } catch (e) {
+    logger.info('[Agent] Scaffold Ollama failed:', e.message || e);
+  }
+
+  throw new Error('All AI providers failed to scaffold the project.');
+}
+
 // ── Safe Path Join ────────────────────────────────────────────────────────────
 function safeJoin(base, rel) {
   if (!rel || typeof rel !== 'string') throw new Error('Invalid path parameter');
@@ -779,6 +996,15 @@ function parseLLMAction(raw) {
       command:   params.command || params.cmd || params.terminal_command || params.exec,
       query:     params.query || params.search || params.term || params.text,
       framework: params.framework,
+      prompt:    params.prompt || params.description || params.project_prompt || params.user_prompt,
+      targetDir: params.targetDir || params.target_dir || params.directory || params.dir,
+      projectId:  params.projectId || params.project_id || params.id,
+      sandboxId:  params.sandboxId || params.sandbox_id || params.id,
+      filePath:   params.filePath || params.file_path || params.filepath,
+      dirPath:    params.dirPath || params.dir_path || params.dirpath,
+      customCommand: params.customCommand || params.custom_command || params.command,
+      containerPort: params.containerPort || params.container_port || params.port,
+      options:    params.options,
     };
     return {
       thought: parsed.thought || 'Executing task...',
@@ -854,6 +1080,565 @@ router.post('/plan', (req, res) => {
   return res.json({ success: true, plan });
 });
 
+// ── Interactive Project Architect Wizard Endpoints ────────────────────────────
+router.post('/wizard-analyze', async (req, res) => {
+  const { userPrompt } = req.body;
+  if (!userPrompt || typeof userPrompt !== 'string' || !userPrompt.trim()) {
+    return res.status(400).json({ error: 'userPrompt is required and must be a non-empty string' });
+  }
+
+  const promptText = userPrompt.trim();
+  const lower = promptText.toLowerCase();
+
+  // Smart fallback defaults based on prompt keywords
+  let defaultCategory = 'Web App';
+  let defaultName = 'modern-web-app';
+  let defaultTitle = 'Modern Web Application';
+  let defaultDesc = 'A full-featured responsive web application with clean interactive UI.';
+  let defaultFeatures = [
+    { id: 'f_core', name: 'Core Feature Workflow', desc: 'Main interactive application logic and state management', enabled: true },
+    { id: 'f_ui', name: 'Responsive Modern UI', desc: 'Mobile-friendly adaptive layout with smooth animations', enabled: true },
+    { id: 'f_storage', name: 'Local Data Persistence', desc: 'Save user preferences and items via localStorage / store', enabled: true },
+    { id: 'f_dark', name: 'Dark / Light Theme', desc: 'One-click visual mode switching with theme memory', enabled: true }
+  ];
+  let defaultStack = {
+    frontend: 'React + Vite',
+    styling: 'Tailwind CSS',
+    backend: 'Client-Only (localStorage)'
+  };
+  let defaultTheme = 'Dark Zinc / Obsidian';
+
+  if (lower.includes('todo') || lower.includes('task')) {
+    defaultCategory = 'Tool / Utility';
+    defaultName = 'taskmaster-pro';
+    defaultTitle = 'TaskMaster Pro';
+    defaultDesc = 'Smart task organizer with priority tagging, drag-and-drop, and filters.';
+    defaultFeatures = [
+      { id: 'f_add', name: 'Task Management', desc: 'Create, edit, delete, and categorize tasks', enabled: true },
+      { id: 'f_filter', name: 'Search & Status Filters', desc: 'Filter by completed, pending, or high priority', enabled: true },
+      { id: 'f_storage', name: 'Auto Persistence', desc: 'Save all tasks locally so data is never lost', enabled: true },
+      { id: 'f_stats', name: 'Productivity Stats', desc: 'Visual progress bar showing completion rate', enabled: true }
+    ];
+  } else if (lower.includes('shop') || lower.includes('store') || lower.includes('ecommerce') || lower.includes('food')) {
+    defaultCategory = 'E-Commerce';
+    defaultName = 'quickstore-app';
+    defaultTitle = 'QuickStore Storefront';
+    defaultDesc = 'Interactive shopping experience with catalog, filterable grid, and dynamic cart.';
+    defaultFeatures = [
+      { id: 'f_catalog', name: 'Product Grid & Search', desc: 'Category filter, price sort, and instant search', enabled: true },
+      { id: 'f_cart', name: 'Interactive Cart', desc: 'Add/remove items, quantity adjustments, and total calc', enabled: true },
+      { id: 'f_checkout', name: 'Checkout Modal', desc: 'Shipping address form and order summary review', enabled: true },
+      { id: 'f_badge', name: 'Discount / Promo System', desc: 'Apply promo coupon codes with instant recalculation', enabled: true }
+    ];
+  } else if (lower.includes('chat') || lower.includes('social') || lower.includes('message')) {
+    defaultCategory = 'Social / Real-Time';
+    defaultName = 'chathub-realtime';
+    defaultTitle = 'ChatHub Messenger';
+    defaultDesc = 'Real-time conversational interface with user channels and emoji reactions.';
+    defaultFeatures = [
+      { id: 'f_channels', name: 'Multiple Chat Channels', desc: 'Switch between General, Tech, and Random rooms', enabled: true },
+      { id: 'f_emojis', name: 'Emoji & Reactions', desc: 'Quick reaction bar on messages and emoji picker', enabled: true },
+      { id: 'f_search', name: 'Message Search & History', desc: 'Search past conversations instantly', enabled: true },
+      { id: 'f_typing', name: 'Simulated Typing Indicators', desc: 'Dynamic indicators for active participants', enabled: true }
+    ];
+  } else if (lower.includes('dashboard') || lower.includes('admin') || lower.includes('analytics')) {
+    defaultCategory = 'Dashboard / Admin';
+    defaultName = 'nexus-analytics';
+    defaultTitle = 'Nexus Admin Dashboard';
+    defaultDesc = 'Executive analytics control panel with interactive metric cards and charts.';
+    defaultFeatures = [
+      { id: 'f_kpi', name: 'KPI Metric Cards', desc: 'Revenue, conversion rate, active users, and trends', enabled: true },
+      { id: 'f_charts', name: 'Interactive Charts', desc: 'Revenue over time and category distribution graphs', enabled: true },
+      { id: 'f_table', name: 'Data Table with Pagination', desc: 'Sortable, filterable records with export option', enabled: true },
+      { id: 'f_notify', name: 'Activity Feed & Alerts', desc: 'Live event stream of user actions', enabled: true }
+    ];
+  }
+
+  // Try LLM for bespoke personalized analysis
+  try {
+    const analysisPrompt = `You are AI-Dost Project Architect. Analyze this user project request and return a JSON wizard specification.
+USER REQUEST: "${promptText}"
+
+Respond with ONLY a valid JSON object matching this schema (no markdown, no prose):
+{
+  "projectName": "kebab-case-name",
+  "projectTitle": "Display Title (3-5 words)",
+  "description": "Clear 1-sentence description of the app",
+  "category": "Web App",
+  "targetAudience": ["Audience 1", "Audience 2"],
+  "suggestedFeatures": [
+    { "id": "feat_1", "name": "Feature 1 Name", "desc": "Short description", "enabled": true },
+    { "id": "feat_2", "name": "Feature 2 Name", "desc": "Short description", "enabled": true },
+    { "id": "feat_3", "name": "Feature 3 Name", "desc": "Short description", "enabled": true },
+    { "id": "feat_4", "name": "Feature 4 Name", "desc": "Short description", "enabled": true }
+  ],
+  "suggestedStack": {
+    "frontend": "React + Vite",
+    "styling": "Tailwind CSS",
+    "backend": "Client-Only (localStorage)"
+  },
+  "suggestedTheme": "Dark Zinc / Obsidian",
+  "suggestedFiles": ["src/App.jsx", "src/components/Navbar.jsx", "index.html", "src/index.css"]
+}`;
+
+    const raw = await callLLM([{ role: 'user', content: analysisPrompt }]);
+    const cleaned = String(raw || '').replace(/```(?:json)?\s*/gi, '').trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.projectName && Array.isArray(parsed.suggestedFeatures) && parsed.suggestedFeatures.length > 0) {
+        return res.json({ success: true, wizardSpec: parsed, source: 'ai' });
+      }
+    }
+  } catch (e) {
+    logger.info('[Wizard] LLM analysis fallback used:', e.message);
+  }
+
+  return res.json({
+    success: true,
+    wizardSpec: {
+      projectName: defaultName,
+      projectTitle: defaultTitle,
+      description: defaultDesc,
+      category: defaultCategory,
+      targetAudience: ['End Users', 'Developers', 'Teams'],
+      suggestedFeatures: defaultFeatures,
+      suggestedStack: defaultStack,
+      suggestedTheme: defaultTheme,
+      suggestedFiles: ['index.html', 'src/App.jsx', 'src/main.jsx', 'src/index.css']
+    },
+    source: 'template_heuristics'
+  });
+});
+
+// ── Interactive Scaffold Stream Endpoint ─────────────────────────────────────
+router.post('/scaffold-wizard', async (req, res) => {
+  const { userPrompt, wizardConfig, projectId } = req.body;
+  if (!wizardConfig || typeof wizardConfig !== 'object') {
+    return res.status(400).json({ error: 'wizardConfig object is required' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+  function generateSmartProject(wizardConfig, userPrompt) {
+  const title = wizardConfig.projectTitle || wizardConfig.projectName || 'Modern Web Application';
+  const desc = wizardConfig.description || userPrompt || 'A feature-rich web application built with modern architecture';
+  const features = (wizardConfig.features || []).filter(f => f.enabled !== false);
+  const stack = wizardConfig.stack || {};
+  const isTourism = /bihar|tour|travel|guide|ghoomne|destination|trip/i.test(title + ' ' + desc);
+
+  if (isTourism) {
+    return [
+      {
+        path: 'index.html',
+        content: `<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Outfit', 'sans-serif'] },
+          colors: {
+            brand: { 50: '#f0fdf4', 500: '#10b981', 600: '#059669', 700: '#047857' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .glass {
+      background: rgba(24, 24, 27, 0.75);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .glass-card {
+      background: rgba(39, 39, 42, 0.5);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen antialiased flex flex-col font-sans selection:bg-emerald-500 selection:text-white">
+  <!-- Header -->
+  <header class="sticky top-0 z-50 glass border-b border-zinc-800/80">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+          <span class="text-xl">🏛️</span>
+        </div>
+        <div>
+          <h1 class="font-bold text-base text-white tracking-tight">${title}</h1>
+          <p class="text-[10px] text-emerald-400 font-medium">Explore Historic, Spiritual & Natural Wonders of Bihar</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="filterCategory('all')" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 text-zinc-200 hover:text-white transition-colors">All Places</button>
+        <button onclick="filterCategory('Historical')" class="px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-white transition-colors">Historical</button>
+        <button onclick="filterCategory('Spiritual')" class="px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-white transition-colors">Spiritual</button>
+        <button onclick="filterCategory('Nature')" class="px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-white transition-colors">Nature</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Banner -->
+  <section class="relative py-14 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto w-full text-center space-y-5">
+    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full glass text-xs text-emerald-300 border border-emerald-500/20">
+      <span>✨ Discover The Rich Heritage of Bihar</span>
+    </div>
+    <h2 class="text-3xl sm:text-5xl font-extrabold text-white tracking-tight leading-tight max-w-4xl mx-auto">
+      Experience the Land of <span class="bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent">Enlightenment & Culture</span>
+    </h2>
+    <p class="text-sm sm:text-base text-zinc-400 max-w-2xl mx-auto leading-relaxed">
+      ${desc}
+    </p>
+
+    <!-- Search Bar -->
+    <div class="max-w-xl mx-auto flex gap-2 p-1.5 rounded-2xl glass shadow-2xl">
+      <input type="text" id="searchInput" oninput="handleSearch()" placeholder="Search Bodh Gaya, Nalanda, Rajgir, Patna..." class="flex-1 bg-transparent px-4 py-2 text-xs sm:text-sm text-white placeholder-zinc-500 focus:outline-none" />
+      <button onclick="handleSearch()" class="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-500/25 transition-all">Search</button>
+    </div>
+  </section>
+
+  <!-- Destinations Grid -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <div class="flex items-center justify-between mb-6">
+      <h3 class="text-lg font-bold text-white flex items-center gap-2">
+        <span>📍 Featured Destinations</span>
+        <span id="placeCount" class="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 font-mono">6 Places</span>
+      </h3>
+    </div>
+
+    <div id="placesGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+  </main>
+
+  <script>
+    const places = [
+      {
+        id: 1,
+        title: 'Mahabodhi Temple, Bodh Gaya',
+        district: 'Gaya',
+        category: 'Spiritual',
+        rating: '4.9',
+        image: 'https://images.unsplash.com/photo-1590050752117-238cb0fb12b1?auto=format&fit=crop&w=800&q=80',
+        desc: 'UNESCO World Heritage site where Gautama Buddha attained enlightenment under the sacred Bodhi Tree.'
+      },
+      {
+        id: 2,
+        title: 'Ancient Nalanda University Ruins',
+        district: 'Nalanda',
+        category: 'Historical',
+        rating: '4.8',
+        image: 'https://images.unsplash.com/photo-1609137144813-7d9921338f24?auto=format&fit=crop&w=800&q=80',
+        desc: 'World famous 5th-century Buddhist monastic university that attracted scholars from China, Korea, and Tibet.'
+      },
+      {
+        id: 3,
+        title: 'Rajgir Glass Bridge & Ropeway',
+        district: 'Nalanda',
+        category: 'Nature',
+        rating: '4.7',
+        image: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=80',
+        desc: 'Historic valley surrounded by 7 hills with Vishwa Shanti Stupa, hot springs, and sky glass bridge.'
+      },
+      {
+        id: 4,
+        title: 'Golghar & Patna Sahib Gurudwara',
+        district: 'Patna',
+        category: 'Historical',
+        rating: '4.6',
+        image: 'https://images.unsplash.com/photo-1582510003544-4d00b7f74220?auto=format&fit=crop&w=800&q=80',
+        desc: 'Historical architecture along the Ganga river and revered Takht Sri Patna Sahib.'
+      },
+      {
+        id: 5,
+        title: 'Valmiki National Park & Tiger Reserve',
+        district: 'West Champaran',
+        category: 'Nature',
+        rating: '4.8',
+        image: 'https://images.unsplash.com/photo-1564349683136-77e08dba1ef7?auto=format&fit=crop&w=800&q=80',
+        desc: 'Dense rainforest wilderness along Gandak river with wild tigers, leopards, and rafting.'
+      },
+      {
+        id: 6,
+        title: 'Vikramshila Ancient University',
+        district: 'Bhagalpur',
+        category: 'Historical',
+        rating: '4.7',
+        image: 'https://images.unsplash.com/photo-1544735716-392fe2489ffa?auto=format&fit=crop&w=800&q=80',
+        desc: 'Pala Dynasty Buddhist university renowned for Tantric studies and ancient monastery stupas.'
+      }
+    ];
+
+    let currentCategory = 'all';
+
+    function renderPlaces(items) {
+      const grid = document.getElementById('placesGrid');
+      document.getElementById('placeCount').innerText = \`\${items.length} Places\`;
+      grid.innerHTML = items.map(p => \`
+        <div class="glass-card rounded-2xl overflow-hidden hover:border-emerald-500/40 transition-all duration-300 group flex flex-col">
+          <div class="h-48 overflow-hidden relative">
+            <img src="\${p.image}" alt="\${p.title}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+            <span class="absolute top-3 right-3 px-2.5 py-1 rounded-full text-[10px] font-bold bg-black/60 backdrop-blur-md text-emerald-300 border border-white/10">
+              ★ \${p.rating}
+            </span>
+            <span class="absolute bottom-3 left-3 px-2.5 py-0.5 rounded-lg text-[10px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-500/30">
+              \${p.district}
+            </span>
+          </div>
+          <div class="p-5 flex-1 flex flex-col justify-between space-y-3">
+            <div>
+              <span class="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">\${p.category}</span>
+              <h4 class="text-sm font-bold text-white group-hover:text-emerald-400 transition-colors mt-0.5">\${p.title}</h4>
+              <p class="text-xs text-zinc-400 mt-1 leading-relaxed">\${p.desc}</p>
+            </div>
+            <div class="pt-2 border-t border-zinc-800/80 flex items-center justify-between">
+              <button onclick="saveFavorite('\${p.title}')" class="text-xs text-zinc-400 hover:text-emerald-400 transition-colors flex items-center gap-1 cursor-pointer">
+                ❤️ Favorite
+              </button>
+              <button onclick="alert('Viewing complete travel guide for ' + '\${p.title}')" class="px-3 py-1 rounded-lg text-xs font-semibold bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-600/30 transition-all cursor-pointer">
+                Explore ↗
+              </button>
+            </div>
+          </div>
+        </div>
+      \`).join('');
+    }
+
+    function filterCategory(cat) {
+      currentCategory = cat;
+      if (cat === 'all') {
+        renderPlaces(places);
+      } else {
+        renderPlaces(places.filter(p => p.category === cat));
+      }
+    }
+
+    function handleSearch() {
+      const q = document.getElementById('searchInput').value.toLowerCase().trim();
+      const filtered = places.filter(p => 
+        (currentCategory === 'all' || p.category === currentCategory) &&
+        (p.title.toLowerCase().includes(q) || p.district.toLowerCase().includes(q) || p.desc.toLowerCase().includes(q))
+      );
+      renderPlaces(filtered);
+    }
+
+    function saveFavorite(title) {
+      alert('Saved to your trip itinerary: ' + title);
+    }
+
+    renderPlaces(places);
+  </script>
+</body>
+</html>`
+      },
+      {
+        path: 'package.json',
+        content: JSON.stringify({
+          name: wizardConfig.projectName || 'bihar-tourist-guide',
+          private: true,
+          version: '1.0.0',
+          scripts: { dev: 'vite', build: 'vite build' }
+        }, null, 2)
+      },
+      {
+        path: 'README.md',
+        content: `# ${title}\n\n${desc}\n\n## Included Features:\n${features.map(f => `- ${f.name}`).join('\n')}`
+      }
+    ];
+  }
+
+  // General App Template
+  return [
+    {
+      path: 'index.html',
+      content: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .glass { background: rgba(24, 24, 27, 0.7); backdrop-filter: blur(12px); }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen antialiased flex flex-col">
+  <header class="border-b border-zinc-800 glass sticky top-0 z-50">
+    <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/30">
+          <span class="text-white font-bold">⚡</span>
+        </div>
+        <div>
+          <h1 class="font-bold text-sm text-white">${title}</h1>
+          <p class="text-[10px] text-zinc-400 font-mono">${stack.frontend || 'React + Vite'}</p>
+        </div>
+      </div>
+      <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+        ● Ready
+      </span>
+    </div>
+  </header>
+  <main class="flex-1 max-w-6xl w-full mx-auto px-4 py-8 space-y-6">
+    <div class="p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-3 shadow-xl">
+      <h2 class="text-xl font-extrabold text-white">${title}</h2>
+      <p class="text-sm text-zinc-400 leading-relaxed">${desc}</p>
+      <div class="flex flex-wrap gap-2 pt-2">
+        ${features.map(f => `<span class="px-2.5 py-1 rounded-lg text-xs bg-zinc-800 text-zinc-300 border border-zinc-700">✨ ${f.name}</span>`).join('\n        ')}
+      </div>
+    </div>
+  </main>
+</body>
+</html>`
+    },
+    {
+      path: 'package.json',
+      content: JSON.stringify({
+        name: wizardConfig.projectName || 'modern-app',
+        private: true,
+        version: '0.1.0'
+      }, null, 2)
+    }
+  ];
+}
+
+  let isAborted = false;
+  res.on('close', () => { isAborted = true; });
+
+  const send = (data) => {
+    if (isAborted) return;
+    try {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+      if (typeof res.flush === 'function') res.flush();
+    } catch (_) {}
+  };
+
+  const workspacePath = path.join(os.tmpdir(), `agent-ws-${projectId || 'copilot-workspace'}`);
+  if (!fs.existsSync(workspacePath)) {
+    try { fs.mkdirSync(workspacePath, { recursive: true }); } catch (_) {}
+  }
+
+  send({ type: 'wizard_status', step: 'architecting', message: '📐 Synthesizing custom architecture and specifications...' });
+
+  const activeFeatures = (wizardConfig.features || []).filter(f => f.enabled !== false).map(f => `${f.name}: ${f.desc || ''}`).join('\n- ');
+  const stackInfo = wizardConfig.stack ? JSON.stringify(wizardConfig.stack) : 'React + Vite + Tailwind CSS';
+
+  const scaffoldPrompt = `You are an expert full-stack engineer. Build a COMPLETE, production-ready, beautiful web application based on this interactive specification:
+
+PROJECT TITLE: ${wizardConfig.projectTitle || wizardConfig.projectName || 'Modern Web App'}
+DESCRIPTION: ${wizardConfig.description || userPrompt}
+TARGET AUDIENCE: ${Array.isArray(wizardConfig.targetAudience) ? wizardConfig.targetAudience.join(', ') : 'Users'}
+TECH STACK: ${stackInfo}
+DESIGN THEME: ${wizardConfig.theme || 'Dark Zinc / Obsidian'}
+
+FEATURES TO IMPLEMENT FULLY:
+- ${activeFeatures || 'Complete interactive features matching the description'}
+
+CUSTOM INSTRUCTIONS / NOTES:
+${wizardConfig.customNotes || 'None'}
+
+REQUIREMENTS:
+1. Write 100% COMPLETE, WORKING code with NO placeholders, NO "TODO" comments, NO truncated sections.
+2. Include all necessary HTML, CSS, JavaScript/React components, and package.json so the app can run immediately.
+3. Apply modern, responsive styling with clean UI components, cards, buttons, and state management.`;
+
+  send({ type: 'wizard_status', step: 'generating', message: '⚡ Generating production-grade code across components...' });
+
+  try {
+    let files = [];
+    try {
+      const rawResponse = await Promise.race([
+        callScaffoldLLM(scaffoldPrompt),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('LLM Timeout')), 10000))
+      ]);
+      const stripped = String(rawResponse || '').replace(/```(?:json)?\s*/gi, '').trim();
+      const jsonBlock = stripped.match(/\{[\s\S]*\}/);
+      if (jsonBlock) {
+        try {
+          const parsed = JSON.parse(jsonBlock[0]);
+          if (parsed && Array.isArray(parsed.files) && parsed.files.length > 0) {
+            files = parsed.files;
+          }
+        } catch (err) {
+          try {
+            const repaired = jsonBlock[0].replace(/(?<=:\s*"[\s\S]*?)\r?\n(?=[\s\S]*?")/g, '\\n');
+            const parsed = JSON.parse(repaired);
+            if (parsed && Array.isArray(parsed.files)) files = parsed.files;
+          } catch (_) {}
+        }
+      }
+    } catch (llmErr) {
+      logger.info('[Wizard] LLM timed out or failed, using autonomous smart generator:', llmErr.message);
+    }
+
+    if (!files || files.length === 0) {
+      logger.info('[Wizard] Generating smart architecture files.');
+      files = generateSmartProject(wizardConfig, userPrompt);
+    }
+
+    send({ type: 'wizard_status', step: 'writing', message: `📂 Writing ${files.length} project files to workspace...` });
+
+    const writtenFiles = [];
+    for (const f of files) {
+      if (!f || !f.path) continue;
+      const safePath = safeJoin(workspacePath, f.path);
+      fs.mkdirSync(path.dirname(safePath), { recursive: true });
+      fs.writeFileSync(safePath, f.content || '', 'utf-8');
+      writtenFiles.push({ path: f.path, size: Buffer.from(f.content || '').length });
+
+      send({
+        type: 'file_changed',
+        action: 'add',
+        path: f.path,
+        content: f.content || ''
+      });
+      send({
+        type: 'wizard_file',
+        path: f.path,
+        message: `Created ${f.path}`
+      });
+    }
+
+    send({ type: 'wizard_status', step: 'dependencies', message: '📦 Initializing git repository and workspace setup...' });
+
+    try {
+      await new Promise((res) => exec('git init', { cwd: workspacePath, timeout: 5000 }, res));
+    } catch (_) {}
+
+    send({
+      type: 'done',
+      message: `🎉 ${wizardConfig.projectTitle || wizardConfig.projectName || 'Project'} successfully generated (${writtenFiles.length} files)!`,
+      files: writtenFiles,
+      summary: wizardConfig.description || 'Project is ready to run and customize.'
+    });
+    res.end();
+  } catch (err) {
+    logger.error('[Wizard Scaffold] Error:', err.message);
+    send({ type: 'error', message: `Scaffolding failed: ${err.message}` });
+    res.end();
+  }
+});
+
+// ── Kanban task list (client-side state; no persistence layer yet) ────────────
+router.get('/tasks', (_req, res) => {
+  return res.json({ success: true, tasks: [] });
+});
+
 // ── ReAct Loop API Endpoint (SSE Streaming) ───────────────────────────────────
 router.post('/run', async (req, res) => {
   const { userPrompt, projectPath, projectFiles, projectId, customKeys } = req.body;
@@ -870,10 +1655,11 @@ router.post('/run', async (req, res) => {
   if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
   let isAborted = false;
-  // req.on('close', () => {
-  //   isAborted = true;
-  //   logger.info('[Agent] Client disconnected. Cancelling ReAct loop.');
-  // });
+  const abortHandler = () => {
+    isAborted = true;
+    logger.info('[Agent] Client disconnected. Cancelling ReAct loop.');
+  };
+  res.on('close', abortHandler);
 
   const send = (data) => {
     if (isAborted) return;
@@ -923,7 +1709,7 @@ router.post('/run', async (req, res) => {
         plan.tasks.forEach(t => t.status = 'completed');
         send({ type: 'plan', plan });
         send({ type: 'done', message: `✅ forceLocal: ${filename} created`, steps: [stepLog], plan });
-        res.end();
+        try { res.end(); } catch (_) {}
         return;
       }
     } catch (e) {
@@ -1048,12 +1834,19 @@ router.post('/run', async (req, res) => {
       });
       const parsed = parseLLMAction(rawResponse);
 
+      // Inject user prompt fallback for project generation when LLM omits params
+      const execParams = { ...(parsed.parameters || {}) };
+      if (parsed.action === 'generate_project_from_prompt') {
+        if (!execParams.prompt) execParams.prompt = userPrompt;
+        if (!execParams.targetDir) execParams.targetDir = workspacePath;
+      }
+
       const stepLog = {
         step: step + 1,
         taskId: activeTaskId,
         thought: parsed.thought || '',
         action: parsed.action,
-        parameters: parsed.parameters || {},
+        parameters: execParams,
         result: null
       };
 
@@ -1074,11 +1867,11 @@ router.post('/run', async (req, res) => {
         type: 'tool_call',
         step: step + 1,
         action: parsed.action,
-        parameters: parsed.parameters,
+        parameters: execParams,
         thought: parsed.thought
       });
 
-      const toolResult = await executeTool(parsed.action, parsed.parameters || {}, workspacePath, projectFiles, send);
+      const toolResult = await executeTool(parsed.action, execParams, workspacePath, projectFiles, send);
       stepLog.result = toolResult;
       steps.push(stepLog);
       send({ type: 'step', stepLog });
@@ -1137,7 +1930,7 @@ router.post('/run', async (req, res) => {
   }
 
   send({ type: 'done', message: '⚠️ Max steps reached. Task partially completed.', steps });
-  res.end();
+  try { res.end(); } catch (_) { /* client already disconnected */ }
 });
 
 // ── Codebase Search Endpoint (can be called separately from UI) ───────────────
@@ -1399,5 +2192,123 @@ router.get('/quota-status', (_req, res) => {
   res.json({ circuitBreakers: status });
 });
 
+// ── Spec Wizard Endpoints ───────────────────────────────────────────────────────
+// Start a new spec from user intent
+router.post('/spec/start', async (req, res) => {
+  try {
+    const { intent, previousAnswers } = req.body;
+    if (!intent || typeof intent !== 'string' || !intent.trim()) {
+      return res.status(400).json({ error: 'intent is required and must be a non-empty string' });
+    }
+    const result = SpecService.createSpecFromIntent(intent.trim(), previousAnswers || {});
+    res.json({ success: true, ...result });
+  } catch (e) {
+    logger.error('[Spec] Start error:', e.message);
+    res.status(500).json({ error: e.message || 'Failed to start spec' });
+  }
+});
+
+// Submit a step and get next step
+router.post('/spec/step', async (req, res) => {
+  try {
+    const { specId, stepIndex, answers } = req.body;
+    if (!specId || typeof stepIndex !== 'number' || !answers) {
+      return res.status(400).json({ error: 'specId, stepIndex, and answers are required' });
+    }
+    const result = SpecService.submitStep(specId, stepIndex, answers);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    logger.error('[Spec] Step error:', e.message);
+    res.status(500).json({ error: e.message || 'Failed to submit step' });
+  }
+});
+
+// Get full spec for review
+router.get('/spec/:specId', async (req, res) => {
+  try {
+    const { specId } = req.params;
+    const spec = SpecService.getSpec(specId);
+    if (!spec) {
+      return res.status(404).json({ error: 'Spec not found' });
+    }
+    res.json({ success: true, spec });
+  } catch (e) {
+    logger.error('[Spec] Get error:', e.message);
+    res.status(500).json({ error: e.message || 'Failed to get spec' });
+  }
+});
+
+// Approve spec and generate plan
+router.post('/spec/:specId/approve', async (req, res) => {
+  try {
+    const { specId } = req.params;
+    const result = await SpecService.approveSpec(specId);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    logger.error('[Spec] Approve error:', e.message);
+    res.status(500).json({ error: e.message || 'Failed to approve spec' });
+  }
+});
+
+// Regenerate step with guidance
+router.post('/spec/:specId/regenerate', async (req, res) => {
+  try {
+    const { specId } = req.params;
+    const { stepId, guidance } = req.body;
+    if (!stepId || !guidance) {
+      return res.status(400).json({ error: 'stepId and guidance are required' });
+    }
+    const result = SpecService.regenerateStep(specId, stepId, guidance);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    logger.error('[Spec] Regenerate error:', e.message);
+    res.status(500).json({ error: e.message || 'Failed to regenerate step' });
+  }
+});
+
+// Update a specific step
+router.post('/spec/:specId/update', async (req, res) => {
+  try {
+    const { specId } = req.params;
+    const { stepId, data } = req.body;
+    if (!stepId || !data) {
+      return res.status(400).json({ error: 'stepId and data are required' });
+    }
+    const spec = SpecService.updateStep(specId, stepId, data);
+    res.json({ success: true, spec });
+  } catch (e) {
+    logger.error('[Spec] Update error:', e.message);
+    res.status(500).json({ error: e.message || 'Failed to update step' });
+  }
+});
+
+// List all specs
+router.get('/specs', async (req, res) => {
+  try {
+    const specs = SpecService.listSpecs();
+    res.json({ success: true, specs });
+  } catch (e) {
+    logger.error('[Spec] List error:', e.message);
+    res.status(500).json({ error: e.message || 'Failed to list specs' });
+  }
+});
+
+// Delete a spec
+router.delete('/spec/:specId', async (req, res) => {
+  try {
+    const { specId } = req.params;
+    const deleted = SpecService.deleteSpec(specId);
+    if (!deleted) {
+      return res.status(404).json({ error: 'Spec not found' });
+    }
+    res.json({ success: true, message: 'Spec deleted' });
+  } catch (e) {
+    logger.error('[Spec] Delete error:', e.message);
+    res.status(500).json({ error: e.message || 'Failed to delete spec' });
+  }
+});
+
 router.parseLLMAction = parseLLMAction;
+router.searchCodebase = searchCodebase;
+router.buildCodebaseIndex = buildCodebaseIndex;
 module.exports = router;

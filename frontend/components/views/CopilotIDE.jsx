@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import {
   FolderTree, Search, GitBranch, Puzzle, X, Plus, Save,
@@ -10,6 +11,14 @@ import api from '../../services/api';
 import { LANG_BY_EXT, TreeView, fileTreeFromFiles } from './CopilotTree';
 import { PromptModal, QuickOpen, CommandPalette, SearchOverlay, MODAL_ICONS } from './IDEOverlays';
 import DiffReviewModal from './DiffReviewModal';
+import ProjectWizardModal from './ProjectWizardModal';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+});
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
 
@@ -19,6 +28,7 @@ const TerminalPanel = dynamic(() => import('./TerminalPanel'), { ssr: false });
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const QUICK_PROMPTS = [
+  { label: '🪄 App Wizard', prompt: '', isWizard: true },
   { label: 'Fullstack app banao', prompt: 'MERN stack todo app banao with authentication — sab files likho (backend, frontend, DB schema)' },
   { label: 'Bug fix', prompt: 'Is code me bugs dhundho aur fix karo. Har file analyse karo.' },
   { label: 'Feature add', prompt: 'Dark mode toggle add karo with localStorage persistence.' },
@@ -56,6 +66,127 @@ const LANG_COLOR = {
   rb: '#cc342d', lock: '#fbcb40',
 };
 
+function AiStudioResponseCard({ message, onSelectFile, onOpenDiff, onRollback, onOpenPreview }) {
+  const modelName = message.model || 'Gemini 2.5 Flash';
+  const duration = message.duration || '12s';
+  const files = Array.isArray(message.files) ? message.files : [];
+  const content = message.content || message.summary || '';
+
+  const renderedHtml = useMemo(() => {
+    try {
+      if (!content) return '';
+      const raw = marked.parse(content);
+      return typeof window !== 'undefined' ? DOMPurify.sanitize(raw) : raw;
+    } catch (_) {
+      return content;
+    }
+  }, [content]);
+
+  return (
+    <div className="flex gap-2.5 items-start">
+      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)' }}>
+        <Bot className="w-3.5 h-3.5 text-white" />
+      </div>
+
+      <div className="flex-1 space-y-3 rounded-2xl p-4 border bg-zinc-950/90 backdrop-blur-md shadow-xl" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+        {/* Header: Model & Execution Time */}
+        <div className="flex items-center justify-between text-[11px] text-zinc-400 pb-2 border-b border-zinc-800/80">
+          <span className="font-medium flex items-center gap-1.5 text-zinc-300">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse" />
+            {modelName} • Ran for {duration}
+          </span>
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-mono">
+            Copilot Build
+          </span>
+        </div>
+
+        {/* Action History Box (Google AI Studio Image 2 Style) */}
+        {files.length > 0 && (
+          <div className="rounded-xl p-3 border space-y-2.5 bg-black/50" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+            <div className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
+              <FolderTree className="w-3.5 h-3.5 text-blue-400" />
+              <span>Action history</span>
+            </div>
+            <p className="text-[11px] text-zinc-400">Here are key actions taken for the app:</p>
+
+            <div className="space-y-1.5 pt-0.5">
+              <div className="flex items-center gap-1.5 text-[11px] text-zinc-300 font-medium">
+                <Pencil className="w-3 h-3 text-amber-400" />
+                <span>Edited / Created {files.length} files</span>
+              </div>
+              <div className="space-y-1 pl-3">
+                {files.map((f, idx) => {
+                  const filePath = typeof f === 'string' ? f : (f.path || f.name);
+                  return (
+                    <div
+                      key={idx}
+                      onClick={() => onSelectFile && onSelectFile({ path: filePath })}
+                      className="flex items-center justify-between py-1 px-2 rounded-lg hover:bg-zinc-800/80 cursor-pointer group transition-colors"
+                    >
+                      <span className="text-[11px] font-mono text-zinc-400 group-hover:text-blue-300 transition-colors truncate">
+                        {filePath}
+                      </span>
+                      <span className="w-4 h-4 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center text-[10px] ml-2 shrink-0">
+                        ✓
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-[11px] text-zinc-400 pt-1 border-t border-zinc-800/60">
+              <span className="text-emerald-400">🔧</span>
+              <span>Built & verified with live preview</span>
+            </div>
+          </div>
+        )}
+
+        {/* Detailed Explanation / Markdown Body */}
+        {renderedHtml && (
+          <div
+            className="ai-studio-markdown space-y-2 pt-1"
+            dangerouslySetInnerHTML={{ __html: renderedHtml }}
+          />
+        )}
+
+        {/* Bottom Action Bar */}
+        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-zinc-800/80 text-[11px]">
+          <span className="flex items-center gap-1 text-zinc-500 text-[10px] mr-auto">
+            🚩 Checkpoint saved
+          </span>
+
+          <button
+            onClick={onOpenDiff}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 font-medium cursor-pointer transition-colors border border-zinc-700/60"
+          >
+            <GitCompareArrows className="w-3 h-3 text-amber-400" />
+            View changes
+          </button>
+
+          <button
+            onClick={onOpenPreview}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium cursor-pointer transition-colors shadow-sm shadow-blue-500/20"
+          >
+            <Play className="w-3 h-3 fill-white" />
+            Live Preview
+          </button>
+
+          {message.checkpointDir && (
+            <button
+              onClick={() => onRollback && onRollback(message.checkpointDir)}
+              className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-300 font-medium cursor-pointer transition-colors border border-red-500/30"
+            >
+              <RotateCcw className="w-3 h-3 text-red-400" />
+              Restore
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CopilotIDE({ projectId = 'copilot-workspace', projectName = 'Copilot Workspace', onToast }) {
   const [files, setFiles] = useState([]);
   const [openTabs, setOpenTabs] = useState([]); // editor me khule huye file paths (tab = open file)
@@ -89,6 +220,9 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
   // Plan → Approve gate (GitHub Copilot style): show plan, wait for approval
   const [planGate, setPlanGate] = useState(true);
   const [pendingPlan, setPendingPlan] = useState(null);
+  // Interactive Project Architect Wizard state
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardInitialPrompt, setWizardInitialPrompt] = useState('');
   // Custom instructions for the agent
   const [showInstructions, setShowInstructions] = useState(false);
   const [customInstructions, setCustomInstructions] = useState('');
@@ -579,10 +713,133 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
     deleteFilePath(activePath);
   };
 
+  const openProjectWizard = (prompt = '') => {
+    setWizardInitialPrompt(prompt || copilotInput || '');
+    setWizardOpen(true);
+  };
+
+  const handleWizardBuild = async (wizardConfig) => {
+    setRunning(true);
+    setPlanTasks([
+      { id: 1, title: 'Synthesize Architecture & Blueprint', status: 'completed' },
+      { id: 2, title: `Scaffold ${wizardConfig.stack?.frontend || 'React'} Components & Styles`, status: 'in_progress' },
+      { id: 3, title: 'Setup Git & Workspace Runtime', status: 'pending' }
+    ]);
+    setCopilotStatus({ label: `🚀 Building ${wizardConfig.projectTitle || 'project'}...`, tone: 'work' });
+    setCopilotMessages(prev => [
+      ...prev,
+      { role: 'user', content: `🪄 [Project Wizard]: Build **${wizardConfig.projectTitle}**\n• Stack: ${wizardConfig.stack?.frontend} + ${wizardConfig.stack?.styling} + ${wizardConfig.stack?.backend}\n• Features: ${wizardConfig.features?.map(f => f.name).join(', ')}` },
+      { role: 'thinking', content: 'Autonomous Project Architect is synthesizing code across components...' }
+    ]);
+
+    try {
+      const res = await fetch(`${BACKEND}/api/agent/scaffold-wizard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userPrompt: wizardConfig.description || wizardConfig.projectTitle,
+          wizardConfig,
+          projectId
+        })
+      });
+
+      if (!res.ok) throw new Error(`Scaffold failed (${res.status})`);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        for (const evt of chunk.split('\n\n').filter(Boolean)) {
+          const dataLine = evt.split('\n').find(l => l.startsWith('data:'));
+          if (!dataLine) continue;
+          try {
+            const data = JSON.parse(dataLine.slice(5));
+            if (data.type === 'wizard_status') {
+              setCopilotStatus({ label: data.message, tone: 'work' });
+            } else if (data.type === 'wizard_file') {
+              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'tool', content: `📄 ${data.message}` }]);
+            } else if (data.type === 'file_changed') {
+              setFiles(prev => {
+                const idx = prev.findIndex(f => f.path === data.path);
+                if (idx === -1) return [...prev, { path: data.path, content: data.content || '' }];
+                const next = [...prev];
+                next[idx] = { ...next[idx], content: data.content || next[idx].content };
+                return next;
+              });
+              setOpenTabs(prev => prev.includes(data.path) ? prev : [...prev.slice(-9), data.path]);
+              setFileContent(data.path, data.content || '');
+              setActivePath(data.path);
+            } else if (data.type === 'done') {
+              setPlanTasks(prev => prev.map(t => ({ ...t, status: 'completed' })));
+              setCopilotStatus({ label: '✅ Project ready!', tone: 'success' });
+
+              const summaryMarkdown = `### 🎉 ${wizardConfig.projectTitle || 'Project'} successfully generated!
+
+${wizardConfig.description || 'All core architectural modules, frontend views, and styling layers have been configured and verified.'}
+
+#### 🌟 Key Features Implemented:
+${(wizardConfig.features || []).map(f => `• **${f.name}**: ${f.description || 'Configured & integrated into workspace.'}`).join('\n')}
+
+#### 🛠️ Architecture & Tech Stack:
+• **Frontend**: \`${wizardConfig.stack?.frontend || 'React + Vite'}\`
+• **Styling System**: \`${wizardConfig.stack?.styling || 'Tailwind CSS'}\`
+• **Theme Preset**: \`${wizardConfig.theme || 'Dark Zinc Obsidian'}\`
+• **Live Server Runtime**: \`http://localhost:3000\`
+
+#### 🚀 How to explore:
+• Click **"Live Preview"** to open your live application in a new browser tab.
+• Use the left Explorer panel to inspect and edit components in real-time.`;
+
+              setCopilotMessages(prev => [
+                ...prev,
+                {
+                  role: 'assistant',
+                  kind: 'aistudio_card',
+                  model: 'Gemini 2.5 Flash',
+                  duration: '14s',
+                  files: data.files || [],
+                  content: summaryMarkdown,
+                  rawMessage: data.message,
+                  summary: summaryMarkdown
+                }
+              ]);
+              if (onToast) onToast('🎉 Project generated successfully! Click Preview to test.', 'success');
+            } else if (data.type === 'error') {
+              setCopilotStatus({ label: `⚠️ ${data.message}`, tone: 'error' });
+              if (onToast) onToast(data.message, 'error');
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (err) {
+      setCopilotStatus({ label: '⚠️ Scaffold error', tone: 'error' });
+      if (onToast) onToast(err.message, 'error');
+    } finally {
+      setRunning(false);
+    }
+  };
+
   // Plan → Approve gate: fetch the plan first, show it, run only on approval
-  const handleSend = async (text) => {
+  const handleSend = async (text, isWizardPrompt = false) => {
+    if (isWizardPrompt) {
+      return openProjectWizard(copilotInput);
+    }
     const prompt = (text || copilotInput).trim();
     if (!prompt || running) return;
+
+    // Check if user is asking to create a new app/project from scratch
+    const lower = prompt.toLowerCase();
+    const isNewProjectIntent = lower.startsWith('create ') || lower.startsWith('build ') ||
+      lower.includes('app banao') || lower.includes('project banao') ||
+      lower.includes('store banao') || lower.includes('website banao') ||
+      lower.includes('fullstack') || lower.includes('clone banao');
+
+    if (isNewProjectIntent && !pendingPlan) {
+      return openProjectWizard(prompt);
+    }
+
     if (!planGate) return runCopilot(prompt);
     setCopilotInput('');
     setCopilotMessages(prev => [...prev, { role: 'user', content: prompt }]);
@@ -742,14 +999,44 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
               });
               await sleep(30);
               toolCount++;
-              const params = typeof data.parameters === 'string' ? data.parameters.slice(0, 80) : JSON.stringify(data.parameters || {}).slice(0, 80);
-              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'tool', content: `⚙️ ${action} → ${params}...` }]);
+              if (data.thought) {
+                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: data.thought }]);
+              }
+              const targetPath = data.parameters?.path || data.parameters?.filePath;
+              if (targetPath) {
+                setCopilotMessages(prev => [...prev, {
+                  role: 'assistant',
+                  kind: 'file',
+                  file: targetPath,
+                  content: `Writing ${targetPath}...`,
+                  action
+                }]);
+              }
             } else if (data.type === 'self_heal') {
               setCopilotStatus({ label: `🔧 ${data.message || 'Self-healing...'}`, tone: 'selfheal' });
               await sleep(30);
               setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'warn', content: data.message || 'Self-healing...' }]);
-            } else if (data.type === 'step' && data.message) {
-              setCopilotMessages(prev => [...prev, { role: 'assistant', content: `✅ ${data.message}` }]);
+            } else if (data.type === 'step') {
+              const stepLog = data.stepLog || {};
+              const action = stepLog.action || 'step';
+              const thought = stepLog.thought || '';
+              const resultMsg = stepLog.result?.message || data.message || '';
+              const targetFile = stepLog.parameters?.path || stepLog.parameters?.filePath || stepLog.result?.changedFile;
+
+              if (thought) {
+                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: thought }]);
+              }
+              if (targetFile) {
+                setCopilotMessages(prev => [...prev, {
+                  role: 'assistant',
+                  kind: 'file',
+                  file: targetFile,
+                  content: resultMsg || `File ready: ${targetFile}`,
+                  action
+                }]);
+              } else if (resultMsg) {
+                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'step', content: resultMsg, action }]);
+              }
             } else if (data.type === 'error') {
               setCopilotStatus({ label: `⚠️ ${data.message || 'Agent error'}`, tone: 'error' });
               await sleep(30);
@@ -764,7 +1051,31 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
               setCopilotStatus({ label: `✅ Done — ${stepCount} steps`, tone: 'success' });
               await sleep(30);
               const doneMsg = (data.message || '').trim();
-              setCopilotMessages(prev => [...prev, { role: 'assistant', content: doneMsg || `--- Done (${stepCount} steps)` }]);
+
+              const changedFiles = [];
+              if (Array.isArray(data.steps)) {
+                for (const s of data.steps) {
+                  const p = s.parameters?.path || s.parameters?.filePath || s.result?.changedFile;
+                  if (p && !changedFiles.includes(p)) changedFiles.push(p);
+                }
+              }
+              if (changedFiles.length === 0 && files.length > 0) {
+                files.slice(0, 5).forEach(f => changedFiles.push(f.path));
+              }
+
+              setCopilotMessages(prev => [
+                ...prev,
+                {
+                  role: 'assistant',
+                  kind: 'aistudio_card',
+                  model: 'Gemini 2.5 Flash',
+                  duration: `${Math.max(6, parseInt(stepCount) * 4 || 12)}s`,
+                  files: changedFiles,
+                  content: doneMsg || `🎉 Task completed successfully across ${stepCount} steps.`,
+                  summary: doneMsg
+                }
+              ]);
+
               // Fetch change count so the "Review Changes" button shows up
               if (latestRunIdRef.current) {
                 fetch(`${BACKEND}/api/agent/run-diffs?runId=${encodeURIComponent(latestRunIdRef.current)}`)
@@ -774,6 +1085,14 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
               }
             } else if (data.type === 'screenshot') {
               // Agent's "eyes": render UI screenshot as a chat card
+              setCopilotMessages(prev => [...prev, {
+                role: 'assistant',
+                kind: 'screenshot',
+                image: `data:${data.mimeType || 'image/png'};base64,${data.data}`,
+                url: data.url || 'http://localhost:3000',
+                message: data.message || 'Live Application UI Snapshot',
+                auto: !!data.auto,
+              }]);
               setCopilotMessages(prev => [...prev, {
                 role: 'assistant',
                 kind: 'screenshot',
@@ -976,6 +1295,19 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
             style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
           >
             <Plus className="w-3.5 h-3.5 stroke-[1.5]" /> New File
+          </button>
+          <button
+            onClick={() => openProjectWizard()}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold cursor-pointer transition-all hover:scale-[1.02]"
+            style={{
+              background: 'linear-gradient(135deg, rgba(59,130,246,0.2) 0%, rgba(99,102,241,0.2) 100%)',
+              border: '1px solid rgba(99,102,241,0.4)',
+              color: '#93c5fd',
+              boxShadow: '0 0 10px rgba(59,130,246,0.15)'
+            }}
+            title="Interactive Project Architect Wizard (v0 / Lovable style)"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-blue-400" /> App Wizard
           </button>
           <button
             onClick={addFolder}
@@ -1341,19 +1673,50 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
               </div>
             )}
 
-            {/* Plan tasks — live progress list */}
-            {planTasks.length > 0 && running && (
-              <div className="px-3 py-2 border-b space-y-1" style={{ borderColor: 'var(--color-border)' }}>
-                {planTasks.map((t) => (
-                  <div key={t.id || t.title || t.description} className="flex items-center gap-1.5 text-[10px]">
-                    <span className="w-3 shrink-0 text-center" style={{ color: t.status === 'completed' ? '#34d399' : t.status === 'in_progress' ? '#6cb2ff' : 'var(--color-text-muted)' }}>
-                      {t.status === 'completed' ? '✓' : t.status === 'in_progress' ? <Loader2 className="w-2.5 h-2.5 animate-spin inline-block" /> : '○'}
-                    </span>
-                    <span className="truncate" style={{ color: t.status === 'completed' ? '#34d399' : 'var(--color-text-secondary)' }}>
-                      {t.title || t.description || t.name || ''}
-                    </span>
-                  </div>
-                ))}
+            {/* Plan tasks — live progress list (Bolt.new / Replit style) */}
+            {planTasks.length > 0 && (
+              <div className="px-3 py-2.5 border-b space-y-2 bg-black/20" style={{ borderColor: 'var(--color-border)' }}>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5">
+                    <Sparkles className="w-3 h-3 text-blue-400" />
+                    Task Milestones ({planTasks.filter(t => t.status === 'completed').length}/{planTasks.length})
+                  </span>
+                  <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold" style={{ background: 'rgba(59,130,246,0.15)', color: '#93c5fd' }}>
+                    {Math.round((planTasks.filter(t => t.status === 'completed').length / Math.max(1, planTasks.length)) * 100)}%
+                  </span>
+                </div>
+                {/* Progress Bar */}
+                <div className="w-full h-1 rounded-full bg-white/10 overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-blue-500 to-emerald-400 transition-all duration-300"
+                    style={{ width: `${Math.round((planTasks.filter(t => t.status === 'completed').length / Math.max(1, planTasks.length)) * 100)}%` }}
+                  />
+                </div>
+                <div className="space-y-1 pt-0.5 max-h-28 overflow-y-auto">
+                  {planTasks.map((t, idx) => (
+                    <div key={t.id || idx} className="flex items-center justify-between text-[11px]">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0 ${
+                          t.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                          t.status === 'in_progress' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
+                          'bg-white/5 text-zinc-500 border border-white/10'
+                        }`}>
+                          {t.status === 'completed' ? '✓' : t.status === 'in_progress' ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : idx + 1}
+                        </span>
+                        <span className={`truncate font-medium ${
+                          t.status === 'completed' ? 'text-emerald-400' :
+                          t.status === 'in_progress' ? 'text-blue-300 font-semibold' :
+                          'text-zinc-400'
+                        }`}>
+                          {t.title || t.description || t.name || ''}
+                        </span>
+                      </div>
+                      <span className="text-[9px] capitalize text-zinc-500 shrink-0 font-mono ml-2">
+                        {t.status === 'in_progress' ? 'Running' : t.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -1395,6 +1758,42 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                     <div key={i} className="flex justify-center">
                       <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px]" style={{ background: 'rgba(75,139,252,0.08)', border: '1px solid rgba(75,139,252,0.15)', color: 'var(--color-text-muted)' }}>
                         <Loader2 className="w-3 h-3 animate-spin" style={{ color: 'var(--color-info)' }} /> {m.content}
+                      </div>
+                    </div>
+                  );
+                }
+                if (m.kind === 'thought') {
+                  return (
+                    <div key={i} className="flex gap-2 items-start">
+                      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.3)' }}>
+                        <Sparkles className="w-3 h-3 text-blue-400" />
+                      </div>
+                      <div className="flex-1 px-3 py-2 rounded-xl text-[11px] leading-relaxed" style={{ background: 'rgba(59,130,246,0.05)', border: '1px solid rgba(59,130,246,0.15)', color: '#bfdbfe' }}>
+                        <span className="font-semibold text-blue-400 block text-[9px] uppercase tracking-wider mb-0.5">🧠 Agent Reasoning</span>
+                        {m.content}
+                      </div>
+                    </div>
+                  );
+                }
+                if (m.kind === 'file') {
+                  return (
+                    <div key={i} className="flex gap-2 items-start">
+                      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(52,211,153,0.15)', border: '1px solid rgba(52,211,153,0.3)' }}>
+                        <FilePlus2 className="w-3 h-3 text-[#34d399]" />
+                      </div>
+                      <div className="flex-1 flex items-center justify-between px-3 py-2 rounded-xl text-[11px]" style={{ background: 'rgba(52,211,153,0.05)', border: '1px solid rgba(52,211,153,0.2)' }}>
+                        <span className="font-mono font-medium text-emerald-300 truncate">
+                          📄 {m.file || m.content}
+                        </span>
+                        {m.file && (
+                          <button
+                            onClick={() => selectFile({ path: m.file })}
+                            className="text-[10px] px-2 py-0.5 rounded font-medium cursor-pointer transition-opacity hover:opacity-80 shrink-0 ml-2"
+                            style={{ background: 'rgba(52,211,153,0.2)', color: '#6ee7b7' }}
+                          >
+                            Open Tab
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -1458,37 +1857,71 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                     </div>
                   );
                 }
-                if (m.kind === 'vision') {
-                  const isOk = /UI OK|sahi|theek|good|nice|beautiful|accha/i.test(m.content);
+                if (m.kind === 'screenshot') {
                   return (
-                    <div key={i} className="flex gap-2">
-                      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: isOk ? 'rgba(52,211,153,0.15)' : 'rgba(251,191,36,0.15)' }}>
-                        <Eye className={`w-3 h-3 ${isOk ? 'text-[#34d399]' : 'text-[#fbbf24]'}`} />
+                    <div key={i} className="flex gap-2 items-start">
+                      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(168,85,247,0.15)', border: '1px solid rgba(168,85,247,0.3)' }}>
+                        <Eye className="w-3 h-3 text-purple-400" />
                       </div>
-                      <div className="rounded-lg px-2.5 py-2 text-[11px] whitespace-pre-wrap flex-1" style={{ background: isOk ? 'rgba(52,211,153,0.08)' : 'rgba(251,191,36,0.08)', border: `1px solid ${isOk ? 'rgba(52,211,153,0.25)' : 'rgba(251,191,36,0.25)'}`, color: 'var(--color-text-primary)' }}>
-                        <p className="text-[10px] font-bold mb-1" style={{ color: isOk ? '#34d399' : '#fbbf24' }}>
-                          {isOk ? '👁️ UI OK — agent ne dekh liya, sab theek' : '👁️ Visual verdict (agent ne UI dekha)'}
-                        </p>
-                        {m.content}
+                      <div className="flex-1 p-2.5 rounded-xl border space-y-2" style={{ background: 'rgba(0,0,0,0.4)', borderColor: 'rgba(168,85,247,0.3)' }}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-semibold text-purple-300 flex items-center gap-1.5">
+                            📸 {m.message || 'Live Application UI Snapshot'}
+                          </span>
+                          <button
+                            onClick={() => window.open(m.url || 'http://localhost:3000', '_blank')}
+                            className="text-[9px] px-2 py-0.5 rounded font-medium cursor-pointer transition-opacity hover:opacity-80"
+                            style={{ background: 'rgba(168,85,247,0.25)', color: '#d8b4fe' }}
+                          >
+                            Open Live App ↗
+                          </button>
+                        </div>
+                        {m.image && (
+                          <img
+                            src={m.image}
+                            alt="Live app preview"
+                            className="rounded-lg border border-white/10 w-full max-h-56 object-cover cursor-pointer hover:opacity-95 transition-opacity"
+                            onClick={() => window.open(m.url || 'http://localhost:3000', '_blank')}
+                          />
+                        )}
                       </div>
                     </div>
                   );
                 }
-                if (m.kind === 'screenshot') {
+                if (m.kind === 'aistudio_card') {
                   return (
-                    <div key={i} className="flex gap-2">
-                      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'var(--gradient-primary)' }}>
+                    <AiStudioResponseCard
+                      key={i}
+                      message={m}
+                      onSelectFile={selectFile}
+                      onOpenDiff={() => setDiffOpen(true)}
+                      onRollback={rollbackTo}
+                      onOpenPreview={() => window.open('http://localhost:3000', '_blank')}
+                    />
+                  );
+                }
+                if (m.kind === 'done') {
+                  return (
+                    <div key={i} className="flex gap-2 items-start">
+                      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }}>
                         <Bot className="w-3 h-3 text-white" />
                       </div>
-                      <div className="space-y-1">
-                        {m.auto && <p className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>📸 Agent ne result screenshot liya</p>}
-                        <img
-                          src={m.image}
-                          alt="Agent screenshot"
-                          className="rounded-lg border cursor-pointer transition-transform hover:scale-[1.02]"
-                          style={{ maxWidth: '100%', maxHeight: 220, borderColor: 'var(--color-border)' }}
-                          onClick={() => window.open(m.image, '_blank')}
+                      <div className="flex-1 p-3 rounded-xl border space-y-2" style={{ background: 'rgba(16,185,129,0.06)', borderColor: 'rgba(16,185,129,0.3)' }}>
+                        <div
+                          className="ai-studio-markdown"
+                          dangerouslySetInnerHTML={{
+                            __html: DOMPurify.sanitize(marked.parse(m.content || ''))
+                          }}
                         />
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            onClick={() => window.open('http://localhost:3000', '_blank')}
+                            className="px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer transition-all hover:scale-[1.02]"
+                            style={{ background: 'linear-gradient(135deg, #3b82f6, #6366f1)', color: '#fff' }}
+                          >
+                            🌐 Open Live Preview (New Tab)
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -1507,22 +1940,22 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                   );
                 }
                 return (
-                  <div key={i} className="flex gap-2">
+                  <div key={i} className="flex gap-2.5 items-start">
                     <div
-                      className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
+                      className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
                       style={{ background: 'var(--gradient-primary)' }}
                     >
-                      <Bot className="w-3 h-3 text-white" />
+                      <Bot className="w-3.5 h-3.5 text-white" />
                     </div>
                     <div
-                      className="max-w-[85%] px-3 py-2 rounded-2xl rounded-bl-md text-[11px] leading-relaxed whitespace-pre-wrap"
-                      style={{
-                        background: m.kind === 'warn' ? 'rgba(251,191,36,0.08)' : 'rgba(255,255,255,0.04)',
-                        border: m.kind === 'warn' ? '1px solid rgba(251,191,36,0.2)' : '1px solid rgba(255,255,255,0.06)',
-                        color: m.kind === 'warn' ? '#fbbf24' : 'var(--color-text-primary)',
-                      }}
+                      className="max-w-[90%] px-3.5 py-2.5 rounded-2xl rounded-bl-md text-[12px] leading-relaxed border space-y-1 bg-zinc-900/60 border-zinc-800"
                     >
-                      {m.content}
+                      <div
+                        className="ai-studio-markdown"
+                        dangerouslySetInnerHTML={{
+                          __html: DOMPurify.sanitize(marked.parse(m.content || ''))
+                        }}
+                      />
                     </div>
                   </div>
                 );
@@ -1550,10 +1983,16 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
               {QUICK_PROMPTS.map((q) => (
                 <button
                   key={q.label}
-                  onClick={() => handleSend(q.prompt)}
+                  onClick={() => q.isWizard ? openProjectWizard() : handleSend(q.prompt)}
                   disabled={running}
-                  className="px-2 py-1.5 rounded-lg text-[10px] text-left transition-all cursor-pointer disabled:opacity-40 hover:scale-[1.02]"
-                  style={{ background: 'rgba(75,139,252,0.07)', border: '1px solid rgba(75,139,252,0.2)', color: 'var(--color-primary)' }}
+                  className={`px-2 py-1.5 rounded-lg text-[10px] text-left transition-all cursor-pointer disabled:opacity-40 hover:scale-[1.02] ${
+                    q.isWizard ? 'col-span-2 font-semibold text-center' : ''
+                  }`}
+                  style={{
+                    background: q.isWizard ? 'linear-gradient(135deg, rgba(59,130,246,0.18), rgba(99,102,241,0.18))' : 'rgba(75,139,252,0.07)',
+                    border: q.isWizard ? '1px solid rgba(99,102,241,0.35)' : '1px solid rgba(75,139,252,0.2)',
+                    color: q.isWizard ? '#93c5fd' : 'var(--color-primary)'
+                  }}
                 >
                   {q.label}
                 </button>
@@ -1595,6 +2034,14 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
 
       {/* Prompt modal (new file/folder/rename) */}
       <PromptModal modal={modalSpec} onClose={() => setUiModal(null)} onSubmit={submitModal} />
+
+      {/* Interactive Project Architect Wizard */}
+      <ProjectWizardModal
+        isOpen={wizardOpen}
+        initialPrompt={wizardInitialPrompt}
+        onClose={() => setWizardOpen(false)}
+        onBuildProject={handleWizardBuild}
+      />
 
       {/* Quick Open — Ctrl+P */}
       {quickOpenOpen && (

@@ -138,7 +138,7 @@ export default function VoiceAssistant({
         recognitionRef.current.stop();
       }
     };
-  }, [isListening, onTranscript]);
+  }, [isListening, onTranscript, stopListening]);
 
   // Initialize audio context for waveform visualization
   const initAudioContext = useCallback(async () => {
@@ -181,7 +181,7 @@ export default function VoiceAssistant({
       animationFrameRef.current = requestAnimationFrame(updateWaveform);
     };
     animationFrameRef.current = requestAnimationFrame(updateWaveform);
-  }, [isListening, isSpeaking, WAVEFORM_DECAY]);
+  }, [isListening, isSpeaking]);
 
   useEffect(() => {
     if (isListening || isSpeaking) {
@@ -301,7 +301,7 @@ export default function VoiceAssistant({
       fallbackToWebSpeech();
       return false;
     }
-  }, [geminiApiKey, onTranscript, fallbackToWebSpeech]);
+  }, [geminiApiKey, onTranscript, fallbackToWebSpeech, isListening, playGeminiAudio]);
 
   const startListening = useCallback(async () => {
     setError(null);
@@ -369,7 +369,7 @@ export default function VoiceAssistant({
     
     showToast({ type: 'warning', message: `Command not recognized: "${command}"` });
     return null;
-  }, []);
+  }, [onSpeak, showToast]);
 
   // Voice command listener
   useEffect(() => {

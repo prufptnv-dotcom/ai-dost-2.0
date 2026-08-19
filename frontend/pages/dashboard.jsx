@@ -32,6 +32,7 @@ const VIEW_META = {
   images: { title: 'Image Generator', subtitle: 'Prompt se free images — Pollinations AI', icon: ImageIcon },
   resume: { title: 'Resume Builder', subtitle: 'Prompt se instant resume + preview', icon: FileText },
   history: { title: 'Chat History', subtitle: 'Purani baatein — sab saved', icon: History },
+  mcp: { title: 'MCP Connectors', subtitle: 'Model Context Protocol server integrations', icon: Code2 },
   settings: { title: 'Settings', subtitle: 'Models, keys aur preferences', icon: Settings },
 };
 

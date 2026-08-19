@@ -177,11 +177,22 @@ class TelegramBot {
     }
 
     async poll() {
-        const res = await this.call('getUpdates', { offset: this.offset, timeout: 25, allowed_updates: ['message'] }, 40000);
-        if (res && res.ok && Array.isArray(res.result)) {
-            for (const u of res.result) {
-                this.offset = u.update_id + 1;
-                this.handleUpdate(u).catch(e => logger.warn(`⚠️ Telegram update error: ${e.message}`));
+        try {
+            const res = await this.call('getUpdates', { offset: this.offset, timeout: 25, allowed_updates: ['message'] }, 40000);
+            if (res && res.ok && Array.isArray(res.result)) {
+                for (const u of res.result) {
+                    this.offset = u.update_id + 1;
+                    this.handleUpdate(u).catch(e => logger.warn(`⚠️ Telegram update error: ${e.message}`));
+                }
+            }
+            this._pollFailures = 0;
+        } catch (e) {
+            this._pollFailures = (this._pollFailures || 0) + 1;
+            logger.warn(`⚠️ Telegram getUpdates failed (attempt ${this._pollFailures}): ${e.message}`);
+            if (this._pollFailures >= 10) {
+                logger.error('❌ Telegram polling repeatedly failing — stopping bot. Restart server to retry.');
+                this.running = false;
+                return;
             }
         }
         setTimeout(() => this.poll(), 300);

@@ -449,10 +449,11 @@ const handleEditorChange = (newContent) => {
     // Register Native Monaco Ghost Text Autocomplete Provider
     try {
       const supportedLanguages = ['python', 'javascript', 'typescript', 'html', 'css', 'java', 'go', 'rust', 'c', 'cpp', 'json', 'yaml', 'bash', 'dockerfile'];
-      if (!supportedLanguages.includes(model.getLanguageId())) {
+      const editorModel = editor.getModel();
+      if (!editorModel || !supportedLanguages.includes(editorModel.getLanguageId())) {
         return;
       }
-      monaco.languages.registerInlineCompletionsProvider(model.getLanguageId(), {
+      monaco.languages.registerInlineCompletionsProvider(editorModel.getLanguageId(), {
         provideInlineCompletions: async (model, position) => {
           const lineContent = model.getLineContent(position.lineNumber);
           // Trigger ghost completion only if typing at line end or after 2 characters

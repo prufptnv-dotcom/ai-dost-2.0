@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { History, MessageSquare, Trash2, Clock, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import api from '../../services/api';
 
@@ -22,11 +22,11 @@ export default function HistoryView({ onToast }) {
   const [expanded, setExpanded] = useState(null);
   const scrollRef = useRef(null);
 
-  const showToast = onToast || ((m, t) => {
+  const showToast = useMemo(() => onToast || ((m, t) => {
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('ai_dost_toast', { detail: { type: t || 'success', message: m } }));
-  });
+  }), [onToast]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.get('/chat/history', { params: { session_id: 'default', limit: 100 } });
@@ -48,9 +48,9 @@ export default function HistoryView({ onToast }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [showToast]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   const clearHistory = async () => {
     if (!window.confirm('Saara chat history delete karein?')) return;

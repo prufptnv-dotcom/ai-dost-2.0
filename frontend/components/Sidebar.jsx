@@ -111,15 +111,14 @@ export default function Sidebar({
         {/* Navigation Items */}
         <nav className="flex-1 overflow-y-auto px-2 py-4 space-y-1" role="navigation" aria-label="Main menu">
           <div className="space-y-1">
-            {primaryIds.map((itemId) => {
-              const item = navItems.find(n => n.id === itemId);
+            {navItems.map((item) => {
               const Icon = item.icon;
-              const isActive = activeItem === itemId;
+              const isActive = activeItem === item.id;
               return (
                 <button
-                  key={itemId}
-                  onClick={() => onItemClick(itemId)}
-                  onMouseEnter={() => setHoveredItem(itemId)}
+                  key={item.id}
+                  onClick={() => onItemClick(item.id)}
+                  onMouseEnter={() => setHoveredItem(item.id)}
                   onMouseLeave={() => setHoveredItem(null)}
                   className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 relative overflow-hidden group cursor-pointer hover-lift
                     ${isActive
@@ -136,7 +135,7 @@ export default function Sidebar({
                 >
                   <motion.div
                     initial={{ scale: 0.8 }}
-                    animate={{ scale: hoveredItem === itemId || isActive ? 1.1 : 1 }}
+                    animate={{ scale: hoveredItem === item.id || isActive ? 1.1 : 1 }}
                     transition={{ type: 'spring', stiffness: 400, damping: 17 }}
                     className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
                     style={{

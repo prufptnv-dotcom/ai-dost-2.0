@@ -48,7 +48,22 @@ yarn-error.log*
 
 # Database
 .data/
+backend/data/*.db*
 memory-brain/.data/frontend/public/downloads/
 
 # Generated document downloads
 frontend/public/downloads/*
+
+# Test Artifacts & Reports
+frontend/coverage/
+frontend/test-results/
+frontend/playwright-report/
+backend/test-results/
+backend/playwright-report/
+
+# Editor & Scratch
+.opencode/
+scratch/
+test_*.png
+test_*.js
+*.png

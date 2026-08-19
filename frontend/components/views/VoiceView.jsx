@@ -128,7 +128,7 @@ export default function VoiceView({ onClose, onTranscript }) {
     } finally {
       setThinking(false);
     }
-  }, [thinking]);
+  }, [thinking, onTranscript]);
 
   const startListening = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;

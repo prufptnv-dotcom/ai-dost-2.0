@@ -653,7 +653,8 @@ export default function ChatView({
         mode: 'chat',
         persona,
       });
-      const reply = res.data?.reply || res.data?.message || 'Sorry, response nahi mil paya. Dobara try karo.';
+      const reply0 = res.data?.reply || res.data?.message || 'Sorry, response nahi mil paya. Dobara try karo.';
+      let reply = reply0;
 
       // ── AI ne [GENERATE_IMAGE: prompt] tag diya → Pollinations se image banao ──
       const imageTagRegex = /\[GENERATE_IMAGE:\s*(.*?)\]/i;

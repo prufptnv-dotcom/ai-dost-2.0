@@ -1,9 +1,11 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Bot, Send, Loader2, Sparkles, CheckCircle2, XCircle, Camera,
   Wrench, FilePlus2, ClipboardList, Play, Trash2, ChevronDown, ChevronRight,
-  Users, FolderOpen, FileCheck2
+  Users, FolderOpen, FileCheck2, Layout, Sparkle
 } from 'lucide-react';
+import { KanbanBoard } from '../agent/KanbanBoard';
+import SpecWizard from '../agent/SpecWizard';
 
 const QUICK_PROMPTS = [
   { label: 'Portfolio site banao', prompt: 'Ek modern portfolio website banao with hero, projects section, contact form. Frontend code likho.' },
@@ -31,6 +33,10 @@ export default function AgentView({ onToast }) {
   const [screenshot, setScreenshot] = useState(null);
   const [expandedTools, setExpandedTools] = useState(new Set());
   const [runCount, setRunCount] = useState(0);
+  const [agentTasks, setAgentTasks] = useState([]);
+  const [draggingTask, setDraggingTask] = useState(null);
+  const [hoveredColumn, setHoveredColumn] = useState(null);
+
   const scrollRef = useRef(null);
   const abortRef = useRef(null);
 
@@ -46,6 +52,14 @@ export default function AgentView({ onToast }) {
     if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
     setRunning(false);
     setMessages(prev => [...prev, { role: 'assistant', content: '⏹️ Agent run user ne stop kiya.' }]);
+  };
+
+  const handleSpecComplete = (spec, plan) => {
+    setTab('agent');
+    setMessages(prev => [...prev, { role: 'assistant', content: `✅ Spec approved! Starting build for "${spec.steps.overview.data.name || 'project'}".` }]);
+    setCurrentPlan(plan.tasks?.map(t => t.title || t) || []);
+    setPlanVisible(true);
+    runAgent(`Build this project from spec: ${JSON.stringify(spec)}`);
   };
 
   const runAgent = async (text) => {
@@ -132,7 +146,11 @@ export default function AgentView({ onToast }) {
       showToast('Agent run complete', 'success');
     } catch (e) {
       if (e.name !== 'AbortError') {
-        setMessages(prev => [...prev, { role: 'assistant', content: `⚠️ ${e?.message || 'Agent error'}` }]);
+        const friendly = e?.message?.includes('Failed to fetch') || e?.message?.includes('NetworkError')
+          ? 'Backend server reach nahi hua (localhost:5000). Check karo: cd backend && node server.js'
+          : (e?.message || 'Agent error');
+        setMessages(prev => [...prev, { role: 'assistant', content: `⚠️ ${friendly}` }]);
+        showToast('Agent run failed — backend check karo', 'error');
       }
     } finally {
       setRunning(false);
@@ -145,6 +163,22 @@ export default function AgentView({ onToast }) {
     if (next.has(id)) next.delete(id); else next.add(id);
     setExpandedTools(next);
   };
+
+  const handleTaskUpdate = useCallback(({ type, task, fromColumn, toColumn }) => {
+    if (type === 'newTask') {
+      setAgentTasks(prev => [...prev, { id: Date.now().toString(), title: task.title, column: 'backlog' }]);
+    } else if (type === 'move') {
+      setAgentTasks(prev => {
+        const idx = prev.findIndex(t => t.id === task.taskId);
+        if (idx > -1) {
+          const newTasks = [...prev];
+          newTasks[idx].column = toColumn;
+          return newTasks;
+        }
+        return prev;
+      });
+    }
+  }, []);
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -168,7 +202,7 @@ export default function AgentView({ onToast }) {
             </button>
           )}
         </div>
-        {/* Mode tabs: single agent vs multi-agent crew */}
+        {/* Mode tabs: single agent vs multi-agent crew vs spec wizard */}
         <div className="flex gap-1.5 mt-3 p-1 rounded-xl w-fit" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}>
           <button
             onClick={() => setTab('agent')}
@@ -178,6 +212,15 @@ export default function AgentView({ onToast }) {
               : { color: 'var(--color-text-muted)' }}
           >
             <Bot className="w-3.5 h-3.5" /> Agent
+          </button>
+          <button
+            onClick={() => setTab('spec')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all cursor-pointer"
+            style={tab === 'spec'
+              ? { background: 'var(--gradient-primary)', color: '#fff', boxShadow: '0 2px 10px var(--color-primary-glow)' }
+              : { color: 'var(--color-text-muted)' }}
+          >
+            <Layout className="w-3.5 h-3.5" /> Spec Wizard
           </button>
           <button
             onClick={() => setTab('crew')}
@@ -195,6 +238,8 @@ export default function AgentView({ onToast }) {
       <div className="flex-1 overflow-y-auto">
         {tab === 'crew' ? (
           <CrewPanel onToast={showToast} BACKEND={BACKEND} />
+        ) : tab === 'spec' ? (
+          <SpecWizard BACKEND={BACKEND} onToast={showToast} onSpecComplete={handleSpecComplete} />
         ) : (
         <div ref={scrollRef} className="max-w-3xl mx-auto px-6 py-6 space-y-5">
           {/* Empty state */}
@@ -311,7 +356,16 @@ export default function AgentView({ onToast }) {
           )}
 
           {/* Screenshot */}
-          {screenshot && (
+          {agentTasks.length > 0 && (
+              <div style={{ padding: '8px 12px', background: 'rgba(75,139,252,0.06)', border: '1px solid rgba(75,139,252,0.2)', borderRadius: '6px', margin: '8px 0' }}>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-muted)' }}>Agent Tasks</span>
+                  <span className="text-[10px] text-[var(--color-primary)] cursor-pointer" onClick={() => setAgentTasks([])}>Clear</span>
+                </div>
+                <KanbanBoard agentId="current-agent" onTaskUpdate={handleTaskUpdate} />
+              </div>
+            )}
+            {screenshot && (
             <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
               <div className="flex items-center gap-2 px-3 py-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
                 <Camera className="w-3.5 h-3.5" style={{ color: 'var(--color-primary)' }} />
