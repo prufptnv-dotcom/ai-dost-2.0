@@ -375,6 +375,39 @@ function generateLiveAppHtml(files = [], contents = {}, inspectorActive = false)
         return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
     };
+
+    // ── Live Iframe Error Telemetry ─────────────────────────────────────────
+    window.onerror = function(msg, url, lineNo, columnNo, error) {
+      const errText = (msg || '').toString() + (lineNo ? ' (Line: ' + lineNo + ':' + columnNo + ')' : '');
+      window.parent.postMessage({
+        type: 'AUTO_FIX_ERROR',
+        error: errText,
+        source: 'iframe_window_onerror'
+      }, '*');
+      return false;
+    };
+
+    window.addEventListener('unhandledrejection', function(event) {
+      const reason = event.reason ? (event.reason.message || event.reason) : 'Unhandled promise';
+      window.parent.postMessage({
+        type: 'AUTO_FIX_ERROR',
+        error: 'Promise Rejection: ' + String(reason),
+        source: 'iframe_unhandled_rejection'
+      }, '*');
+    });
+
+    const _origConsoleError = console.error;
+    console.error = function(...args) {
+      _origConsoleError.apply(console, args);
+      const text = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+      if (text.includes('Error') || text.includes('Uncaught') || text.includes('SyntaxError') || text.includes('TypeError')) {
+        window.parent.postMessage({
+          type: 'AUTO_FIX_ERROR',
+          error: text.slice(0, 300),
+          source: 'iframe_console_error'
+        }, '*');
+      }
+    };
   </script>
   <style>
     body { font-family: 'Inter', sans-serif; margin: 0; background: #0b0f19; color: #f8fafc; }
@@ -406,6 +439,11 @@ function generateLiveAppHtml(files = [], contents = {}, inspectorActive = false)
       }
       componentDidCatch(error, info) {
         console.error("Preview caught error:", error, info);
+        window.parent.postMessage({
+          type: 'AUTO_FIX_ERROR',
+          error: 'React ErrorBoundary: ' + (error?.message || 'Component Crash'),
+          source: 'react_error_boundary'
+        }, '*');
       }
       render() {
         if (this.state.hasError) {
@@ -457,6 +495,11 @@ function generateLiveAppHtml(files = [], contents = {}, inspectorActive = false)
       }
     } catch(err) {
       document.getElementById('root').innerHTML = '<div style="padding:24px;color:#f87171;font-family:monospace;font-size:12px;"><b>Syntax/Execution Error:</b> ' + err.message + '</div>';
+      window.parent.postMessage({
+        type: 'AUTO_FIX_ERROR',
+        error: 'Babel Compilation Syntax Error: ' + err.message,
+        source: 'babel_compilation_error'
+      }, '*');
     }
   </script>
 

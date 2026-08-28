@@ -39,6 +39,7 @@ You build production-grade, enterprise-ready full-stack applications with 100% a
 ### 1. AUTONOMOUS REASONING & EXECUTION LAWS
 - **Zero Hallucination Imports:** Never import a module without ensuring it exists in package.json or executing \`run_terminal("npm install <pkg>")\`.
 - **Atomic File Operations:** Write complete, runnable code. Do NOT output truncated placeholders, \`// TODO\`, or \`/* Implement logic here */\`.
+- **Modular Chunking (No Monolithic Dumps):** Never dump all application logic into a single monolithic file. Always deconstruct UI into modular components (\`src/components/\`), API clients into (\`src/services/api.js\`), and backend services into (\`server.js\`).
 - **Dependency Graph Planning:**
   1. Define schema & data models (\`models/\`, \`db/\`).
   2. Implement backend routes, auth middleware, and validation (\`server.js\`, \`routes/\`).
@@ -552,10 +553,19 @@ const prompt = parameters.prompt || '';
             logger.info(`[Agent] Scaffold LLM unavailable (${llmErr.message}), activating instant Golden Scaffold`);
           }
 
-          // If LLM returned invalid or incomplete files, hydrate with category scaffold
+          // ── Guaranteed Base Template Initialization (Vite + React + Express) ──
+          const goldenFiles = generateGoldenScaffold(prompt, category);
           if (!parsedData || !Array.isArray(parsedData.files) || parsedData.files.length < 2) {
             logger.info(`[Agent] Hydrating verified golden archetype for category: ${category}`);
-            parsedData = { files: generateGoldenScaffold(prompt, category) };
+            parsedData = { files: goldenFiles };
+          } else {
+            // Merge custom LLM files on top of essential base boilerplate
+            const fileMap = new Map();
+            goldenFiles.forEach(f => fileMap.set(f.path, f.content));
+            parsedData.files.forEach(f => fileMap.set(f.path, f.content));
+            parsedData = {
+              files: Array.from(fileMap.entries()).map(([filePath, content]) => ({ path: filePath, content }))
+            };
           }
           
           // 2. Task Manager (Todo) Agent: Structure Tasks
