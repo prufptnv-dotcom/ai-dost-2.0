@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 /* ─── Local Fonts (downloaded to public/fonts) ─── */
@@ -208,18 +209,53 @@ html {
 }
 
 body {
-  background-color: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans);
+  background-color: #090a0f;
+  color: #e2e8f0;
+  font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
   margin: 0;
   padding: 0;
   overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   transition: background-color 0.4s ease, color 0.4s ease;
 }
 
-h1, h2, h3, h4, h5, h6, .font-display { font-family: var(--font-display); }
+/* Custom Minimalist Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
 
-code, pre, .font-mono { font-family: var(--font-mono) !important; }
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* Crisp Selection */
+::selection {
+  background: rgba(14, 165, 233, 0.3);
+  color: #ffffff;
+}
+
+/* Glass Surface Layer */
+.glass-panel {
+  background: rgba(22, 24, 33, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+h1, h2, h3, h4, h5, h6, .font-display { font-family: 'Plus Jakarta Sans', var(--font-display); }
+
+code, pre, .font-mono { font-family: 'JetBrains Mono', monospace !important; }
 
 /* ═══════════════════════════════════════
    ANIMATIONS & KEYFRAMES
