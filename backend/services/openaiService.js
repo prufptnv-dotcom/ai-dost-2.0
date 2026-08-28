@@ -70,7 +70,7 @@ Key Response Guidelines:
             messagesPayload.push({ role: 'user', content: message });
 
             const response = await this.client.post('/chat/completions', {
-                model: process.env.OPENAI_MODEL || 'gpt-4o',
+                model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
                 messages: messagesPayload,
                 temperature: 0.3,
                 max_tokens: 4096
