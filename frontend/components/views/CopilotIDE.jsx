@@ -17,6 +17,7 @@ import { PromptModal, QuickOpen, CommandPalette, SearchOverlay, MODAL_ICONS } fr
 import DiffReviewModal from './DiffReviewModal';
 import ProjectWizardModal from './ProjectWizardModal';
 import TaskStepItem from './TaskStepItem';
+import VisualDebugger from './VisualDebugger';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
@@ -501,10 +502,12 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
   const terminalRef = useRef(null);
+  const iframeRef = useRef(null);
   const abortRef = useRef(null);
   const activePathRef = useRef(null);
   const endRef = useRef(null);
   const diagTimerRef = useRef(null);
+  const [visualDebuggerOpen, setVisualDebuggerOpen] = useState(false);
 
   const showToast = useCallback((msg, type = 'info') => {
     if (onToast) onToast(msg, type);
@@ -1881,12 +1884,23 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                   <span className="text-neutral-200 truncate">{projectId || 'app'}.aidost.local</span>
                 </div>
 
-                {/* Actions: Refresh & Popout */}
+                {/* Actions: Visual QA, Refresh & Popout */}
                 <div className="flex items-center gap-1.5">
                   <button
+                    onClick={() => setVisualDebuggerOpen(prev => !prev)}
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
+                      visualDebuggerOpen 
+                        ? 'bg-sky-500/20 text-sky-400 border-sky-500/40' 
+                        : 'bg-[#161821] hover:bg-[#1c1f2b] text-neutral-300 hover:text-white border-white/[0.08]'
+                    }`}
+                    title="Visual QA Auto-Debugger"
+                  >
+                    <Eye size={12} className="text-sky-400" /> Visual QA
+                  </button>
+
+                  <button
                     onClick={() => {
-                      const iframe = document.querySelector('iframe');
-                      if (iframe) iframe.src = iframe.src;
+                      if (iframeRef.current) iframeRef.current.src = iframeRef.current.src;
                       showToast('Preview refreshed', 'info');
                     }}
                     className="p-1.5 rounded-md bg-[#161821] hover:bg-[#1c1f2b] text-neutral-400 hover:text-white border border-white/[0.08] hover:border-white/[0.18] transition-colors cursor-pointer"
@@ -1904,6 +1918,17 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                 </div>
               </div>
 
+              {/* Visual QA Inspector Drawer */}
+              {visualDebuggerOpen && (
+                <div className="px-4 py-2 bg-[#090a0f] border-b border-white/[0.08] animate-in fade-in">
+                  <VisualDebugger 
+                    iframeRef={iframeRef} 
+                    onTriggerFix={(p) => handleSend(p)} 
+                    isRepairing={running} 
+                  />
+                </div>
+              )}
+
               {/* Preview Viewport Canvas */}
               <div className="flex-1 min-h-0 flex items-center justify-center p-4 lg:p-6 bg-[#090a0f] overflow-auto">
                 <div
@@ -1913,6 +1938,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                   }}
                 >
                   <iframe
+                    ref={iframeRef}
                     srcDoc={generateLiveAppHtml(files, contents, inspectorActive)}
                     className="w-full h-full border-0 bg-white"
                     title="Live App"
