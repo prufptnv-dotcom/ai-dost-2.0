@@ -2009,7 +2009,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                   <iframe
                     ref={iframeRef}
                     srcDoc={generateLiveAppHtml(files, contents, inspectorActive)}
-                    className="w-full h-full border-0 bg-white"
+                    className="w-full h-full border-0 bg-[#090a0f]"
                     title="Live App"
                     sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
                   />

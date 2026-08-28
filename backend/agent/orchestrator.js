@@ -1031,16 +1031,51 @@ p { color: #64748b; }`,
   }
 }
 
-// Self-healing: analyze error and suggest fix
-async function suggestFix(error, context, options) {
-  if (options?.groqService) {
-    try {
-      const fixPrompt = `Analyze this error and provide a code fix:\n\nError: ${error}\nContext: ${context}\n\nReturn ONLY the fixed code block with a brief explanation.`;
-      const resp = await options.groqService.chat(fixPrompt, [], 'agent', options.customKeys?.groq);
-      if (resp && resp.trim().length > 5) return resp;
-    } catch (_) {}
+// Standalone helper for direct boilerplate injection
+async function injectBaseBoilerplate(workspace) {
+  const defaultPackageJson = JSON.stringify({
+    name: 'ai-dost-app',
+    version: '1.0.0',
+    type: 'module',
+    scripts: { dev: 'vite', build: 'vite build', start: 'vite' },
+    dependencies: { react: '^18.2.0', 'react-dom': '^18.2.0', 'lucide-react': '^0.344.0' },
+    devDependencies: { vite: '^5.1.4', '@vitejs/plugin-react': '^4.2.1', tailwindcss: '^3.4.1' }
+  }, null, 2);
+
+  const defaultIndexHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><script src="https://cdn.tailwindcss.com"></script><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"></head><body class="bg-[#090a0f] text-white"><div id="root"></div><script type="module" src="/src/main.jsx"></script></body></html>`;
+  const defaultViteConfig = `import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\n\nexport default defineConfig({ plugins: [react()], server: { port: 5173, host: '0.0.0.0' } });`;
+  const defaultMainJsx = `import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App.jsx';\n\nReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>);`;
+
+  const files = [
+    { path: 'package.json', content: defaultPackageJson },
+    { path: 'index.html', content: defaultIndexHtml },
+    { path: 'vite.config.js', content: defaultViteConfig },
+    { path: 'src/main.jsx', content: defaultMainJsx }
+  ];
+
+  for (const f of files) {
+    if (workspace && typeof workspace.write_file === 'function') {
+      await workspace.write_file(f.path, f.content);
+    } else if (typeof workspace === 'string') {
+      try {
+        const full = path.join(workspace, f.path);
+        if (!fs.existsSync(full)) {
+          fs.mkdirSync(path.dirname(full), { recursive: true });
+          fs.writeFileSync(full, f.content, 'utf-8');
+        }
+      } catch (_) {}
+    }
   }
-  return null;
+}
+
+async function runAutonomousCopilotLoop({ prompt, workspace, onStepUpdate, onLogStream }) {
+  await injectBaseBoilerplate(workspace);
+  if (onLogStream) onLogStream('📦 System: Base React+Vite template injected to prevent compilation crash.');
+  const orchestrator = new AgentOrchestrator({ projectPath: typeof workspace === 'string' ? workspace : os.tmpdir() });
+  return orchestrator.executePlan(prompt, typeof workspace === 'string' ? workspace : os.tmpdir(), onStepUpdate);
 }
 
 module.exports = AgentOrchestrator;
+module.exports.AgentOrchestrator = AgentOrchestrator;
+module.exports.injectBaseBoilerplate = injectBaseBoilerplate;
+module.exports.runAutonomousCopilotLoop = runAutonomousCopilotLoop;
