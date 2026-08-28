@@ -44,14 +44,19 @@ class OpenRouterService {
             messages.push(...history);
             messages.push({ role: 'user', content: message });
 
-            // Free models (2026) — pehle walo ka free tier hat chuka hai.
-            // Verified working: openai/gpt-oss-20b:free. Baaki provider availability pe depend karte hain.
+            // Free models list (2026) with automatic fallback
             const freeModels = [
                 'openai/gpt-oss-20b:free',
+                'deepseek/deepseek-r1:free',
+                'deepseek/deepseek-chat:free',
+                'qwen/qwen-2.5-coder-32b-instruct:free',
+                'meta-llama/llama-3.3-70b-instruct:free',
+                'google/gemini-2.0-flash-exp:free',
                 'cohere/north-mini-code:free',
                 'z-ai/glm-5.2:free',
                 'google/gemma-4-31b-it:free',
-                'liquid/lfm-2.5-2.6b:free'
+                'liquid/lfm-2.5-2.6b:free',
+                'mistralai/mistral-7b-instruct:free'
             ];
 
             let lastError = null;
