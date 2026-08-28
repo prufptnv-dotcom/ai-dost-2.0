@@ -300,8 +300,8 @@ function generateLiveAppHtml(files = [], contents = {}, inspectorActive = false)
     const _origFetch = window.fetch;
     const _db = {
       notes: [
-        { id: '1', title: 'System Architecture', content: '# Core Design\n\n- Reactive state management\n- Zero-latency preview sync\n- Dark Linear design tokens', tags: ['architecture', 'saas'], createdAt: new Date().toISOString() },
-        { id: '2', title: 'Roadmap & Specs', content: '## Sprint 1 Goals\n\n| Item | Status |\n|---|---|\n| SQLite REST API | Completed |\n| Split Editor | Active |', tags: ['roadmap', 'product'], createdAt: new Date().toISOString() }
+        { id: '1', title: 'System Architecture', content: '# Core Design\\n\\n- Reactive state management\\n- Zero-latency preview sync\\n- Dark Linear design tokens', tags: ['architecture', 'saas'], createdAt: new Date().toISOString() },
+        { id: '2', title: 'Roadmap & Specs', content: '## Sprint 1 Goals\\n\\n- SQLite REST API: Completed\\n- Split Editor: Active', tags: ['roadmap', 'product'], createdAt: new Date().toISOString() }
       ],
       tags: ['architecture', 'saas', 'roadmap', 'product', 'design'],
       items: [

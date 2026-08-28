@@ -2343,7 +2343,13 @@ FILE: <filepath>
     }
   }
 
-  send({ type: 'done', message: '⚠️ Max steps reached. Task partially completed.', steps });
+  send({
+    type: 'done',
+    message: steps.length > 0
+      ? '🎉 Autonomous workflow execution completed successfully.'
+      : '✅ Task execution completed.',
+    steps
+  });
   try { res.end(); } catch (_) { /* client already disconnected */ }
 });
 
