@@ -1795,18 +1795,18 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
           {workspaceMode === 'preview' && (
             <div className="flex-1 flex flex-col overflow-hidden min-h-0 bg-[#090a0f]">
               
-              {/* Browser Address Bar Header */}
-              <div className="flex items-center justify-between px-4 py-2 bg-[#0f1117] border-b border-white/[0.08] shrink-0">
+              {/* Browser Address Bar & Device Toolbar */}
+              <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-[#0f1117] border-b border-white/[0.08] shrink-0">
                 <div className="flex items-center gap-3">
                   <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 uppercase tracking-wider font-mono">
-                    <Eye size={14} /> Live App Preview
+                    <Eye size={14} /> Preview
                   </span>
 
-                  {/* Responsive Switcher */}
+                  {/* Responsive Device Switcher */}
                   <div className="flex items-center bg-[#090a0f] rounded-lg p-0.5 border border-white/[0.08]">
                     <button
                       onClick={() => setPreviewDevice('desktop')}
-                      className={`px-3 py-1 rounded-md text-[10px] font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                      className={`px-2.5 py-1 rounded-md text-[10px] font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
                         previewDevice === 'desktop' ? 'bg-sky-600 text-white shadow-glow-sm font-semibold' : 'text-neutral-400 hover:text-white'
                       }`}
                     >
@@ -1814,7 +1814,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                     </button>
                     <button
                       onClick={() => setPreviewDevice('tablet')}
-                      className={`px-3 py-1 rounded-md text-[10px] font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                      className={`px-2.5 py-1 rounded-md text-[10px] font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
                         previewDevice === 'tablet' ? 'bg-sky-600 text-white shadow-glow-sm font-semibold' : 'text-neutral-400 hover:text-white'
                       }`}
                     >
@@ -1822,7 +1822,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                     </button>
                     <button
                       onClick={() => setPreviewDevice('mobile')}
-                      className={`px-3 py-1 rounded-md text-[10px] font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                      className={`px-2.5 py-1 rounded-md text-[10px] font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
                         previewDevice === 'mobile' ? 'bg-sky-600 text-white shadow-glow-sm font-semibold' : 'text-neutral-400 hover:text-white'
                       }`}
                     >
@@ -1842,14 +1842,22 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                   </button>
                 </div>
 
-                <div className="flex items-center gap-2">
+                {/* Simulated URL Path Bar */}
+                <div className="hidden lg:flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[#090a0f] border border-white/[0.08] text-[11px] font-mono text-neutral-400 max-w-xs truncate">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <span className="text-neutral-500">https://</span>
+                  <span className="text-neutral-200 truncate">{projectId || 'app'}.aidost.local</span>
+                </div>
+
+                {/* Actions: Refresh & Popout */}
+                <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => {
                       const iframe = document.querySelector('iframe');
                       if (iframe) iframe.src = iframe.src;
                       showToast('Preview refreshed', 'info');
                     }}
-                    className="p-1.5 rounded-lg bg-[#181b28] hover:bg-[#23273b] text-zinc-400 hover:text-white border border-[#262a40]"
+                    className="p-1.5 rounded-md bg-[#161821] hover:bg-[#1c1f2b] text-neutral-400 hover:text-white border border-white/[0.08] hover:border-white/[0.18] transition-colors cursor-pointer"
                     title="Reload Preview"
                   >
                     <RefreshCw size={13} />
@@ -1857,24 +1865,24 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
 
                   <button
                     onClick={() => window.open(previewUrl, '_blank')}
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-[#181b28] hover:bg-[#23273b] text-zinc-300 hover:text-white border border-[#262a40] transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-[#161821] hover:bg-[#1c1f2b] text-neutral-300 hover:text-white border border-white/[0.08] hover:border-white/[0.18] transition-colors cursor-pointer"
                   >
-                    <ExternalLink size={12} /> Open in New Tab
+                    <ExternalLink size={12} className="text-sky-400" /> Open in New Tab
                   </button>
                 </div>
               </div>
 
-              {/* Preview Viewport Frame */}
-              <div className="flex-1 min-h-0 flex items-center justify-center p-6 bg-[#07080b] overflow-auto">
+              {/* Preview Viewport Canvas */}
+              <div className="flex-1 min-h-0 flex items-center justify-center p-4 lg:p-6 bg-[#090a0f] overflow-auto">
                 <div
-                  className="h-full bg-black rounded-2xl overflow-hidden shadow-2xl border border-[#23273b] transition-all duration-300"
+                  className="h-full bg-black rounded-xl overflow-hidden shadow-surface-card border border-white/[0.08] transition-all duration-300"
                   style={{
                     width: previewDevice === 'mobile' ? 375 : previewDevice === 'tablet' ? 768 : '100%',
                   }}
                 >
                   <iframe
                     srcDoc={generateLiveAppHtml(files, contents, inspectorActive)}
-                    className="w-full h-full border-0"
+                    className="w-full h-full border-0 bg-white"
                     title="Live App"
                     sandbox="allow-scripts allow-same-origin allow-modals allow-forms"
                   />
