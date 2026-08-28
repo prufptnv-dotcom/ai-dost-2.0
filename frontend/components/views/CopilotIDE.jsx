@@ -913,7 +913,10 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
             else if (data.type === 'plan' || data.type === 'plan_tasks') {
               const tasks = Array.isArray(data.tasks) ? data.tasks : (Array.isArray(data.plan?.tasks) ? data.plan.tasks : []);
               if (tasks.length > 0) {
-                setPlanTasks(tasks.map(t => ({ ...t, status: t.status || 'pending' })));
+                setPlanTasks(tasks.map((t, idx) => ({ 
+                  ...t, 
+                  status: idx === 0 ? 'in_progress' : (t.status || 'pending') 
+                })));
               }
             } 
             else if (data.type === 'thinking' || data.type === 'thought' || data.type === 'agent_status') {
@@ -921,6 +924,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
               if (msg && msg.trim()) {
                 setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: msg, agent: data.agent }]);
                 setCopilotStatus({ label: msg.substring(0, 45) + '...', tone: 'work' });
+                setPlanTasks(prev => prev.map(t => t.status === 'in_progress' ? { ...t, logSnippet: msg.substring(0, 60) } : t));
               }
             } 
             else if (data.type === 'tool_call') {
@@ -930,6 +934,16 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
               if (data.thought) {
                 setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: data.thought }]);
               }
+              setPlanTasks(prev => {
+                let foundActive = false;
+                return prev.map(t => {
+                  if (t.status === 'in_progress') {
+                    foundActive = true;
+                    return { ...t, actionType: action, logSnippet: data.thought || label };
+                  }
+                  return t;
+                });
+              });
             } 
             else if (data.type === 'file_written' || data.type === 'file_changed' || data.type === 'file') {
               const filePath = data.path || data.file;
@@ -946,6 +960,24 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                   return [...prev, { path: filePath, content, lastModified: Date.now() }];
                 });
                 setContents(prev => ({ ...prev, [filePath]: content }));
+
+                // Advance milestone task status dynamically
+                setPlanTasks(prev => {
+                  let advanced = false;
+                  return prev.map((t) => {
+                    if (t.status === 'in_progress' && !advanced) {
+                      advanced = true;
+                      return { ...t, status: 'completed', target: filePath, actionType: 'WRITE' };
+                    }
+                    return t;
+                  }).map((t, idx, arr) => {
+                    const prevTask = arr[idx - 1];
+                    if (prevTask && prevTask.status === 'completed' && t.status === 'pending') {
+                      return { ...t, status: 'in_progress' };
+                    }
+                    return t;
+                  });
+                });
 
                 // Auto-open primary component in editor tab
                 if (!activePathRef.current || filePath.endsWith('App.jsx') || filePath.endsWith('main.jsx')) {
