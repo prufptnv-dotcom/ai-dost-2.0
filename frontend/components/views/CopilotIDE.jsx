@@ -179,8 +179,12 @@ function generateLiveAppHtml(files = [], contents = {}, inspectorActive = false)
   const cleanedCode = (appCode || '')
     .replace(/import\s+[\s\S]*?from\s+['"].*?['"];?/g, '')
     .replace(/import\s+['"].*?['"];?/g, '')
-    .replace(/export\s+default\s+function\s+(\w+)/g, 'function $1')
+    .replace(/export\s+default\s+function\s*(\w*)/g, (m, name) => name ? `function ${name}` : 'function App')
+    .replace(/export\s+default\s+const\s+(\w+)\s*=/g, 'const $1 =')
+    .replace(/export\s+default\s+async\s+function\s*(\w*)/g, (m, name) => name ? `async function ${name}` : 'async function App')
     .replace(/export\s+default\s+(\w+);?/g, '')
+    .replace(/export\s+(?:async\s+)?function\s+(\w+)/g, 'async function $1')
+    .replace(/export\s+(?:const|let|var)\s+(\w+)/g, 'const $1')
     .replace(/export\s+\{[\s\S]*?\};?/g, '');
 
   // Extract all imported API functions (from ./services/api, ./api, etc.)
@@ -252,7 +256,7 @@ function generateLiveAppHtml(files = [], contents = {}, inspectorActive = false)
     'Users', 'Clock', 'Mail', 'Phone', 'MapPin', 'Star', 'Heart', 'Filter', 'RefreshCw', 'ExternalLink',
     'Settings', 'AlertCircle', 'Check', 'Copy', 'Sliders', 'Calendar', 'Camera', 'Image', 'Video',
     'Hospital', 'Stethoscope', 'Award', 'PhoneCall', 'UserCheck', 'Bed', 'CalendarCheck', 'Pill',
-    'Ticket', 'Film', 'Rocket', 'Mars', 'Info', 'Utensils', 'Coffee', 'DollarSign', 'CreditCard',
+    'Ticket', 'Film', 'Rocket', 'Mars', 'Info', 'Utensils', 'Coffee', 'DollarSign', 'CreditCard', 'Tag', 'FileText',
     ...importedLucide,
     ...tagsList
   ])).filter(name => !['App', 'Main', 'Root', 'React', 'ReactDOM', 'GlobalErrorBoundary', 'Fragment'].includes(name));
@@ -262,7 +266,7 @@ function generateLiveAppHtml(files = [], contents = {}, inspectorActive = false)
       const size = props.size || 18;
       const className = props.className || '';
       return React.createElement('span', {
-        className: 'inline-flex items-center justify-center text-indigo-400 font-bold ' + className,
+        className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
         style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
         title: '${name}'
       }, '✦');
@@ -275,7 +279,7 @@ function generateLiveAppHtml(files = [], contents = {}, inspectorActive = false)
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -295,19 +299,13 @@ function generateLiveAppHtml(files = [], contents = {}, inspectorActive = false)
     // ── Smart In-Memory REST & Fetch Router for Preview ─────────────────────
     const _origFetch = window.fetch;
     const _db = {
-      rockets: [
-        { id: '1', name: 'Starship HLS', mission: 'Artemis Mars Probe', status: 'Active', countdown: '18d 04h 12m', target: 'Mars Jezero Crater', speed: '27,000 km/h' },
-        { id: '2', name: 'Falcon Heavy', mission: 'Europa Clipper', status: 'Scheduled', countdown: '02h 15m 00s', target: 'Outer Orbit', speed: '24,500 km/h' }
+      notes: [
+        { id: '1', title: 'System Architecture', content: '# Core Design\n\n- Reactive state management\n- Zero-latency preview sync\n- Dark Linear design tokens', tags: ['architecture', 'saas'], createdAt: new Date().toISOString() },
+        { id: '2', title: 'Roadmap & Specs', content: '## Sprint 1 Goals\n\n| Item | Status |\n|---|---|\n| SQLite REST API | Completed |\n| Split Editor | Active |', tags: ['roadmap', 'product'], createdAt: new Date().toISOString() }
       ],
-      'mars-status': {
-        sol: 1042,
-        weather: 'Clear',
-        temperature: '-63°C',
-        dustStorm: 'None',
-        roverLocation: 'Jezero Crater'
-      },
+      tags: ['architecture', 'saas', 'roadmap', 'product', 'design'],
       items: [
-        { id: '1', title: 'Primary Item', name: 'Sample Item 1', status: 'Active', count: 10, price: 99 }
+        { id: '1', title: 'Primary Item', name: 'Sample Item 1', status: 'Active', count: 10, price: 99, tags: ['general'] }
       ]
     };
 
@@ -316,29 +314,57 @@ function generateLiveAppHtml(files = [], contents = {}, inspectorActive = false)
       const withoutProto = rawUrl.indexOf('://') !== -1 ? rawUrl.split('://')[1].split('/').slice(1).join('/') : rawUrl;
       const cleanPath = withoutProto.replace(/^api\//, '').replace(/^\//, '');
       const method = (options.method || 'GET').toUpperCase();
-      const resource = cleanPath.split('/')[0];
+      const resource = cleanPath.split('/')[0] || 'items';
 
-      if (_db[resource]) {
-        if (method === 'GET') {
-          const id = cleanPath.split('/')[1];
-          const data = Array.isArray(_db[resource]) && id
-            ? _db[resource].find(x => x.id === id) || _db[resource][0]
-            : _db[resource];
-          return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (!_db[resource]) {
+        _db[resource] = [
+          { id: '1', title: 'Sample ' + resource, name: 'Item 1', status: 'Active', count: 5, tags: ['default'], createdAt: new Date().toISOString() }
+        ];
+      }
+
+      if (method === 'GET') {
+        const id = cleanPath.split('/')[1];
+        const data = Array.isArray(_db[resource]) && id
+          ? _db[resource].find(x => x.id === id) || _db[resource][0]
+          : _db[resource];
+        return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      if (method === 'POST') {
+        let body = {};
+        try { body = JSON.parse(options.body || '{}'); } catch(_) {}
+        const newItem = { id: String(Date.now()), ...body, createdAt: new Date().toISOString() };
+        if (Array.isArray(_db[resource])) _db[resource].unshift(newItem);
+        return new Response(JSON.stringify(newItem), { status: 201, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      if (method === 'PUT' || method === 'PATCH') {
+        let body = {};
+        try { body = JSON.parse(options.body || '{}'); } catch(_) {}
+        const id = cleanPath.split('/')[1];
+        let updatedItem = { id: id || '1', ...body };
+        if (Array.isArray(_db[resource])) {
+          const idx = _db[resource].findIndex(x => x.id === id);
+          if (idx !== -1) {
+            _db[resource][idx] = { ..._db[resource][idx], ...body };
+            updatedItem = _db[resource][idx];
+          }
         }
-        if (method === 'POST') {
-          let body = {};
-          try { body = JSON.parse(options.body || '{}'); } catch(_) {}
-          const newItem = { id: String(Date.now()), ...body, createdAt: new Date().toISOString() };
-          if (Array.isArray(_db[resource])) _db[resource].unshift(newItem);
-          return new Response(JSON.stringify(newItem), { status: 201, headers: { 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify(updatedItem), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      if (method === 'DELETE') {
+        const id = cleanPath.split('/')[1];
+        if (Array.isArray(_db[resource]) && id) {
+          _db[resource] = _db[resource].filter(x => x.id !== id);
         }
+        return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
 
       // Safe local fallback for any unhandled relative or localhost endpoint
-      if (!urlStr.startsWith('http') || urlStr.includes('localhost') || urlStr.includes('127.0.0.1')) {
+      if (!rawUrl.startsWith('http') || rawUrl.includes('localhost') || rawUrl.includes('127.0.0.1')) {
         const dynamicPayload = [
-          { id: '1', name: 'Item Alpha', title: 'Mission Active', mission: 'Artemis Alpha', rocket: 'Falcon Heavy', status: 'Active', countdown: '02h 15m 00s', count: 12, createdAt: new Date().toISOString() }
+          { id: '1', title: 'Item Active', name: 'Item Alpha', status: 'Active', count: 12, tags: ['general'], createdAt: new Date().toISOString() }
         ];
         return new Response(JSON.stringify(dynamicPayload), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
@@ -1942,7 +1968,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                     srcDoc={generateLiveAppHtml(files, contents, inspectorActive)}
                     className="w-full h-full border-0 bg-white"
                     title="Live App"
-                    sandbox="allow-scripts allow-same-origin allow-modals allow-forms"
+                    sandbox="allow-scripts allow-modals allow-forms"
                   />
                 </div>
               </div>
