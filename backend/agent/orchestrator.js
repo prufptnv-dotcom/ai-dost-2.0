@@ -78,6 +78,98 @@ Shape 2 (Final Answer):
     };
   }
 
+  // ── Force Base Template Boilerplate Injection ─────────────────────────────
+  injectBaseBoilerplate(targetPath = this.projectPath, projectFiles = []) {
+    const defaultPackageJson = JSON.stringify({
+      name: 'ai-dost-fullstack-app',
+      version: '1.0.0',
+      private: true,
+      type: 'module',
+      scripts: {
+        dev: 'vite',
+        build: 'vite build',
+        server: 'node server.js',
+        start: 'vite'
+      },
+      dependencies: {
+        react: '^18.2.0',
+        'react-dom': '^18.2.0',
+        'lucide-react': '^0.344.0',
+        express: '^4.18.2',
+        cors: '^2.8.5'
+      },
+      devDependencies: {
+        '@vitejs/plugin-react': '^4.2.1',
+        vite: '^5.1.4'
+      }
+    }, null, 2);
+
+    const defaultViteConfig = `import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5173,
+    host: '0.0.0.0',
+    proxy: {
+      '/api': 'http://localhost:5000'
+    }
+  }
+});
+`;
+
+    const defaultIndexHtml = `<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI-Dost Fullstack App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-[#090a0f] text-neutral-100 font-sans antialiased min-h-screen">
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
+`;
+
+    const defaultMainJsx = `import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App.jsx';
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+`;
+
+    const boilerplate = [
+      { path: 'package.json', content: defaultPackageJson },
+      { path: 'vite.config.js', content: defaultViteConfig },
+      { path: 'index.html', content: defaultIndexHtml },
+      { path: 'src/main.jsx', content: defaultMainJsx }
+    ];
+
+    boilerplate.forEach(b => {
+      try {
+        const full = path.join(targetPath, b.path);
+        if (!fs.existsSync(full)) {
+          fs.mkdirSync(path.dirname(full), { recursive: true });
+          fs.writeFileSync(full, b.content, 'utf-8');
+        }
+      } catch (_) {}
+
+      if (Array.isArray(projectFiles)) {
+        if (!projectFiles.some(f => f.path === b.path)) {
+          projectFiles.push({ path: b.path, content: b.content });
+        }
+      }
+    });
+  }
+
   // Execute a single tool action
   async executeTool(action, parameters) {
     const projectFiles = parameters.projectFiles || [];
@@ -100,6 +192,9 @@ Shape 2 (Final Answer):
 
       case 'write_file': {
         try {
+          // Auto-inject base boilerplate if writing React/Express files into an empty workspace
+          this.injectBaseBoilerplate(this.projectPath, projectFiles);
+
           const filePath = path.join(this.projectPath, parameters.path);
           fs.mkdirSync(path.dirname(filePath), { recursive: true });
           fs.writeFileSync(filePath, parameters.content || '', 'utf-8');

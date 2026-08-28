@@ -1208,8 +1208,9 @@ function generateTaskPlan(userPrompt) {
     return { summary: `Direct Answer: "${prompt}"`, tasks: [] };
   }
 
-  // ── Tier 2: Micro-Tasks (1 to 3 atomic steps for targeted edits, bugfixes, small tweaks)
-  const isMicroTask = /\b(add|insert|jodo|lagao|navbar|header|footer|sidebar|button|filter|search|fix|bug|typo|color|change|rename|delete|remove|update|style|css|icon)\b/i.test(clean) && !/\b(full\s*stack|greenfield|complete\s+app|naya\s+project|new\s+project|scaffold)\b/i.test(clean);
+  // ── Tier 2: Micro-Tasks (ONLY for small single-file bugfixes/text changes on existing code)
+  const isBuildIntent = /\b(build|create|banao|scaffold|generate|implement|setup|app|dashboard|system|tracker|manager|simulator|platform|game|clone|store|portal|saas|notes|expense|auth|kanban|todo|full\s*stack|greenfield|complete\s+app|naya\s+project|new\s+project)\b/i.test(clean);
+  const isMicroTask = !isBuildIntent && clean.length < 40 && /\b(fix\s+bug|typo|change\s+color|rename|edit\s+text)\b/i.test(clean);
   if (isMicroTask) {
     summary = `Targeted Component / UI Modification: "${prompt}"`;
     tasks = [
