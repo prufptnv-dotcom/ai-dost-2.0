@@ -9,18 +9,18 @@ import '@xterm/xterm/css/xterm.css';
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
 
 const THEME = {
-  background: '#0d0f14',
-  foreground: 'var(--color-text-secondary)',
-  cursor: '#6cb2ff',
-  selectionBackground: 'rgba(75,139,252,0.25)',
-  black: '#1a1d26',
-  red: '#f87171',
-  green: '#34d399',
-  yellow: '#fbbf24',
-  blue: '#6cb2ff',
-  magenta: '#e879f9',
+  background: '#090a0f',
+  foreground: '#e2e8f0',
+  cursor: '#38bdf8',
+  selectionBackground: 'rgba(56, 189, 248, 0.25)',
+  black: '#161821',
+  red: '#ef4444',
+  green: '#10b981',
+  yellow: '#f59e0b',
+  blue: '#38bdf8',
+  magenta: '#c084fc',
   cyan: '#22d3ee',
-  white: '#c3c9d9',
+  white: '#f8fafc',
 };
 
 const TerminalPanel = forwardRef(({ projectId, projectPath, className = '', onCommand, innerRef }, ref) => {

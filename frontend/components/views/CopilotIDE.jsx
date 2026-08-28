@@ -1549,13 +1549,13 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
             <div className="flex-1 flex flex-col overflow-hidden min-h-0">
               
               {/* Tabs + Breadcrumbs Toolbar */}
-              <div className="flex items-center justify-between px-3 bg-[#10121a] border-b border-[#1f2333] shrink-0">
+              <div className="flex items-center justify-between px-3 bg-[#0f1117] border-b border-white/[0.08] shrink-0">
                 
                 {/* File Tabs */}
                 <div className="flex items-center gap-1 pt-1.5 overflow-x-auto">
                   <button
                     onClick={() => setSidebarOpen(!sidebarOpen)}
-                    className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-[#1a1d2e] mr-1"
+                    className="p-1.5 rounded-md text-neutral-400 hover:text-white hover:bg-white/[0.06] mr-1 cursor-pointer transition-colors"
                     title={sidebarOpen ? 'Hide Files' : 'Show Files'}
                   >
                     <FolderTree size={14} />
@@ -1568,18 +1568,18 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                       <div
                         key={p}
                         onClick={() => selectFile(p)}
-                        className={`group flex items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-t-xl text-xs font-mono transition-all cursor-pointer shrink-0 border-t-2 ${
+                        className={`group flex items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-t-lg text-xs font-mono transition-all cursor-pointer shrink-0 border-t-2 ${
                           isActive
-                            ? 'bg-[#090a0f] text-white border-indigo-500 shadow-sm font-semibold'
-                            : 'text-zinc-400 hover:text-zinc-200 border-transparent hover:bg-[#151722]'
+                            ? 'bg-[#090a0f] text-white border-sky-400 shadow-sm font-semibold'
+                            : 'text-neutral-400 hover:text-neutral-200 border-transparent hover:bg-white/[0.03]'
                         }`}
                       >
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: LANG_COLOR[ext] || '#818cf8' }} />
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: LANG_COLOR[ext] || '#38bdf8' }} />
                         <span className="truncate max-w-[150px]">{p.split('/').pop()}</span>
                         {dirtyPaths.has(p) && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
                         <button
                           onClick={(e) => { e.stopPropagation(); closeTab(p); }}
-                          className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-[#23273b] text-zinc-400 hover:text-white transition-opacity"
+                          className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-white/[0.1] text-neutral-400 hover:text-white transition-opacity"
                         >
                           <X size={12} />
                         </button>
@@ -1587,7 +1587,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                     );
                   })}
                   {openTabs.length === 0 && (
-                    <div className="px-3 py-1.5 text-xs text-zinc-500">
+                    <div className="px-3 py-1.5 text-xs text-neutral-500 font-mono">
                       No files open — select from explorer
                     </div>
                   )}
@@ -1597,15 +1597,15 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                 <div className="flex items-center gap-1.5">
                   <button
                     onClick={saveActiveFile}
-                    className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-[#1a1d2e]"
+                    className="p-1 rounded-md text-neutral-400 hover:text-white hover:bg-white/[0.06] cursor-pointer transition-colors"
                     title="Save File (Ctrl+S)"
                   >
                     <Save size={14} />
                   </button>
                   <button
                     onClick={() => setTerminalOpen(!terminalOpen)}
-                    className={`p-1 rounded-lg text-xs flex items-center gap-1 transition-colors ${
-                      terminalOpen ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-white hover:bg-[#1a1d2e]'
+                    className={`p-1 rounded-md text-xs flex items-center gap-1 transition-colors cursor-pointer ${
+                      terminalOpen ? 'bg-sky-600 text-white shadow-glow-sm' : 'text-neutral-400 hover:text-white hover:bg-white/[0.06]'
                     }`}
                     title="Toggle Terminal"
                   >
@@ -1616,12 +1616,12 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
 
               {/* Breadcrumb + AI Quick Action Pills Bar */}
               {activePath && (
-                <div className="flex items-center justify-between px-4 py-1.5 bg-[#0d0e14] border-b border-[#1b1e2c] shrink-0 text-xs">
-                  <div className="flex items-center gap-1 font-mono text-[11px] text-zinc-400">
+                <div className="flex items-center justify-between px-4 py-1.5 bg-[#090a0f] border-b border-white/[0.08] shrink-0 text-xs">
+                  <div className="flex items-center gap-1 font-mono text-[11px] text-neutral-400">
                     {activePath.split('/').map((seg, i, arr) => (
                       <span key={i} className="flex items-center gap-1">
-                        <span className={i === arr.length - 1 ? 'text-zinc-200 font-semibold' : ''}>{seg}</span>
-                        {i < arr.length - 1 && <ChevronRight size={10} className="text-zinc-600" />}
+                        <span className={i === arr.length - 1 ? 'text-neutral-200 font-medium' : ''}>{seg}</span>
+                        {i < arr.length - 1 && <ChevronRight size={10} className="text-neutral-600" />}
                       </span>
                     ))}
                   </div>
@@ -1630,27 +1630,27 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                   <div className="flex items-center gap-1.5">
                     <button
                       onClick={() => handleSend(`Explain how ${activePath} works`)}
-                      className="px-2.5 py-0.5 rounded-lg text-[10px] font-medium bg-[#161824] hover:bg-[#202334] text-zinc-300 hover:text-white border border-[#25293d] transition-colors flex items-center gap-1 cursor-pointer"
+                      className="px-2.5 py-0.5 rounded-md text-[10px] font-medium bg-[#161821] hover:bg-[#1c1f2b] text-neutral-300 hover:text-white border border-white/[0.08] hover:border-white/[0.18] transition-colors flex items-center gap-1 cursor-pointer"
                     >
-                      <Code2 size={11} className="text-blue-400" /> Explain
+                      <Code2 size={11} className="text-sky-400" /> Explain
                     </button>
                     <button
                       onClick={() => handleSend(`Inspect ${activePath} for any potential bugs or edge cases and fix them`)}
-                      className="px-2.5 py-0.5 rounded-lg text-[10px] font-medium bg-[#161824] hover:bg-[#202334] text-zinc-300 hover:text-white border border-[#25293d] transition-colors flex items-center gap-1 cursor-pointer"
+                      className="px-2.5 py-0.5 rounded-md text-[10px] font-medium bg-[#161821] hover:bg-[#1c1f2b] text-neutral-300 hover:text-white border border-white/[0.08] hover:border-white/[0.18] transition-colors flex items-center gap-1 cursor-pointer"
                     >
                       <Bug size={11} className="text-amber-400" /> Find Bugs
                     </button>
                     <button
                       onClick={() => handleSend(`Optimize performance and clean up ${activePath}`)}
-                      className="px-2.5 py-0.5 rounded-lg text-[10px] font-medium bg-[#161824] hover:bg-[#202334] text-zinc-300 hover:text-white border border-[#25293d] transition-colors flex items-center gap-1 cursor-pointer"
+                      className="px-2.5 py-0.5 rounded-md text-[10px] font-medium bg-[#161821] hover:bg-[#1c1f2b] text-neutral-300 hover:text-white border border-white/[0.08] hover:border-white/[0.18] transition-colors flex items-center gap-1 cursor-pointer"
                     >
                       <Zap size={11} className="text-emerald-400" /> Optimize
                     </button>
                     <button
                       onClick={() => triggerInlineEdit()}
-                      className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 transition-colors flex items-center gap-1 cursor-pointer"
+                      className="px-2.5 py-0.5 rounded-md text-[10px] font-medium bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/30 transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
                     >
-                      <Sparkles size={11} className="text-indigo-400" /> Edit (Ctrl+K)
+                      <Sparkles size={11} className="text-sky-400" /> Edit (Ctrl+K)
                     </button>
                   </div>
                 </div>
@@ -1660,27 +1660,27 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
               <div className="flex-1 flex overflow-hidden min-h-0">
                 {/* File Tree Panel */}
                 {sidebarOpen && (
-                  <div className="w-56 shrink-0 bg-[#0c0d12] border-r border-[#1a1d2b] flex flex-col">
-                    <div className="flex items-center justify-between px-3 py-2 border-b border-[#1a1d2b] text-[10px] uppercase font-bold text-zinc-400 tracking-wider">
+                  <div className="w-56 shrink-0 bg-[#0f1117] border-r border-white/[0.08] flex flex-col">
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.08] text-[10px] uppercase font-bold text-neutral-400 font-mono tracking-wider">
                       <span>Explorer</span>
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => handleCreateFile()}
-                          className="p-1 hover:bg-[#1a1d2e] rounded text-zinc-400 hover:text-white cursor-pointer"
+                          className="p-1 hover:bg-white/[0.06] rounded text-neutral-400 hover:text-white cursor-pointer transition-colors"
                           title="New File"
                         >
                           <FilePlus2 size={13} />
                         </button>
                         <button
                           onClick={() => handleCreateFolder()}
-                          className="p-1 hover:bg-[#1a1d2e] rounded text-zinc-400 hover:text-white cursor-pointer"
+                          className="p-1 hover:bg-white/[0.06] rounded text-neutral-400 hover:text-white cursor-pointer transition-colors"
                           title="New Folder"
                         >
                           <FolderPlus size={13} />
                         </button>
                         <button
                           onClick={loadWorkspaceFiles}
-                          className="p-1 hover:bg-[#1a1d2e] rounded text-zinc-400 hover:text-white cursor-pointer"
+                          className="p-1 hover:bg-white/[0.06] rounded text-neutral-400 hover:text-white cursor-pointer transition-colors"
                           title="Refresh Explorer"
                         >
                           <RefreshCw size={12} />
@@ -1690,13 +1690,13 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
 
                     <div className="flex-1 overflow-y-auto p-2">
                       {loadingFiles ? (
-                        <div className="p-4 text-center text-xs text-zinc-500">Loading files...</div>
+                        <div className="p-4 text-center text-xs text-neutral-500 font-mono">Loading files...</div>
                       ) : files.length === 0 ? (
-                        <div className="p-4 text-center text-xs text-zinc-500 flex flex-col items-center gap-2">
+                        <div className="p-4 text-center text-xs text-neutral-500 flex flex-col items-center gap-2 font-mono">
                           <span>No files yet</span>
                           <button
                             onClick={() => handleCreateFile()}
-                            className="px-2 py-1 text-[11px] bg-indigo-600/20 text-indigo-300 rounded border border-indigo-500/30 hover:bg-indigo-600/30"
+                            className="px-2 py-1 text-[11px] bg-sky-500/10 text-sky-400 rounded border border-sky-500/20 hover:bg-sky-500/20 cursor-pointer"
                           >
                             + Create File
                           </button>
@@ -1755,27 +1755,29 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
 
               {/* Collapsible Terminal Drawer */}
               {terminalOpen && (
-                <div className="h-48 shrink-0 flex flex-col bg-[#090a0f] border-t border-[#1f2333]">
-                  <div className="flex items-center justify-between px-4 py-1.5 bg-[#10121a] border-b border-[#1f2333]">
-                    <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <TerminalIcon size={13} /> Integrated Terminal
+                <div className="h-48 shrink-0 flex flex-col bg-[#090a0f] border-t border-white/[0.08]">
+                  <div className="flex items-center justify-between px-4 py-1.5 bg-[#0f1117] border-b border-white/[0.08]">
+                    <span className="text-xs font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-1.5 font-mono">
+                      <TerminalIcon size={13} className="text-sky-400" /> Integrated Terminal
                     </span>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={runSingleFile}
-                        className="px-2.5 py-0.5 rounded-lg text-[10px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30"
+                        className="px-2.5 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 cursor-pointer transition-colors"
                       >
                         <Play size={10} className="inline mr-1" /> Run File
                       </button>
                       <button
                         onClick={() => terminalRef.current?.clear()}
-                        className="p-1 rounded hover:bg-[#1f2338] text-zinc-400 hover:text-white"
+                        className="p-1 rounded-md hover:bg-white/[0.06] text-neutral-400 hover:text-white cursor-pointer transition-colors"
+                        title="Clear Terminal"
                       >
                         <Eraser size={13} />
                       </button>
                       <button
                         onClick={() => setTerminalOpen(false)}
-                        className="p-1 rounded hover:bg-[#1f2338] text-zinc-400 hover:text-white"
+                        className="p-1 rounded-md hover:bg-white/[0.06] text-neutral-400 hover:text-white cursor-pointer transition-colors"
+                        title="Close Terminal"
                       >
                         <X size={13} />
                       </button>
@@ -1789,39 +1791,39 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
             </div>
           )}
 
-          {/* When in LIVE PREVIEW mode (Bolt.new / Replit style full browser) */}
+          {/* When in LIVE PREVIEW mode (Linear / Vercel style full browser) */}
           {workspaceMode === 'preview' && (
             <div className="flex-1 flex flex-col overflow-hidden min-h-0 bg-[#090a0f]">
               
               {/* Browser Address Bar Header */}
-              <div className="flex items-center justify-between px-4 py-2 bg-[#10121a] border-b border-[#1f2333] shrink-0">
+              <div className="flex items-center justify-between px-4 py-2 bg-[#0f1117] border-b border-white/[0.08] shrink-0">
                 <div className="flex items-center gap-3">
-                  <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                  <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 uppercase tracking-wider font-mono">
                     <Eye size={14} /> Live App Preview
                   </span>
 
                   {/* Responsive Switcher */}
-                  <div className="flex items-center bg-[#090a0f] rounded-xl p-0.5 border border-[#23273b]">
+                  <div className="flex items-center bg-[#090a0f] rounded-lg p-0.5 border border-white/[0.08]">
                     <button
                       onClick={() => setPreviewDevice('desktop')}
-                      className={`px-3 py-1 rounded-lg text-[10px] font-medium flex items-center gap-1.5 transition-all ${
-                        previewDevice === 'desktop' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-white'
+                      className={`px-3 py-1 rounded-md text-[10px] font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                        previewDevice === 'desktop' ? 'bg-sky-600 text-white shadow-glow-sm font-semibold' : 'text-neutral-400 hover:text-white'
                       }`}
                     >
                       <Monitor size={12} /> Desktop
                     </button>
                     <button
                       onClick={() => setPreviewDevice('tablet')}
-                      className={`px-3 py-1 rounded-lg text-[10px] font-medium flex items-center gap-1.5 transition-all ${
-                        previewDevice === 'tablet' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-white'
+                      className={`px-3 py-1 rounded-md text-[10px] font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                        previewDevice === 'tablet' ? 'bg-sky-600 text-white shadow-glow-sm font-semibold' : 'text-neutral-400 hover:text-white'
                       }`}
                     >
                       <Tablet size={12} /> Tablet
                     </button>
                     <button
                       onClick={() => setPreviewDevice('mobile')}
-                      className={`px-3 py-1 rounded-lg text-[10px] font-medium flex items-center gap-1.5 transition-all ${
-                        previewDevice === 'mobile' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-white'
+                      className={`px-3 py-1 rounded-md text-[10px] font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                        previewDevice === 'mobile' ? 'bg-sky-600 text-white shadow-glow-sm font-semibold' : 'text-neutral-400 hover:text-white'
                       }`}
                     >
                       <Smartphone size={12} /> Mobile
@@ -1830,10 +1832,10 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
 
                   <button
                     onClick={() => setInspectorActive(!inspectorActive)}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-medium flex items-center gap-1.5 border transition-all ${
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-medium flex items-center gap-1.5 border transition-all cursor-pointer ${
                       inspectorActive
                         ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                        : 'bg-[#181b28] text-zinc-400 border-[#262a40] hover:text-white'
+                        : 'bg-[#161821] text-neutral-400 border-white/[0.08] hover:text-white hover:border-white/[0.18]'
                     }`}
                   >
                     <Crosshair size={12} /> Inspect UI
@@ -1946,10 +1948,10 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
       )}
 
       {/* ── 4. STATUS BAR ──────────────────────────────────────────────────────── */}
-      <footer className="h-6 shrink-0 flex items-center justify-between px-4 bg-[#0a0b0f] border-t border-[#1a1d2b] text-[10px] text-zinc-400 font-mono">
+      <footer className="h-6 shrink-0 flex items-center justify-between px-4 bg-[#0f1117] border-t border-white/[0.08] text-[10px] text-neutral-400 font-mono">
         <div className="flex items-center gap-4">
-          <span className="flex items-center gap-1.5 text-zinc-300">
-            <GitBranch size={12} className="text-indigo-400" /> main
+          <span className="flex items-center gap-1.5 text-neutral-300">
+            <GitBranch size={12} className="text-sky-400" /> main
           </span>
           <span className="flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
