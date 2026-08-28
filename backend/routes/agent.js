@@ -584,23 +584,13 @@ const prompt = parameters.prompt || '';
           }
 
           const writtenFiles = [];
-          const Database = require('better-sqlite3');
-          const appDb = new Database(path.join(__dirname, '..', 'data', 'app.db'));
-          
-          // Clear all stale files for this project ID so previous projects don't linger
-          try {
-            appDb.prepare('DELETE FROM workspace_files WHERE project_id = ?').run(projectId || 'default');
-          } catch (_) {}
-
-          const insertStmt = appDb.prepare('INSERT INTO workspace_files (project_id, path, content) VALUES (?, ?, ?)');
-
           for (let i = 0; i < parsedData.files.length; i++) {
             const file = parsedData.files[i];
             const safePath = safeJoin(targetDir, file.path);
             try {
               fs.mkdirSync(path.dirname(safePath), { recursive: true });
               fs.writeFileSync(safePath, file.content || '', 'utf-8');
-              insertStmt.run(projectId || 'default', file.path, file.content || '');
+              saveProjectFile(projectId || 'default', file.path, file.content || '');
             } catch (_) {}
             writtenFiles.push({ path: file.path, size: Buffer.from(file.content || '').length });
             
