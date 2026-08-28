@@ -18,6 +18,7 @@ async function loadPWA() {
 const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',
+  allowedDevOrigins: ['localhost', '127.0.0.1', 'localhost:3000', 'localhost:5000', '127.0.0.1:3000', '127.0.0.1:5000', '*.aidost.local'],
   // Turbopack root: absolute path to monorepo root (one level above frontend/)
   turbopack: {
     root: resolve(__dirname, '..'),

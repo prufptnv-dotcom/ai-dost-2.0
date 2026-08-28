@@ -16,6 +16,7 @@ const devServerManager = require('../sandbox/devServerManager');
 //  ✅ Phase 4: Self-Healing Loop (Terminal error → auto-inject → auto-fix)
 // ─────────────────────────────────────────────────────────────────────────────
 
+const OpenAIService    = require('../services/openaiService');
 const GroqService       = require('../services/groqService');
 const OpenRouterService = require('../services/openrouterService');
 const NvidiaService     = require('../services/nvidiaService');
@@ -1059,6 +1060,7 @@ async function callScaffoldLLM(scaffoldPrompt, customKeys = null) {
     r.includes('Quota exceeded') || r.includes('429') || r.trim().length <= 5;
 
   const providers = [
+    { name: 'OpenAI (GPT-4o)', fn: () => OpenAIService.chat(scaffoldPrompt, [], 'agent', customKeys?.openai) },
     { name: 'Groq', fn: () => GroqService.chat(scaffoldPrompt, [], 'agent', customKeys?.groq) },
     { name: 'Gemini', fn: () => GeminiService.chat(scaffoldPrompt, [], null, 'agent', customKeys?.gemini) },
     { name: 'Cerebras', fn: () => CerebrasService.chat(scaffoldPrompt, [], 'agent', customKeys?.cerebras) },
