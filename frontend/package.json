@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "jest"
+    "test": "jest",
+    "clean": "node ../backend/scripts/clean_project.js",
+    "prod": "docker compose up --build"
   },
   "dependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",

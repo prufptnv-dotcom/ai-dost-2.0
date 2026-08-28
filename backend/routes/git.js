@@ -99,4 +99,29 @@ router.post('/checkout', async (req, res) => {
     }
 });
 
+// 5. Remote Push (GitHub / GitLab / Bitbucket)
+router.post('/push-remote', async (req, res) => {
+    try {
+        const { remoteUrl, branch = 'main', cwd } = req.body;
+        if (!remoteUrl) {
+            return res.status(400).json({ success: false, error: 'remoteUrl is required' });
+        }
+        const workDir = cwd || WORKSPACE_DIR;
+        // Check if origin exists, else add
+        await runGitCommand('git remote remove origin', workDir);
+        await runGitCommand(`git remote add origin "${remoteUrl}"`, workDir);
+        await runGitCommand(`git branch -M ${branch}`, workDir);
+        const pushResult = await runGitCommand(`git push -u origin ${branch}`, workDir);
+
+        res.json({
+            success: pushResult.success,
+            message: pushResult.success ? `Successfully pushed branch [${branch}] to remote!` : pushResult.error,
+            stdout: pushResult.stdout,
+            stderr: pushResult.stderr
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 module.exports = router;

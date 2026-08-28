@@ -4,12 +4,14 @@ import {
   Send, Copy, Volume2, RefreshCw, ThumbsUp, ThumbsDown,
   Sparkles, FileText, Mic, Paperclip, Bot, User, Check,
   Lightbulb, Globe, Wand2, Eraser, History as HistoryIcon,
-  Pencil, Download, Search, ExternalLink, FileDown
+  Pencil, Download, Search, ExternalLink, FileDown, ArrowRight,
+  Play, Terminal, Loader2, Code2, Eye, LayoutTemplate
 } from 'lucide-react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import api from '../../services/api';
 import { ImageCard, ImageLightbox } from './ImageLightbox';
+import ChatArtifactsCanvas from '../chat/ChatArtifactsCanvas';
 
 const STORAGE_KEY = 'ai_dost_messages_chat';
 const SESSIONS_KEY = 'ai_dost_chat_sessions';
@@ -22,11 +24,11 @@ const PERSONAS = [
 ];
 
 const QUICK_PROMPTS = [
-  { icon: Sparkles, label: 'Website banao', prompt: 'Ek modern portfolio website bana do with HTML, CSS and JavaScript' },
+  { icon: Sparkles, label: 'Calculator Widget', prompt: 'Ek modern interactive calculator widget bana do with HTML, Tailwind CSS and JavaScript' },
   { icon: FileText, label: 'Resume banao', prompt: 'Mera resume bana do — full stack developer, 3 saal experience React aur Node.js me' },
-  { icon: Globe, label: 'Explain', prompt: 'Explain how WebSockets work in simple Hinglish' },
-  { icon: Wand2, label: 'Code fix', prompt: 'Python me ek function likho jo Fibonacci series generate kare' },
-  { icon: Search, label: 'Research', prompt: 'Latest AI trends search karo aur sources ke saath batao' },
+  { icon: Code2, label: 'Python Script', prompt: 'Python me ek recursive Fibonacci aur prime numbers generator script likho aur output print karo' },
+  { icon: Globe, label: 'Explain WebSockets', prompt: 'Explain how WebSockets work in simple Hinglish with architecture diagram' },
+  { icon: Search, label: 'Research AI News', prompt: 'Latest AI news aur major breakthrough trends search karo aur sources ke saath batao' },
 ];
 
 const IMAGE_CREATE_INTENT =
@@ -35,61 +37,58 @@ const IMAGE_CREATE_INTENT =
 const PROJECT_INTENT =
   /\b(fullstack|project|app|website|web ?site|portfolio|mern|crud|clone|todo|blog|e-?commerce|chatbot|dashboard|landing page)\b.*\b(banao|bana|banake|make|create|build|generate)\b|\b(banao|bana|banake|make|create|build|generate)\b.*\b(project|app|website|web ?site|fullstack)\b/i;
 
-// Document keywords: input me jo format keyword aaya → wahi file banao (banao/likho ki zaroorat nahi)
-// "jaise hi input me pdf ho → pdf, excel/xlsx ho → xlsx, csv ho → csv, ppt ho → ppt"
-// Message me jo keyword SABSE PEHLE aata hai, wahi type jeet ta hai.
 const DOC_KEYWORDS = [
   { type: 'pdf', re: /pdf/i },
   { type: 'pptx', re: /ppt[a-z]*|powerpoint|presentation|slides?/i },
-  { type: 'xlsx', re: /xlsx|excel\b/i },           // exact "excel" or "xlsx" → real Excel
-  { type: 'csv', re: /csv|spreadsheet|sheet/i },  // csv only
+  { type: 'xlsx', re: /xlsx|excel\b/i },
+  { type: 'csv', re: /csv|spreadsheet|sheet/i },
   { type: 'docx', re: /\bdocx?\b|\bdoct\b|word ?file|word ?document|document|report/i },
 ];
 
-// Chat se koi bhi view directly kholo — universal interface
 const NAV_INTENTS = [
-  { re: /\b(projects?|meri projects?|my projects?)\b.*\b(kholo|dikhao|dikha|open|show|list)\b/i, view: 'projects' },
-  { re: /\b(history|purani baatein|chat history|old chats?)\b.*\b(kholo|dikhao|dikha|open|show|load|dekh)\b/i, view: 'history' },
-  { re: /\b(copilot|ide|code editor|editor)\b.*\b(kholo|dikhao|dikha|open|show)\b/i, view: 'copilot' },
-  { re: /\b(agent mode|autonomous mode|agent)\b.*\b(kholo|dikhao|dikha|open|show|run|chal)\b/i, view: 'agent' },
-  { re: /\b(settings|setting)\b.*\b(kholo|dikhao|dikha|open|show)\b/i, view: 'settings' },
-  { re: /\b(image generator|images? view|gallery)\b.*\b(kholo|dikhao|dikha|open|show)\b/i, view: 'images' },
-  { re: /\b(voice assistant|voice view|voice)\b.*\b(kholo|open|start|use)\b/i, view: 'voice' },
+  { re: /\b(projects?|meri projects?|my projects?)\b.*\b(kholo|dikhao|dikha|open|show|list)\b/i, view: 'projects', label: 'Projects View' },
+  { re: /\b(history|purani baatein|chat history|old chats?)\b.*\b(kholo|dikhao|dikha|open|show|load|dekh)\b/i, view: 'history', label: 'Chat History' },
+  { re: /\b(copilot|ide|code editor|editor)\b.*\b(kholo|dikhao|dikha|open|show)\b/i, view: 'copilot', label: 'Copilot IDE' },
+  { re: /\b(agent mode|autonomous mode|agent)\b.*\b(kholo|dikhao|dikha|open|show|run|chal)\b/i, view: 'agent', label: 'Autonomous Agent' },
+  { re: /\b(settings|setting)\b.*\b(kholo|dikhao|dikha|open|show)\b/i, view: 'settings', label: 'Settings' },
+  { re: /\b(image generator|images? view|gallery)\b.*\b(kholo|dikhao|dikha|open|show)\b/i, view: 'images', label: 'Image Generator' },
+  { re: /\b(voice assistant|voice view|voice)\b.*\b(kholo|open|start|use)\b/i, view: 'voice', label: 'Voice Assistant' },
 ];
 
-// Web search intent (Perplexity-style, sources ke saath)
 const SEARCH_INTENT =
   /\b(research|deep research)\b|\b(search|google|pata karo|dhundho)\b.*\b(karo|kar|karke|do)\b|\b(latest|current|today'?s|aaj ki)\b.*\b(news|update|price|weather|score|status)\b|\b(news|weather|stock price|cricket score|football score|match result|trending)\b.*\b(batao|bata|dikhao|kya hai|do|kar)\b/i;
 
 const MODEL_OPTIONS = [
-  { id: 'auto', label: '⚡ Auto' },
-  { id: 'gemini', label: '✨ Gemini' },
-  { id: 'groq', label: '🚀 Groq' },
-  { id: 'nvidia', label: '🔷 NVIDIA' },
-  { id: 'together', label: '🧠 Together' },
+  { id: 'auto', label: '⚡ Auto (Smart Pick)' },
+  { id: 'groq', label: '🚀 Groq (GPT-OSS 120B)' },
+  { id: 'gemini', label: '✨ Gemini 2.5 Flash' },
+  { id: 'nvidia', label: '🔷 NVIDIA NIM' },
+  { id: 'together', label: '🧠 Together AI' },
   { id: 'deepseek', label: '🐋 DeepSeek' },
   { id: 'mistral', label: '🌬️ Mistral' },
-  { id: 'ollama', label: '💻 Ollama' },
+  { id: 'ollama', label: '💻 Ollama (Local Offline)' },
 ];
 
 const FOLLOW_UPS = [
-  'Isme aur kya add kar sakta hoon?',
-  'Sample code with output dikhao',
-  'Isse fullstack project me convert karo',
-  'Deep dive karke explain karo',
+  'Isme aur kya styling ya logic add kar sakte hain?',
+  'Interactive Claude Artifacts Canvas me open karo',
+  'Isse Copilot IDE me fullstack project me badlo',
+  'Code ka step-by-step mathematical breakdown do',
 ];
 
 const WELCOME = {
+  id: 'welcome',
   role: 'assistant',
-  content: `Namaste! 🙏 Main **AI-Dost** hoon — aapka personal AI developer assistant.
+  content: `Namaste! 🙏 Main **AI-Dost** hoon — aapka supercharged AI assistant.
 
-Main aapki madad kar sakta hoon:
-- 💬 **Chat** — kuch bhi pucho, Hinglish/Hindi/English me jawab
-- 📄 **Resume** — "resume bana do" bolo, side me live preview aa jayega
-- 🤖 **Copilot** — fullstack project ek command me banao
-- 🎤 **Voice** — Perplexity jaisa voice assistant
+### 🌟 New Capabilities:
+- 🎨 **Claude-Style Live Canvas** — HTML/JS widgets chat ke right side me live run hote hain
+- ▶️ **In-Chat Code Interpreter** — Python & JS code block me direct \`Run\` dabayein
+- ⚡ **1-Click Copilot IDE Bridge** — Koi bhi code instantly full IDE workspace me bhejein
+- 🧠 **20+ Turn Context Memory** — Purana reference kabhi nahi bhulega
+- 🌐 **Perplexity-Grade Search** — Real-time sources and grounding
 
-Kya karna hai aaj?`,
+Kya banana ya discuss karna hai aaj?`,
   timestamp: new Date().toISOString(),
 };
 
@@ -103,56 +102,135 @@ const extractImages = (content) => {
   return images;
 };
 
-function useTypewriter(fullText, isActive) {
-  const [shown, setShown] = useState('');
-  useEffect(() => {
-    if (!isActive) { setShown(fullText); return; }
-    setShown('');
-    let i = 0;
-    const interval = setInterval(() => {
-      i += 3;
-      setShown(fullText.slice(0, i));
-      if (i >= fullText.length) clearInterval(interval);
-    }, 12);
-    return () => clearInterval(interval);
-  }, [fullText, isActive]);
-  return shown;
+// Detect HTML / SVG code block for interactive Claude artifact
+function extractArtifact(content) {
+  if (!content) return null;
+  const htmlMatch = content.match(/```(?:html|xml|svg)\s*\n([\s\S]*?)```/i);
+  if (htmlMatch) {
+    const code = htmlMatch[1].trim();
+    if (code.includes('<') && code.includes('>')) {
+      return {
+        title: code.includes('<svg') ? 'SVG Vector Graphic' : 'Interactive UI Artifact',
+        code,
+        language: code.includes('<svg') ? 'svg' : 'html',
+      };
+    }
+  }
+  return null;
 }
 
-function MessageBubble({ msg, isTyping, onOpenImage, onRegenerate, onEdit, isLast, onVariants }) {
+function MessageBubble({
+  msg,
+  onOpenImage,
+  onRegenerate,
+  onEdit,
+  isLast,
+  onVariants,
+  onNavigate,
+  onOpenArtifact
+}) {
   const [copied, setCopied] = useState(false);
   const isUser = msg.role === 'user';
-  const rendered = useTypewriter(msg.content, isTyping);
+  const isStreaming = !!msg.isStreaming;
   const images = isUser ? [] : extractImages(msg.content);
   const proseRef = useRef(null);
 
-  // Add copy button to every code block
+  const detectedArtifact = !isUser && !isStreaming ? extractArtifact(msg.content) : null;
+
+  // Code Block Top Bar + Copy + In-Chat Execution Runner
   useEffect(() => {
     const el = proseRef.current;
-    if (!el || isTyping) return;
+    if (!el || isStreaming) return;
     el.querySelectorAll('pre').forEach((pre) => {
-      if (pre.querySelector('.chat-code-copy')) return;
+      if (pre.querySelector('.chat-code-header')) return;
       pre.style.position = 'relative';
-      const btn = document.createElement('button');
-      btn.className = 'chat-code-copy';
-      btn.textContent = '📋';
-      btn.title = 'Copy code';
-      btn.style.cssText =
-        'position:absolute;top:6px;right:6px;z-index:2;width:26px;height:24px;border:none;border-radius:6px;cursor:pointer;font-size:11px;background:rgba(255,255,255,0.08);color:#e2e8f0;transition:background .15s;';
-      btn.addEventListener('mouseenter', () => (btn.style.background = 'rgba(255,255,255,0.2)'));
-      btn.addEventListener('mouseleave', () => (btn.style.background = 'rgba(255,255,255,0.08)'));
-      btn.addEventListener('click', (e) => {
+      pre.style.borderRadius = '12px';
+      pre.style.overflow = 'hidden';
+      pre.style.margin = '14px 0';
+      pre.style.background = '#0a0d14';
+      pre.style.border = '1px solid rgba(255,255,255,0.12)';
+
+      const code = pre.querySelector('code');
+      let lang = 'CODE';
+      if (code && code.className) {
+        const m = code.className.match(/language-([a-zA-Z0-9_-]+)/);
+        if (m) lang = m[1].toUpperCase();
+      }
+
+      const rawCode = code ? code.innerText : pre.innerText;
+
+      const header = document.createElement('div');
+      header.className = 'chat-code-header';
+      header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 14px;background:rgba(255,255,255,0.06);border-bottom:1px solid rgba(255,255,255,0.08);font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:0.5px;';
+
+      const langSpan = document.createElement('span');
+      langSpan.textContent = lang;
+
+      const btnGroup = document.createElement('div');
+      btnGroup.style.cssText = 'display:flex;align-items:center;gap:6px;';
+
+      // Run button for Python/JS
+      const isRunnable = /^(PYTHON|PY|JAVASCRIPT|JS|NODE)$/i.test(lang);
+      let runBtn = null;
+      let outputContainer = null;
+
+      if (isRunnable) {
+        runBtn = document.createElement('button');
+        runBtn.className = 'chat-code-run';
+        runBtn.innerHTML = '<span>▶ Run</span>';
+        runBtn.title = 'Execute code in sandbox';
+        runBtn.style.cssText = 'display:flex;align-items:center;gap:4px;border:none;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;background:rgba(16,185,129,0.2);color:#34d399;border:1px solid rgba(16,185,129,0.3);transition:all .15s;';
+        
+        outputContainer = document.createElement('div');
+        outputContainer.className = 'chat-code-output';
+        outputContainer.style.cssText = 'display:none;padding:10px 14px;background:#030712;border-top:1px solid rgba(255,255,255,0.08);font-family:monospace;font-size:11px;color:#cbd5e1;white-space:pre-wrap;max-height:180px;overflow-y:auto;';
+
+        runBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          runBtn.innerHTML = '<span>⏳ Running...</span>';
+          outputContainer.style.display = 'block';
+          outputContainer.innerHTML = '<span style="color:#94a3b8">Executing in sandbox environment...</span>';
+
+          try {
+            const res = await api.post('/chat/execute', { code: rawCode, language: lang });
+            const data = res.data;
+            if (data.success) {
+              outputContainer.innerHTML = `<span style="color:#34d399;font-weight:600;">[Exit Code 0 • ${data.duration || 0}ms]</span>\n${data.stdout || '(No output)'}`;
+            } else {
+              outputContainer.innerHTML = `<span style="color:#f87171;font-weight:600;">[Error • ${data.duration || 0}ms]</span>\n${data.stderr || data.error || 'Execution failed'}`;
+            }
+          } catch (err) {
+            outputContainer.innerHTML = `<span style="color:#f87171;">Failed to connect to execution sandbox: ${err.message}</span>`;
+          } finally {
+            runBtn.innerHTML = '<span>▶ Run Again</span>';
+          }
+        });
+        btnGroup.appendChild(runBtn);
+      }
+
+      // Copy button
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'chat-code-copy';
+      copyBtn.innerHTML = '<span>📋 Copy</span>';
+      copyBtn.title = 'Copy code';
+      copyBtn.style.cssText = 'display:flex;align-items:center;gap:4px;border:none;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;background:rgba(255,255,255,0.08);color:#e2e8f0;transition:all .15s;';
+      copyBtn.addEventListener('mouseenter', () => (copyBtn.style.background = 'rgba(255,255,255,0.2)'));
+      copyBtn.addEventListener('mouseleave', () => (copyBtn.style.background = 'rgba(255,255,255,0.08)'));
+      copyBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const code = pre.querySelector('code');
-        const text = code ? code.innerText : pre.innerText;
-        navigator.clipboard.writeText(text).then(() => {
-          btn.textContent = '✓';
-          setTimeout(() => (btn.textContent = '📋'), 1200);
+        navigator.clipboard.writeText(rawCode).then(() => {
+          copyBtn.innerHTML = '<span style="color:#34d399">✓ Copied!</span>';
+          setTimeout(() => (copyBtn.innerHTML = '<span>📋 Copy</span>'), 1500);
         });
       });
-      pre.appendChild(btn);
+      btnGroup.appendChild(copyBtn);
+
+      header.appendChild(langSpan);
+      header.appendChild(btnGroup);
+      pre.insertBefore(header, pre.firstChild);
+      if (outputContainer) pre.appendChild(outputContainer);
     });
-  }, [msg.content, isTyping]);
+  }, [msg.content, isStreaming]);
 
   const copyText = async () => {
     try {
@@ -163,20 +241,18 @@ function MessageBubble({ msg, isTyping, onOpenImage, onRegenerate, onEdit, isLas
   };
 
   const [speaking, setSpeaking] = useState(false);
-  const [speakErr, setSpeakErr] = useState(false);
 
   const speak = async () => {
     const text = msg.content.replace(/[*#`>\[\]]/g, '').slice(0, 1500);
     if (!text.trim()) return;
     try {
-      // Edge TTS via backend (free, natural Hindi/English voices)
       const audioUrl = `${api.defaults.baseURL}/agent/ai/tts`;
       const ttsRes = await fetch(audioUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, voice: 'en-IN-PrabhatNeural' }),
       });
-      if (ttsRes.ok && !speakErr) {
+      if (ttsRes.ok) {
         setSpeaking(true);
         const blob = await ttsRes.blob();
         const url = URL.createObjectURL(blob);
@@ -186,9 +262,8 @@ function MessageBubble({ msg, isTyping, onOpenImage, onRegenerate, onEdit, isLas
         await audio.play();
         return;
       }
-    } catch (e) { /* fallback below */ }
+    } catch (e) { /* fallback */ }
 
-    // Fallback: browser speechSynthesis
     try {
       const utter = new SpeechSynthesisUtterance(text);
       utter.lang = 'hi-IN';
@@ -198,40 +273,48 @@ function MessageBubble({ msg, isTyping, onOpenImage, onRegenerate, onEdit, isLas
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
-      className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}
+      transition={{ duration: 0.2 }}
+      className={`flex gap-3.5 ${isUser ? 'flex-row-reverse' : ''}`}
     >
       {/* Avatar */}
       <div
-        className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+        className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 shadow-md"
         style={{
-          background: isUser ? 'rgba(161,66,244,0.15)' : 'var(--gradient-primary)',
-          border: isUser ? '1px solid rgba(161,66,244,0.3)' : 'none',
-          boxShadow: isUser ? 'none' : '0 0 12px var(--color-primary-glow)',
+          background: isUser ? 'linear-gradient(135deg, #3b82f6, #8b5cf6)' : 'linear-gradient(135deg, #10b981, #06b6d4)',
+          border: isUser ? '1px solid rgba(59,130,246,0.4)' : '1px solid rgba(16,185,129,0.4)',
         }}
       >
-        {isUser ? <User className="w-4 h-4 text-[var(--color-secondary)]" /> : <Bot className="w-4 h-4 text-white" />}
+        {isUser ? <User className="w-4 h-4 text-white" /> : <Bot className="w-4 h-4 text-white" />}
       </div>
 
       {/* Bubble */}
-      <div className={`max-w-[85%] md:max-w-[70%] flex flex-col ${isUser ? 'items-end' : 'items-start'} reveal-subtle`}>
+      <div className={`max-w-[92%] md:max-w-[82%] flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
         <div
-          className="px-4 py-3 rounded-2xl text-sm leading-relaxed"
+          className="px-4 py-3.5 rounded-2xl text-sm leading-relaxed"
           style={{
-            background: isUser ? 'var(--gradient-primary)' : 'rgba(255,255,255,0.045)',
-            border: isUser ? 'none' : '1px solid var(--color-border)',
-            color: isUser ? '#fff' : 'var(--color-text-primary)',
-            borderTopRightRadius: isUser ? 4 : 16,
-            borderTopLeftRadius: isUser ? 16 : 4,
-            boxShadow: isUser ? '0 4px 16px var(--color-primary-glow)' : 'none',
+            background: isUser ? 'linear-gradient(135deg, #2563eb, #7c3aed)' : 'rgba(255,255,255,0.065)',
+            border: isUser ? 'none' : '1px solid rgba(255,255,255,0.12)',
+            color: '#f8fafc',
+            borderTopRightRadius: isUser ? 4 : 18,
+            borderTopLeftRadius: isUser ? 18 : 4,
+            boxShadow: isUser ? '0 4px 18px rgba(37,99,235,0.35)' : '0 4px 16px rgba(0,0,0,0.25)',
           }}
         >
-          {isTyping ? (
-            <div className="flex items-center gap-1.5 py-1">
-              <span className="text-sm opacity-80">{rendered}</span>
-              <span className="blink-cursor" />
+          {isStreaming && msg.content.length === 0 ? (
+            <div className="flex items-center gap-2 py-1">
+              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+              <span className="text-xs text-slate-300">AI-Dost response stream kar raha hai...</span>
+            </div>
+          ) : isStreaming ? (
+            <div>
+              <div
+                ref={proseRef}
+                className="prose-chat"
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
+              />
+              <span className="inline-block w-2 h-4 ml-1 bg-cyan-400 animate-pulse align-middle" />
             </div>
           ) : (
             <div
@@ -241,39 +324,74 @@ function MessageBubble({ msg, isTyping, onOpenImage, onRegenerate, onEdit, isLas
             />
           )}
 
+          {/* Claude-Style Live Artifact Preview Trigger */}
+          {detectedArtifact && (
+            <div className="mt-3 pt-2.5 border-t border-white/10 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <LayoutTemplate className="w-4 h-4 text-purple-400 animate-pulse" />
+                <span className="text-xs font-semibold text-purple-300">Interactive Canvas Ready</span>
+              </div>
+              <button
+                onClick={() => onOpenArtifact && onOpenArtifact(detectedArtifact)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-purple-600/30 hover:bg-purple-600/40 border border-purple-500/50 text-purple-200 transition-all cursor-pointer shadow-lg hover:scale-[1.02]"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>Live Canvas Kholo</span>
+              </button>
+            </div>
+          )}
+
+          {/* Quick Action Navigation Chip */}
+          {msg.navView && (
+            <div className="mt-3 pt-2.5 border-t border-white/10">
+              <button
+                onClick={() => onNavigate && onNavigate(msg.navView)}
+                className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-400/40 hover:bg-blue-500/30 transition-all cursor-pointer shadow-lg"
+              >
+                <span>👉 {msg.navLabel || msg.navView} me chalein</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Attached files */}
           {msg.attachments && msg.attachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-2">
               {msg.attachments.map((n, i) => (
-                <span key={i} className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg" style={{ background: 'rgba(161,66,244,0.12)', border: '1px solid rgba(161,66,244,0.3)', color: 'var(--color-secondary)' }}>
+                <span key={i} className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg bg-blue-500/15 border border-blue-400/30 text-blue-300">
                   <Paperclip className="w-2.5 h-2.5" /> {n}
                 </span>
               ))}
             </div>
           )}
 
-          {/* Search sources (Perplexity-style) */}
-          {!isTyping && msg.sources && msg.sources.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-2.5 pt-2.5" style={{ borderTop: '1px solid var(--color-border)' }}>
-              {msg.sources.map((s, i) => (
-                <a
-                  key={i}
-                  href={s.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[10px] px-2 py-1 rounded-lg flex items-center gap-1 max-w-[220px] truncate transition-colors cursor-pointer hover:bg-white/10"
-                  style={{ background: 'rgba(75,139,252,0.1)', border: '1px solid rgba(75,139,252,0.3)', color: 'var(--color-primary)' }}
-                  title={s.url}
-                >
-                  <ExternalLink className="w-2.5 h-2.5 shrink-0" /> [{i + 1}] {s.title || s.url}
-                </a>
-              ))}
+          {/* Search sources with Favicons */}
+          {!isStreaming && msg.sources && msg.sources.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2.5 pt-2.5 border-t border-white/10">
+              {msg.sources.map((s, i) => {
+                let domain = '';
+                try { domain = new URL(s.url).hostname; } catch (_) {}
+                return (
+                  <a
+                    key={i}
+                    href={s.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[10px] px-2.5 py-1.5 rounded-xl flex items-center gap-2 max-w-[240px] truncate bg-blue-500/10 border border-blue-400/30 text-blue-300 hover:bg-blue-500/20 transition-colors shadow-sm"
+                    title={s.url}
+                  >
+                    <Globe className="w-3 h-3 text-blue-400 shrink-0" />
+                    <span className="truncate">[{i + 1}] {s.title || domain}</span>
+                    <ExternalLink className="w-2.5 h-2.5 shrink-0 opacity-70" />
+                  </a>
+                );
+              })}
             </div>
           )}
 
           {/* Generated images */}
-          {!isTyping && images.length > 0 && (
-            <div className={`grid gap-2.5 mt-3 ${images.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`} style={{ minWidth: 200 }}>
+          {!isStreaming && images.length > 0 && (
+            <div className={`grid gap-2.5 mt-3 ${images.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`} style={{ minWidth: 220 }}>
               {images.map((img, idx) => (
                 <ImageCard key={idx} src={img.url} alt={img.alt} index={idx} onOpen={onOpenImage} />
               ))}
@@ -281,9 +399,9 @@ function MessageBubble({ msg, isTyping, onOpenImage, onRegenerate, onEdit, isLas
           )}
         </div>
 
-        {/* Actions */}
-        {!isUser && !isTyping && (
-          <div className="flex items-center gap-1 mt-1.5">
+        {/* Action Toolbar */}
+        {!isUser && !isStreaming && (
+          <div className="flex items-center gap-1 mt-1.5 px-1 bg-white/5 rounded-lg border border-white/5 py-0.5">
             {[
               { icon: Copy, fn: copyText, title: 'Copy' },
               { icon: Volume2, fn: speak, title: 'Read aloud' },
@@ -298,21 +416,19 @@ function MessageBubble({ msg, isTyping, onOpenImage, onRegenerate, onEdit, isLas
                 key={i}
                 onClick={fn}
                 title={title}
-                className="w-6 h-6 rounded-md flex items-center justify-center transition-colors cursor-pointer hover:bg-white/10"
-                style={{ color: 'var(--color-text-muted)' }}
+                className="w-6 h-6 rounded-md flex items-center justify-center transition-colors cursor-pointer hover:bg-white/15 text-slate-400 hover:text-slate-200"
               >
-                {title === 'Copy' && copied ? <Check className="w-3 h-3 text-[var(--color-success)]" /> : <Icon className="w-3 h-3" />}
+                {title === 'Copy' && copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Icon className="w-3 h-3" />}
               </button>
             ))}
           </div>
         )}
-        {isUser && !isTyping && (
-          <div className="flex items-center gap-1 mt-1.5">
+        {isUser && !isStreaming && (
+          <div className="flex items-center gap-1 mt-1.5 px-1">
             <button
               onClick={() => onEdit && onEdit(msg)}
               title="Edit message"
-              className="w-6 h-6 rounded-md flex items-center justify-center transition-colors cursor-pointer hover:bg-white/10"
-              style={{ color: 'var(--color-text-muted)' }}
+              className="w-6 h-6 rounded-md flex items-center justify-center transition-colors cursor-pointer hover:bg-white/10 text-slate-400"
             >
               <Pencil className="w-3 h-3" />
             </button>
@@ -329,7 +445,7 @@ function DeepAnalyzing() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="flex items-center gap-4 py-3"
+      className="flex items-center gap-4 py-3 px-2"
     >
       <div className="deep-analyzing-orb">
         <div className="orb-core" />
@@ -338,9 +454,9 @@ function DeepAnalyzing() {
         <div className="orb-ring" />
       </div>
       <div>
-        <p className="text-sm font-medium text-white">Deep analysing...</p>
-        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-          AI-Dost is thinking across models
+        <p className="text-sm font-semibold text-white">Deep reasoning in progress...</p>
+        <p className="text-xs text-slate-400">
+          Streaming instant response from AI cascade
         </p>
       </div>
     </motion.div>
@@ -359,7 +475,6 @@ export default function ChatView({
 }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
-  const [typingIndex, setTypingIndex] = useState(null);
   const [showFollowUps, setShowFollowUps] = useState(false);
   const [lastReply, setLastReply] = useState('');
   const [localThinking, setLocalThinking] = useState(false);
@@ -372,6 +487,7 @@ export default function ChatView({
   const [persona, setPersona] = useState('hinglish');
   const [variants, setVariants] = useState(null);
   const [sessionId, setSessionId] = useState('default');
+  const [activeArtifact, setActiveArtifact] = useState(null);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const newChatCount = useRef(0);
@@ -404,7 +520,6 @@ export default function ChatView({
       }
     } catch (e) { /* noop */ }
     setMessages([WELCOME]);
-    // Fetch backend history as fallback (offer to restore)
     api.get('/chat/history', { params: { session_id: sessionId, limit: 50 } })
       .then((res) => {
         const rows = Array.isArray(res.data) ? res.data : (res.data?.history || []);
@@ -420,7 +535,7 @@ export default function ChatView({
       const userMsg = row.user_message || row.prompt;
       const reply = row.response;
       if (userMsg) restored.push({ id: Date.now() + restored.length, role: 'user', content: userMsg });
-      if (reply) restored.push({ id: Date.now() + restored.length, role: 'assistant', content: reply.slice(0, 2000) });
+      if (reply) restored.push({ id: Date.now() + restored.length, role: 'assistant', content: reply.slice(0, 3000) });
     }
     if (restored.length > 0) {
       setMessages(restored);
@@ -440,7 +555,7 @@ export default function ChatView({
     }
   }, [messages, sessionId]);
 
-  // Save to backend history (fire and forget)
+  // Save to backend history
   useEffect(() => {
     if (messages.length > 1) {
       api.post('/chat/save', { session_id: sessionId, messages: messages.slice(-20) }).catch(() => {});
@@ -452,6 +567,7 @@ export default function ChatView({
     if (newChatCount.current > 0) {
       setMessages([WELCOME]);
       setShowFollowUps(false);
+      setActiveArtifact(null);
     }
   }, [onNewChatSignal]);
 
@@ -460,7 +576,21 @@ export default function ChatView({
     if (scrollRef.current) {
       scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }
-  }, [messages, typingIndex, thinking]);
+  }, [messages, thinking]);
+
+  // 1-Click Bridge: Open Artifact into Copilot IDE
+  const handleOpenArtifactInCopilot = (art) => {
+    try {
+      const payload = {
+        title: art.title || 'chat-artifact',
+        code: art.code || '',
+        language: art.language || 'html',
+        timestamp: Date.now(),
+      };
+      localStorage.setItem('ai_dost_copilot_import', JSON.stringify(payload));
+    } catch (_) {}
+    if (onNavigate) onNavigate('copilot');
+  };
 
   const sendMessage = useCallback(async (text) => {
     const content = (text || input).trim();
@@ -468,7 +598,7 @@ export default function ChatView({
     setInput('');
     setShowFollowUps(false);
 
-    const userMsg = { role: 'user', content, timestamp: new Date().toISOString(), attachments: attachment ? [attachment.name] : undefined };
+    const userMsg = { id: Date.now(), role: 'user', content, timestamp: new Date().toISOString(), attachments: attachment ? [attachment.name] : undefined };
     setMessages((prev) => [...prev, userMsg]);
     setThinking(true);
     setSuggestView(null);
@@ -482,20 +612,15 @@ export default function ChatView({
         else if (attachment.type === 'text') { payload.text = attachment.text; }
         const res = await api.post('/chat/analyze', payload);
         const reply = res.data?.reply || 'File padh nahi paya — dobara try karo.';
-        const aiMsg = { role: 'assistant', content: reply, timestamp: new Date().toISOString() };
+        const aiMsg = { id: Date.now() + 1, role: 'assistant', content: reply, timestamp: new Date().toISOString() };
         setMessages((prev) => [...prev, aiMsg]);
-        setTypingIndex(messages.length + 1);
         setLastReply(reply);
-        setTimeout(() => {
-          setTypingIndex(null);
-          setShowFollowUps(true);
-        }, Math.min(1500, 200 + reply.length * 2));
+        setShowFollowUps(true);
         setAttachment(null);
         setThinking(false);
         return;
       } catch (e) {
         setAttachment(null);
-        /* fall through to normal chat */
       }
     }
 
@@ -506,28 +631,21 @@ export default function ChatView({
         const urls = [r1.data?.imageUrl].filter(Boolean);
         if (urls.length > 0) {
           const imageReply = {
+            id: Date.now() + 1,
             role: 'assistant',
-            content: `Haan bhai, ho gaya! 🎨 Maine aapki image banayi (HD quality):\n\n![Image 1](${urls[0]})\n\n[⬇️ Download Image](${urls[0]}) • [🔗 Full screen me kholo](${urls[0]})\n\nKuch aur change chahiye to batao — style, colors, size — sab kar dunga! ✨`,
+            content: `Haan bhai, ho gaya! 🎨 Maine aapki image banayi (HD quality):\n\n![Image 1](${urls[0]})\n\n[⬇️ Download Image](${urls[0]}) • [🔗 Full screen me kholo](${urls[0]})\n\nKuch aur change chahiye to batao! ✨`,
             timestamp: new Date().toISOString(),
           };
           setMessages((prev) => [...prev, imageReply]);
-          setTypingIndex(messages.length + 1);
           setLastReply(imageReply.content);
-          setTimeout(() => {
-            setTypingIndex(null);
-            setShowFollowUps(true);
-          }, Math.min(1500, 200 + imageReply.content.length));
+          setShowFollowUps(true);
           setThinking(false);
           return;
         }
-      } catch (e) {
-        /* image API fail → fall through to normal chat */
-      }
+      } catch (e) { /* fall through */ }
     }
 
-    // ── Document intent: pdf / docx / pptx / csv — jo manga jaaye wahi banao ──
-    // Specific format (pdf/csv/ppt) hamesha generic words (report/document) pe jeeta hai —
-    // "report pdf me chahiye" → pdf. Sirf specific format nahi hai to docx keywords.
+    // ── Document intent: pdf / docx / pptx / csv / xlsx ──
     const specificDoc = DOC_KEYWORDS
       .filter((k) => k.type !== 'docx')
       .map((k) => ({ type: k.type, pos: content.search(k.re) }))
@@ -538,33 +656,27 @@ export default function ChatView({
     if (docIntent) {
       try {
         const topic = content.replace(docIntent.re, '').replace(/^(bihar|india|15 august|independence day|raksha|shaheed|shahid|martyr)[\s,:-]*/i, '').trim() || content;
-        const typeLabel = { docx: 'Word', pptx: 'PowerPoint', csv: 'Excel/CSV', pdf: 'PDF' }[docIntent.type];
-        const toast = { role: 'assistant', content: `⏳ **${typeLabel} file ban rahi hai...** Research + file generation me 30-90s lag sakte hain.`, timestamp: new Date().toISOString() };
+        const typeLabel = { docx: 'Word', pptx: 'PowerPoint', csv: 'CSV', xlsx: 'Excel', pdf: 'PDF' }[docIntent.type] || docIntent.type;
+        const toast = { id: Date.now() + 1, role: 'assistant', content: `⏳ **${typeLabel} file ban rahi hai...** AI research + generation chal raha hai.`, timestamp: new Date().toISOString() };
         setMessages((prev) => [...prev, toast]);
-        setTypingIndex(messages.length + 1);
         const r = await api.post('/document/generate', { type: docIntent.type, topic, title: content.slice(0, 50) });
         if (r.data?.success && r.data.downloadUrl) {
           const readyMsg = {
+            id: Date.now() + 2,
             role: 'assistant',
-            content: `✅ **${typeLabel} file ready!**\n\n📄 **${r.data.filename}**\n\n[⬇️ Download karo](${r.data.downloadUrl}) • [🔗 Naye tab me kholo](${r.data.downloadUrl})\n\nAur kuch chahiye to batao — title, content, sections — sab change kar dunga! ✨`,
+            content: `✅ **${typeLabel} file ready!**\n\n📄 **${r.data.filename}**\n\n[⬇️ Download karo](${r.data.downloadUrl}) • [🔗 Naye tab me kholo](${r.data.downloadUrl})\n\nAur koi badlaav chahiye to batao! ✨`,
             timestamp: new Date().toISOString(),
           };
           setMessages((prev) => [...prev, readyMsg]);
-          setTypingIndex(messages.length + 1);
           setLastReply(readyMsg.content);
-          setTimeout(() => {
-            setTypingIndex(null);
-            setShowFollowUps(true);
-          }, Math.min(1500, 200 + readyMsg.content.length * 2));
+          setShowFollowUps(true);
         } else {
-          setMessages((prev) => [...prev, { role: 'assistant', content: `⚠️ File ban nahi payi: ${r.data?.error || 'unknown error'}`, timestamp: new Date().toISOString() }]);
-          setTypingIndex(null);
+          setMessages((prev) => [...prev, { id: Date.now() + 2, role: 'assistant', content: `⚠️ File ban nahi payi: ${r.data?.error || 'unknown error'}`, timestamp: new Date().toISOString() }]);
         }
         setThinking(false);
         return;
       } catch (e) {
-        setMessages((prev) => [...prev, { role: 'assistant', content: `⚠️ File banane me problem aayi: ${e?.message || 'backend down?'} — dobara try karo ya thodi der baad.`, timestamp: new Date().toISOString() }]);
-        setTypingIndex(null);
+        setMessages((prev) => [...prev, { id: Date.now() + 2, role: 'assistant', content: `⚠️ File banane me problem aayi: ${e?.message || 'backend error'}`, timestamp: new Date().toISOString() }]);
         setThinking(false);
         return;
       }
@@ -576,112 +688,187 @@ export default function ChatView({
         const data = await api.post('/resume/generate', { prompt: content });
         if (data.data && !data.data.error) {
           const resumeMsg = {
+            id: Date.now() + 1,
             role: 'assistant',
-            content: `📄 **Resume ready!** Maine aapki details se ek professional resume bana diya hai.\n\n**${data.data.fullName || 'Your Name'}** — ${data.data.summary || ''}\n\nSide preview me live dikh raha hai. Template change kar sakte ho aur PDF download kar sakte ho.`,
+            content: `📄 **Resume ready!** Maine aapki details se ek professional resume bana diya hai.\n\n**${data.data.fullName || 'Developer'}** — ${data.data.summary || ''}\n\nSide preview me live dikh raha hai. PDF download kar sakte ho.`,
             timestamp: new Date().toISOString(),
+            navView: 'resume',
+            navLabel: 'Resume Builder Open Karo'
           };
           setMessages((prev) => [...prev, resumeMsg]);
-          setTypingIndex(messages.length + 1);
-          setTimeout(() => {
-            setTypingIndex(null);
-            onOpenResumeWithData(data.data);
-          }, 400);
+          if (onOpenResumeWithData) onOpenResumeWithData(data.data);
           setThinking(false);
           return;
         }
-      } catch (e) { /* fall through to normal chat */ }
+      } catch (e) { /* fall through */ }
     }
 
-    // ── Navigation intent: chat se hi koi bhi view kholo ──
+    // ── Navigation intent ──
     const nav = NAV_INTENTS.find((n) => n.re.test(content));
     if (nav) {
       const navReply = {
+        id: Date.now() + 1,
         role: 'assistant',
-        content: `Le chal raha hoon **${nav.view}** view me... 👉`,
+        content: `Le chal raha hoon **${nav.label}** me... 👉`,
         timestamp: new Date().toISOString(),
+        navView: nav.view,
+        navLabel: nav.label
       };
       setMessages((prev) => [...prev, navReply]);
-      setTypingIndex(messages.length + 1);
       setLastReply(navReply.content);
-      setTimeout(() => {
-        setTypingIndex(null);
-        setShowFollowUps(true);
-        if (onNavigate) onNavigate(nav.view);
-      }, 600);
+      if (onNavigate) onNavigate(nav.view);
       setThinking(false);
       return;
     }
 
-    // ── Web search intent: research karo → sources ke saath jawab ──
+    // ── Web search intent ──
     if (SEARCH_INTENT.test(content)) {
       try {
         const res = await api.post('/chat/search', { message: content });
         const reply = res.data?.reply || 'Search se kuch nahi mila — thoda specific banao.';
         const sources = res.data?.sources || [];
         const searchMsg = {
+          id: Date.now() + 1,
           role: 'assistant',
           content: reply,
           sources,
           timestamp: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, searchMsg]);
-        setTypingIndex(messages.length + 1);
         setLastReply(reply);
-        setTimeout(() => {
-          setTypingIndex(null);
-          setShowFollowUps(true);
-        }, Math.min(1500, 200 + reply.length * 2));
+        setShowFollowUps(true);
         setThinking(false);
         return;
-      } catch (e) {
-        /* search fail → normal chat fallback */
-      }
+      } catch (e) { /* fall through */ }
     }
 
-    // ── Normal chat ──
+    // ── Real-Time SSE Token Streaming ──
     const history = messages
       .filter(m => m.role === 'user' || m.role === 'assistant')
-      .slice(-6)
-      .map(m => ({ role: m.role, content: m.content.slice(0, 1500) }));
+      .slice(-20)
+      .map(m => ({ role: m.role, content: String(m.content).slice(0, 2500) }));
+
+    const aiMsgId = Date.now() + 1;
+    const placeholder = {
+      id: aiMsgId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      isStreaming: true,
+    };
+
+    setMessages((prev) => [...prev, placeholder]);
 
     try {
-      const res = await api.post('/chat/', {
-        message: content,
-        model: model === 'auto' ? 'auto' : model,
-        section: 'chat',
-        history,
-        mode: 'chat',
-        persona,
+      const response = await fetch('/api/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: content,
+          model: model === 'auto' ? 'auto' : model,
+          section: 'chat',
+          history,
+          mode: 'chat',
+          persona,
+        }),
       });
-      const reply0 = res.data?.reply || res.data?.message || 'Sorry, response nahi mil paya. Dobara try karo.';
-      let reply = reply0;
 
-      // ── AI ne [GENERATE_IMAGE: prompt] tag diya → Pollinations se image banao ──
+      if (!response.ok) {
+        throw new Error(`Streaming failed with status: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data: ')) continue;
+          const dataStr = trimmed.slice(6).trim();
+          if (dataStr === '[DONE]') continue;
+
+          try {
+            const parsed = JSON.parse(dataStr);
+            if (parsed.chunk) {
+              accumulated += parsed.chunk;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === aiMsgId ? { ...m, content: accumulated, isStreaming: true } : m
+                )
+              );
+            }
+          } catch (_) {}
+        }
+      }
+
+      // Check final generated image tags
+      let finalReply = accumulated;
       const imageTagRegex = /\[GENERATE_IMAGE:\s*(.*?)\]/i;
-      const imageMatch = reply.match(imageTagRegex);
+      const imageMatch = finalReply.match(imageTagRegex);
       if (imageMatch) {
         const imagePromptText = imageMatch[1].trim();
         const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePromptText)}?width=768&height=512&nologo=true`;
-        reply = reply.replace(imageTagRegex, '🎨 Image ban gayi — neeche dekho:').trim();
-        reply += `\n\n![Generated: ${imagePromptText}](${pollinationsUrl})`;
+        finalReply = finalReply.replace(imageTagRegex, '🎨 Image ban gayi — neeche dekho:').trim();
+        finalReply += `\n\n![Generated: ${imagePromptText}](${pollinationsUrl})`;
       }
 
-      const aiMsg = { role: 'assistant', content: reply, timestamp: new Date().toISOString() };
-      setMessages((prev) => [...prev, aiMsg]);
-      setTypingIndex(messages.length + 1);
-      setLastReply(reply);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === aiMsgId ? { ...m, content: finalReply || 'Kuch response nahi mila.', isStreaming: false } : m
+        )
+      );
+      setLastReply(finalReply);
+
+      // Auto open Claude-style artifact if HTML/widget is detected
+      const artifact = extractArtifact(finalReply);
+      if (artifact) {
+        setActiveArtifact(artifact);
+      }
+
       if (PROJECT_INTENT.test(content)) setSuggestView('project');
-      setTimeout(() => {
-        setTypingIndex(null);
+      setShowFollowUps(true);
+    } catch (err) {
+      console.warn('Stream failed, falling back to REST endpoint:', err.message);
+      try {
+        const res = await api.post('/chat/', {
+          message: content,
+          model: model === 'auto' ? 'auto' : model,
+          section: 'chat',
+          history,
+          mode: 'chat',
+          persona,
+        });
+        const reply0 = res.data?.reply || res.data?.message || 'Sorry, response nahi mil paya. Dobara try karo.';
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === aiMsgId ? { ...m, content: reply0, isStreaming: false } : m
+          )
+        );
+        setLastReply(reply0);
+        const artifact = extractArtifact(reply0);
+        if (artifact) setActiveArtifact(artifact);
         setShowFollowUps(true);
-      }, Math.min(1500, 200 + reply.length * 2));
-    } catch (e) {
-      const errMsg = {
-        role: 'assistant',
-        content: `⚠️ **Error:** ${e?.message || 'Network error'}\n\nBackend chal raha hai check karo (localhost:5000) aur dobara try karo.`,
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, errMsg]);
+      } catch (e2) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === aiMsgId
+              ? {
+                  ...m,
+                  content: `⚠️ **Error:** ${e2?.message || 'Network error'}\n\nBackend chal raha hai check karo (localhost:5000) aur dobara try karo.`,
+                  isStreaming: false,
+                }
+              : m
+          )
+        );
+      }
     } finally {
       setThinking(false);
     }
@@ -766,6 +953,7 @@ export default function ChatView({
     setMessages([WELCOME]);
     setShowFollowUps(false);
     setBackendHistory(null);
+    setActiveArtifact(null);
   };
 
   const switchSession = (id) => {
@@ -776,6 +964,7 @@ export default function ChatView({
     setShowFollowUps(false);
     setSuggestView(null);
     setSessionsOpen(false);
+    setActiveArtifact(null);
     const saved = localStorage.getItem(msgKey(id));
     try {
       const parsed = saved ? JSON.parse(saved) : null;
@@ -801,6 +990,7 @@ export default function ChatView({
       setSessionId('default');
       setMessages([]);
       setShowFollowUps(false);
+      setActiveArtifact(null);
     }
   };
 
@@ -843,7 +1033,7 @@ export default function ChatView({
     setThinking(true);
     try {
       const res = await api.post('/chat/', {
-        message: `Sawal: "${q}"\nIs sawal ke 3 alag-alag chhote answers do. Sirf "1. ..." "2. ..." "3. ..." format me, bilkul koi extra text nahi.`,
+        message: `Sawal: "${q}"\nIs sawal ke 3 alag-alag answers do. Sirf "1. ..." "2. ..." "3. ..." format me.`,
         model: model === 'auto' ? 'auto' : model,
         section: 'chat',
         history: [],
@@ -879,329 +1069,321 @@ export default function ChatView({
   };
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Session bar */}
-      <div className="shrink-0 px-4 md:px-8 pt-4">
-        <div className="max-w-3xl mx-auto flex items-center gap-2">
-          <div className="relative">
-            <button
-              onClick={() => setSessionsOpen(!sessionsOpen)}
-              title="Sessions"
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer"
-              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}
-            >
-              💬 {sessions.find((s) => s.id === sessionId)?.title || 'Default chat'}
-              <span className="text-[9px]" style={{ color: 'var(--color-text-muted)' }}>▾</span>
-            </button>
-            {sessionsOpen && (
-              <div
-                className="absolute top-full left-0 mt-1.5 w-60 rounded-xl overflow-hidden z-40 shadow-2xl"
-                style={{ background: '#0d1117', border: '1px solid var(--color-border)' }}
-              >
-                <div className="max-h-56 overflow-y-auto">
-                  {[{ id: 'default', title: 'Default chat' }, ...sessions].map((s) => (
-                    <div
-                      key={s.id}
-                      className="flex items-center gap-1 px-3 py-2 cursor-pointer hover:bg-white/5"
-                      style={{ background: s.id === sessionId ? 'rgba(75,139,252,0.12)' : 'transparent' }}
-                    >
-                      <span
-                        className="flex-1 truncate text-xs"
-                        style={{ color: s.id === sessionId ? 'var(--color-primary)' : 'var(--color-text-primary)' }}
-                        onClick={() => switchSession(s.id)}
-                      >
-                        {s.title}
-                      </span>
-                      {s.id !== 'default' && (
-                        <>
-                          <button onClick={() => renameSession(s.id)} title="Rename" className="w-6 h-6 rounded-md hover:bg-white/10 cursor-pointer text-[10px]" style={{ color: 'var(--color-text-muted)' }}>✏️</button>
-                          <button onClick={() => deleteSession(s.id)} title="Delete" className="w-6 h-6 rounded-md hover:bg-white/10 cursor-pointer text-[10px]" style={{ color: 'var(--color-text-muted)' }}>🗑️</button>
-                        </>
-                      )}
+    <div className="h-full flex flex-row overflow-hidden bg-[#0b0e14]">
+      {/* Left / Main Chat Panel */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden">
+        {/* Docked Sticky Sub-Header Bar */}
+        <div className="shrink-0 px-4 md:px-8 py-2.5 bg-[#0e121b]/90 backdrop-blur-md border-b border-white/10 z-20">
+          <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <button
+                  onClick={() => setSessionsOpen(!sessionsOpen)}
+                  title="Sessions"
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 cursor-pointer transition-colors shadow-sm"
+                >
+                  <span>💬 {sessions.find((s) => s.id === sessionId)?.title || 'Default chat'}</span>
+                  <span className="text-[10px] text-slate-400">▾</span>
+                </button>
+                {sessionsOpen && (
+                  <div
+                    className="absolute top-full left-0 mt-1.5 w-64 rounded-xl overflow-hidden z-50 shadow-2xl bg-[#0d1117] border border-white/15 backdrop-blur-xl"
+                  >
+                    <div className="max-h-56 overflow-y-auto py-1">
+                      {[{ id: 'default', title: 'Default chat' }, ...sessions].map((s) => (
+                        <div
+                          key={s.id}
+                          className="flex items-center gap-1.5 px-3 py-2 cursor-pointer hover:bg-white/10 transition-colors"
+                          style={{ background: s.id === sessionId ? 'rgba(59,130,246,0.15)' : 'transparent' }}
+                        >
+                          <span
+                            className="flex-1 truncate text-xs"
+                            style={{ color: s.id === sessionId ? '#60a5fa' : '#e2e8f0' }}
+                            onClick={() => switchSession(s.id)}
+                          >
+                            {s.title}
+                          </span>
+                          {s.id !== 'default' && (
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => renameSession(s.id)} title="Rename" className="p-1 rounded hover:bg-white/10 cursor-pointer text-[11px] text-slate-400">✏️</button>
+                              <button onClick={() => deleteSession(s.id)} title="Delete" className="p-1 rounded hover:bg-white/10 cursor-pointer text-[11px] text-slate-400">🗑️</button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          <button
-            onClick={createSession}
-            title="Nayi chat"
-            className="w-8 h-8 rounded-xl flex items-center justify-center cursor-pointer hover:bg-white/10"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}
-          >
-            +
-          </button>
-          <div className="ml-auto flex items-center gap-1">
-            {PERSONAS.map((p) => (
               <button
-                key={p.id}
-                onClick={() => setPersonaAndSave(p.id)}
-                className="px-2.5 py-1.5 rounded-xl text-[10px] font-semibold transition-colors cursor-pointer"
-                style={{
-                  background: persona === p.id ? 'rgba(161,66,244,0.15)' : 'transparent',
-                  border: '1px solid ' + (persona === p.id ? 'rgba(161,66,244,0.4)' : 'var(--color-border)'),
-                  color: persona === p.id ? 'var(--color-secondary)' : 'var(--color-text-muted)',
-                }}
+                onClick={createSession}
+                title="Nayi chat"
+                className="w-8 h-8 rounded-xl flex items-center justify-center cursor-pointer bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 transition-colors text-sm font-semibold"
               >
-                {p.label}
+                +
               </button>
-            ))}
+            </div>
+
+            {/* Persona Tone Selector */}
+            <div className="flex items-center gap-1.5 bg-black/30 p-1 rounded-xl border border-white/10">
+              {PERSONAS.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => setPersonaAndSave(p.id)}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all cursor-pointer"
+                  style={{
+                    background: persona === p.id ? 'linear-gradient(135deg, rgba(59,130,246,0.3), rgba(139,92,246,0.3))' : 'transparent',
+                    border: persona === p.id ? '1px solid rgba(139,92,246,0.5)' : '1px solid transparent',
+                    color: persona === p.id ? '#c084fc' : '#94a3b8',
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Messages */}
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto px-4 md:px-8 py-6"
-        style={{ scrollBehavior: 'smooth' }}
-      >
-        <div className="max-w-3xl mx-auto space-y-6">
-          {messages.map((msg, i) => (
-            <MessageBubble
-              key={i}
-              msg={msg}
-              isTyping={typingIndex === i}
-              onOpenImage={setLightboxUrl}
-              onRegenerate={handleRegenerate}
-              onEdit={handleEditMessage}
-              isLast={i === messages.length - 1}
-              onVariants={loadVariants}
-            />
-          ))}
+        {/* Message Stream */}
+        <div
+          ref={scrollRef}
+          className="flex-1 overflow-y-auto px-4 md:px-8 py-6"
+          style={{ scrollBehavior: 'smooth' }}
+        >
+          <div className="max-w-4xl mx-auto space-y-6">
+            {messages.map((msg, i) => (
+              <MessageBubble
+                key={msg.id || i}
+                msg={msg}
+                onOpenImage={setLightboxUrl}
+                onRegenerate={handleRegenerate}
+                onEdit={handleEditMessage}
+                isLast={i === messages.length - 1}
+                onVariants={loadVariants}
+                onNavigate={onNavigate}
+                onOpenArtifact={setActiveArtifact}
+              />
+            ))}
 
-          {/* Variants panel */}
-          {variants && variants.items.length > 0 && !thinking && (
-            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="pt-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--color-text-muted)' }}>
-                ✨ 3 variants — kisi pe click karo
-              </p>
-              <div className="space-y-2">
-                {variants.items.map((v, i) => (
-                  <button
-                    key={i}
-                    onClick={() => applyVariant(v)}
-                    className="w-full text-left px-3 py-2 rounded-xl text-xs transition-all cursor-pointer hover:scale-[1.01]"
-                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}
-                  >
-                    <span className="font-bold mr-1.5" style={{ color: 'var(--color-secondary)' }}>V{i + 1}:</span>
-                    {v.slice(0, 200)}
-                  </button>
-                ))}
-              </div>
-            </motion.div>
-          )}
-
-          <AnimatePresence>
-            {thinking && <DeepAnalyzing key="thinking" />}
-          </AnimatePresence>
-
-          {/* Follow-up suggestions */}
-          <AnimatePresence>
-            {showFollowUps && lastReply && !thinking && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className="pt-2"
-              >
-                <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--color-text-muted)' }}>
-                  Follow-up questions
+            {/* Variants panel */}
+            {variants && variants.items.length > 0 && !thinking && (
+              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="pt-2">
+                <p className="text-[10px] font-bold uppercase tracking-widest mb-2 text-slate-400">
+                  ✨ 3 Variants Available
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  {FOLLOW_UPS.map((q) => (
+                <div className="space-y-2">
+                  {variants.items.map((v, i) => (
                     <button
-                      key={q}
-                      onClick={() => sendMessage(q)}
-                      className="px-3 py-1.5 rounded-full text-xs transition-all cursor-pointer hover:scale-[1.03]"
-                      style={{
-                        background: 'rgba(75,139,252,0.08)',
-                        border: '1px solid rgba(75,139,252,0.25)',
-                        color: 'var(--color-primary)',
-                      }}
+                      key={i}
+                      onClick={() => applyVariant(v)}
+                      className="w-full text-left px-3.5 py-2.5 rounded-xl text-xs transition-all cursor-pointer hover:bg-white/10 bg-white/5 border border-white/10 text-slate-200"
                     >
-                      {q}
+                      <span className="font-bold mr-1.5 text-purple-400">Option {i + 1}:</span>
+                      {v.slice(0, 240)}
                     </button>
                   ))}
                 </div>
               </motion.div>
             )}
-          </AnimatePresence>
 
-          {/* Action suggestions (project → Copilot/Agent) */}
-          <AnimatePresence>
-            {suggestView === 'project' && !thinking && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className="pt-2"
-              >
-                <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--color-text-muted)' }}>
-                  Chaho to poora project banwalo
-                </p>
-                <div className="flex flex-wrap gap-2">
+            <AnimatePresence>
+              {thinking && <DeepAnalyzing key="thinking" />}
+            </AnimatePresence>
+
+            {/* Follow-up suggestions */}
+            <AnimatePresence>
+              {showFollowUps && lastReply && !thinking && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="pt-3 border-t border-white/5"
+                >
+                  <p className="text-[11px] font-semibold text-slate-400 mb-2 flex items-center gap-1.5">
+                    <Lightbulb className="w-3.5 h-3.5 text-yellow-400" />
+                    Suggested follow-ups
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {FOLLOW_UPS.map((q) => (
+                      <button
+                        key={q}
+                        onClick={() => sendMessage(q)}
+                        className="px-3.5 py-1.5 rounded-full text-xs font-medium transition-all cursor-pointer hover:scale-[1.02] bg-blue-500/10 border border-blue-400/25 text-blue-300 hover:bg-blue-500/20"
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Project View Suggestions */}
+            <AnimatePresence>
+              {suggestView === 'project' && !thinking && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="pt-2"
+                >
+                  <p className="text-[11px] font-semibold text-slate-400 mb-2">
+                    ⚡ Chaho to poora project Copilot IDE me open karo
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => onNavigate && onNavigate('copilot')}
+                      className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-blue-600/20 border border-blue-500/40 text-blue-300 hover:bg-blue-600/30 transition-all cursor-pointer"
+                    >
+                      <span>⚡ Copilot IDE me open karo</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => onNavigate && onNavigate('agent')}
+                      className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-purple-600/20 border border-purple-500/40 text-purple-300 hover:bg-purple-600/30 transition-all cursor-pointer"
+                    >
+                      <span>🤖 Autonomous Agent se banao</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
+
+        {/* Quick Prompts */}
+        {messages.length <= 2 && !thinking && (
+          <div className="px-4 md:px-8 pb-2">
+            <div className="max-w-4xl mx-auto">
+              {backendHistory && backendHistory.length > 0 && (
+                <button
+                  onClick={loadBackendHistory}
+                  className="mb-2 flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-purple-500/10 border border-purple-500/30 text-purple-300 hover:bg-purple-500/20 transition-all cursor-pointer"
+                >
+                  <HistoryIcon className="w-3.5 h-3.5" /> Purani baatein load karo ({backendHistory.length} saved)
+                </button>
+              )}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                {QUICK_PROMPTS.map(({ icon: Icon, label, prompt }) => (
                   <button
-                    onClick={() => onNavigate && onNavigate('copilot')}
-                    className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer hover:scale-[1.03]"
-                    style={{ background: 'rgba(75,139,252,0.12)', border: '1px solid rgba(75,139,252,0.35)', color: 'var(--color-primary)' }}
+                    key={label}
+                    onClick={() => sendMessage(prompt)}
+                    className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs transition-all cursor-pointer hover:bg-white/10 bg-white/5 border border-white/10 text-slate-300 text-left"
                   >
-                    ⚡ Copilot IDE me banao (files + run)
+                    <Icon className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                    <span className="truncate">{label}</span>
                   </button>
-                  <button
-                    onClick={() => onNavigate && onNavigate('agent')}
-                    className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer hover:scale-[1.03]"
-                    style={{ background: 'rgba(161,66,244,0.12)', border: '1px solid rgba(161,66,244,0.35)', color: 'var(--color-secondary)' }}
-                  >
-                    🤖 Agent se banao (autonomous)
-                  </button>
-                </div>
-              </motion.div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Input Area */}
+        <div className="px-4 md:px-8 pb-5 pt-2 bg-gradient-to-t from-[#0b0e14] via-[#0b0e14]/90 to-transparent">
+          <div className="max-w-4xl mx-auto">
+            {attachment && (
+              <div className="flex items-center gap-2 mb-2 px-3.5 py-2 rounded-xl text-xs bg-purple-500/10 border border-purple-500/30">
+                <Paperclip className="w-3.5 h-3.5 text-purple-400" />
+                <span className="truncate text-slate-200">{attachment.name}</span>
+                <button
+                  onClick={() => setAttachment(null)}
+                  className="ml-auto px-2 py-0.5 rounded-lg text-[10px] text-slate-400 hover:text-white cursor-pointer hover:bg-white/10"
+                >
+                  ✕ hatao
+                </button>
+              </div>
             )}
-          </AnimatePresence>
+            <div
+              className="flex items-end gap-2.5 px-4 py-3 rounded-2xl transition-all bg-white/[0.06] border border-white/15 focus-within:border-blue-500/60 focus-within:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
+            >
+              <select
+                value={model}
+                onChange={handleModelChange}
+                title="Model select karo"
+                className="shrink-0 mb-0.5 px-2 py-1.5 rounded-lg text-xs font-semibold bg-black/40 border border-white/15 text-slate-300 cursor-pointer focus:outline-none"
+              >
+                {MODEL_OPTIONS.map((m) => (
+                  <option key={m.id} value={m.id} style={{ color: '#0b0d12', background: '#fff' }}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={Math.min(5, Math.max(1, input.split('\n').length))}
+                placeholder="AI-Dost se kuch bhi pucho... (Enter = send, Shift+Enter = newline)"
+                className="flex-1 bg-transparent resize-none text-sm focus:outline-none placeholder:text-slate-500 text-slate-100 leading-relaxed py-1"
+              />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,.pdf,.txt,.md,.js,.jsx,.ts,.tsx,.py,.html,.css,.json,.csv,.xlsx,.java,.c,.cpp,.go,.rs"
+                className="hidden"
+                onChange={handleFileSelect}
+              />
+              <button
+                onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                title="File attach (image / PDF / text)"
+                className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors cursor-pointer hover:bg-white/10 text-slate-400 hover:text-slate-200"
+              >
+                <Paperclip className="w-4 h-4" />
+              </button>
+              <button
+                onClick={onOpenVoice}
+                title="Voice input"
+                className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors cursor-pointer hover:bg-purple-500/20 text-purple-400 hover:text-purple-300"
+              >
+                <Mic className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => sendMessage()}
+                disabled={!input.trim() || thinking}
+                title="Send (Enter)"
+                className="w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md hover:shadow-blue-500/30 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex items-center justify-between gap-3 mt-2 px-1">
+              <p className="text-[10px] text-slate-500">
+                AI-Dost v2.0 • Live Artifacts Canvas & In-Chat Code Runner Active
+              </p>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  onClick={exportMarkdown}
+                  title="Export as Markdown"
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold text-slate-400 hover:text-slate-200 border border-white/10 hover:bg-white/10 transition-colors"
+                >
+                  <FileDown className="w-3 h-3" /> .md
+                </button>
+                <button
+                  onClick={exportPdf}
+                  title="Export as PDF"
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold text-slate-400 hover:text-slate-200 border border-white/10 hover:bg-white/10 transition-colors"
+                >
+                  <Download className="w-3 h-3" /> PDF
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Quick prompts (only when few messages) */}
-      {messages.length <= 2 && !thinking && (
-        <div className="px-4 md:px-8 pb-2">
-          <div className="max-w-3xl mx-auto">
-            {backendHistory && backendHistory.length > 0 && (
-              <button
-                onClick={loadBackendHistory}
-                className="mb-2 flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer hover:scale-[1.02]"
-                style={{ background: 'rgba(161,66,244,0.1)', border: '1px solid rgba(161,66,244,0.3)', color: 'var(--color-secondary)' }}
-              >
-                <HistoryIcon className="w-3.5 h-3.5" /> Purani baatein load karo ({backendHistory.length} saved)
-              </button>
-            )}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            {QUICK_PROMPTS.map(({ icon: Icon, label, prompt }) => (
-              <button
-                key={label}
-                onClick={() => sendMessage(prompt)}
-                className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs transition-all cursor-pointer hover:scale-[1.02]"
-                style={{
-                  background: 'rgba(255,255,255,0.035)',
-                  border: '1px solid var(--color-border)',
-                  color: 'var(--color-text-secondary)',
-                }}
-              >
-                <Icon className="w-3.5 h-3.5 text-[var(--color-primary)]" />
-                <span className="truncate">{label}</span>
-              </button>
-            ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Input area */}
-      <div className="px-4 md:px-8 pb-5 pt-2">
-        <div className="max-w-3xl mx-auto">
-          {attachment && (
-            <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-xl text-xs" style={{ background: 'rgba(161,66,244,0.08)', border: '1px solid rgba(161,66,244,0.3)' }}>
-              <Paperclip className="w-3.5 h-3.5" style={{ color: 'var(--color-secondary)' }} />
-              <span className="truncate" style={{ color: 'var(--color-text-primary)' }}>{attachment.name}</span>
-              <button
-                onClick={() => setAttachment(null)}
-                className="ml-auto px-2 py-0.5 rounded-lg text-[10px] cursor-pointer hover:bg-white/10"
-                style={{ color: 'var(--color-text-muted)' }}
-              >
-                ✕ hatao
-              </button>
-            </div>
-          )}
-          <div
-            className="flex items-end gap-2 px-3 py-2.5 rounded-2xl transition-all"
-            style={{
-              background: 'rgba(255,255,255,0.045)',
-              border: '1px solid var(--color-border)',
-              boxShadow: thinking ? '0 0 0 1px rgba(75,139,252,0.3)' : 'none',
-            }}
-          >
-            <select
-              value={model}
-              onChange={handleModelChange}
-              title="Model select karo"
-              className="shrink-0 mb-0.5 px-1.5 py-1 rounded-lg text-[10px] font-semibold cursor-pointer focus:outline-none"
-              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}
-            >
-              {MODEL_OPTIONS.map((m) => (
-                <option key={m.id} value={m.id} style={{ color: '#0b0d12', background: '#fff' }}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              rows={Math.min(4, Math.max(1, input.split('\n').length))}
-              placeholder="AI-Dost se kuch bhi pucho... (Enter = send)"
-              className="flex-1 bg-transparent resize-none text-sm focus:outline-none placeholder:text-[var(--color-text-muted)]"
-              style={{ color: 'var(--color-text-primary)' }}
-            />
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,.pdf,.txt,.md,.js,.jsx,.ts,.tsx,.py,.html,.css,.json,.csv,.java,.c,.cpp,.go,.rs"
-              className="hidden"
-              onChange={handleFileSelect}
-            />
-            <button
-              onClick={() => fileInputRef.current && fileInputRef.current.click()}
-              title="File attach (image / PDF / text)"
-              className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors cursor-pointer hover:bg-white/10"
-              style={{ color: 'var(--color-text-muted)' }}
-            >
-              <Paperclip className="w-4 h-4" />
-            </button>
-            <button
-              onClick={onOpenVoice}
-              title="Voice input"
-              className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors cursor-pointer hover:bg-white/10"
-              style={{ color: 'var(--color-secondary)' }}
-            >
-              <Mic className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => sendMessage()}
-              disabled={!input.trim() || thinking}
-              title="Send (Enter)"
-              className="w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              style={{ background: 'var(--gradient-primary)', color: '#fff', boxShadow: '0 0 14px var(--color-primary-glow)' }}
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="flex items-center justify-between gap-3 mt-2">
-            <p className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
-              AI-Dost galtiyan kar sakta hai — important cheezein verify karo
-            </p>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                onClick={exportMarkdown}
-                title="Export as Markdown"
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer hover:bg-white/10"
-                style={{ color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}
-              >
-                <FileDown className="w-3 h-3" /> .md
-              </button>
-              <button
-                onClick={exportPdf}
-                title="Export as PDF"
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer hover:bg-white/10"
-                style={{ color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}
-              >
-                <Download className="w-3 h-3" /> PDF
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Right / Claude-Style Live Artifacts Canvas (Split Screen) */}
+      <AnimatePresence>
+        {activeArtifact && (
+          <ChatArtifactsCanvas
+            artifact={activeArtifact}
+            onClose={() => setActiveArtifact(null)}
+            onOpenInCopilot={handleOpenArtifactInCopilot}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Image lightbox */}
       {lightboxUrl && (

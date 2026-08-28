@@ -128,6 +128,28 @@ router.get('/health/services', async (req, res) => {
     res.json({ success: true, services });
 });
 
+// Clean history: dynamic sliding window up to 20 messages and 24,000 char budget
+function buildCleanHistory(history, maxMessages = 20, maxTotalChars = 24000) {
+    if (!history || !Array.isArray(history)) return [];
+    const valid = history.filter(msg => msg && msg.role && msg.content);
+    const sliced = valid.slice(-maxMessages);
+    let totalChars = 0;
+    const result = [];
+    for (let i = sliced.length - 1; i >= 0; i--) {
+        const item = sliced[i];
+        const contentStr = String(item.content || '').substring(0, 3000);
+        if (totalChars + contentStr.length > maxTotalChars && result.length > 0) {
+            break;
+        }
+        totalChars += contentStr.length;
+        result.unshift({
+            role: item.role === 'ai' || item.role === 'model' ? 'assistant' : item.role,
+            content: contentStr
+        });
+    }
+    return result;
+}
+
 // Main chat endpoint
 router.post('/', async (req, res) => {
     const startTime = Date.now();
@@ -157,14 +179,8 @@ router.post('/', async (req, res) => {
             processedMessage = `Knowledge Base / Document Library Context:\n${docsContext}\n\nUser Message:\n${message}`;
         }
         
-        // Clean history: truncate long content & limit to last 6 messages to stay under token limits
-        const cleanHistory = (history || [])
-            .filter(msg => msg.role && msg.content)
-            .slice(-6)
-            .map(msg => ({
-                role: msg.role === 'ai' ? 'assistant' : msg.role,
-                content: String(msg.content).substring(0, 1500)
-            }));
+        // Clean history: sliding window up to 20 messages
+        const cleanHistory = buildCleanHistory(history, 20, 24000);
 
         let response;
         let usedModel = model || 'auto';
@@ -679,6 +695,292 @@ router.post('/analyze', async (req, res) => {
     }
 
     return res.json({ success: true, reply: 'File ka analysis nahi ho paya — dobara try karo.', provider: 'none' });
+});
+
+// ── Stream Chat (Server-Sent Events) ─────────────────────────────────────────
+router.post('/stream', async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+    const sendEvent = (data) => {
+        if (!res.writableEnded) {
+            res.write(`data: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`);
+        }
+    };
+
+    try {
+        const { message, model, section, fileContent, history, mode, customKeys, uploadedDocs, persona } = req.body;
+        if (!message || !message.trim()) {
+            sendEvent({ error: 'Message is required' });
+            sendEvent('[DONE]');
+            return res.end();
+        }
+
+        const PERSONAS = {
+            hinglish: 'Tone: Always reply in Hinglish (Hindi written in Roman script, mixed with English). Be friendly, casual and fun. Use light emojis. Keep technical accuracy. ',
+            english: 'Tone: Reply in clear simple English. Friendly but professional. ',
+            formal: 'Tone: Reply in formal, professional Hindi or English. Polite, structured, no slang, no emojis. '
+        };
+        let processedMessage = message;
+        if (persona && PERSONAS[persona]) {
+            processedMessage = `${PERSONAS[persona]}\n\n${message}`;
+        }
+        if (uploadedDocs && uploadedDocs.length > 0) {
+            const docsContext = uploadedDocs.map(doc => `--- START OF DOCUMENT: ${doc.name} ---\n${doc.content}\n--- END OF DOCUMENT: ${doc.name} ---`).join('\n\n');
+            processedMessage = `Knowledge Base / Document Library Context:\n${docsContext}\n\nUser Message:\n${message}`;
+        }
+
+        const cleanHistory = buildCleanHistory(history, 20, 24000);
+        const groqMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
+
+        let streamedSuccessfully = false;
+        let usedModel = 'auto';
+
+        // 1. If Local Ollama requested
+        if (model && model.startsWith('local:')) {
+            const localModelName = model.substring(6);
+            try {
+                const ollamaRes = await fetch('http://127.0.0.1:11434/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: localModelName,
+                        messages: [
+                            ...cleanHistory,
+                            { role: 'user', content: groqMsg }
+                        ],
+                        stream: true
+                    }),
+                    signal: AbortSignal.timeout(60000)
+                });
+                if (ollamaRes.ok && ollamaRes.body) {
+                    const reader = ollamaRes.body.getReader();
+                    const decoder = new TextDecoder();
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        const chunkText = decoder.decode(value, { stream: true });
+                        const lines = chunkText.split('\n').filter(Boolean);
+                        for (const line of lines) {
+                            try {
+                                const parsed = JSON.parse(line);
+                                if (parsed.message?.content) {
+                                    sendEvent({ chunk: parsed.message.content });
+                                    streamedSuccessfully = true;
+                                }
+                            } catch (_) {}
+                        }
+                    }
+                    usedModel = `local:${localModelName}`;
+                }
+            } catch (err) {
+                logger.warn('Ollama streaming error:', err.message);
+            }
+        }
+
+        // 2. Try Groq Streaming (Primary Fast)
+        if (!streamedSuccessfully && (model === 'groq' || model === 'auto' || !model)) {
+            const apiKey = customKeys?.groq || process.env.GROQ_API_KEY;
+            if (apiKey && apiKey !== 'gsk_your_key_here') {
+                try {
+                    const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${apiKey}`
+                        },
+                        body: JSON.stringify({
+                            model: 'openai/gpt-oss-120b',
+                            messages: [
+                                { role: 'system', content: 'You are AI-Dost, an ultra-intelligent and friendly AI developer assistant. Answer in Hinglish/English naturally.' },
+                                ...cleanHistory,
+                                { role: 'user', content: groqMsg }
+                            ],
+                            stream: true,
+                            temperature: 0.2,
+                            max_tokens: 2048
+                        }),
+                        signal: AbortSignal.timeout(20000)
+                    });
+
+                    if (groqRes.ok && groqRes.body) {
+                        const reader = groqRes.body.getReader();
+                        const decoder = new TextDecoder();
+                        let buffer = '';
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+                            buffer += decoder.decode(value, { stream: true });
+                            const lines = buffer.split('\n');
+                            buffer = lines.pop() || '';
+                            for (const line of lines) {
+                                const trimmed = line.trim();
+                                if (trimmed.startsWith('data: ')) {
+                                    const dataStr = trimmed.slice(6);
+                                    if (dataStr === '[DONE]') continue;
+                                    try {
+                                        const parsed = JSON.parse(dataStr);
+                                        const delta = parsed.choices?.[0]?.delta?.content;
+                                        if (delta) {
+                                            sendEvent({ chunk: delta });
+                                            streamedSuccessfully = true;
+                                        }
+                                    } catch (_) {}
+                                }
+                            }
+                        }
+                        if (streamedSuccessfully) usedModel = 'groq (gpt-oss-120b)';
+                    }
+                } catch (e) {
+                    logger.warn('Groq streaming failed, trying Gemini:', e.message);
+                }
+            }
+        }
+
+        // 3. Try Gemini Streaming
+        if (!streamedSuccessfully && (model === 'gemini' || model === 'auto' || !model)) {
+            const geminiKey = customKeys?.gemini || process.env.GEMINI_API_KEY;
+            if (geminiKey && geminiKey !== 'your_gemini_key') {
+                try {
+                    const geminiModels = ['gemini-2.5-flash', 'gemini-flash-latest'];
+                    for (const gModel of geminiModels) {
+                        const geminiRes = await fetch(
+                            `https://generativelanguage.googleapis.com/v1beta/models/${gModel}:streamGenerateContent?alt=sse&key=${geminiKey}`,
+                            {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    contents: [
+                                        ...cleanHistory.map(h => ({ role: h.role === 'assistant' ? 'model' : 'user', parts: [{ text: h.content }] })),
+                                        { role: 'user', parts: [{ text: processedMessage }] }
+                                    ],
+                                    generationConfig: { temperature: 0.3 }
+                                }),
+                                signal: AbortSignal.timeout(25000)
+                            }
+                        );
+                        if (geminiRes.ok && geminiRes.body) {
+                            const reader = geminiRes.body.getReader();
+                            const decoder = new TextDecoder();
+                            let buffer = '';
+                            while (true) {
+                                const { done, value } = await reader.read();
+                                if (done) break;
+                                buffer += decoder.decode(value, { stream: true });
+                                const lines = buffer.split('\n');
+                                buffer = lines.pop() || '';
+                                for (const line of lines) {
+                                    const trimmed = line.trim();
+                                    if (trimmed.startsWith('data: ')) {
+                                        try {
+                                            const parsed = JSON.parse(trimmed.slice(6));
+                                            const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+                                            if (text) {
+                                                sendEvent({ chunk: text });
+                                                streamedSuccessfully = true;
+                                            }
+                                        } catch (_) {}
+                                    }
+                                }
+                            }
+                            if (streamedSuccessfully) {
+                                usedModel = `gemini (${gModel})`;
+                                break;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    logger.warn('Gemini streaming failed:', e.message);
+                }
+            }
+        }
+
+        // 4. Fallback to normal cascading chat if streaming had no output
+        if (!streamedSuccessfully) {
+            logger.info('Streaming fallbacks exhausted, falling back to synchronous cascade...');
+            const fallbackResult = await autoSelectModel(processedMessage, section, fileContent, cleanHistory, mode, customKeys);
+            if (isValidResponse(fallbackResult.response)) {
+                sendEvent({ chunk: fallbackResult.response });
+                usedModel = fallbackResult.model;
+            } else {
+                sendEvent({ chunk: 'Ai-Dost: Sabhi AI models temporarily busy hain. Please kuch der baad try karein ya Local Ollama use karein.' });
+                usedModel = 'fallback';
+            }
+        }
+
+        sendEvent({ done: true, model: usedModel });
+        sendEvent('[DONE]');
+        res.end();
+    } catch (error) {
+        logger.error('Stream chat error:', error);
+        sendEvent({ error: error.message || 'Stream failed' });
+        sendEvent('[DONE]');
+        res.end();
+    }
+});
+
+// ── In-Chat Code Execution Runner (Node.js / Python Sandbox) ────────────────
+const { exec: runChildExec } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+router.post('/execute', async (req, res) => {
+    const { code, language } = req.body;
+    if (!code || typeof code !== 'string') {
+        return res.status(400).json({ success: false, error: 'code is required' });
+    }
+
+    const lang = (language || 'javascript').toLowerCase();
+    const startTime = Date.now();
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidost-chat-exec-'));
+    
+    let filePath;
+    let execCmd;
+
+    if (lang === 'python' || lang === 'py') {
+        filePath = path.join(tempDir, 'script.py');
+        fs.writeFileSync(filePath, code, 'utf-8');
+        execCmd = `python "${filePath}"`;
+    } else if (lang === 'javascript' || lang === 'js' || lang === 'node') {
+        filePath = path.join(tempDir, 'script.js');
+        fs.writeFileSync(filePath, code, 'utf-8');
+        execCmd = `node "${filePath}"`;
+    } else {
+        try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
+        return res.json({
+            success: false,
+            error: `Execution for '${lang}' is not supported directly in chat. Use Copilot IDE for full-stack environments.`,
+            duration: Date.now() - startTime
+        });
+    }
+
+    runChildExec(execCmd, { timeout: 10000, maxBuffer: 1024 * 512 }, (err, stdout, stderr) => {
+        const duration = Date.now() - startTime;
+        try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
+
+        if (err && err.killed) {
+            return res.json({
+                success: false,
+                error: 'Execution timed out (10s limit exceeded)',
+                stdout: stdout || '',
+                stderr: stderr || '',
+                exitCode: 124,
+                duration
+            });
+        }
+
+        res.json({
+            success: !err,
+            stdout: stdout || '',
+            stderr: stderr || (err ? err.message : ''),
+            exitCode: err ? (err.code || 1) : 0,
+            duration
+        });
+    });
 });
 
 module.exports = router;

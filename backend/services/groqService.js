@@ -54,7 +54,7 @@ Key Response Guidelines:
    - PDF / DOCUMENT: Format printable documents as \`[GENERATE_PDF: Title] Content [/GENERATE_PDF]\`.
 3. Language & Grammar: Respond in clean, natural, grammatically flawless language matching user preference.`;
             } else if (mode === 'agent') {
-                systemPrompt = '';
+                systemPrompt = 'You are an autonomous code generation engine. Do NOT call tools. Write complete, functional production code for each file requested.';
             }
 
             const messagesPayload = [];
@@ -102,15 +102,15 @@ Key Response Guidelines:
             }
             messagesPayload.push({ role: 'user', content: processContent(message) });
 
-            let primaryModel = mode === 'chat' || mode === 'agent' ? 'openai/gpt-oss-120b' : 'qwen/qwen3.6-27b';
+            let primaryModel = 'openai/gpt-oss-20b';
             if (hasImage) {
-                primaryModel = 'openai/gpt-oss-120b'; // Vision support (llama-3.2-11b-vision-preview deprecate ho chuka)
+                primaryModel = 'openai/gpt-oss-20b';
             }
-            const fallbackModel = 'qwen/qwen3.6-27b';
+            const fallbackModel = 'qwen/qwen3.8-27b';
 
-            // Groq per-model max OUTPUT tokens (8192 hardcoded → 413 "Request too large"!)
-            // gpt-oss-120b: 2048, qwen3.6-27b: 4096 (verified)
             const MAX_OUTPUT_TOKENS = {
+                'openai/gpt-oss-20b': 4096,
+                'qwen/qwen3.8-27b': 4096,
                 'openai/gpt-oss-120b': 2048,
                 'qwen/qwen3.6-27b': 4096,
             };

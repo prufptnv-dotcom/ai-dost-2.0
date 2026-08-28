@@ -191,3 +191,69 @@ test('GET / redirects to frontend (FRONTEND_URL)', async () => {
   assert.match(loc, /localhost:\d+/);
   await res.body?.cancel?.();
 });
+
+// ── Copilot Agent Diffs, Rollback & Revert ───────────────────────────────
+test('GET /api/agent/run-diffs missing runId -> 400', async () => {
+  const { status, body } = await req('GET', '/api/agent/run-diffs');
+  assert.equal(status, 400);
+  assert.ok(body.error);
+});
+
+test('GET /api/agent/run-diffs unknown runId -> 200 with empty diffs', async () => {
+  const { status, body } = await req('GET', '/api/agent/run-diffs?runId=unknown-run-123');
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.deepEqual(body.diffs, []);
+});
+
+test('POST /api/agent/rollback missing checkpoint -> 400', async () => {
+  const { status, body } = await req('POST', '/api/agent/rollback', {});
+  assert.equal(status, 400);
+  assert.ok(body.error);
+});
+
+test('POST /api/agent/rollback valid empty checkpoint -> 200', async () => {
+  const { status, body } = await req('POST', '/api/agent/rollback', {
+    checkpoint: { files: [] },
+    projectId: 'test-project'
+  });
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.equal(body.restoredFiles, 0);
+});
+
+test('POST /api/agent/revert-file missing parameters -> 400', async () => {
+  const { status } = await req('POST', '/api/agent/revert-file', { runId: 'test-run' });
+  assert.equal(status, 400);
+});
+
+test('POST /api/agent/revert-all missing runId -> 400', async () => {
+  const { status } = await req('POST', '/api/agent/revert-all', {});
+  assert.equal(status, 400);
+});
+
+test('POST /api/agent/rag-sync -> responds with success or warning', async () => {
+  const { status, body } = await req('POST', '/api/agent/rag-sync', { directory: 'test-workspace' });
+  assert.equal(status, 200);
+  assert.ok(body.success !== undefined);
+});
+
+// ── Resume Endpoints (Validation & Error Handling) ───────────────────────
+test('POST /api/v1/resume/regenerate-section missing body -> 400', async () => {
+  const { status, body } = await req('POST', '/api/v1/resume/regenerate-section', {});
+  assert.equal(status, 400);
+  assert.ok(body.error);
+});
+
+test('POST /api/v1/resume/ats-analyze missing resumeData or jobDescription -> 400', async () => {
+  const { status, body } = await req('POST', '/api/v1/resume/ats-analyze', {});
+  assert.equal(status, 400);
+  assert.ok(body.error);
+});
+
+test('POST /api/v1/resume/auto-tailor missing resumeData or jobDescription -> 400', async () => {
+  const { status, body } = await req('POST', '/api/v1/resume/auto-tailor', {});
+  assert.equal(status, 400);
+  assert.ok(body.error);
+});
+

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronRight, ChevronDown, FolderTree, File, FileCode2, FileJson, FileText, FilePlus2, FolderPlus } from 'lucide-react';
+import { ChevronRight, ChevronDown, FolderTree, File, FileCode2, FileJson, FileText, FilePlus2, FolderPlus, Pencil, Trash2 } from 'lucide-react';
 
 export const LANG_BY_EXT = {
   js: 'javascript', jsx: 'javascript', mjs: 'javascript', ts: 'typescript', tsx: 'typescript',
@@ -36,71 +36,131 @@ export function fileTreeFromFiles(files) {
   return tree;
 }
 
-export function TreeView({ node, depth = 0, activePath, onSelect, onCtx, onNewFileInFolder, onNewFolderInFolder }) {
-  const [open, setOpen] = useState(depth < 2);
-  const keys = Object.keys(node || {}).filter(k => !k.startsWith('__'));
+export function TreeView({
+  tree,
+  node,
+  depth = 0,
+  currentPath = '',
+  activePath,
+  onSelect,
+  onRename,
+  onDelete,
+  onDeleteFolder,
+  onNewFileInFolder,
+  onNewFolderInFolder,
+  onCtx
+}) {
+  const rootNode = node || tree || {};
+  const [open, setOpen] = useState(true);
+  const keys = Object.keys(rootNode).filter(k => !k.startsWith('__'));
   if (keys.length === 0) return null;
 
   return (
-    <div>
+    <div className="space-y-0.5">
       {keys.map((key) => {
-        const child = node[key];
+        const child = rootNode[key];
         if (child.__file) {
           const isActive = activePath === child.path;
           const Icon = iconForFile(child.path);
           return (
-            <button
+            <div
               key={child.path}
-              onClick={() => onSelect(child)}
-              onContextMenu={(e) => { e.preventDefault(); onCtx && onCtx(e, child.path, false); }}
-              className="w-full flex items-center gap-1.5 py-[3px] text-[12px] text-left transition-colors cursor-pointer"
-              style={{
-                paddingLeft: `${8 + depth * 12}px`,
-                background: isActive ? 'rgba(75,139,252,0.18)' : 'transparent',
-                color: isActive ? '#fff' : 'var(--color-text-secondary)',
-              }}
+              className={`group flex items-center justify-between py-1 text-xs rounded-md transition-all cursor-pointer ${
+                isActive
+                  ? 'bg-indigo-600/25 text-white font-semibold border-l-2 border-indigo-400'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+              }`}
+              style={{ paddingLeft: isActive ? `${6 + depth * 12}px` : `${8 + depth * 12}px` }}
             >
-              <Icon className="w-3.5 h-3.5 shrink-0 stroke-[1.5]" style={{ color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }} />
-              <span className="truncate">{key}</span>
-            </button>
+              <button
+                onClick={() => onSelect(child)}
+                onContextMenu={(e) => { e.preventDefault(); onCtx && onCtx(e, child.path, false); }}
+                className="flex-1 flex items-center gap-2 text-left truncate cursor-pointer min-w-0 pr-1"
+              >
+                <Icon className={`w-3.5 h-3.5 shrink-0 stroke-[1.5] ${isActive ? 'text-indigo-400' : 'text-slate-400'}`} />
+                <span className="truncate">{key}</span>
+              </button>
+
+              <div className="flex items-center gap-1 pr-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                <button
+                  title="Rename file"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRename && onRename(child.path);
+                  }}
+                  className="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-indigo-300 cursor-pointer"
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
+                <button
+                  title="Delete file"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete && onDelete(child.path);
+                  }}
+                  className="p-1 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400 cursor-pointer"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
           );
         }
+        const fullFolderPath = currentPath ? `${currentPath}/${key}` : key;
         return (
-          <div key={key}>
+          <div key={fullFolderPath} className="space-y-0.5">
             <div
-              className="group flex items-center w-full cursor-pointer"
-              onContextMenu={(e) => { e.preventDefault(); onCtx && onCtx(e, key, true); }}
+              className="group flex items-center justify-between w-full rounded-md hover:bg-slate-800/40 transition-colors cursor-pointer py-1"
+              style={{ paddingLeft: `${8 + depth * 12}px` }}
+              onContextMenu={(e) => { e.preventDefault(); onCtx && onCtx(e, fullFolderPath, true); }}
             >
               <button
                 onClick={() => setOpen(!open)}
-                className="flex-1 flex items-center gap-1.5 py-[3px] text-[12px] text-left transition-colors cursor-pointer"
-                style={{ paddingLeft: `${8 + depth * 12}px`, color: 'var(--color-text-secondary)' }}
+                className="flex-1 flex items-center gap-1.5 text-xs text-left text-slate-300 hover:text-white font-medium transition-colors cursor-pointer min-w-0 pr-1 truncate"
               >
-                {open ? <ChevronDown className="w-3 h-3 shrink-0 stroke-[1.5]" /> : <ChevronRight className="w-3 h-3 shrink-0 stroke-[1.5]" />}
-                <FolderTree className="w-3.5 h-3.5 shrink-0 stroke-[1.5]" style={{ color: 'var(--color-text-muted)' }} />
+                {open ? <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
+                <FolderTree className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                 <span className="truncate">{key}</span>
               </button>
-              <div className="flex items-center gap-0.5 pr-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+
+              <div className="flex items-center gap-0.5 pr-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                 <button
                   title={`${key} me nayi file`}
-                  onClick={(e) => { e.stopPropagation(); onNewFileInFolder && onNewFileInFolder(key); }}
-                  className="p-0.5 rounded hover:bg-white/10 cursor-pointer"
-                  style={{ color: 'var(--color-text-muted)' }}
+                  onClick={(e) => { e.stopPropagation(); onNewFileInFolder && onNewFileInFolder(fullFolderPath); }}
+                  className="p-1 rounded hover:bg-slate-700/80 text-slate-400 hover:text-white cursor-pointer"
                 >
-                  <FilePlus2 className="w-3.5 h-3.5 stroke-[1.5]" />
+                  <FilePlus2 className="w-3.5 h-3.5" />
                 </button>
                 <button
                   title={`${key} me naya folder`}
-                  onClick={(e) => { e.stopPropagation(); onNewFolderInFolder && onNewFolderInFolder(key); }}
-                  className="p-0.5 rounded hover:bg-white/10 cursor-pointer"
-                  style={{ color: 'var(--color-text-muted)' }}
+                  onClick={(e) => { e.stopPropagation(); onNewFolderInFolder && onNewFolderInFolder(fullFolderPath); }}
+                  className="p-1 rounded hover:bg-slate-700/80 text-slate-400 hover:text-white cursor-pointer"
                 >
-                  <FolderPlus className="w-3.5 h-3.5 stroke-[1.5]" />
+                  <FolderPlus className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  title={`Delete folder ${key}`}
+                  onClick={(e) => { e.stopPropagation(); onDeleteFolder && onDeleteFolder(fullFolderPath); }}
+                  className="p-1 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400 cursor-pointer"
+                >
+                  <Trash2 className="w-3 h-3" />
                 </button>
               </div>
             </div>
             {open && (
-              <TreeView node={child} depth={depth + 1} activePath={activePath} onSelect={onSelect} onCtx={onCtx} onNewFileInFolder={onNewFileInFolder} onNewFolderInFolder={onNewFolderInFolder} />
+              <TreeView
+                node={child}
+                depth={depth + 1}
+                currentPath={fullFolderPath}
+                activePath={activePath}
+                onSelect={onSelect}
+                onRename={onRename}
+                onDelete={onDelete}
+                onDeleteFolder={onDeleteFolder}
+                onNewFileInFolder={onNewFileInFolder}
+                onNewFolderInFolder={onNewFolderInFolder}
+                onCtx={onCtx}
+              />
             )}
           </div>
         );

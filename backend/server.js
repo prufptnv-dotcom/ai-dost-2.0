@@ -301,17 +301,18 @@ Return ONLY valid JSON (no markdown, no code fences, no prose) with EXACTLY this
   "summary": "string - 3-4 detailed sentences: who they are, top skills, key achievements, career goal",
   "experience": [ { "company": "string", "role": "string", "duration": "string", "bullets": ["3-5 detailed strings"] } ],
   "education": [ { "institution": "string", "degree": "string", "year": "string" } ],
-  "skills": ["8-15 strings grouped by category like 'Languages: JavaScript, Python'"],
+  "skills": ["8-15 strings grouped by category"],
   "projects": [ { "name": "string", "description": "string - 1-2 sentences with tech used and result" } ],
   "certifications": ["string"]
 }
 
 STRICT RULES:
-- NEVER return empty arrays or null. If the user gave few details, GENERATE realistic placeholder content matching their stated role/domain — the user will edit it later. Example for a React developer: experience [{company: "Tech Solutions Pvt Ltd", role: "React Developer", duration: "2023 - Present", bullets: ["Built 20+ responsive React components...", "Reduced page load time by 40% via code splitting...", ...]}], skills like "Frontend: React, Next.js, Tailwind", "Backend: Node.js, Express".
-- Experience: 1-3 jobs, each with 3-5 bullets using action verbs + measurable results (% faster, X users, Y% growth).
+- NEVER return empty arrays or null.
+- INFER THE INDUSTRY/ROLE: Read the user's prompt carefully. If they mention "Skill India", infer a training, education, management, or administrative role. If they mention a specific job, tailor everything to that job.
+- If the user provides very little detail, GENERATE realistic placeholder content tailored to the inferred industry — the user will edit it later. 
+- Experience: 1-3 jobs, each with 3-5 bullets using action verbs + measurable results.
 - Summary: minimum 3 sentences, never 1 line.
-- Extract everything available from the user's prompt (real name, company, college, years, skills) and USE it.
-- If user says nothing about a field, create plausible placeholders a fresher/that role would have.
+- Extract everything available from the user's prompt (real name, company, college, years, skills, phone, email) and USE it.
 - Keep section labels English; content can be Hindi/Hinglish if the user wrote in Hindi.
 - Double-check the JSON is valid and complete before responding.`;
 
@@ -329,19 +330,19 @@ const parseResumeJson = (content) => {
 // Safety net — agar LLM ne khali arrays diye to realistic placeholders bhar do
 const enrichResume = (data, prompt) => {
     const role = (data.experience && data.experience[0] && data.experience[0].role) ||
-        (prompt.match(/([A-Za-z ]+developer|engineer|designer|analyst|manager|student)/i) || [null, 'Software Developer'])[1];
+        (prompt.match(/([A-Za-z ]+(developer|engineer|designer|analyst|manager|student|executive|coordinator|trainer))/i) || [null, 'Professional'])[1];
     if (!data.summary || data.summary.length < 30) {
-        data.summary = `Passionate ${role} with hands-on experience building and shipping real products. Skilled in modern tools and best practices, focused on writing clean, maintainable code and solving problems end-to-end. Always learning, always shipping.`;
+        data.summary = `Passionate ${role} with hands-on experience delivering results. Skilled in industry best practices, focused on maintaining high standards and solving problems end-to-end. Always learning, always improving.`;
     }
     if (!Array.isArray(data.experience) || data.experience.length === 0) {
         data.experience = [{
-            company: 'Tech Solutions Pvt Ltd',
+            company: 'Target Organization',
             role,
             duration: '2023 - Present',
             bullets: [
-                'Built and shipped key features used by 1,000+ users',
-                'Improved performance — cut page load time by 40%',
-                'Collaborated with designers and PMs to deliver on time',
+                'Successfully managed daily operations and delivered key initiatives',
+                'Collaborated with cross-functional teams to improve overall efficiency by 20%',
+                'Resolved complex issues and maintained high satisfaction rates',
             ],
         }];
     }
@@ -352,16 +353,16 @@ const enrichResume = (data, prompt) => {
         bullets: Array.isArray(e.bullets) && e.bullets.length >= 2
             ? e.bullets
             : [
-                'Built and shipped key features used by 1,000+ users',
-                'Improved performance — cut page load time by 40%',
-                'Collaborated with designers and PMs to deliver on time',
+                'Successfully managed daily operations and delivered key initiatives',
+                'Collaborated with cross-functional teams to improve overall efficiency by 20%',
+                'Resolved complex issues and maintained high satisfaction rates',
             ],
     }));
     if (!Array.isArray(data.education) || data.education.length === 0) {
-        data.education = [{ institution: 'Your College / University', degree: 'B.Tech / B.Sc — Computer Science', year: '2021 - 2025' }];
+        data.education = [{ institution: 'Your College / University', degree: 'Bachelor\'s Degree', year: '2021 - 2025' }];
     }
     if (!Array.isArray(data.skills) || data.skills.length === 0) {
-        data.skills = ['Languages: JavaScript, Python, HTML/CSS', 'Frameworks: React, Node.js', 'Tools: Git, VS Code, Docker', 'Soft Skills: Communication, Problem Solving'];
+        data.skills = ['Communication', 'Problem Solving', 'Project Management', 'Team Leadership', 'Adaptability'];
     }
     if (!Array.isArray(data.projects)) data.projects = [];
     if (!Array.isArray(data.certifications)) data.certifications = [];
@@ -432,8 +433,151 @@ const resumeGenerateHandler = async (req, res) => {
     res.status(500).json({ error: 'Resume generation failed', detail: e.message });
   }
 };
-app.post('/api/resume/generate', resumeGenerateHandler);
 app.post('/api/v1/resume/generate', resumeGenerateHandler);
+
+// ==========================================
+// Phase 1.1: Edit Generated Sections (AI Rewrite)
+// ==========================================
+const regenerateSectionHandler = async (req, res) => {
+    const { section, sectionName, currentData, userPrompt, fullResumeContext } = req.body;
+    const targetSection = section || sectionName;
+    if (!targetSection || !currentData) return res.status(400).json({ error: 'section and currentData are required' });
+
+    try {
+        const systemInstruction = `You are an expert resume writer. The user wants to improve a specific section of their resume: "${targetSection}".
+        
+CURRENT CONTENT: ${JSON.stringify(currentData)}
+FULL RESUME CONTEXT: ${JSON.stringify(fullResumeContext)}
+USER REQUEST (if any): ${userPrompt || "Make it sound more professional, impactful, and results-oriented."}
+
+Return ONLY the rewritten JSON object/array for this specific section, matching its schema perfectly. No markdown fences.`;
+
+        const chatRes = await fetch(`http://127.0.0.1:${process.env.PORT || 5000}/api/v1/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: systemInstruction,
+                model: 'auto',
+                mode: 'chat',
+                section: 'resume',
+            }),
+            signal: AbortSignal.timeout(60000)
+        });
+        const chatData = await chatRes.json();
+        const content = chatData.reply || chatData.message || '';
+        
+        let newSectionData;
+        try {
+            newSectionData = JSON.parse(content.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim());
+        } catch(e) {
+            return res.status(500).json({ error: 'AI returned invalid JSON for section rewrite.' });
+        }
+
+        res.json({ newSectionData });
+    } catch(e) {
+        logger.error('Section rewrite error:', e);
+        res.status(500).json({ error: 'Failed to rewrite section.' });
+    }
+};
+app.post('/api/v1/resume/regenerate-section', regenerateSectionHandler);
+
+// ==========================================
+// Phase 1.2: ATS Analyzer & Job Description Matcher
+// ==========================================
+const atsAnalyzeHandler = async (req, res) => {
+    const { resumeData, jobDescription } = req.body;
+    if (!resumeData || !jobDescription) return res.status(400).json({ error: 'resumeData and jobDescription are required' });
+
+    try {
+        const prompt = `You are an expert ATS (Applicant Tracking System). Analyze this resume against this Job Description.
+        
+RESUME: ${JSON.stringify(resumeData)}
+JOB DESCRIPTION: ${jobDescription}
+
+Calculate an ATS match score (0-100) and extract keywords.
+Return ONLY valid JSON matching this schema exactly (no markdown fences):
+{
+  "score": number,
+  "matchingKeywords": ["string"],
+  "missingKeywords": ["string"],
+  "feedback": "1-2 sentences of specific actionable advice to improve the score"
+}`;
+
+        const chatRes = await fetch(`http://127.0.0.1:${process.env.PORT || 5000}/api/v1/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: prompt,
+                model: 'auto',
+                mode: 'chat',
+                section: 'resume',
+            }),
+            signal: AbortSignal.timeout(60000)
+        });
+        const chatData = await chatRes.json();
+        const content = chatData.reply || chatData.message || '';
+        
+        let analysis;
+        try {
+            analysis = JSON.parse(content.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim());
+        } catch(e) {
+            return res.status(500).json({ error: 'AI returned invalid JSON for ATS analysis.' });
+        }
+
+        res.json(analysis);
+    } catch(e) {
+        logger.error('ATS Analysis error:', e);
+        res.status(500).json({ error: 'Failed to analyze ATS score.' });
+    }
+};
+app.post('/api/v1/resume/ats-analyze', atsAnalyzeHandler);
+
+// ==========================================
+// Phase 1.3: Auto-Tailor Resume to JD
+// ==========================================
+const autoTailorHandler = async (req, res) => {
+    const { resumeData, jobDescription, missingKeywords } = req.body;
+    if (!resumeData || !jobDescription) return res.status(400).json({ error: 'resumeData and jobDescription are required' });
+
+    try {
+        const systemInstruction = `You are an expert ATS resume writer. The user wants to tailor their resume to fit a specific Job Description.
+        
+CURRENT RESUME: ${JSON.stringify(resumeData)}
+JOB DESCRIPTION: ${jobDescription}
+MISSING KEYWORDS TO INTEGRATE: ${missingKeywords ? JSON.stringify(missingKeywords) : 'None provided'}
+
+Your task: Rewrite the "summary" and "experience" sections to naturally integrate the missing keywords and align with the JD's requirements. Do NOT lie or invent completely fake jobs, but rephrase their existing experience to sound like a perfect fit.
+
+Return ONLY the updated full resume JSON object matching the exact schema. No markdown fences.`;
+
+        const chatRes = await fetch(`http://127.0.0.1:${process.env.PORT || 5000}/api/v1/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: systemInstruction,
+                model: 'auto',
+                mode: 'chat',
+                section: 'resume',
+            }),
+            signal: AbortSignal.timeout(90000)
+        });
+        const chatData = await chatRes.json();
+        const content = chatData.reply || chatData.message || '';
+        
+        let tailoredResume;
+        try {
+            tailoredResume = JSON.parse(content.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim());
+        } catch(e) {
+            return res.status(500).json({ error: 'AI returned invalid JSON for tailored resume.' });
+        }
+
+        res.json({ tailoredResume });
+    } catch(e) {
+        logger.error('Auto Tailor error:', e);
+        res.status(500).json({ error: 'Failed to auto-tailor resume.' });
+    }
+};
+app.post('/api/v1/resume/auto-tailor', autoTailorHandler);
 
 // ── Document engine (docx / pptx / csv) ────────────────────────────────────
 const documentRoutes = require('./routes/documents');
@@ -454,7 +598,7 @@ app.get(['/api/v1/memory/projects', '/api/projects'], (req, res) => {
     })));
 });
 
-app.post(['/api/v1/memory/project', '/api/project'], (req, res) => {
+app.post(['/api/v1/memory/project', '/api/memory/project', '/api/project'], (req, res) => {
     const { project_name, description, user_id } = req.body;
     const id = (req.body && req.body.project_id) || 'proj_' + Date.now();
     const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
@@ -479,7 +623,7 @@ app.post(['/api/v1/memory/project', '/api/project'], (req, res) => {
     });
 });
 
-app.delete(['/api/v1/memory/project/:id', '/api/project/:id'], (req, res) => {
+app.delete(['/api/v1/memory/project/:id', '/api/memory/project/:id', '/api/project/:id'], (req, res) => {
     const { id } = req.params;
     if (id.startsWith('proj_demo_')) return res.status(400).json({ error: 'Demo projects cannot be deleted' });
     db.prepare('DELETE FROM projects WHERE id = ?').run(id);
@@ -487,18 +631,23 @@ app.delete(['/api/v1/memory/project/:id', '/api/project/:id'], (req, res) => {
     res.json({ success: true, message: 'Project deleted' });
 });
 
-app.get(['/api/v1/memory/project/:id', '/api/project/:id'], (req, res) => {
+app.get(['/api/v1/memory/project/:id', '/api/memory/project/:id', '/api/project/:id'], (req, res) => {
     const { id } = req.params;
-    const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
-    if (!row) return res.status(404).json({ error: 'Project not found' });
+    let row = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+    if (!row) {
+        // Auto-create workspace record if not found
+        const now = new Date().toISOString();
+        db.prepare('INSERT INTO projects (id, name, description, created_at, status) VALUES (?, ?, ?, ?, ?)').run(
+            id,
+            id === 'copilot-workspace' ? 'Copilot Workspace' : id,
+            'Autonomous AI Copilot Workspace',
+            now,
+            'Active'
+        );
+        row = { id, name: id, description: 'Autonomous AI Copilot Workspace', created_at: now, status: 'Active' };
+    }
     const files = getProjectFiles(id);
     const fileArr = Object.keys(files).map(path => ({ path, content: files[path] }));
-    if (fileArr.length === 0) {
-        fileArr.push(
-            { path: 'README.md', content: `# ${row.name}\n\n${row.description || 'AI-Dost project'}\n` },
-            { path: 'index.html', content: '<!DOCTYPE html>\n<html>\n<head>\n  <title>' + row.name + '</title>\n</head>\n<body>\n  <h1>' + row.name + '</h1>\n</body>\n</html>\n' }
-        );
-    }
     res.json({
         project_id: row.id,
         project_name: row.name,
@@ -509,7 +658,7 @@ app.get(['/api/v1/memory/project/:id', '/api/project/:id'], (req, res) => {
     });
 });
 
-app.post(['/api/v1/memory/project/:id/folder', '/api/project/:id/folder'], (req, res) => {
+app.post(['/api/v1/memory/project/:id/folder', '/api/memory/project/:id/folder', '/api/project/:id/folder'], (req, res) => {
     const { id } = req.params;
     const folderPath = (req.body && (req.body.path || req.body.folder_path || req.body.name)) || null;
     if (!folderPath) return res.status(400).json({ error: 'path is required' });
@@ -518,7 +667,7 @@ app.post(['/api/v1/memory/project/:id/folder', '/api/project/:id/folder'], (req,
     res.json({ success: true, message: 'Folder created' });
 });
 
-app.post(['/api/v1/memory/project/:id/rename', '/api/project/:id/rename'], (req, res) => {
+app.post(['/api/v1/memory/project/:id/rename', '/api/memory/project/:id/rename', '/api/project/:id/rename'], (req, res) => {
     const { id } = req.params;
     const oldPath = String(req.body && (req.body.oldPath || req.body.old_path || req.body.path) || '').replace(/^\/+|\/+$/g, '');
     const newPath = String(req.body && (req.body.newPath || req.body.new_path) || '').replace(/^\/+|\/+$/g, '');
@@ -544,7 +693,7 @@ app.post(['/api/v1/memory/project/:id/rename', '/api/project/:id/rename'], (req,
     res.json({ success: true, message: 'Renamed' });
 });
 
-app.delete(['/api/v1/memory/project/:id/folder', '/api/project/:id/folder'], (req, res) => {
+app.delete(['/api/v1/memory/project/:id/folder', '/api/memory/project/:id/folder', '/api/project/:id/folder'], (req, res) => {
     const { id } = req.params;
     const folderPath = String((req.query && (req.query.path || req.query.folder_path)) || (req.body && (req.body.path || req.body.folder_path)) || '').replace(/^\/+|\/+$/g, '');
     if (!folderPath) return res.status(400).json({ error: 'path is required' });
@@ -558,7 +707,7 @@ app.delete(['/api/v1/memory/project/:id/folder', '/api/project/:id/folder'], (re
     res.json({ success: true, message: 'Folder deleted' });
 });
 
-app.post(['/api/v1/memory/project/:id/file', '/api/project/:id/file'], (req, res) => {
+app.post(['/api/v1/memory/project/:id/file', '/api/memory/project/:id/file', '/api/project/:id/file'], (req, res) => {
     const { id } = req.params;
     const filePath = (req.body && (req.body.path || req.body.file_path)) || null;
     const content = (req.body && req.body.content) || '';
@@ -567,7 +716,7 @@ app.post(['/api/v1/memory/project/:id/file', '/api/project/:id/file'], (req, res
     res.json({ success: true, message: 'File saved successfully' });
 });
 
-app.put(['/api/v1/memory/project/:id/file', '/api/project/:id/file'], (req, res) => {
+app.put(['/api/v1/memory/project/:id/file', '/api/memory/project/:id/file', '/api/project/:id/file'], (req, res) => {
     const { id } = req.params;
     const filePath = (req.body && (req.body.path || req.body.file_path)) || null;
     const content = (req.body && req.body.content) || '';
@@ -576,7 +725,7 @@ app.put(['/api/v1/memory/project/:id/file', '/api/project/:id/file'], (req, res)
     res.json({ success: true, message: 'File updated successfully' });
 });
 
-app.delete(['/api/v1/memory/project/:id/file', '/api/project/:id/file'], (req, res) => {
+app.delete(['/api/v1/memory/project/:id/file', '/api/memory/project/:id/file', '/api/project/:id/file'], (req, res) => {
     const { id } = req.params;
     const filePath = (req.query && (req.query.path || req.query.file_path)) || (req.body && (req.body.path || req.body.file_path));
     if (!filePath) return res.status(400).json({ error: 'path is required' });

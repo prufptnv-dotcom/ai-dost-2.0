@@ -5,7 +5,11 @@ import {
   FolderTree, Search, GitBranch, Puzzle, X, Plus, Save,
   Send, Sparkles, Play, Terminal as TerminalIcon,
   Loader2, Bot, Eraser, Eye, Download, Square, RotateCcw, Settings2,
-  FilePlus2, FolderPlus, Pencil, Trash2, SaveAll, PanelLeftClose, PanelLeftOpen, ChevronRight, GitCompareArrows, Database
+  FilePlus2, FolderPlus, Pencil, Trash2, SaveAll, PanelLeftClose, PanelLeftOpen, ChevronRight, GitCompareArrows, Database,
+  Smartphone, Tablet, Monitor, Crosshair,
+  Mic, MicOff, LayoutGrid, Zap, Bug, Code2, RefreshCw, ExternalLink, Copy, Check, ArrowRight,
+  Code, ShieldCheck, ShoppingCart, BarChart3, Kanban, MessageSquare, Flame, CheckCircle2, ChevronDown, ChevronUp,
+  BrainCircuit, Workflow
 } from 'lucide-react';
 import api from '../../services/api';
 import { LANG_BY_EXT, TreeView, fileTreeFromFiles } from './CopilotTree';
@@ -27,35 +31,26 @@ const TerminalPanel = dynamic(() => import('./TerminalPanel'), { ssr: false });
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-const QUICK_PROMPTS = [
-  { label: '🪄 App Wizard', prompt: '', isWizard: true },
-  { label: 'Fullstack app banao', prompt: 'MERN stack todo app banao with authentication — sab files likho (backend, frontend, DB schema)' },
-  { label: 'Bug fix', prompt: 'Is code me bugs dhundho aur fix karo. Har file analyse karo.' },
-  { label: 'Feature add', prompt: 'Dark mode toggle add karo with localStorage persistence.' },
-  { label: 'Tests likho', prompt: 'Unit tests likho aur run karo.' },
-];
-
 // Agent tool action → human-readable live status
 const STATUS_BY_ACTION = {
-  write_file: '✍️ Writing files...',
-  create_file: '✍️ Writing files...',
-  apply_diff: '✏️ Editing code...',
-  read_file: '📖 Reading files...',
-  list_directory: '📂 Browsing files...',
-  run_terminal: '💻 Running terminal commands...',
-  run_terminal_auto: '💻 Running terminal commands...',
-  run_tests: '🧪 Running tests...',
-  search_codebase: '🔍 Searching codebase...',
-  git_init: '🔀 Initializing git...',
+  write_file: '✍️ Writing source code...',
+  create_file: '✍️ Creating file...',
+  apply_diff: '✏️ Applying surgical code edits...',
+  read_file: '📖 Reading file context...',
+  list_directory: '📂 Scanning workspace files...',
+  run_terminal: '💻 Running terminal command...',
+  run_terminal_auto: '💻 Executing background command...',
+  run_tests: '🧪 Running automated test suite...',
+  search_codebase: '🔍 Analyzing codebase graph...',
+  generate_project_from_prompt: '🏗️ Generating full-stack project scaffold...',
+  git_init: '🔀 Initializing local git repo...',
   git_add: '🔀 Staging files...',
-  git_commit: '🔀 Committing changes...',
-  git_branch: '🔀 Managing branches...',
-  git_log: '🔀 Reading git history...',
-  get_current_branch: '🔀 Reading git branch...',
-  init_git: '🔀 Initializing git...',
+  git_commit: '🔀 Creating commit snapshot...',
+  git_branch: '🔀 Managing git branch...',
+  git_log: '🔀 Reading git logs...',
 };
 
-// File extension → brand color (for tab icons)
+// File extension → brand color
 const LANG_COLOR = {
   js: '#f7df1e', mjs: '#f7df1e', jsx: '#61dafb', ts: '#3178c6', tsx: '#61dafb',
   html: '#e34f26', htm: '#e34f26', css: '#563d7c', scss: '#cd6799',
@@ -67,7 +62,7 @@ const LANG_COLOR = {
 };
 
 function AiStudioResponseCard({ message, onSelectFile, onOpenDiff, onRollback, onOpenPreview }) {
-  const modelName = message.model || 'Gemini 2.5 Flash';
+  const modelName = message.model || 'Gemini 2.5 Flash + Groq Cascade';
   const duration = message.duration || '12s';
   const files = Array.isArray(message.files) ? message.files : [];
   const content = message.content || message.summary || '';
@@ -83,92 +78,72 @@ function AiStudioResponseCard({ message, onSelectFile, onOpenDiff, onRollback, o
   }, [content]);
 
   return (
-    <div className="flex gap-2.5 items-start">
-      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)' }}>
-        <Bot className="w-3.5 h-3.5 text-white" />
+    <div className="flex gap-3 items-start animate-in fade-in slide-in-from-bottom-2 duration-200">
+      <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0 mt-0.5 bg-gradient-to-br from-indigo-500 to-purple-600 shadow-md">
+        <Bot size={15} className="text-white" />
       </div>
 
-      <div className="flex-1 space-y-3 rounded-2xl p-4 border bg-zinc-950/90 backdrop-blur-md shadow-xl" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
-        {/* Header: Model & Execution Time */}
-        <div className="flex items-center justify-between text-[11px] text-zinc-400 pb-2 border-b border-zinc-800/80">
-          <span className="font-medium flex items-center gap-1.5 text-zinc-300">
+      <div className="flex-1 space-y-3 rounded-2xl p-4 border bg-zinc-900/90 backdrop-blur-md shadow-xl border-zinc-800">
+        {/* Header: Model & Duration */}
+        <div className="flex items-center justify-between text-xs text-zinc-400 pb-2.5 border-b border-zinc-800">
+          <span className="font-medium flex items-center gap-2 text-zinc-200">
             <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse" />
-            {modelName} • Ran for {duration}
+            {modelName} • {duration}
           </span>
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-mono">
-            Copilot Build
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+            Completed
           </span>
         </div>
 
-        {/* Action History Box (Google AI Studio Image 2 Style) */}
-        {files.length > 0 && (
-          <div className="rounded-xl p-3 border space-y-2.5 bg-black/50" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
-            <div className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
-              <FolderTree className="w-3.5 h-3.5 text-blue-400" />
-              <span>Action history</span>
-            </div>
-            <p className="text-[11px] text-zinc-400">Here are key actions taken for the app:</p>
-
-            <div className="space-y-1.5 pt-0.5">
-              <div className="flex items-center gap-1.5 text-[11px] text-zinc-300 font-medium">
-                <Pencil className="w-3 h-3 text-amber-400" />
-                <span>Edited / Created {files.length} files</span>
-              </div>
-              <div className="space-y-1 pl-3">
-                {files.map((f, idx) => {
-                  const filePath = typeof f === 'string' ? f : (f.path || f.name);
-                  return (
-                    <div
-                      key={idx}
-                      onClick={() => onSelectFile && onSelectFile({ path: filePath })}
-                      className="flex items-center justify-between py-1 px-2 rounded-lg hover:bg-zinc-800/80 cursor-pointer group transition-colors"
-                    >
-                      <span className="text-[11px] font-mono text-zinc-400 group-hover:text-blue-300 transition-colors truncate">
-                        {filePath}
-                      </span>
-                      <span className="w-4 h-4 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center text-[10px] ml-2 shrink-0">
-                        ✓
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 text-[11px] text-zinc-400 pt-1 border-t border-zinc-800/60">
-              <span className="text-emerald-400">🔧</span>
-              <span>Built & verified with live preview</span>
-            </div>
-          </div>
-        )}
-
-        {/* Detailed Explanation / Markdown Body */}
-        {renderedHtml && (
+        {/* Markdown Content */}
+        {content && (
           <div
-            className="ai-studio-markdown space-y-2 pt-1"
+            className="ai-studio-markdown text-xs leading-relaxed text-zinc-300 space-y-2.5"
             dangerouslySetInnerHTML={{ __html: renderedHtml }}
           />
         )}
 
-        {/* Bottom Action Bar */}
-        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-zinc-800/80 text-[11px]">
-          <span className="flex items-center gap-1 text-zinc-500 text-[10px] mr-auto">
-            🚩 Checkpoint saved
-          </span>
+        {/* Files Touched Chips */}
+        {files.length > 0 && (
+          <div className="space-y-1.5 pt-2 border-t border-zinc-800">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-bold block">
+              Files Built ({files.length}):
+            </span>
+            <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
+              {files.map((file, idx) => {
+                const fileName = typeof file === 'string' ? file : (file.path || file.name || `file-${idx}`);
+                const ext = fileName.split('.').pop()?.toLowerCase();
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => onSelectFile && onSelectFile(fileName)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-mono bg-zinc-950 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-700/60 transition-all cursor-pointer shadow-xs hover:border-zinc-500"
+                    title={`Open ${fileName}`}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: LANG_COLOR[ext] || '#818cf8' }} />
+                    <span className="truncate max-w-[170px]">{fileName}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
+        {/* Bottom Action Bar */}
+        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-zinc-800 text-xs">
           <button
             onClick={onOpenDiff}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 font-medium cursor-pointer transition-colors border border-zinc-700/60"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white font-medium cursor-pointer transition-colors border border-zinc-700"
           >
-            <GitCompareArrows className="w-3 h-3 text-amber-400" />
-            View changes
+            <GitCompareArrows size={12} className="text-amber-400" />
+            Review Diff
           </button>
 
           <button
             onClick={onOpenPreview}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium cursor-pointer transition-colors shadow-sm shadow-blue-500/20"
+            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold cursor-pointer transition-colors shadow-sm shadow-indigo-600/30"
           >
-            <Play className="w-3 h-3 fill-white" />
+            <Play size={11} className="fill-white" />
             Live Preview
           </button>
 
@@ -177,7 +152,7 @@ function AiStudioResponseCard({ message, onSelectFile, onOpenDiff, onRollback, o
               onClick={() => onRollback && onRollback(message.checkpointDir)}
               className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-300 font-medium cursor-pointer transition-colors border border-red-500/30"
             >
-              <RotateCcw className="w-3 h-3 text-red-400" />
+              <RotateCcw size={12} className="text-red-400" />
               Restore
             </button>
           )}
@@ -187,677 +162,872 @@ function AiStudioResponseCard({ message, onSelectFile, onOpenDiff, onRollback, o
   );
 }
 
+// ── In-Browser Instant Live App Compiler with Error Boundary & Inspector ──────
+function generateLiveAppHtml(files = [], contents = {}, inspectorActive = false) {
+  let appCode = contents['src/App.jsx'] || contents['App.jsx'] || contents['src/main.jsx'] || '';
+  if (!appCode) {
+    const appFile = files.find(f => f.path.endsWith('App.jsx') || f.path.endsWith('main.jsx') || f.path.endsWith('index.html'));
+    if (appFile) appCode = contents[appFile.path] || appFile.content || '';
+  }
+
+  if (!appCode && contents['index.html']) {
+    return contents['index.html'];
+  }
+
+  const cleanedCode = (appCode || '')
+    .replace(/import\s+[\s\S]*?from\s+['"].*?['"];?/g, '')
+    .replace(/import\s+['"].*?['"];?/g, '')
+    .replace(/export\s+default\s+function\s+(\w+)/g, 'function $1')
+    .replace(/export\s+default\s+(\w+);?/g, '')
+    .replace(/export\s+\{[\s\S]*?\};?/g, '');
+
+  // Extract all imported API functions (from ./services/api, ./api, etc.)
+  const apiImports = [];
+  const apiMatches = (appCode || '').matchAll(/import\s+(?:\{([^}]+)\}|(\w+))\s+from\s+['"][^'"]*api[^'"]*['"]/g);
+  for (const m of apiMatches) {
+    if (m[1]) {
+      m[1].split(',').forEach(id => {
+        const clean = id.trim().split(' as ')[0].trim();
+        if (clean) apiImports.push(clean);
+      });
+    }
+    if (m[2]) apiImports.push(m[2].trim());
+  }
+
+  // Load and clean src/services/api.js if available
+  const apiFile = (files || []).find(f => f.path?.endsWith('api.js') || f.path?.endsWith('api.ts'));
+  let apiCode = '';
+  if (apiFile && contents[apiFile.path]) {
+    apiCode = (contents[apiFile.path] || '')
+      .replace(/import\s+[\s\S]*?from\s+['"].*?['"];?/g, '')
+      .replace(/import\s+['"].*?['"];?/g, '')
+      .replace(/export\s+(?:async\s+)?function\s+(\w+)/g, 'async function $1')
+      .replace(/export\s+(?:const|let|var)\s+(\w+)/g, 'const $1')
+      .replace(/export\s+default\s+[\s\S]*?;?/g, '')
+      .replace(/export\s+\{[\s\S]*?\};?/g, '');
+  }
+
+  // Generate fallback stubs for all imported API functions
+  const apiStubs = Array.from(new Set(apiImports)).map(name =>
+    `if (typeof window.${name} === 'undefined' && typeof ${name} === 'undefined') {
+      window.${name} = async function ${name}Stub(payload) {
+        try {
+          const key = 'mock_' + '${name}'.toLowerCase();
+          if (payload && typeof payload === 'object') {
+            const existing = JSON.parse(localStorage.getItem(key) || '[]');
+            const newItem = { id: String(Date.now()), ...payload, createdAt: new Date().toISOString() };
+            existing.unshift(newItem);
+            localStorage.setItem(key, JSON.stringify(existing));
+            return newItem;
+          }
+          return JSON.parse(localStorage.getItem(key) || '[]');
+        } catch(_) { return []; }
+      };
+    }`
+  ).join('\n');
+
+  // Extract all imported Lucide icons + JSX component tags
+  const importedLucide = [];
+  const lucideMatches = (appCode || '').matchAll(/import\s+\{([^}]+)\}\s+from\s+['"]lucide-react['"]/g);
+  for (const m of lucideMatches) {
+    if (m[1]) {
+      m[1].split(',').forEach(id => {
+        const clean = id.trim().split(' as ')[0].trim();
+        if (clean) importedLucide.push(clean);
+      });
+    }
+  }
+
+  const jsxTags = (appCode || '').match(/<([A-Z][A-Za-z0-9_]*)/g) || [];
+  const tagsList = jsxTags.map(t => t.replace('<', '').trim());
+
+  const ALL_DETECTED_ICONS = Array.from(new Set([
+    'Search', 'ShoppingCart', 'ShoppingBag', 'Kanban', 'BrainCircuit', 'Activity', 'BarChart2', 'BarChart3',
+    'Sparkles', 'Play', 'Layers', 'TrendingUp', 'CheckCircle', 'CheckCircle2', 'Shield', 'ShieldCheck',
+    'GitBranch', 'Plus', 'Minus', 'Zap', 'Box', 'ArrowRight', 'Download', 'X', 'Menu', 'Trash', 'Trash2',
+    'Edit', 'Pencil', 'FolderTree', 'FilePlus2', 'FolderPlus', 'ChevronDown', 'ChevronUp', 'ChevronRight',
+    'ChevronLeft', 'Globe', 'Database', 'Server', 'Code', 'Code2', 'Eye', 'EyeOff', 'Lock', 'User',
+    'Users', 'Clock', 'Mail', 'Phone', 'MapPin', 'Star', 'Heart', 'Filter', 'RefreshCw', 'ExternalLink',
+    'Settings', 'AlertCircle', 'Check', 'Copy', 'Sliders', 'Calendar', 'Camera', 'Image', 'Video',
+    'Hospital', 'Stethoscope', 'Award', 'PhoneCall', 'UserCheck', 'Bed', 'CalendarCheck', 'Pill',
+    'Ticket', 'Film', 'Rocket', 'Mars', 'Info', 'Utensils', 'Coffee', 'DollarSign', 'CreditCard',
+    ...importedLucide,
+    ...tagsList
+  ])).filter(name => !['App', 'Main', 'Root', 'React', 'ReactDOM', 'GlobalErrorBoundary', 'Fragment'].includes(name));
+
+  const iconDeclarations = ALL_DETECTED_ICONS.map(name =>
+    `const ${name} = function ${name}Icon(props) {
+      const size = props.size || 18;
+      const className = props.className || '';
+      return React.createElement('span', {
+        className: 'inline-flex items-center justify-center text-indigo-400 font-bold ' + className,
+        style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+        title: '${name}'
+      }, '✦');
+    };`
+  ).join('\n');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script>
+    // ── Safe In-Memory Storage Polyfill ─────────────────────────────────────
+    const _memoryStorage = {};
+    window.safeStorage = {
+      getItem: (k) => _memoryStorage[k] !== undefined ? _memoryStorage[k] : null,
+      setItem: (k, v) => { _memoryStorage[k] = String(v); },
+      removeItem: (k) => { delete _memoryStorage[k]; },
+      clear: () => { Object.keys(_memoryStorage).forEach(k => delete _memoryStorage[k]); }
+    };
+    try {
+      if (!window.localStorage) window.localStorage = window.safeStorage;
+    } catch(_) {}
+
+    // ── Smart In-Memory REST & Fetch Router for Preview ─────────────────────
+    const _origFetch = window.fetch;
+    const _db = {
+      rockets: [
+        { id: '1', name: 'Starship HLS', mission: 'Artemis Mars Probe', status: 'Active', countdown: '18d 04h 12m', target: 'Mars Jezero Crater', speed: '27,000 km/h' },
+        { id: '2', name: 'Falcon Heavy', mission: 'Europa Clipper', status: 'Scheduled', countdown: '02h 15m 00s', target: 'Outer Orbit', speed: '24,500 km/h' }
+      ],
+      'mars-status': {
+        sol: 1042,
+        weather: 'Clear',
+        temperature: '-63°C',
+        dustStorm: 'None',
+        roverLocation: 'Jezero Crater'
+      },
+      items: [
+        { id: '1', title: 'Primary Item', name: 'Sample Item 1', status: 'Active', count: 10, price: 99 }
+      ]
+    };
+
+    window.fetch = async function(url, options = {}) {
+      const rawUrl = String(url || '').split('?')[0];
+      const withoutProto = rawUrl.indexOf('://') !== -1 ? rawUrl.split('://')[1].split('/').slice(1).join('/') : rawUrl;
+      const cleanPath = withoutProto.replace(/^api\//, '').replace(/^\//, '');
+      const method = (options.method || 'GET').toUpperCase();
+      const resource = cleanPath.split('/')[0];
+
+      if (_db[resource]) {
+        if (method === 'GET') {
+          const id = cleanPath.split('/')[1];
+          const data = Array.isArray(_db[resource]) && id
+            ? _db[resource].find(x => x.id === id) || _db[resource][0]
+            : _db[resource];
+          return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        if (method === 'POST') {
+          let body = {};
+          try { body = JSON.parse(options.body || '{}'); } catch(_) {}
+          const newItem = { id: String(Date.now()), ...body, createdAt: new Date().toISOString() };
+          if (Array.isArray(_db[resource])) _db[resource].unshift(newItem);
+          return new Response(JSON.stringify(newItem), { status: 201, headers: { 'Content-Type': 'application/json' } });
+        }
+      }
+
+      // Safe local fallback for any unhandled relative or localhost endpoint
+      if (!urlStr.startsWith('http') || urlStr.includes('localhost') || urlStr.includes('127.0.0.1')) {
+        const dynamicPayload = [
+          { id: '1', name: 'Item Alpha', title: 'Mission Active', mission: 'Artemis Alpha', rocket: 'Falcon Heavy', status: 'Active', countdown: '02h 15m 00s', count: 12, createdAt: new Date().toISOString() }
+        ];
+        return new Response(JSON.stringify(dynamicPayload), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      try {
+        return await _origFetch(url, options);
+      } catch(e) {
+        return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+    };
+  </script>
+  <style>
+    body { font-family: 'Inter', sans-serif; margin: 0; background: #0b0f19; color: #f8fafc; }
+    ${inspectorActive ? `
+      *:hover { outline: 2px dashed #6366f1 !important; cursor: crosshair !important; }
+    ` : ''}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo, useCallback, useContext, useReducer, createContext, Fragment } = React;
+
+    // ── API Functions & Stubs ───────────────────────────────────────────────
+    ${apiCode}
+    ${apiStubs}
+
+    // ── Dynamic Icon Component Declarations ─────────────────────────────────
+    ${iconDeclarations}
+
+    class GlobalErrorBoundary extends React.Component {
+      constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null };
+      }
+      static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+      }
+      componentDidCatch(error, info) {
+        console.error("Preview caught error:", error, info);
+      }
+      render() {
+        if (this.state.hasError) {
+          return (
+            <div className="min-h-screen bg-[#0d111a] text-red-400 p-8 flex flex-col items-center justify-center space-y-4">
+              <div className="p-6 max-w-lg w-full bg-red-950/40 border border-red-500/30 rounded-2xl shadow-2xl space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">⚠️</span>
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Preview Runtime Error</h3>
+                </div>
+                <pre className="text-xs bg-black/60 p-3 rounded-xl overflow-x-auto text-red-300 font-mono">
+                  {this.state.error?.message || 'Unknown error'}
+                </pre>
+                <button
+                  onClick={() => {
+                    window.parent.postMessage({
+                      type: 'AUTO_FIX_ERROR',
+                      error: this.state.error?.message || 'Runtime crash'
+                    }, '*');
+                  }}
+                  className="w-full py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  ⚡ Auto-Fix this Error with Copilot AI
+                </button>
+              </div>
+            </div>
+          );
+        }
+        return this.props.children;
+      }
+    }
+
+    try {
+      ${cleanedCode}
+
+      const RootComp = typeof App !== 'undefined' ? App : (typeof Main !== 'undefined' ? Main : null);
+      if (RootComp) {
+        ReactDOM.createRoot(document.getElementById('root')).render(
+          <GlobalErrorBoundary>
+            <RootComp />
+          </GlobalErrorBoundary>
+        );
+      } else {
+        ReactDOM.createRoot(document.getElementById('root')).render(
+          <div className="min-h-screen flex items-center justify-center text-slate-500 text-xs font-mono">
+            Compiling application preview...
+          </div>
+        );
+      }
+    } catch(err) {
+      document.getElementById('root').innerHTML = '<div style="padding:24px;color:#f87171;font-family:monospace;font-size:12px;"><b>Syntax/Execution Error:</b> ' + err.message + '</div>';
+    }
+  </script>
+
+  ${inspectorActive ? `
+  <script>
+    document.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const el = e.target;
+      window.parent.postMessage({
+        type: 'INSPECT_ELEMENT',
+        tag: el.tagName.toLowerCase(),
+        className: el.className || '',
+        text: el.innerText ? el.innerText.trim().slice(0, 40) : ''
+      }, '*');
+    }, true);
+  </script>
+  ` : ''}
+</body>
+</html>`;
+}
+
 export default function CopilotIDE({ projectId = 'copilot-workspace', projectName = 'Copilot Workspace', onToast }) {
   const [files, setFiles] = useState([]);
-  const [openTabs, setOpenTabs] = useState([]); // editor me khule huye file paths (tab = open file)
+  const [openTabs, setOpenTabs] = useState([]);
   const [activePath, setActivePath] = useState(null);
-  const [contents, setContents] = useState({}); // unsaved content per path (dirty files)
+  const [contents, setContents] = useState({});
   const [dirtyPaths, setDirtyPaths] = useState(() => new Set());
-  const [activityBar, setActivityBar] = useState('explorer');
-  const [copilotOpen, setCopilotOpen] = useState(true);
-  const [terminalOpen, setTerminalOpen] = useState(true);
+  
+  // Workspace Mode: 'code' | 'preview'
+  const [workspaceMode, setWorkspaceMode] = useState('code');
+  
+  // Left Sidebar & Terminal Collapsible States
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [terminalOpen, setTerminalOpen] = useState(false);
+
+  // Copilot Agent Chat States
+  const [copilotMessages, setCopilotMessages] = useState([]);
   const [copilotInput, setCopilotInput] = useState('');
-  const [copilotMessages, setCopilotMessages] = useState([
-    { role: 'assistant', content: 'Namaste! Main **Copilot** hoon. Kya banayein? Fullstack project, bug fix, feature add — ek prompt me batao. 👇' },
-  ]);
   const [running, setRunning] = useState(false);
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [problems, setProblems] = useState(0);
-  // Live process indicator: { label, tone: 'work'|'info'|'success'|'error'|'selfheal' }
   const [copilotStatus, setCopilotStatus] = useState({ label: '', tone: 'info' });
-  const terminalRef = useRef(null);
-  const monacoRef = useRef(null);
-  const editorRef = useRef(null);
-  const diagTimerRef = useRef(null);
-  const abortRef = useRef(null);
-  const activePathRef = useRef(null);
-  const termMsgIdxRef = useRef(-1);
-  const endRef = useRef(null);
-  // Live plan tasks from SSE 'plan' events: [{id, title, status}]
   const [planTasks, setPlanTasks] = useState([]);
-  // Live preview pane (iframe inside IDE — project ke andar hi dikhta hai)
-  const [previewOpen, setPreviewOpen] = useState(false);
-  // Plan → Approve gate (GitHub Copilot style): show plan, wait for approval
-  const [planGate, setPlanGate] = useState(true);
+  const [planGate, setPlanGate] = useState(false); // Default to Autopilot (Replit/Bolt style)
   const [pendingPlan, setPendingPlan] = useState(null);
-  // Interactive Project Architect Wizard state
+
+  // Live preview configuration
+  const [previewDevice, setPreviewDevice] = useState('desktop');
+  const [inspectorActive, setInspectorActive] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState('http://localhost:3000');
+
+  // Modals & Overlays
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardInitialPrompt, setWizardInitialPrompt] = useState('');
-  // Custom instructions for the agent
-  const [showInstructions, setShowInstructions] = useState(false);
-  const [customInstructions, setCustomInstructions] = useState('');
-  // Find in Files (Ctrl+Shift+F)
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [searchCase, setSearchCase] = useState(false);
-  const [searching, setSearching] = useState(false);
-  // Diff Review: latest run id + change count for the "Review Changes" button
+  const [diffOpen, setDiffOpen] = useState(false);
   const [latestRunId, setLatestRunId] = useState(null);
   const latestRunIdRef = useRef(null);
-  const [runChangeCount, setRunChangeCount] = useState(0);
-  const [diffOpen, setDiffOpen] = useState(false);
-  // Reveal-at-line after opening a search result
-  const pendingRevealRef = useRef(null);
-  const [revealTick, setRevealTick] = useState(0);
 
-  useEffect(() => { activePathRef.current = activePath; }, [activePath]);
+  // Voice Coding State
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef(null);
 
-  // Derived: active file content = unsaved contents[path] ?? saved files[path]
-  const activeContent = useMemo(() => {
-    if (!activePath) return '';
-    return contents[activePath] ?? files.find(f => f.path === activePath)?.content ?? '';
-  }, [activePath, contents, files]);
-  const dirty = dirtyPaths.has(activePath);
+  // Ctrl+K Inline AI Edit State
+  const [inlineEditOpen, setInlineEditOpen] = useState(false);
+  const [inlineEditPrompt, setInlineEditPrompt] = useState('');
+  const [inlineEditLoading, setInlineEditLoading] = useState(false);
 
-  const markDirty = (p) => setDirtyPaths(prev => {
-    if (prev.has(p)) return prev;
-    const n = new Set(prev);
-    n.add(p);
-    return n;
-  });
-  const clearDirty = (p) => setDirtyPaths(prev => {
-    if (!prev.has(p)) return prev;
-    const n = new Set(prev);
-    n.delete(p);
-    return n;
-  });
-  const setFileContent = (p, v) => setContents(prev => (prev[p] === v ? prev : { ...prev, [p]: v }));
+  const editorRef = useRef(null);
+  const monacoRef = useRef(null);
+  const terminalRef = useRef(null);
+  const abortRef = useRef(null);
+  const activePathRef = useRef(null);
+  const endRef = useRef(null);
+  const diagTimerRef = useRef(null);
 
-  // Auto-scroll chat to bottom as the agent streams messages in
-  useEffect(() => {
-    if (endRef.current) endRef.current.scrollTop = endRef.current.scrollHeight;
-  }, [copilotMessages]);
+  const showToast = useCallback((msg, type = 'info') => {
+    if (onToast) onToast(msg, type);
+  }, [onToast]);
 
-  const showToast = useMemo(() => onToast || ((m, t) => {
-    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('ai_dost_toast', { detail: { type: t || 'success', message: m } }));
-  }), [onToast]);
-
-  // Load project files
-  useEffect(() => {
-    (async () => {
-      setLoadingFiles(true);
-      setContents({});
-      setDirtyPaths(new Set());
-      try {
-        let res = await api.get(`/memory/project/${projectId}`);
-        let fileArr = Array.isArray(res.data?.files) ? res.data.files : [];
-        if (fileArr.length === 0) {
-          fileArr.push(
-            { path: 'README.md', content: `# ${projectName}\n\nAI-Dost Copilot workspace — yahan se fullstack project banao.\n` },
-            { path: 'index.html', content: '<!DOCTYPE html>\n<html>\n<head><title>' + projectName + '</title></head>\n<body>\n  <h1>' + projectName + '</h1>\n</body>\n</html>\n' },
-            { path: 'app.js', content: '// AI-Dost Copilot workspace\nconsole.log("Hello from AI-Dost!");\n' },
-          );
-        }
-        setFiles(fileArr);
-        if (fileArr.length > 0) {
-          setActivePath(fileArr[0].path);
-          setOpenTabs(fileArr.slice(0, 10).map(f => f.path));
-        }
-      } catch (e) {
-        if (e?.status === 404 || /not found/i.test(e?.message || '')) {
-          try {
-            await api.post('/memory/project', { project_id: projectId, project_name: projectName, description: `${projectName} — AI-Dost Copilot workspace` });
-            const res = await api.get(`/memory/project/${projectId}`);
-            const fileArr = Array.isArray(res.data?.files) ? res.data.files : [];
-            if (fileArr.length > 0) {
-              setFiles(fileArr);
-              setActivePath(fileArr[0].path);
-              setOpenTabs(fileArr.slice(0, 10).map(f => f.path));
-            }
-            showToast('Project create ho gaya', 'success');
-            return;
-          } catch (e2) { /* backend off */ }
-        }
-        const fallback = [
-          { path: 'README.md', content: `# ${projectName}\n\nAI-Dost Copilot workspace.\n` },
-          { path: 'app.js', content: '// AI-Dost Copilot workspace\nconsole.log("Hello from AI-Dost!");\n' },
-        ];
-        setFiles(fallback);
-        setActivePath('app.js');
-        setOpenTabs(['app.js', 'README.md']);
-        showToast('Files load nahi hue — offline workspace', 'warning');
-      } finally {
-        setLoadingFiles(false);
-      }
-    })();
-  }, [projectId, projectName, showToast]);
-
-  const selectFile = (f) => {
-    setActivePath(f.path);
-    setOpenTabs(prev => prev.includes(f.path) ? prev : [...prev, f.path]);
-  };
-
-  // Search results → open the file and jump to the matching line
-  const openSearchResult = (r) => {
-    setSearchOpen(false);
-    pendingRevealRef.current = { path: r.path, line: Math.max(1, r.line || 1) };
-    const f = files.find(x => x.path === r.path);
-    if (f) selectFile(f);
-    else {
-      setActivePath(r.path);
-      setOpenTabs(prev => prev.includes(r.path) ? prev : [...prev, r.path]);
-    }
-    setRevealTick(t => t + 1);
-  };
-
-  // Debounced find-in-files query → backend line search
-  useEffect(() => {
-    const q = searchQuery.trim();
-    if (!searchOpen || !q) {
-      setSearchResults([]);
-      setSearching(false);
+  // Voice input setup
+  const toggleVoice = () => {
+    if (typeof window === 'undefined') return;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      showToast('Speech recognition not supported in this browser.', 'warning');
       return;
     }
-    setSearching(true);
-    const t = setTimeout(async () => {
-      try {
-        const r = await api.get(`/memory/project/${projectId}/search?q=${encodeURIComponent(q)}&case=${searchCase ? '1' : '0'}`);
-        setSearchResults(Array.isArray(r.data?.results) ? r.data.results : []);
-      } catch (e) {
-        setSearchResults([]);
-      } finally {
-        setSearching(false);
-      }
-    }, 350);
-    return () => clearTimeout(t);
-  }, [searchOpen, searchQuery, searchCase, projectId]);
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'hi-IN';
+      recognition.onstart = () => {
+        setIsListening(true);
+        showToast('🎙️ Sun raha hoon... Speak your prompt!', 'info');
+      };
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        if (transcript) {
+          setCopilotInput(prev => prev ? `${prev} ${transcript}` : transcript);
+          showToast(`🎙️ Captured: "${transcript}"`, 'success');
+        }
+      };
+      recognition.onerror = () => setIsListening(false);
+      recognition.onend = () => setIsListening(false);
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (_) {
+      setIsListening(false);
+    }
+  };
 
-  // Reveal the target line once the file is open in the editor
-  useEffect(() => {
-    const pending = pendingRevealRef.current;
-    if (!pending || !activePath || pending.path !== activePath) return;
+  // Ctrl+K Inline AI Edit
+  const triggerInlineEdit = useCallback(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    pendingRevealRef.current = null;
-    const line = Math.max(1, pending.line || 1);
-    try {
-      editor.revealLineInCenter(line);
-      editor.setPosition({ lineNumber: line, column: 1 });
-      editor.focus();
-    } catch (_) {}
-  }, [activePath, revealTick, activeContent]);
+    setInlineEditPrompt('');
+    setInlineEditOpen(true);
+  }, []);
 
-  // Tab close: file DB se delete nahi hota — sirf editor se band hota hai (tree me rehta hai)
-  const closeTab = useCallback((path) => {
-    if (path === activePath && dirtyPaths.has(path)) {
-      if (!window.confirm(`"${path}" save nahi hua — phir bhi close karein?`)) return;
+  const handleInlineEditSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!inlineEditPrompt.trim()) return;
+    const editor = editorRef.current;
+    if (!editor || !activePath) return;
+
+    const selection = editor.getSelection();
+    const model = editor.getModel();
+    let selectedText = model.getValueInRange(selection);
+    let targetRange = selection;
+
+    if (!selectedText.trim()) {
+      const pos = editor.getPosition();
+      const lineContent = model.getLineContent(pos.lineNumber);
+      selectedText = lineContent;
+      targetRange = new monacoRef.current.Range(pos.lineNumber, 1, pos.lineNumber, lineContent.length + 1);
     }
+
+    setInlineEditLoading(true);
+    try {
+      const ext = activePath.split('.').pop()?.toLowerCase();
+      const res = await api.post('/agent/inline-edit', {
+        code: selectedText,
+        prompt: inlineEditPrompt,
+        language: LANG_BY_EXT[ext] || 'javascript',
+        file: activePath
+      });
+
+      if (res.data?.success && res.data?.replacement) {
+        editor.executeEdits('inline-ai', [
+          { range: targetRange, text: res.data.replacement, forceMoveMarkers: true }
+        ]);
+        setDirtyPaths(prev => new Set(prev).add(activePath));
+        showToast('✨ Inline AI edit applied! (Ctrl+S to save)', 'success');
+        setInlineEditOpen(false);
+      }
+    } catch (err) {
+      showToast(`Inline edit failed: ${err.message}`, 'error');
+    } finally {
+      setInlineEditLoading(false);
+    }
+  };
+
+  // Active path ref sync
+  useEffect(() => {
+    activePathRef.current = activePath;
+  }, [activePath]);
+
+  // Auto scroll chat messages
+  useEffect(() => {
+    if (endRef.current) {
+      endRef.current.scrollTop = endRef.current.scrollHeight;
+    }
+  }, [copilotMessages, copilotStatus, planTasks]);
+
+  // Suppress benign Monaco editor unmount cancellation errors
+  useEffect(() => {
+    const handleRejection = (e) => {
+      if (e?.reason?.message === 'Canceled' || e?.reason?.name === 'Canceled' || e?.reason === 'Canceled') {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('unhandledrejection', handleRejection);
+    return () => window.removeEventListener('unhandledrejection', handleRejection);
+  }, []);
+
+  // Load workspace files
+  const loadWorkspaceFiles = useCallback(async () => {
+    setLoadingFiles(true);
+    try {
+      const res = await api.get(`/memory/project/${projectId}`);
+      const raw = Array.isArray(res.data) ? res.data : (res.data?.files || []);
+      const fileList = raw.map(f => ({
+        path: f.path || f.name,
+        content: f.content || '',
+        lastModified: f.last_modified || f.lastModified || Date.now()
+      }));
+
+      setFiles(fileList);
+      const map = {};
+      fileList.forEach(f => { map[f.path] = f.content; });
+      setContents(map);
+
+      if (fileList.length > 0 && openTabs.length === 0) {
+        const priority = ['src/App.jsx', 'src/App.js', 'src/main.jsx', 'src/index.js', 'App.jsx', 'index.html', 'server.js', 'package.json'];
+        const target = priority.find(p => fileList.some(f => f.path === p)) || fileList[0].path;
+        setOpenTabs([target]);
+        setActivePath(target);
+      } else if (fileList.length === 0) {
+        setOpenTabs([]);
+        setActivePath(null);
+      }
+    } catch (_) {
+      setFiles([]);
+      setContents({});
+      setOpenTabs([]);
+      setActivePath(null);
+    } finally {
+      setLoadingFiles(false);
+    }
+  }, [projectId, openTabs.length]);
+
+  useEffect(() => {
+    loadWorkspaceFiles();
+  }, [loadWorkspaceFiles]);
+
+  const selectFile = useCallback((fileOrPath) => {
+    const pathStr = typeof fileOrPath === 'string' ? fileOrPath : fileOrPath.path;
+    if (!pathStr) return;
+    if (!openTabs.includes(pathStr)) {
+      setOpenTabs(prev => [...prev, pathStr]);
+    }
+    setActivePath(pathStr);
+    setWorkspaceMode('code');
+  }, [openTabs]);
+
+  const closeTab = useCallback((pathStr) => {
     setOpenTabs(prev => {
-      const next = prev.filter(p => p !== path);
-      if (path === activePathRef.current) {
-        const nextOpen = next.map(p => files.find(f => f.path === p)).filter(Boolean);
-        const target = nextOpen[nextOpen.length - 1];
-        setActivePath(target?.path || null);
+      const next = prev.filter(p => p !== pathStr);
+      if (activePath === pathStr) {
+        setActivePath(next[next.length - 1] || null);
       }
       return next;
     });
-  }, [files, activePath, dirtyPaths]);
+  }, [activePath]);
 
-  const saveActiveFile = useCallback(async () => {
+  const activeContent = activePath ? (contents[activePath] ?? '') : '';
+  const activeExt = activePath ? activePath.split('.').pop()?.toLowerCase() : 'js';
+  const activeLang = LANG_BY_EXT[activeExt] || 'javascript';
+
+  const setFileContent = (pathStr, newContent) => {
+    setContents(prev => ({ ...prev, [pathStr]: newContent }));
+  };
+
+  const markDirty = (pathStr) => {
+    setDirtyPaths(prev => new Set(prev).add(pathStr));
+  };
+
+  const saveActiveFile = async () => {
     if (!activePath) return;
-    const content = contents[activePath] ?? activeContent;
+    const content = contents[activePath] ?? '';
     try {
-      await api.put(`/memory/project/${projectId}/file`, { path: activePath, content });
-      clearDirty(activePath);
-      showToast('File saved', 'success');
-    } catch (e) {
-      showToast('Save failed — backend off?', 'error');
+      await api.post(`/memory/project/${projectId}/file`, { path: activePath, content });
+      setDirtyPaths(prev => {
+        const next = new Set(prev);
+        next.delete(activePath);
+        return next;
+      });
+      setFiles(prev => prev.map(f => f.path === activePath ? { ...f, content } : f));
+      showToast(`Saved ${activePath}`, 'success');
+    } catch (err) {
+      showToast(`Save failed: ${err.message}`, 'error');
     }
-  }, [activePath, activeContent, contents, projectId, showToast]);
+  };
 
-  const saveAllFiles = useCallback(async () => {
+  const saveAllFiles = async () => {
     if (dirtyPaths.size === 0) return;
-    const dirtyList = [...dirtyPaths];
+    const saves = Array.from(dirtyPaths).map(p =>
+      api.post(`/memory/project/${projectId}/file`, { path: p, content: contents[p] ?? '' })
+    );
     try {
-      await Promise.all(dirtyList.map(p => {
-        const f = files.find(ff => ff.path === p);
-        const content = contents[p] ?? f?.content ?? '';
-        return f ? api.put(`/memory/project/${projectId}/file`, { path: p, content }) : Promise.resolve();
-      }));
+      await Promise.all(saves);
       setDirtyPaths(new Set());
-      showToast(`${dirtyList.length} files save ho gayi`, 'success');
-    } catch (e) {
-      showToast('Save all fail — backend off?', 'error');
-    }
-  }, [dirtyPaths, files, contents, projectId, showToast]);
-
-  useEffect(() => {
-    const handler = (e) => {
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        saveActiveFile();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [saveActiveFile]);
-
-  const deleteFilePath = async (path) => {
-    if (!window.confirm(`"${path}" delete karein?`)) return;
-    try {
-      await api.delete(`/memory/project/${projectId}/file`, { params: { path } });
-      setFiles(prev => prev.filter(f => f.path !== path));
-      setOpenTabs(prev => prev.filter(p => p !== path));
-      setContents(prev => { const n = { ...prev }; delete n[path]; return n; });
-      clearDirty(path);
-      if (activePathRef.current === path) {
-        const next = files.find(f => f.path !== path);
-        setActivePath(next?.path || null);
-      }
-      showToast(`"${path}" delete ho gaya`, 'success');
-    } catch (e) {
-      showToast('Delete fail — backend off?', 'error');
+      showToast(`All files saved`, 'success');
+    } catch (err) {
+      showToast(`Save error: ${err.message}`, 'error');
     }
   };
 
-  const deleteFolder = async (folderPath) => {
-    if (!window.confirm(`"${folderPath}" folder + andar ki saari files delete karein?`)) return;
-    try {
-      await api.delete(`/memory/project/${projectId}/folder`, { params: { path: folderPath } });
-      setFiles(prev => prev.filter(f => f.path !== folderPath && !f.path.startsWith(folderPath + '/')));
-      setOpenTabs(prev => prev.filter(p => p !== folderPath && !p.startsWith(folderPath + '/')));
-      setContents(prev => {
-        const n = { ...prev };
-        for (const k of Object.keys(n)) {
-          if (k === folderPath || k.startsWith(folderPath + '/')) delete n[k];
-        }
-        return n;
-      });
-      setDirtyPaths(prev => {
-        const n = new Set();
-        for (const p of prev) {
-          if (p !== folderPath && !p.startsWith(folderPath + '/')) n.add(p);
-        }
-        return n;
-      });
-      if (activePathRef.current === folderPath || activePathRef.current?.startsWith(folderPath + '/')) {
-        setActivePath(null);
-      }
-      showToast(`Folder "${folderPath}" delete ho gaya`, 'success');
-    } catch (e) {
-      showToast('Delete fail — backend off?', 'error');
-    }
-  };
+  // LSP Diagnostics
+  const setMarkers = useCallback((pathStr, diags) => {
+    const monaco = monacoRef.current;
+    const editor = editorRef.current;
+    if (!monaco || !editor) return;
+    const model = editor.getModel();
+    if (!model) return;
 
-  const renamePath = async (oldPath, newPath) => {
-    if (!oldPath || !newPath || oldPath === newPath) return;
-    try {
-      await api.post(`/memory/project/${projectId}/rename`, { oldPath, newPath });
-      setFiles(prev => prev.map(f =>
-        f.path === oldPath ? { ...f, path: newPath }
-        : f.path.startsWith(oldPath + '/') ? { ...f, path: newPath + f.path.slice(oldPath.length) }
-        : f
-      ));
-      setOpenTabs(prev => prev.map(p =>
-        p === oldPath ? newPath : p.startsWith(oldPath + '/') ? newPath + p.slice(oldPath.length) : p
-      ));
-      setContents(prev => {
-        const n = {};
-        for (const [k, v] of Object.entries(prev)) {
-          if (k === oldPath) n[newPath] = v;
-          else if (k.startsWith(oldPath + '/')) n[newPath + k.slice(oldPath.length)] = v;
-          else n[k] = v;
-        }
-        return n;
-      });
-      setDirtyPaths(prev => {
-        const n = new Set();
-        for (const p of prev) {
-          if (p === oldPath) n.add(newPath);
-          else if (p.startsWith(oldPath + '/')) n.add(newPath + p.slice(oldPath.length));
-          else n.add(p);
-        }
-        return n;
-      });
-      setActivePath(prev =>
-        prev === oldPath ? newPath
-        : (prev && prev.startsWith(oldPath + '/')) ? newPath + prev.slice(oldPath.length)
-        : prev
-      );
-      showToast(`"${oldPath}" → "${newPath}"`, 'success');
-    } catch (e) {
-      showToast('Rename fail — backend off?', 'error');
-    }
-  };
-
-  const createFileInFolder = (folderPath) => {
-    setUiModal({ type: 'fileIn', folder: folderPath });
-  };
-
-  const createFolderInFolder = (folderPath) => {
-    setUiModal({ type: 'folderIn', folder: folderPath });
-  };
-
-  const runSingleFile = useCallback(() => {
-    if (!activePath || running) return;
-    const ext = activePath.split('.').pop();
-    const cmd = ext === 'py' ? `python "${activePath}"` : `node "${activePath}"`;
-    if (terminalRef.current?.runCommand) {
-      terminalRef.current.runCommand(cmd);
-      if (!terminalOpen) setTerminalOpen(true);
-    } else {
-      showToast('Terminal ready nahi hai', 'warning');
-    }
-  }, [activePath, running, terminalOpen, showToast]);
-
-  // Right-click context menu (VS Code style)
-  const [ctxMenu, setCtxMenu] = useState(null);
-  // Modal dialog (replaces window.prompt): newFile | newFolder | fileIn | folderIn | rename
-  const [uiModal, setUiModal] = useState(null);
-  const [quickOpenOpen, setQuickOpenOpen] = useState(false);
-  const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
-  const [sidebarHidden, setSidebarHidden] = useState(false);
-
-  const submitModal = (value) => {
-    const modal = uiModal;
-    setUiModal(null);
-    if (!modal || !value) return;
-    if (modal.type === 'rename') {
-      const oldName = modal.path.split('/').pop();
-      const newPath = `${modal.path.slice(0, modal.path.length - oldName.length)}${value}`;
-      renamePath(modal.path, newPath);
-      return;
-    }
-    const clean = value.replace(/^\/+|\/+$/g, '');
-    if (modal.type === 'newFile' || modal.type === 'fileIn') {
-      const full = modal.type === 'fileIn' ? `${modal.folder}/${clean}` : clean;
-      if (files.some(f => f.path === full)) { showToast('File already exists', 'warning'); return; }
-      const content = full.endsWith('.py') ? '# Python file\n' : '// New file\n';
-      setFiles(prev => [...prev, { path: full, content }]);
-      setActivePath(full);
-      setOpenTabs(prev => prev.includes(full) ? prev : [...prev, full]);
-      api.post(`/memory/project/${projectId}/file`, { path: full, content }).catch(() => {});
-    } else {
-      const full = modal.type === 'folderIn' ? `${modal.folder}/${clean}` : clean;
-      if (!full || full.includes('..')) { showToast('Invalid folder name', 'error'); return; }
-      if (files.some(f => f.path.startsWith(full + '/'))) { showToast('Folder already exists', 'warning'); return; }
-      const gitkeep = `${full}/.gitkeep`;
-      setFiles(prev => [...prev, { path: gitkeep, content: '' }]);
-      setOpenTabs(prev => prev.includes(gitkeep) ? prev : [...prev, gitkeep]);
-      setActivePath(gitkeep);
-      api.post(`/memory/project/${projectId}/folder`, { path: full })
-        .then(() => showToast(`Folder "${full}" ban gaya`, 'success'))
-        .catch(() => showToast('Folder create fail — backend off?', 'error'));
-    }
-  };
-
-  const modalSpec = (() => {
-    if (!uiModal) return null;
-    const base = { initial: '', okLabel: 'Create' };
-    if (uiModal.type === 'rename') {
-      return {
-        ...base,
-        title: 'Rename',
-        placeholder: 'Naya naam',
-        initial: uiModal.path.split('/').pop(),
-        okLabel: 'Rename',
-        hint: uiModal.path,
-        icon: MODAL_ICONS.rename,
-      };
-    }
-    if (uiModal.type === 'newFile' || uiModal.type === 'fileIn') {
-      return {
-        ...base,
-        title: uiModal.type === 'fileIn' ? `New File — ${uiModal.folder}/` : 'New File',
-        placeholder: 'file.txt ya utils.py (subfolder bhi: src/app.js)',
-        hint: uiModal.type === 'fileIn' ? `Folder: ${uiModal.folder}` : undefined,
-        icon: MODAL_ICONS.newFile,
-      };
-    }
-    return {
-      ...base,
-      title: uiModal.type === 'folderIn' ? `New Folder — ${uiModal.folder}/` : 'New Folder',
-      placeholder: 'src/components (nested allowed)',
-      hint: uiModal.type === 'folderIn' ? `Folder: ${uiModal.folder}` : undefined,
-      icon: MODAL_ICONS.newFolder,
-    };
-  })();
-
-  // Keybindings: Ctrl+P quick open, Ctrl+Shift+P command palette, Ctrl+B sidebar,
-  // Ctrl+W close tab, Ctrl+Shift+S save all, Ctrl+` terminal, F2 rename
-  useEffect(() => {
-    const handler = (e) => {
-      const mod = e.ctrlKey || e.metaKey;
-      const k = (e.key || '').toLowerCase();
-      if (mod && k === 'p' && e.shiftKey) {
-        e.preventDefault();
-        setCmdPaletteOpen(o => !o);
-      } else if (mod && k === 'f' && e.shiftKey) {
-        e.preventDefault();
-        setSearchOpen(o => !o);
-      } else if (mod && k === 'p') {
-        e.preventDefault();
-        setQuickOpenOpen(o => !o);
-      } else if (mod && k === 'b') {
-        e.preventDefault();
-        setSidebarHidden(h => !h);
-      } else if (mod && k === 'w') {
-        e.preventDefault();
-        if (activePathRef.current) closeTab(activePathRef.current);
-      } else if (mod && e.shiftKey && k === 's') {
-        e.preventDefault();
-        saveAllFiles();
-      } else if (mod && k === '`') {
-        e.preventDefault();
-        setTerminalOpen(t => !t);
-      } else if (k === 'f2') {
-        e.preventDefault();
-        if (activePathRef.current) setUiModal({ type: 'rename', path: activePathRef.current });
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [closeTab, saveAllFiles]);
-
-  const commands = useMemo(() => [
-    { label: 'Quick Open File', key: 'Ctrl+P', icon: <Search className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-primary)' }} />, run: () => setQuickOpenOpen(true) },
-    { label: 'Find in Files', key: 'Ctrl+Shift+F', icon: <Search className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-accent)' }} />, run: () => setSearchOpen(true) },
-    { label: 'New File', key: 'Ctrl+N', icon: <FilePlus2 className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-primary)' }} />, run: () => setUiModal({ type: 'newFile' }) },
-    { label: 'New Folder', icon: <FolderPlus className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-primary)' }} />, run: () => setUiModal({ type: 'newFolder' }) },
-    { label: 'Save File', key: 'Ctrl+S', icon: <Save className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-success)' }} />, run: () => saveActiveFile() },
-    { label: `Save All Files${dirtyPaths.size ? ` (${dirtyPaths.size})` : ''}`, key: 'Ctrl+Shift+S', icon: <SaveAll className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-success)' }} />, run: () => saveAllFiles() },
-    { label: 'Close Tab', key: 'Ctrl+W', icon: <X className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-warning)' }} />, run: () => activePathRef.current && closeTab(activePathRef.current) },
-    { label: 'Rename Active File', key: 'F2', icon: <Pencil className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-accent)' }} />, run: () => activePathRef.current && setUiModal({ type: 'rename', path: activePathRef.current }) },
-    { label: 'Toggle Terminal', key: 'Ctrl+`', icon: <TerminalIcon className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-teal)' }} />, run: () => setTerminalOpen(t => !t) },
-    { label: 'Open Live Preview', icon: <Eye className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-success)' }} />, run: () => window.open('http://localhost:3000', '_blank') },
-    { label: 'Toggle Copilot Chat', icon: <Sparkles className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-secondary)' }} />, run: () => setCopilotOpen(o => !o) },
-    { label: 'Toggle Sidebar', key: 'Ctrl+B', icon: sidebarHidden ? <PanelLeftOpen className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-text-muted)' }} /> : <PanelLeftClose className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-text-muted)' }} />, run: () => setSidebarHidden(h => !h) },
-    { label: `Plan Gate: ${planGate ? 'ON (plan → approve)' : 'OFF (autopilot)'}`, icon: <Settings2 className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-info)' }} />, run: () => setPlanGate(g => !g) },
-    { label: 'Run Active File', icon: <Play className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-success)' }} />, run: () => runSingleFile() },
-    { label: 'Clear Terminal', icon: <Eraser className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-text-muted)' }} />, run: () => terminalRef.current?.clear() },
-    { label: 'Download Workspace ZIP', icon: <Download className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-info)' }} />, run: () => { window.open(`${BACKEND}/api/preview/${projectId}/zip`, '_blank'); } },
-  ], [saveActiveFile, saveAllFiles, dirtyPaths.size, sidebarHidden, planGate, projectId, closeTab, runSingleFile]);
-
-  const runCommand = (c) => {
-    setCmdPaletteOpen(false);
-    c.run();
-  };
-  const openCtxMenu = (e, path, isDir) => {
-    e.preventDefault();
-    const menuW = 180;
-    const menuH = isDir ? 170 : 90;
-    const x = Math.min(e.clientX, window.innerWidth - menuW - 8);
-    const y = Math.min(e.clientY, window.innerHeight - menuH - 8);
-    setCtxMenu({ x, y, path, isDir });
-  };
-  useEffect(() => {
-    const esc = (e) => { if (e.key === 'Escape') setCtxMenu(null); };
-    window.addEventListener('keydown', esc);
-    return () => window.removeEventListener('keydown', esc);
+    const markers = (diags || []).map(d => ({
+      severity: d.severity === 'error' ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning,
+      message: d.message,
+      startLineNumber: d.line || 1,
+      startColumn: d.column || 1,
+      endLineNumber: d.line || 1,
+      endColumn: (d.column || 1) + 10,
+    }));
+    monaco.editor.setModelMarkers(model, 'lsp', markers);
+    setProblems(markers.length);
   }, []);
-  const ctxRename = () => {
-    if (!ctxMenu) return;
-    const path = ctxMenu.path;
-    setCtxMenu(null);
-    setUiModal({ type: 'rename', path });
-  };
-  const ctxDelete = () => {
-    if (!ctxMenu) return;
-    const { path, isDir } = ctxMenu;
-    setCtxMenu(null);
-    if (isDir) deleteFolder(path);
-    else deleteFilePath(path);
+
+  const runDiagnostics = useCallback((pathStr, content) => {
+    const ext = pathStr.split('.').pop()?.toLowerCase();
+    const lang = LANG_BY_EXT[ext];
+    if (!lang) return;
+    if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
+    diagTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await api.post('/agent/lsp-diagnostics', { code: content, language: lang });
+        setMarkers(pathStr, Array.isArray(res.data?.diagnostics) ? res.data.diagnostics : []);
+      } catch (_) {}
+    }, 500);
+  }, [setMarkers]);
+
+  const handleEditorMount = (editor, monaco) => {
+    editorRef.current = editor;
+    monacoRef.current = monaco;
+
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, () => {
+      triggerInlineEdit();
+    });
+
+    try {
+      const supportedLangs = ['javascript', 'typescript', 'python', 'html', 'css', 'json'];
+      supportedLangs.forEach(langId => {
+        monaco.languages.registerInlineCompletionsProvider(langId, {
+          provideInlineCompletions: async (model, position) => {
+            const prefix = model.getValueInRange({
+              startLineNumber: Math.max(1, position.lineNumber - 30),
+              startColumn: 1,
+              endLineNumber: position.lineNumber,
+              endColumn: position.column
+            });
+            const suffix = model.getValueInRange({
+              startLineNumber: position.lineNumber,
+              startColumn: position.column,
+              endLineNumber: Math.min(model.getLineCount(), position.lineNumber + 20),
+              endColumn: 1
+            });
+
+            if (!prefix.trim() || prefix.trim().length < 5) return { items: [] };
+
+            try {
+              const res = await api.post('/agent/autocomplete', {
+                prefix,
+                suffix,
+                language: langId
+              });
+              if (res.data?.success && res.data?.completion) {
+                return {
+                  items: [{
+                    insertText: res.data.completion,
+                    range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column)
+                  }]
+                };
+              }
+            } catch (_) {}
+            return { items: [] };
+          },
+          freeInlineCompletions: () => {}
+        });
+      });
+    } catch (_) {}
+
+    if (activePath) runDiagnostics(activePath, activeContent);
   };
 
-  const addFile = () => {
-    setUiModal({ type: 'newFile' });
-  };
-
-  const addFolder = () => {
-    setUiModal({ type: 'newFolder' });
-  };
-
-  const deleteFile = () => {
+  const runSingleFile = () => {
     if (!activePath) return;
-    deleteFilePath(activePath);
+    setTerminalOpen(true);
+    const ext = activePath.split('.').pop()?.toLowerCase();
+    let cmd = `node "${activePath}"`;
+    if (ext === 'py') cmd = `python "${activePath}"`;
+    if (ext === 'sh') cmd = `bash "${activePath}"`;
+    terminalRef.current?.runCommand(cmd);
+  };
+
+  const rollbackTo = async (dir) => {
+    if (!dir) return;
+    try {
+      const res = await api.post('/agent/rollback', { dir });
+      if (res.data?.success) {
+        showToast('Restored workspace snapshot successfully', 'success');
+        await loadWorkspaceFiles();
+      }
+    } catch (err) {
+      showToast(`Rollback failed: ${err.message}`, 'error');
+    }
   };
 
   const openProjectWizard = (prompt = '') => {
-    setWizardInitialPrompt(prompt || copilotInput || '');
+    setWizardInitialPrompt(prompt);
     setWizardOpen(true);
   };
 
-  const handleWizardBuild = async (wizardConfig) => {
+  const handleWizardBuild = async (spec) => {
+    setWizardOpen(false);
     setRunning(true);
-    setPlanTasks([
-      { id: 1, title: 'Synthesize Architecture & Blueprint', status: 'completed' },
-      { id: 2, title: `Scaffold ${wizardConfig.stack?.frontend || 'React'} Components & Styles`, status: 'in_progress' },
-      { id: 3, title: 'Setup Git & Workspace Runtime', status: 'pending' }
-    ]);
-    setCopilotStatus({ label: `🚀 Building ${wizardConfig.projectTitle || 'project'}...`, tone: 'work' });
-    setCopilotMessages(prev => [
-      ...prev,
-      { role: 'user', content: `🪄 [Project Wizard]: Build **${wizardConfig.projectTitle}**\n• Stack: ${wizardConfig.stack?.frontend} + ${wizardConfig.stack?.styling} + ${wizardConfig.stack?.backend}\n• Features: ${wizardConfig.features?.map(f => f.name).join(', ')}` },
-      { role: 'thinking', content: 'Autonomous Project Architect is synthesizing code across components...' }
-    ]);
+    setCopilotStatus({ label: '🏗️ Scaffolding full-stack application...', tone: 'work' });
 
     try {
-      const res = await fetch(`${BACKEND}/api/agent/scaffold-wizard`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userPrompt: wizardConfig.description || wizardConfig.projectTitle,
-          wizardConfig,
-          projectId
-        })
+      const res = await api.post('/agent/scaffold-wizard', {
+        spec,
+        projectId
       });
 
-      if (!res.ok) throw new Error(`Scaffold failed (${res.status})`);
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        for (const evt of chunk.split('\n\n').filter(Boolean)) {
-          const dataLine = evt.split('\n').find(l => l.startsWith('data:'));
-          if (!dataLine) continue;
-          try {
-            const data = JSON.parse(dataLine.slice(5));
-            if (data.type === 'wizard_status') {
-              setCopilotStatus({ label: data.message, tone: 'work' });
-            } else if (data.type === 'wizard_file') {
-              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'tool', content: `📄 ${data.message}` }]);
-            } else if (data.type === 'file_changed') {
-              setFiles(prev => {
-                const idx = prev.findIndex(f => f.path === data.path);
-                if (idx === -1) return [...prev, { path: data.path, content: data.content || '' }];
-                const next = [...prev];
-                next[idx] = { ...next[idx], content: data.content || next[idx].content };
-                return next;
-              });
-              setOpenTabs(prev => prev.includes(data.path) ? prev : [...prev.slice(-9), data.path]);
-              setFileContent(data.path, data.content || '');
-              setActivePath(data.path);
-            } else if (data.type === 'done') {
-              setPlanTasks(prev => prev.map(t => ({ ...t, status: 'completed' })));
-              setCopilotStatus({ label: '✅ Project ready!', tone: 'success' });
-
-              const summaryMarkdown = `### 🎉 ${wizardConfig.projectTitle || 'Project'} successfully generated!
-
-${wizardConfig.description || 'All core architectural modules, frontend views, and styling layers have been configured and verified.'}
-
-#### 🌟 Key Features Implemented:
-${(wizardConfig.features || []).map(f => `• **${f.name}**: ${f.description || 'Configured & integrated into workspace.'}`).join('\n')}
-
-#### 🛠️ Architecture & Tech Stack:
-• **Frontend**: \`${wizardConfig.stack?.frontend || 'React + Vite'}\`
-• **Styling System**: \`${wizardConfig.stack?.styling || 'Tailwind CSS'}\`
-• **Theme Preset**: \`${wizardConfig.theme || 'Dark Zinc Obsidian'}\`
-• **Live Server Runtime**: \`http://localhost:3000\`
-
-#### 🚀 How to explore:
-• Click **"Live Preview"** to open your live application in a new browser tab.
-• Use the left Explorer panel to inspect and edit components in real-time.`;
-
-              setCopilotMessages(prev => [
-                ...prev,
-                {
-                  role: 'assistant',
-                  kind: 'aistudio_card',
-                  model: 'Gemini 2.5 Flash',
-                  duration: '14s',
-                  files: data.files || [],
-                  content: summaryMarkdown,
-                  rawMessage: data.message,
-                  summary: summaryMarkdown
-                }
-              ]);
-              if (onToast) onToast('🎉 Project generated successfully! Click Preview to test.', 'success');
-            } else if (data.type === 'error') {
-              setCopilotStatus({ label: `⚠️ ${data.message}`, tone: 'error' });
-              if (onToast) onToast(data.message, 'error');
-            }
-          } catch (_) {}
-        }
+      if (res.data?.success) {
+        showToast('🎉 Project scaffolded successfully!', 'success');
+        await loadWorkspaceFiles();
+        setWorkspaceMode('preview');
       }
     } catch (err) {
-      setCopilotStatus({ label: '⚠️ Scaffold error', tone: 'error' });
-      if (onToast) onToast(err.message, 'error');
+      showToast(`Scaffold error: ${err.message}`, 'error');
     } finally {
       setRunning(false);
     }
   };
 
-  // Plan → Approve gate: fetch the plan first, show it, run only on approval
+  // Main SSE Agent Stream Runner
+  const runCopilot = async (prompt) => {
+    if (!prompt || running) return;
+    setRunning(true);
+    setCopilotStatus({ label: '🤖 Agent thinking & planning...', tone: 'info' });
+    setCopilotMessages(prev => [...prev, { role: 'user', content: prompt }]);
+    setCopilotInput('');
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const response = await fetch(`${BACKEND}/api/agent/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userPrompt: prompt,
+          projectId,
+          projectFiles: files
+        }),
+        signal: controller.signal
+      });
+
+      if (!response.ok) throw new Error(`Agent request failed: ${response.statusText}`);
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const jsonStr = line.slice(6).trim();
+          if (!jsonStr || jsonStr === '[DONE]') continue;
+
+          try {
+            const data = JSON.parse(jsonStr);
+
+            if (data.type === 'run_started') {
+              setLatestRunId(data.runId || null);
+              latestRunIdRef.current = data.runId || null;
+            } 
+            else if (data.type === 'plan' || data.type === 'plan_tasks') {
+              const tasks = Array.isArray(data.tasks) ? data.tasks : (Array.isArray(data.plan?.tasks) ? data.plan.tasks : []);
+              if (tasks.length > 0) {
+                setPlanTasks(tasks.map(t => ({ ...t, status: t.status || 'pending' })));
+              }
+            } 
+            else if (data.type === 'thinking' || data.type === 'thought' || data.type === 'agent_status') {
+              const msg = data.message || data.thought;
+              if (msg && msg.trim()) {
+                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: msg, agent: data.agent }]);
+                setCopilotStatus({ label: msg.substring(0, 45) + '...', tone: 'work' });
+              }
+            } 
+            else if (data.type === 'tool_call') {
+              const action = data.action;
+              const label = STATUS_BY_ACTION[action] || `Executing ${action}...`;
+              setCopilotStatus({ label, tone: 'work' });
+              if (data.thought) {
+                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: data.thought }]);
+              }
+            } 
+            else if (data.type === 'file_written' || data.type === 'file_changed' || data.type === 'file') {
+              const filePath = data.path || data.file;
+              const content = data.content || '';
+              if (filePath) {
+                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'file', file: filePath, content: `Created/Updated: ${filePath}` }]);
+                setFiles(prev => {
+                  const existingIdx = prev.findIndex(f => f.path === filePath);
+                  if (existingIdx !== -1) {
+                    const updated = [...prev];
+                    updated[existingIdx] = { path: filePath, content, lastModified: Date.now() };
+                    return updated;
+                  }
+                  return [...prev, { path: filePath, content, lastModified: Date.now() }];
+                });
+                setContents(prev => ({ ...prev, [filePath]: content }));
+
+                // Auto-open primary component in editor tab
+                if (!activePathRef.current || filePath.endsWith('App.jsx') || filePath.endsWith('main.jsx')) {
+                  setActivePath(filePath);
+                  setOpenTabs(prev => prev.includes(filePath) ? prev : [...prev, filePath]);
+                }
+              }
+            } 
+            else if (data.type === 'step') {
+              const log = data.stepLog || {};
+              if (log.thought || log.action) {
+                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'step', content: log.thought || log.action }]);
+              }
+            } 
+            else if (data.type === 'screenshot') {
+              if (data.data) {
+                setCopilotMessages(prev => [...prev, {
+                  role: 'assistant',
+                  kind: 'screenshot',
+                  image: `data:${data.mimeType || 'image/png'};base64,${data.data}`,
+                  url: data.url || 'http://localhost:3000',
+                  message: data.message || 'Live Application UI Verification Snapshot'
+                }]);
+              }
+            } 
+            else if (data.type === 'vision') {
+              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: `👁️ Vision QA: ${data.message}` }]);
+            }
+            else if (data.type === 'done') {
+              const stepCount = Array.isArray(data.steps) ? data.steps.length : (data.steps || '?');
+              setPlanTasks(prev => prev.map(t => ({ ...t, status: 'completed' })));
+              setCopilotStatus({ label: `✅ Done — ${stepCount} steps`, tone: 'success' });
+              
+              setCopilotMessages(prev => [
+                ...prev,
+                {
+                  role: 'assistant',
+                  kind: 'aistudio_card',
+                  model: 'Gemini 2.5 Flash + Groq Cascade',
+                  duration: `${Math.max(6, parseInt(stepCount) * 4 || 12)}s`,
+                  files: files.map(f => f.path),
+                  content: data.message || `🎉 Fullstack task completed successfully across ${stepCount} steps.`,
+                  summary: data.message
+                }
+              ]);
+
+              await loadWorkspaceFiles();
+              setWorkspaceMode('preview');
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        setCopilotStatus({ label: `⚠️ ${err.message}`, tone: 'error' });
+        showToast(err.message, 'error');
+      }
+    } finally {
+      setRunning(false);
+    }
+  };
+
   const handleSend = async (text, isWizardPrompt = false) => {
     if (isWizardPrompt) {
-      return openProjectWizard(copilotInput);
+      return openProjectWizard(text || copilotInput);
     }
     const prompt = (text || copilotInput).trim();
     if (!prompt || running) return;
 
-    // Check if user is asking to create a new app/project from scratch
-    const lower = prompt.toLowerCase();
-    const isNewProjectIntent = lower.startsWith('create ') || lower.startsWith('build ') ||
-      lower.includes('app banao') || lower.includes('project banao') ||
-      lower.includes('store banao') || lower.includes('website banao') ||
-      lower.includes('fullstack') || lower.includes('clone banao');
-
-    if (isNewProjectIntent && !pendingPlan) {
-      return openProjectWizard(prompt);
+    if (!planGate) {
+      return runCopilot(prompt);
     }
 
-    if (!planGate) return runCopilot(prompt);
     setCopilotInput('');
     setCopilotMessages(prev => [...prev, { role: 'user', content: prompt }]);
-    setCopilotStatus({ label: '📋 Plan bana raha hoon...', tone: 'info' });
+    setCopilotStatus({ label: '📋 Planning architecture...', tone: 'info' });
+
     try {
-      const res = await fetch(`${BACKEND}/api/agent/plan`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userPrompt: prompt }),
-        signal: AbortSignal.timeout(12000),
-      });
-      const data = await res.json();
-      const tasks = Array.isArray(data.plan?.tasks) ? data.plan.tasks : [];
+      const res = await api.post('/agent/plan', { userPrompt: prompt });
+      const tasks = Array.isArray(res.data?.plan?.tasks) ? res.data.plan.tasks : [];
       if (tasks.length === 0) return runCopilot(prompt);
-      setPendingPlan({ prompt, summary: data.plan?.summary || '', tasks });
-      setCopilotStatus({ label: '🛡 Plan approve karo — phir agent kaam shuru karega', tone: 'info' });
-    } catch (e) {
-      setCopilotStatus({ label: '📋 Plan fetch fail — direct run', tone: 'info' });
+      setPendingPlan({ prompt, summary: res.data.plan?.summary || '', tasks });
+    } catch (_) {
       runCopilot(prompt);
     }
   };
@@ -871,1171 +1041,876 @@ ${(wizardConfig.features || []).map(f => `• **${f.name}**: ${f.description || 
 
   const cancelPlan = () => {
     setPendingPlan(null);
-    setCopilotStatus({ label: '', tone: 'info' });
+    setCopilotStatus({ label: 'Plan cancelled', tone: 'neutral' });
   };
 
-  // 1-click undo: restore workspace + DB to a checkpoint snapshot
-  const rollbackTo = async (dir) => {
-    if (running) return;
-    setCopilotStatus({ label: '⏪ Rollback ho raha hai...', tone: 'info' });
-    try {
-      const r = await fetch(`${BACKEND}/api/agent/rollback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, snapshotDir: dir }),
-        signal: AbortSignal.timeout(20000),
-      });
-      const data = await r.json();
-      if (!data.success) throw new Error(data.error || 'Rollback failed');
-      // Refresh tree from DB (post-run there is no open SSE stream for events)
-      try {
-        const fres = await api.get(`/memory/project/${projectId}`);
-        if (Array.isArray(fres.data?.files) && fres.data.files.length > 0) {
-          setFiles(fres.data.files);
-          setContents({});
-          setDirtyPaths(new Set());
-          setActivePath(fres.data.files[0].path);
-        }
-      } catch (e) { /* noop */ }
-      setCopilotMessages(prev => [...prev, {
-        role: 'assistant',
-        kind: 'warn',
-        content: `⏪ Rollback done: ${data.restored.length} files restore hue${data.removed?.length ? `, ${data.removed.length} naye files remove hue` : ''}`,
-      }]);
-      setCopilotStatus({ label: '⏪ Rollback complete', tone: 'success' });
-      // noop
-    } catch (e) {
-      setCopilotStatus({ label: '⏪ Rollback failed', tone: 'error' });
-      showToast(e?.message || 'Rollback failed', 'error');
-    }
-  };
-
-  const runCopilot = async (text) => {
-    const prompt = (text || copilotInput).trim();
-    if (!prompt || running) return;
-    setCopilotInput('');
-    setCopilotMessages(prev => [...prev, { role: 'user', content: prompt }]);
-    setRunning(true);
-    setPlanTasks([]);
-    setRunChangeCount(0);
-    termMsgIdxRef.current = -1;
-    setCopilotStatus({ label: '🚀 Starting agent...', tone: 'info' });
-    setCopilotMessages(prev => [...prev, { role: 'thinking', content: 'Deep analysing...' }]);
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    try {
-      const body = {
-        userPrompt: prompt,
-        projectPath: '',
-        projectFiles: files.map(f => ({ path: f.path, content: contents[f.path] ?? f.content })),
-        projectId,
-        saveToRepo: false,
-        forceLocal: false,
-        customInstructions: customInstructions.trim() || undefined,
-      };
-
-      // Inject MCP Config if a default one exists in localStorage
-      try {
-        const savedMcp = localStorage.getItem('mcp_configs');
-        if (savedMcp) {
-          const configs = JSON.parse(savedMcp);
-          if (configs && configs.length > 0) {
-            body.mcpConfig = { command: configs[0].command, args: configs[0].args.split(' ') };
-          }
-        }
-      } catch(e) {}
-
-      let res;
-      try {
-        // Direct to backend SSE (bypasses Next proxy buffering → true real-time)
-        res = await fetch(`${BACKEND}/api/agent/run`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          signal: ctrl.signal,
-        });
-      } catch (directErr) {
-        if (ctrl.signal.aborted) throw directErr;
-        // BUG-011 FIX: fallback also uses direct backend (not Next.js proxy which buffers SSE)
-        const fallbackBackend = 'http://localhost:5000';
-        res = await fetch(`${fallbackBackend}/api/agent/run`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          signal: ctrl.signal,
-        });
-      }
-      if (!res.ok) throw new Error(`Agent failed (${res.status})`);
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let toolCount = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (ctrl.signal.aborted) break;
-        const chunk = decoder.decode(value, { stream: true });
-        for (const evt of chunk.split('\n\n').filter(Boolean)) {
-          const dataLine = evt.split('\n').find(l => l.startsWith('data:'));
-          if (!dataLine) continue;
-          try {
-            const data = JSON.parse(dataLine.slice(5));
-            if (data.type === 'plan') {
-              const tasks = Array.isArray(data.plan?.tasks) ? data.plan.tasks : [];
-              setPlanTasks(tasks);
-              setCopilotStatus({ label: '📋 Planning...', tone: 'info' });
-              await sleep(30);
-            } else if (data.type === 'thinking') {
-              const t = (data.message || data.thought || '').toString().trim();
-              setCopilotStatus({
-                label: t ? `🤔 ${t.replace(/^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\s]+/u, '')}` : '🤔 Deep analysing...',
-                tone: 'info',
-              });
-              await sleep(30);
-            } else if (data.type === 'tool_call') {
-              const action = data.action || data.tool || 'tool';
-              setCopilotStatus({
-                label: STATUS_BY_ACTION[action] || `⚙️ Running: ${action}...`,
-                tone: 'work',
-              });
-              await sleep(30);
-              toolCount++;
-              if (data.thought) {
-                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: data.thought }]);
-              }
-              const targetPath = data.parameters?.path || data.parameters?.filePath;
-              if (targetPath) {
-                setCopilotMessages(prev => [...prev, {
-                  role: 'assistant',
-                  kind: 'file',
-                  file: targetPath,
-                  content: `Writing ${targetPath}...`,
-                  action
-                }]);
-              }
-            } else if (data.type === 'self_heal') {
-              setCopilotStatus({ label: `🔧 ${data.message || 'Self-healing...'}`, tone: 'selfheal' });
-              await sleep(30);
-              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'warn', content: data.message || 'Self-healing...' }]);
-            } else if (data.type === 'step') {
-              const stepLog = data.stepLog || {};
-              const action = stepLog.action || 'step';
-              const thought = stepLog.thought || '';
-              const resultMsg = stepLog.result?.message || data.message || '';
-              const targetFile = stepLog.parameters?.path || stepLog.parameters?.filePath || stepLog.result?.changedFile;
-
-              if (thought) {
-                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: thought }]);
-              }
-              if (targetFile) {
-                setCopilotMessages(prev => [...prev, {
-                  role: 'assistant',
-                  kind: 'file',
-                  file: targetFile,
-                  content: resultMsg || `File ready: ${targetFile}`,
-                  action
-                }]);
-              } else if (resultMsg) {
-                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'step', content: resultMsg, action }]);
-              }
-            } else if (data.type === 'error') {
-              setCopilotStatus({ label: `⚠️ ${data.message || 'Agent error'}`, tone: 'error' });
-              await sleep(30);
-              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'warn', content: `⚠️ ${data.message || 'Agent error'}` }]);
-            } else if (data.type === 'run_started') {
-              setLatestRunId(data.runId || null);
-              latestRunIdRef.current = data.runId || null;
-              setRunChangeCount(0);
-            } else if (data.type === 'done') {
-              const stepCount = Array.isArray(data.steps) ? data.steps.length : (data.steps || '?');
-              setPlanTasks(prev => prev.map(t => ({ ...t, status: 'completed' })));
-              setCopilotStatus({ label: `✅ Done — ${stepCount} steps`, tone: 'success' });
-              await sleep(30);
-              const doneMsg = (data.message || '').trim();
-
-              const changedFiles = [];
-              if (Array.isArray(data.steps)) {
-                for (const s of data.steps) {
-                  const p = s.parameters?.path || s.parameters?.filePath || s.result?.changedFile;
-                  if (p && !changedFiles.includes(p)) changedFiles.push(p);
-                }
-              }
-              if (changedFiles.length === 0 && files.length > 0) {
-                files.slice(0, 5).forEach(f => changedFiles.push(f.path));
-              }
-
-              setCopilotMessages(prev => [
-                ...prev,
-                {
-                  role: 'assistant',
-                  kind: 'aistudio_card',
-                  model: 'Gemini 2.5 Flash',
-                  duration: `${Math.max(6, parseInt(stepCount) * 4 || 12)}s`,
-                  files: changedFiles,
-                  content: doneMsg || `🎉 Task completed successfully across ${stepCount} steps.`,
-                  summary: doneMsg
-                }
-              ]);
-
-              // Fetch change count so the "Review Changes" button shows up
-              if (latestRunIdRef.current) {
-                fetch(`${BACKEND}/api/agent/run-diffs?runId=${encodeURIComponent(latestRunIdRef.current)}`)
-                  .then(r => r.json())
-                  .then(d => setRunChangeCount(Array.isArray(d?.diffs) ? d.diffs.length : 0))
-                  .catch(() => setRunChangeCount(0));
-              }
-            } else if (data.type === 'screenshot') {
-              // Agent's "eyes": render UI screenshot as a chat card
-              setCopilotMessages(prev => [...prev, {
-                role: 'assistant',
-                kind: 'screenshot',
-                image: `data:${data.mimeType || 'image/png'};base64,${data.data}`,
-                url: data.url || 'http://localhost:3000',
-                message: data.message || 'Live Application UI Snapshot',
-                auto: !!data.auto,
-              }]);
-              setCopilotMessages(prev => [...prev, {
-                role: 'assistant',
-                kind: 'screenshot',
-                image: `data:${data.mimeType || 'image/png'};base64,${data.data}`,
-                auto: !!data.auto,
-              }]);
-            } else if (data.type === 'vision') {
-              // Gemini vision verdict — what the agent actually SAW in the UI
-              const v = String(data.message || '').trim();
-              if (v) {
-                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'vision', content: v }]);
-              }
-            } else if (data.type === 'checkpoint') {
-              // Snapshot taken before a mutating tool call → rollback button
-              setCopilotMessages(prev => [...prev, {
-                role: 'assistant',
-                kind: 'checkpoint',
-                step: data.step,
-                dir: data.dir,
-                files: Array.isArray(data.files) ? data.files : [],
-              }]);
-            } else if (data.type === 'commit') {
-              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'commit', hash: data.hash }]);
-            } else if (data.type === 'terminal_output') {
-              const out = String(data.output || '').slice(0, 2000);
-              if (!out.trim()) continue;
-              setCopilotMessages(prev => {
-                const idx = termMsgIdxRef.current;
-                if (idx !== -1 && idx < prev.length && prev[idx].kind === 'term') {
-                  const next = [...prev];
-                  next[idx] = { ...prev[idx], content: (prev[idx].content + out).slice(-8000) };
-                  return next;
-                }
-                termMsgIdxRef.current = prev.length;
-                return [...prev, { role: 'assistant', kind: 'term', content: `$ ${data.command || ''}\n${out}` }];
-              });
-            } else if (data.type === 'file_changed') {
-              // Real-time tree/editor/preview updates — no page refresh
-              if (data.action === 'delete') {
-                setFiles(prev => prev.filter(f => f.path !== data.path));
-                setOpenTabs(prev => prev.filter(p => p !== data.path));
-                if (activePathRef.current === data.path) { setActivePath(null); }
-              } else if (data.action === 'move') {
-                setFiles(prev => {
-                  const idx = prev.findIndex(f => f.path === data.path);
-                  if (idx === -1) return prev;
-                  const next = [...prev];
-                  next[idx] = { path: data.newPath, content: next[idx].content };
-                  return next;
-                });
-                setOpenTabs(prev => {
-                  if (!prev.includes(data.path)) return prev;
-                  return prev.map(p => p === data.path ? data.newPath : p);
-                });
-              } else {
-                setFiles(prev => {
-                  const idx = prev.findIndex(f => f.path === data.path);
-                  if (idx === -1) return [...prev, { path: data.path, content: data.content || '' }];
-                  const next = [...prev];
-                  next[idx] = { ...next[idx], content: data.content || next[idx].content };
-                  return next;
-                });
-                // Agent ki nayi file automatically tab me khul jaye
-                setOpenTabs(prev => prev.includes(data.path) ? prev : [...prev.slice(-9), data.path]);
-                setFileContent(data.path, data.content || '');
-                if (activePathRef.current === data.path) {
-                  clearDirty(data.path);
-                }
-              }
-              // noop
-            }
-          } catch (e) { /* partial chunk */ }
-        }
-      }
-      setCopilotMessages(prev => prev.filter(m => m.role !== 'thinking'));
-      showToast(`Copilot: ${toolCount} tools chale`, 'success');
-      // Final safety sync from DB (covers files the agent made via sub-tools)
-      try {
-        const fres = await api.get(`/memory/project/${projectId}`);
-        if (Array.isArray(fres.data?.files) && fres.data.files.length > 0) {
-          setFiles(fres.data.files);
-          setContents({});
-          setDirtyPaths(new Set());
-          setOpenTabs(prev => [...prev, ...fres.data.files.slice(0, 10).map(f => f.path)].filter((p, i, a) => a.indexOf(p) === i));
-          if (!fres.data.files.some(f => f.path === activePathRef.current)) {
-            setActivePath(fres.data.files[0].path);
-          }
-        }
-      } catch (e) { /* noop */ }
-    } catch (e) {
-      setCopilotMessages(prev => prev.filter(m => m.role !== 'thinking'));
-      setCopilotMessages(prev => [...prev, { role: 'assistant', content: `⚠️ ${e?.name === 'AbortError' ? 'Agent ko stop kar diya gaya' : (e?.message || 'Agent error')}` }]);
-      setCopilotStatus({ label: e?.name === 'AbortError' ? '⏹ Stopped' : '⚠️ Agent failed', tone: 'error' });
-      if (e?.name !== 'AbortError') {
-        showToast(e?.message || 'Agent pipeline interrupted', 'error');
-      }
-    } finally {
-      abortRef.current = null;
-      setRunning(false);
-      setTimeout(() => setCopilotStatus(prev => prev.tone === 'success' || prev.tone === 'error' ? { label: '', tone: 'info' } : prev), 5000);
-    }
-  };
-
-  const activeLang = activePath ? (LANG_BY_EXT[activePath.split('.').pop()] || 'plaintext') : 'plaintext';
-  const tree = fileTreeFromFiles(files);
-  const previewTarget = files.find(f => f.path === 'index.html') || files.find(f => f.path.toLowerCase().endsWith('.html')) || null;
-
-  const setMarkers = useCallback((path, diagnostics) => {
-    const monaco = monacoRef.current;
-    const editor = editorRef.current;
-    if (!monaco || !editor) return;
-    const model = editor.getModel();
-    if (!model) return;
-    if (!diagnostics || diagnostics.length === 0) {
-      monaco.editor.setModelMarkers(model, 'ai-dost-lsp', []);
-      setProblems(0);
-      return;
-    }
-    const markerSeverity = monaco.MarkerSeverity;
-    const markers = diagnostics.map((d) => ({
-      startLineNumber: d.line || 1,
-      startColumn: (d.column || 1) + 1,
-      endLineNumber: d.line || 1,
-      endColumn: (d.column || 1) + 50,
-      message: d.message || 'Issue',
-      severity: d.severity === 'error' ? markerSeverity.Error : d.severity === 'info' ? markerSeverity.Info : markerSeverity.Warning,
-    }));
-    monaco.editor.setModelMarkers(model, 'ai-dost-lsp', markers);
-    setProblems(diagnostics.length);
-  }, []);
-
-  const runDiagnostics = useCallback((path, content) => {
-    const ext = (path || '').split('.').pop();
-    const lang = LANG_BY_EXT[ext];
-    if (!lang) return;
-    if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
-    diagTimerRef.current = setTimeout(async () => {
-      try {
-        const res = await api.post('/agent/lsp-diagnostics', { code: content, language: lang });
-        setMarkers(path, Array.isArray(res.data?.diagnostics) ? res.data.diagnostics : []);
-      } catch (e) { /* LSP offline */ }
-    }, 500);
-  }, [setMarkers]);
-
-  const handleEditorMount = (editor, monaco) => {
-    editorRef.current = editor;
-    monacoRef.current = monaco;
-    if (activePath) runDiagnostics(activePath, activeContent);
-    const pending = pendingRevealRef.current;
-    if (pending && pending.path === activePath) {
-      pendingRevealRef.current = null;
-      const line = Math.max(1, pending.line || 1);
-      try {
-        editor.revealLineInCenter(line);
-        editor.setPosition({ lineNumber: line, column: 1 });
-        editor.focus();
-      } catch (_) {}
-    }
-  };
-
-  // Clear diagnostics when switching files
+  // Preview Iframe Auto-Fix & Inspector message listener
   useEffect(() => {
-    if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
-    setProblems(0);
-    if (activePath) runDiagnostics(activePath, activeContent);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePath]);
+    const handleMessage = (e) => {
+      if (!e.data || typeof e.data !== 'object') return;
+      if (e.data.type === 'AUTO_FIX_ERROR') {
+        showToast('⚡ Sending runtime error to Copilot for auto-healing...', 'info');
+        handleSend(`Fix this runtime error in the application: ${e.data.error}`);
+      } else if (e.data.type === 'INSPECT_ELEMENT') {
+        const promptText = `Edit the <${e.data.tag}> element (class: "${e.data.className}", text: "${e.data.text}"): `;
+        setCopilotInput(promptText);
+        showToast(`🎯 Selected <${e.data.tag}> in inspector! Type your edit instructions in chat.`, 'success');
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [handleSend, showToast]);
+
+  // ── File & Folder CRUD + New Project Handlers ──────────────────────────────
+  const handleCreateFile = async (parentFolder = '') => {
+    const name = window.prompt(parentFolder ? `Create new file inside ${parentFolder}:` : 'Enter new file name (e.g. src/components/Card.jsx):');
+    if (!name || !name.trim()) return;
+    const fullPath = parentFolder ? `${parentFolder}/${name.trim()}` : name.trim();
+    try {
+      await api.post(`/memory/project/${projectId}/file`, { path: fullPath, content: '' });
+      setContents(prev => ({ ...prev, [fullPath]: '' }));
+      setFiles(prev => [...prev, { path: fullPath, content: '', lastModified: Date.now() }]);
+      setOpenTabs(prev => prev.includes(fullPath) ? prev : [...prev, fullPath]);
+      setActivePath(fullPath);
+      showToast(`📄 Created file ${fullPath}`, 'success');
+    } catch (err) {
+      showToast(`Create file failed: ${err.message}`, 'error');
+    }
+  };
+
+  const handleCreateFolder = async (parentFolder = '') => {
+    const name = window.prompt(parentFolder ? `Create folder inside ${parentFolder}:` : 'Enter new folder name (e.g. src/utils):');
+    if (!name || !name.trim()) return;
+    const fullPath = parentFolder ? `${parentFolder}/${name.trim()}` : name.trim();
+    try {
+      await api.post(`/memory/project/${projectId}/folder`, { path: fullPath });
+      const placeholderFile = `${fullPath}/.gitkeep`;
+      setContents(prev => ({ ...prev, [placeholderFile]: '' }));
+      setFiles(prev => [...prev, { path: placeholderFile, content: '', lastModified: Date.now() }]);
+      showToast(`📁 Created folder ${fullPath}`, 'success');
+    } catch (err) {
+      showToast(`Create folder failed: ${err.message}`, 'error');
+    }
+  };
+
+  const handleRename = async (oldPath) => {
+    const newName = window.prompt(`Rename "${oldPath}" to:`, oldPath);
+    if (!newName || !newName.trim() || newName.trim() === oldPath) return;
+    const newPath = newName.trim();
+    try {
+      await api.post(`/memory/project/${projectId}/rename`, { oldPath, newPath });
+      const oldContent = contents[oldPath] || '';
+      setContents(prev => {
+        const next = { ...prev, [newPath]: oldContent };
+        delete next[oldPath];
+        return next;
+      });
+      setFiles(prev => prev.map(f => f.path === oldPath ? { ...f, path: newPath } : f));
+      setOpenTabs(prev => prev.map(t => t === oldPath ? newPath : t));
+      if (activePath === oldPath) setActivePath(newPath);
+      showToast(`✏️ Renamed to ${newPath}`, 'success');
+    } catch (err) {
+      showToast(`Rename failed: ${err.message}`, 'error');
+    }
+  };
+
+  const handleDelete = async (filePath) => {
+    if (!window.confirm(`Are you sure you want to delete "${filePath}"?`)) return;
+    try {
+      await api.delete(`/memory/project/${projectId}/file`, { data: { path: filePath } });
+      setContents(prev => {
+        const next = { ...prev };
+        delete next[filePath];
+        return next;
+      });
+      setFiles(prev => prev.filter(f => f.path !== filePath));
+      setOpenTabs(prev => prev.filter(t => t !== filePath));
+      if (activePath === filePath) setActivePath(null);
+      showToast(`🗑️ Deleted ${filePath}`, 'info');
+    } catch (err) {
+      showToast(`Delete failed: ${err.message}`, 'error');
+    }
+  };
+
+  const handleDeleteFolder = async (folderPath) => {
+    if (!window.confirm(`Are you sure you want to delete folder "${folderPath}" and all its contents?`)) return;
+    try {
+      await api.delete(`/memory/project/${projectId}/folder`, { data: { path: folderPath } });
+      setFiles(prev => prev.filter(f => !f.path.startsWith(folderPath)));
+      setContents(prev => {
+        const next = { ...prev };
+        Object.keys(next).forEach(k => {
+          if (k.startsWith(folderPath)) delete next[k];
+        });
+        return next;
+      });
+      setOpenTabs(prev => prev.filter(t => !t.startsWith(folderPath)));
+      if (activePath && activePath.startsWith(folderPath)) setActivePath(null);
+      showToast(`🗑️ Deleted folder ${folderPath}`, 'info');
+    } catch (err) {
+      showToast(`Delete folder failed: ${err.message}`, 'error');
+    }
+  };
+
+  const handleNewProject = async () => {
+    if (files.length > 0 && !window.confirm('Start a new project? Current project files will be reset.')) return;
+    try {
+      await api.delete(`/memory/project/${projectId}`);
+      setFiles([]);
+      setContents({});
+      setOpenTabs([]);
+      setActivePath(null);
+      setCopilotMessages([]);
+      setPlanTasks([]);
+      setCopilotStatus({ label: '', tone: 'info' });
+      setWorkspaceMode('code');
+      showToast('✨ Fresh new project initialized! Select a starter template below.', 'success');
+    } catch (err) {
+      showToast(`New project error: ${err.message}`, 'error');
+    }
+  };
 
   return (
-    <div className="h-full flex flex-col overflow-hidden" style={{ backgroundColor: 'var(--color-bg-default)' }}>
-      {/* Title bar */}
-      <div className="flex items-center gap-2 px-3 py-1.5 shrink-0" style={{ backgroundColor: 'var(--color-bg-elevated)', borderBottom: '1px solid var(--color-border)' }}>
-        <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]" />
-        <span className="w-2.5 h-2.5 rounded-full bg-[#febc2e]" />
-        <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
-        <span className="ml-3 text-[11px] font-medium truncate" style={{ color: 'var(--color-text-muted)' }}>
-          {projectName} — AI-Dost Copilot
-        </span>
-        <div className="ml-auto flex items-center gap-2">
+    <div className="h-full w-full flex flex-col bg-[#0b0c10] text-zinc-100 select-none overflow-hidden font-sans">
+      {/* ── TOP ACTION BAR (Clean Bolt.new style header) ────────────────────────── */}
+      <header className="h-12 shrink-0 flex items-center justify-between px-4 bg-[#10121a] border-b border-[#1f2333] z-20">
+        {/* Left: Project identity + New Project button */}
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-500 shadow-md shadow-indigo-600/30">
+            <Sparkles size={16} className="text-white" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xs font-bold text-white tracking-tight">{projectName}</h1>
+              <span className="text-[10px] font-mono px-2 py-0.2 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                Live
+              </span>
+            </div>
+            <span className="text-[10px] text-zinc-400 font-mono">React 19 • Express • Vite • SQLite</span>
+          </div>
+
+          <button
+            onClick={handleNewProject}
+            className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 transition-all shadow-sm cursor-pointer"
+            title="Create a fresh empty project"
+          >
+            <Plus size={13} /> New Project
+          </button>
+        </div>
+
+        {/* Center: Workspace Mode Switcher (Code Editor vs Live Preview) */}
+        <div className="flex items-center bg-[#090a0f] p-1 rounded-xl border border-[#23273b] shadow-inner">
+          <button
+            onClick={() => setWorkspaceMode('code')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              workspaceMode === 'code'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Code size={14} /> Code Editor
+          </button>
+
+          <button
+            onClick={() => setWorkspaceMode('preview')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              workspaceMode === 'preview'
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Eye size={14} /> Live Preview
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          </button>
+        </div>
+
+        {/* Right: Quick Launchers */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => openProjectWizard()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-indigo-600/20 to-purple-600/20 hover:from-indigo-600/30 hover:to-purple-600/30 text-indigo-300 border border-indigo-500/40 transition-all cursor-pointer hover:scale-[1.02]"
+            title="Launch Project Architect Wizard"
+          >
+            <Sparkles size={13} className="text-indigo-400" /> App Wizard
+          </button>
+
           <button
             onClick={saveAllFiles}
             disabled={dirtyPaths.size === 0}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] transition-all cursor-pointer disabled:opacity-40"
-            style={{ background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.3)', color: 'var(--color-success)' }}
-            title="Sab dirty files save karo (Ctrl+Shift+S)"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium bg-[#1a1d2d] hover:bg-[#23273b] text-zinc-300 hover:text-white border border-[#2d324d] transition-all disabled:opacity-40 cursor-pointer"
+            title="Save all modified files"
           >
-            <SaveAll className="w-3.5 h-3.5 stroke-[1.5]" /> Save All{dirtyPaths.size ? ` (${dirtyPaths.size})` : ''}
+            <SaveAll size={13} className="text-emerald-400" />
+            Save{dirtyPaths.size > 0 ? ` (${dirtyPaths.size})` : ''}
           </button>
-          <button
-            onClick={() => setSidebarHidden(h => !h)}
-            className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] cursor-pointer"
-            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
-            title="Toggle sidebar (Ctrl+B)"
-          >
-            {sidebarHidden ? <PanelLeftOpen className="w-3.5 h-3.5 stroke-[1.5]" /> : <PanelLeftClose className="w-3.5 h-3.5 stroke-[1.5]" />} Sidebar
-          </button>
-          <button
-            onClick={addFile}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] cursor-pointer"
-            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
-          >
-            <Plus className="w-3.5 h-3.5 stroke-[1.5]" /> New File
-          </button>
-          <button
-            onClick={() => openProjectWizard()}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold cursor-pointer transition-all hover:scale-[1.02]"
-            style={{
-              background: 'linear-gradient(135deg, rgba(59,130,246,0.2) 0%, rgba(99,102,241,0.2) 100%)',
-              border: '1px solid rgba(99,102,241,0.4)',
-              color: '#93c5fd',
-              boxShadow: '0 0 10px rgba(59,130,246,0.15)'
-            }}
-            title="Interactive Project Architect Wizard (v0 / Lovable style)"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-blue-400" /> App Wizard
-          </button>
-          <button
-            onClick={addFolder}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] cursor-pointer"
-            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
-          >
-            <FolderTree className="w-3.5 h-3.5 stroke-[1.5]" /> New Folder
-          </button>
-          <button
-            onClick={() => setPreviewOpen(!previewOpen)}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] cursor-pointer transition-all hover:opacity-80"
-            style={{
-              background: previewOpen ? 'rgba(52,211,153,0.15)' : 'rgba(255,255,255,0.05)',
-              border: '1px solid ' + (previewOpen ? 'rgba(52,211,153,0.4)' : 'var(--color-border)'),
-              color: '#34d399',
-            }}
-            title={previewOpen ? 'Preview band karo' : 'Project preview IDE ke andar kholo'}
-          >
-            <Eye className="w-3.5 h-3.5 stroke-[1.5]" /> Preview
-          </button>
+
           <a
             href={`${BACKEND}/api/preview/${projectId}/zip`}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] cursor-pointer"
-            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
-            title="Workspace zip download"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-[#1a1d2d] hover:bg-[#23273b] text-zinc-300 hover:text-white border border-[#2d324d] transition-all cursor-pointer"
+            title="Download ZIP with Windows & Mac double-click launchers"
           >
-            <Download className="w-3.5 h-3.5 stroke-[1.5]" /> Zip
+            <Download size={13} className="text-blue-400" /> ZIP
           </a>
         </div>
-      </div>
+      </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Activity bar */}
-        <div className="w-12 shrink-0 flex flex-col items-center py-2 space-y-3" style={{ backgroundColor: 'var(--color-bg-elevated)', borderRight: '1px solid var(--color-border)' }}>
-          {[
-            { id: 'explorer', icon: FolderTree, title: 'Explorer' },
-            { id: 'search', icon: Search, title: 'Search' },
-            { id: 'git', icon: GitBranch, title: 'Source Control' },
-            { id: 'extensions', icon: Puzzle, title: 'Extensions' },
-          ].map(({ id, icon: Icon, title }) => (
-            <button
-              key={id}
-              onClick={() => setActivityBar(id === activityBar ? 'explorer' : id)}
-              title={title}
-              className="w-9 h-9 rounded-lg flex items-center justify-center transition-all cursor-pointer"
-              style={{
-                background: activityBar === id ? 'var(--gradient-primary)' : 'transparent',
-                color: activityBar === id ? '#fff' : 'var(--color-text-muted)',
-                boxShadow: activityBar === id ? '0 0 12px var(--color-primary-glow)' : 'none',
-              }}
-            >
-              <Icon size={18} />
-            </button>
-          ))}
-        </div>
-
-        {/* Sidebar panel */}
-        {!sidebarHidden && (
-        <div className="w-52 shrink-0 flex flex-col" style={{ backgroundColor: 'var(--color-bg-hover)', borderRight: '1px solid var(--color-border)' }}>
-          <div className="flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
-            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-muted)' }}>
-              {activityBar === 'explorer' ? 'Explorer' : activityBar === 'git' ? 'Source Control' : activityBar === 'search' ? 'Search' : 'Extensions'}
-            </span>
-            {activityBar === 'explorer' && (
-              <div className="flex items-center gap-1">
-                <button onClick={addFolder} title="New folder" className="cursor-pointer p-0.5 hover:opacity-80" style={{ color: 'var(--color-text-muted)' }}>
-                  <FolderTree className="w-4 h-4 stroke-[1.5]" />
-                </button>
-                <button onClick={addFile} title="New file" className="cursor-pointer p-0.5 hover:opacity-80" style={{ color: 'var(--color-text-muted)' }}>
-                  <Plus className="w-4 h-4 stroke-[1.5]" />
-                </button>
-                <button onClick={() => {
-                  onToast('Rebuilding RAG Index...', 'info');
-                  fetch('http://127.0.0.1:8001/ai/rag/index', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ directory: projectId })
-                  }).then(() => onToast('Index synced!', 'success')).catch(() => onToast('Index failed', 'error'));
-                }} title="Sync AI Context Index" className="cursor-pointer p-0.5 hover:opacity-80" style={{ color: 'var(--color-text-muted)', marginLeft: 4 }}>
-                  <Database className="w-3.5 h-3.5 stroke-[1.5]" />
-                </button>
+      {/* ── 2. MASTER 2-COLUMN SPLIT (Left: AI Copilot | Right: Code/Preview) ───── */}
+      <div className="flex-1 flex overflow-hidden min-h-0">
+        
+        {/* ── LEFT PANE: AI COPILOT CHAT & AUTONOMOUS ENGINE ─────────────────── */}
+        <aside className="w-[430px] shrink-0 flex flex-col bg-[#0f1118] border-r border-[#1f2333] z-10">
+          
+          {/* Copilot Header */}
+          <div className="flex items-center justify-between px-4 py-3 bg-[#131622] border-b border-[#1f2333]">
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 absolute inset-0 animate-ping opacity-75" />
               </div>
-            )}
-          </div>
-          <div className="flex-1 overflow-y-auto py-2">
-            {loadingFiles ? (
-              <div className="px-3 space-y-2"><div className="h-4 rounded skeleton" /><div className="h-4 rounded skeleton w-3/4" /><div className="h-4 rounded skeleton w-1/2" /></div>
-            ) : activityBar === 'explorer' ? (
-              <TreeView
-                node={tree}
-                activePath={activePath}
-                onSelect={selectFile}
-                onCtx={openCtxMenu}
-                onNewFileInFolder={createFileInFolder}
-                onNewFolderInFolder={createFolderInFolder}
-              />
-            ) : (
-              <div className="px-3 py-2 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
-                {activityBar === 'git'
-                  ? 'Local-only git. GitControlModal dashboard me hai.'
-                  : 'Monaco native support: 15+ languages. Har file ka syntax highlighting automatic.'}
-              </div>
-            )}
-          </div>
-        </div>
-        )}
-
-        {/* Editor + Terminal */}
-        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-          {/* Tabs */}
-          <div className="flex items-center gap-1 px-2 pt-1.5 shrink-0 overflow-x-auto" style={{ backgroundColor: 'var(--color-bg-default)' }}>
-            {openTabs.map((p) => {
-              const f = files.find(ff => ff.path === p);
-              if (!f) return null;
-              const ext = f.path.split('.').pop();
-              const isActive = activePath === f.path;
-              return (
-                <div
-                  key={f.path}
-                  onClick={() => selectFile(f)}
-                  className="group flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 rounded-t-lg text-[11px] transition-colors cursor-pointer shrink-0"
-                  style={{
-                    background: isActive ? '#1a1d26' : 'transparent',
-                    color: isActive ? '#fff' : 'var(--color-text-muted)',
-                    borderTop: isActive ? '2px solid var(--color-primary)' : '2px solid transparent',
-                  }}
-                >
-                  <span className="w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: LANG_COLOR[ext] || '#4b8bfc' }} />
-                  <span className="truncate max-w-32">{f.path.split('/').pop()}</span>
-                  {dirtyPaths.has(f.path) && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#fbbf24' }} />}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); closeTab(f.path); }}
-                    title="Close tab"
-                    className="rounded p-0.5 opacity-0 group-hover:opacity-100 hover:opacity-100 cursor-pointer transition-opacity"
-                    style={{ color: 'var(--color-text-muted)' }}
-                  >
-                    <X className="w-3.5 h-3.5 stroke-[1.5]" />
-                  </button>
-                </div>
-              );
-            })}
-            {openTabs.length === 0 && (
-              <div className="px-3 py-1.5 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
-                No open files — tree se kholo ya New File
-              </div>
-            )}
-          </div>
-
-          {/* Breadcrumb */}
-          {activePath && (
-            <div className="flex items-center gap-1 px-3 py-1 shrink-0 overflow-x-auto" style={{ background: '#13151b', borderBottom: '1px solid var(--color-border)' }}>
-              {activePath.split('/').map((seg, i, arr) => (
-                <span key={i} className="flex items-center gap-1 shrink-0 text-[10px]">
-                  <span style={{ color: i === arr.length - 1 ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }} className={i === arr.length - 1 ? 'font-semibold' : 'hover:opacity-80 cursor-pointer'} onClick={() => {
-                    if (i < arr.length - 1) {
-                      const folder = arr.slice(0, i + 1).join('/');
-                      const firstInFolder = files.find(f => f.path.startsWith(folder + '/'));
-                      if (firstInFolder) selectFile(firstInFolder);
-                    }
-                  }}>
-                    {seg}
-                  </span>
-                  {i < arr.length - 1 && <ChevronRight className="w-2.5 h-2.5" style={{ color: 'var(--color-text-muted)' }} />}
-                </span>
-              ))}
-            </div>
-          )}
-
-          {/* Monaco Editor Pane */}
-          <div className="flex-1 min-h-0 relative flex">
-            <div className="flex-1 min-h-0 relative flex flex-col" style={{ display: previewOpen && previewTarget ? 'none' : 'flex' }}>
-              {activePath ? (
-                <MonacoEditor
-                  height="100%"
-                  language={activeLang}
-                  value={activeContent}
-                  onMount={handleEditorMount}
-                  onChange={(v) => {
-                    const p = activePath;
-                    if (!p) return;
-                    setFileContent(p, v || '');
-                    markDirty(p);
-                    runDiagnostics(p, v || '');
-                  }}
-                  theme="vs-dark"
-                  options={{
-                    automaticLayout: true,
-                    minimap: { enabled: false },
-                    scrollBeyondLastLine: false,
-                    wordWrap: 'on',
-                    fontSize: 13,
-                    fontFamily: "'JetBrains Mono', monospace",
-                    padding: { top: 12 },
-                    scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 },
-                  }}
-                />
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center gap-3 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                  <FolderTree className="w-10 h-10 opacity-30" />
-                  <p>Explorer se file select karo ya nayi file banao</p>
-                  <button
-                    onClick={addFile}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] cursor-pointer hover:opacity-90 transition-opacity"
-                    style={{ background: 'rgba(75,139,252,0.12)', border: '1px solid rgba(75,139,252,0.3)', color: 'var(--color-primary)' }}
-                  >
-                    <Plus className="w-3.5 h-3.5 stroke-[1.5]" /> New File
-                  </button>
-                </div>
-              )}
-            </div>
-
-
-            {/* Live preview iframe — project ke andar hi render hota hai */}
-            {previewOpen && (
-              <div className="flex-1 min-h-0 flex flex-col" style={{ background: '#fff' }}>
-                <div className="flex items-center justify-between px-3 py-1.5 shrink-0" style={{ background: '#13151b', borderBottom: '1px solid var(--color-border)' }}>
-                  <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest" style={{ color: '#34d399' }}>
-                    <Eye className="w-3 h-3" /> Live Preview — {projectId}
-                  </span>
-                  <button
-                    onClick={() => setPreviewOpen(false)}
-                    className="rounded p-1 cursor-pointer hover:opacity-80"
-                    style={{ color: 'var(--color-text-muted)' }}
-                    title="Close preview"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                {previewTarget ? (
-                  <iframe
-                    key={`${projectId}-${previewTarget?.path || 'index'}`}
-                    src={`${BACKEND}/api/preview/${encodeURIComponent(projectId)}`}
-                    className="flex-1 w-full border-0"
-                    title="Project preview"
-                    sandbox="allow-scripts allow-modals allow-forms allow-popups allow-same-origin"
-                  />
-                ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center gap-3 text-sm" style={{ color: '#666' }}>
-                    <Eye className="w-10 h-10 opacity-30" />
-                    <p>Preview ke liye project me index.html hona chahiye</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Copilot floating button */}
-            <button
-              onClick={() => setCopilotOpen(!copilotOpen)}
-              className="absolute bottom-4 right-4 flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold cursor-pointer z-10"
-              style={{ background: 'var(--gradient-primary)', color: '#fff', boxShadow: '0 8px 30px rgba(75,139,252,0.45)' }}
-              title="Toggle Copilot chat"
-            >
-              <Sparkles className="w-4 h-4 stroke-[1.5]" /> {copilotOpen ? 'Hide Copilot' : 'Copilot'}
-            </button>
-          </div>
-
-          {/* Terminal */}
-          <div className="h-52 shrink-0 flex flex-col" style={{ background: '#0d0f14', borderTop: '1px solid var(--color-border)', display: terminalOpen ? 'flex' : 'none' }}>
-            <div className="flex items-center justify-between px-3 py-1.5" style={{ backgroundColor: 'var(--color-bg-hover)' }}>
-              <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-muted)' }}>
-                <TerminalIcon className="w-3.5 h-3.5 stroke-[1.5]" /> Terminal
+              <span className="text-xs font-bold text-white tracking-wide">AI Copilot</span>
+              <span className="text-[10px] font-mono text-zinc-400 bg-[#1c2033] px-2 py-0.5 rounded-md border border-[#282d47]">
+                Groq + Gemini
               </span>
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={runSingleFile}
-                  disabled={!activePath}
-                  className="px-2 py-0.5 rounded text-[10px] font-semibold cursor-pointer disabled:opacity-40"
-                  style={{ background: 'rgba(52,211,153,0.12)', color: 'var(--color-success)', border: '1px solid rgba(52,211,153,0.25)' }}
-                  title="Run active file"
-                >
-                  <Play className="w-3 h-3 inline mr-0.5" />Run
-                </button>
-                <button onClick={() => { terminalRef.current?.clear(); }} className="cursor-pointer" style={{ color: 'var(--color-text-muted)' }} title="Clear terminal">
-                  <Eraser className="w-4 h-4 stroke-[1.5]" />
-                </button>
-                <button onClick={() => setTerminalOpen(false)} className="cursor-pointer" style={{ color: 'var(--color-text-muted)' }} title="Close terminal">
-                  <X className="w-4 h-4 stroke-[1.5]" />
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 min-h-0">
-              <TerminalPanel innerRef={terminalRef} projectId={projectId} projectPath="" />
-            </div>
-          </div>
-        </div>
-
-        {/* Copilot chat panel */}
-        {copilotOpen && (
-          <div className="w-96 shrink-0 flex flex-col" style={{ backgroundColor: 'var(--color-bg-hover)', borderLeft: '1px solid var(--color-border)' }}>
-            <div className="flex items-center justify-between px-3 py-2.5 border-b" style={{ borderColor: 'var(--color-border)' }}>
-              <span className="flex items-center gap-2 text-xs font-bold" style={{ color: 'var(--color-text-primary)' }}>
-                <span className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: 'var(--gradient-primary)' }}>
-                  <Sparkles className="w-3.5 h-3.5 text-white" />
-                </span>
-                Copilot
-              </span>
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => setPlanGate(g => !g)}
-                  title={planGate ? 'Plan gate ON — pehle plan dikhega, approve pe run hoga' : 'Autopilot — plan gate OFF, turant run'}
-                  className="px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer transition-all"
-                  style={{
-                    background: planGate ? 'rgba(75,139,252,0.15)' : 'rgba(255,255,255,0.05)',
-                    border: planGate ? '1px solid rgba(75,139,252,0.4)' : '1px solid var(--color-border)',
-                    color: planGate ? 'var(--color-primary)' : 'var(--color-text-muted)',
-                  }}
-                >
-                  {planGate ? '🛡 Plan' : '⚡ Auto'}
-                </button>
-                <button
-                  onClick={() => setShowInstructions(s => !s)}
-                  className="p-1 rounded-md cursor-pointer transition-all"
-                  style={{
-                    background: showInstructions ? 'rgba(75,139,252,0.15)' : 'transparent',
-                    color: showInstructions ? 'var(--color-primary)' : 'var(--color-text-muted)',
-                  }}
-                  title="Custom instructions"
-                >
-                  <Settings2 className="w-4 h-4 stroke-[1.5]" />
-                </button>
-                <button onClick={() => setCopilotOpen(false)} className="cursor-pointer" style={{ color: 'var(--color-text-muted)' }}>
-                  <X className="w-4 h-4 stroke-[1.5]" />
-                </button>
-              </div>
             </div>
 
-            {/* Custom instructions */}
-            {showInstructions && (
-              <div className="px-3 py-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
-                <textarea
-                  value={customInstructions}
-                  onChange={(e) => setCustomInstructions(e.target.value)}
-                  rows={3}
-                  placeholder="Custom instructions... e.g. 'Sirf .html/.css/.js files banao', 'Hinglish me explain karo', 'Har file ke end me TODO comment add karo'"
-                  className="w-full text-[10px] focus:outline-none resize-none rounded-md p-2"
-                  style={{ color: 'var(--color-text-primary)', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}
-                />
-              </div>
-            )}
-
-            {/* Live process status */}
-            {copilotStatus.label && (
-              <div
-                className="flex items-center gap-2 px-3 py-2 border-b"
-                style={{
-                  background: copilotStatus.tone === 'error' ? 'rgba(248,113,113,0.1)' : copilotStatus.tone === 'success' ? 'rgba(52,211,153,0.1)' : copilotStatus.tone === 'selfheal' ? 'rgba(251,191,36,0.1)' : 'rgba(75,139,252,0.08)',
-                  borderColor: 'var(--color-border)',
-                }}
-              >
-                {(copilotStatus.tone === 'work' || copilotStatus.tone === 'info') && (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: copilotStatus.tone === 'work' ? '#34d399' : '#6cb2ff' }} />
-                )}
-                {copilotStatus.tone === 'success' && <span className="text-[10px]" style={{ color: 'var(--color-success)' }}>✔</span>}
-                {copilotStatus.tone === 'error' && <span className="text-[10px]" style={{ color: 'var(--color-warning)' }}>✖</span>}
-                <span
-                  className={`text-[11px] font-semibold truncate ${copilotStatus.tone === 'work' ? 'copilot-status-pulse' : ''}`}
-                  style={{
-                    color: copilotStatus.tone === 'error' ? '#f87171' : copilotStatus.tone === 'success' ? '#34d399' : copilotStatus.tone === 'selfheal' ? '#fbbf24' : 'var(--color-text-primary)',
-                  }}
-                >
-                  {copilotStatus.label}
-                </span>
-              </div>
-            )}
-
-            {/* Plan tasks — live progress list (Bolt.new / Replit style) */}
-            {planTasks.length > 0 && (
-              <div className="px-3 py-2.5 border-b space-y-2 bg-black/20" style={{ borderColor: 'var(--color-border)' }}>
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5">
-                    <Sparkles className="w-3 h-3 text-blue-400" />
-                    Task Milestones ({planTasks.filter(t => t.status === 'completed').length}/{planTasks.length})
-                  </span>
-                  <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold" style={{ background: 'rgba(59,130,246,0.15)', color: '#93c5fd' }}>
-                    {Math.round((planTasks.filter(t => t.status === 'completed').length / Math.max(1, planTasks.length)) * 100)}%
-                  </span>
-                </div>
-                {/* Progress Bar */}
-                <div className="w-full h-1 rounded-full bg-white/10 overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-blue-500 to-emerald-400 transition-all duration-300"
-                    style={{ width: `${Math.round((planTasks.filter(t => t.status === 'completed').length / Math.max(1, planTasks.length)) * 100)}%` }}
-                  />
-                </div>
-                <div className="space-y-1 pt-0.5 max-h-28 overflow-y-auto">
-                  {planTasks.map((t, idx) => (
-                    <div key={t.id || idx} className="flex items-center justify-between text-[11px]">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0 ${
-                          t.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-                          t.status === 'in_progress' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
-                          'bg-white/5 text-zinc-500 border border-white/10'
-                        }`}>
-                          {t.status === 'completed' ? '✓' : t.status === 'in_progress' ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : idx + 1}
-                        </span>
-                        <span className={`truncate font-medium ${
-                          t.status === 'completed' ? 'text-emerald-400' :
-                          t.status === 'in_progress' ? 'text-blue-300 font-semibold' :
-                          'text-zinc-400'
-                        }`}>
-                          {t.title || t.description || t.name || ''}
-                        </span>
-                      </div>
-                      <span className="text-[9px] capitalize text-zinc-500 shrink-0 font-mono ml-2">
-                        {t.status === 'in_progress' ? 'Running' : t.status}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div ref={endRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
-              {pendingPlan && (
-                <div className="rounded-lg p-3 space-y-2" style={{ background: 'rgba(75,139,252,0.08)', border: '1px solid rgba(75,139,252,0.3)' }}>
-                  <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-primary)' }}>
-                    🛡 Plan — approve karo
-                  </p>
-                  <div className="space-y-1">
-                    {pendingPlan.tasks.map((t, i) => (
-                      <div key={t.id || i} className="flex items-start gap-1.5 text-[10px]">
-                        <span style={{ color: 'var(--color-primary)' }}>▸</span>
-                        <span style={{ color: 'var(--color-text-secondary)' }}>{t.title}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex gap-1.5 pt-1">
-                    <button
-                      onClick={approvePlan}
-                      className="flex-1 px-2 py-1.5 rounded-md text-[10px] font-bold cursor-pointer hover:opacity-90 transition-opacity"
-                      style={{ background: 'var(--gradient-primary)', color: '#fff' }}
-                    >
-                      ✅ Approve — Run karo
-                    </button>
-                    <button
-                      onClick={cancelPlan}
-                      className="flex-1 px-2 py-1.5 rounded-md text-[10px] cursor-pointer hover:opacity-90 transition-opacity"
-                      style={{ background: 'rgba(248,113,113,0.12)', color: 'var(--color-warning)', border: '1px solid rgba(248,113,113,0.3)' }}
-                    >
-                      ❌ Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-              {copilotMessages.map((m, i) => {
-                if (m.role === 'thinking') {
-                  return (
-                    <div key={i} className="flex justify-center">
-                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px]" style={{ background: 'rgba(75,139,252,0.08)', border: '1px solid rgba(75,139,252,0.15)', color: 'var(--color-text-muted)' }}>
-                        <Loader2 className="w-3 h-3 animate-spin" style={{ color: 'var(--color-info)' }} /> {m.content}
-                      </div>
-                    </div>
-                  );
-                }
-                if (m.kind === 'thought') {
-                  return (
-                    <div key={i} className="flex gap-2 items-start">
-                      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.3)' }}>
-                        <Sparkles className="w-3 h-3 text-blue-400" />
-                      </div>
-                      <div className="flex-1 px-3 py-2 rounded-xl text-[11px] leading-relaxed" style={{ background: 'rgba(59,130,246,0.05)', border: '1px solid rgba(59,130,246,0.15)', color: '#bfdbfe' }}>
-                        <span className="font-semibold text-blue-400 block text-[9px] uppercase tracking-wider mb-0.5">🧠 Agent Reasoning</span>
-                        {m.content}
-                      </div>
-                    </div>
-                  );
-                }
-                if (m.kind === 'file') {
-                  return (
-                    <div key={i} className="flex gap-2 items-start">
-                      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(52,211,153,0.15)', border: '1px solid rgba(52,211,153,0.3)' }}>
-                        <FilePlus2 className="w-3 h-3 text-[#34d399]" />
-                      </div>
-                      <div className="flex-1 flex items-center justify-between px-3 py-2 rounded-xl text-[11px]" style={{ background: 'rgba(52,211,153,0.05)', border: '1px solid rgba(52,211,153,0.2)' }}>
-                        <span className="font-mono font-medium text-emerald-300 truncate">
-                          📄 {m.file || m.content}
-                        </span>
-                        {m.file && (
-                          <button
-                            onClick={() => selectFile({ path: m.file })}
-                            className="text-[10px] px-2 py-0.5 rounded font-medium cursor-pointer transition-opacity hover:opacity-80 shrink-0 ml-2"
-                            style={{ background: 'rgba(52,211,153,0.2)', color: '#6ee7b7' }}
-                          >
-                            Open Tab
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                }
-                if (m.kind === 'checkpoint') {
-                  return (
-                    <div key={i} className="flex gap-2">
-                      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(251,191,36,0.12)' }}>
-                        <RotateCcw className="w-3 h-3 text-[#fbbf24]" />
-                      </div>
-                      <div className="flex-1 space-y-1">
-                        <p className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
-                          ⏸ Snapshot step {m.step} — {m.files.length} files
-                        </p>
-                        <button
-                          onClick={() => rollbackTo(m.dir)}
-                          disabled={running}
-                          className="px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer disabled:opacity-40 hover:opacity-90 transition-opacity"
-                          style={{ background: 'rgba(251,191,36,0.15)', color: 'var(--color-accent)', border: '1px solid rgba(251,191,36,0.3)' }}
-                          title="Is step pe wapas jao (agent ke changes undo)"
-                        >
-                          ⏪ Rollback to step {m.step}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                }
-                if (m.kind === 'commit') {
-                  return (
-                    <div key={i} className="flex gap-2">
-                      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(97,175,239,0.12)' }}>
-                        <GitBranch className="w-3 h-3 text-[#61afef]" />
-                      </div>
-                      <p className="text-[10px] font-mono" style={{ color: '#61afef' }}>
-                        🔀 commit {m.hash}
-                      </p>
-                    </div>
-                  );
-                }
-                if (m.kind === 'tool') {
-                  return (
-                    <div key={i} className="flex gap-2">
-                      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(52,211,153,0.15)' }}>
-                        <Bot className="w-3 h-3 text-[#34d399]" />
-                      </div>
-                      <pre className="text-[10px] whitespace-pre-wrap font-mono rounded-md px-2 py-1.5 flex-1 overflow-x-auto" style={{ background: '#0d0f14', border: '1px solid var(--color-border)', color: '#a5f3c5' }}>
-                        {m.content}
-                      </pre>
-                    </div>
-                  );
-                }
-                if (m.kind === 'term') {
-                  return (
-                    <div key={i} className="flex gap-2">
-                      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(97,175,239,0.12)' }}>
-                        <TerminalIcon className="w-3 h-3 text-[#61afef]" />
-                      </div>
-                      <pre className="text-[10px] whitespace-pre-wrap font-mono rounded-md px-2 py-1.5 flex-1 overflow-x-auto" style={{ background: '#000', border: '1px solid rgba(97,175,239,0.2)', color: '#c9d1d9' }}>
-                        {m.content}
-                      </pre>
-                    </div>
-                  );
-                }
-                if (m.kind === 'screenshot') {
-                  return (
-                    <div key={i} className="flex gap-2 items-start">
-                      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(168,85,247,0.15)', border: '1px solid rgba(168,85,247,0.3)' }}>
-                        <Eye className="w-3 h-3 text-purple-400" />
-                      </div>
-                      <div className="flex-1 p-2.5 rounded-xl border space-y-2" style={{ background: 'rgba(0,0,0,0.4)', borderColor: 'rgba(168,85,247,0.3)' }}>
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-semibold text-purple-300 flex items-center gap-1.5">
-                            📸 {m.message || 'Live Application UI Snapshot'}
-                          </span>
-                          <button
-                            onClick={() => window.open(m.url || 'http://localhost:3000', '_blank')}
-                            className="text-[9px] px-2 py-0.5 rounded font-medium cursor-pointer transition-opacity hover:opacity-80"
-                            style={{ background: 'rgba(168,85,247,0.25)', color: '#d8b4fe' }}
-                          >
-                            Open Live App ↗
-                          </button>
-                        </div>
-                        {m.image && (
-                          <img
-                            src={m.image}
-                            alt="Live app preview"
-                            className="rounded-lg border border-white/10 w-full max-h-56 object-cover cursor-pointer hover:opacity-95 transition-opacity"
-                            onClick={() => window.open(m.url || 'http://localhost:3000', '_blank')}
-                          />
-                        )}
-                      </div>
-                    </div>
-                  );
-                }
-                if (m.kind === 'aistudio_card') {
-                  return (
-                    <AiStudioResponseCard
-                      key={i}
-                      message={m}
-                      onSelectFile={selectFile}
-                      onOpenDiff={() => setDiffOpen(true)}
-                      onRollback={rollbackTo}
-                      onOpenPreview={() => window.open('http://localhost:3000', '_blank')}
-                    />
-                  );
-                }
-                if (m.kind === 'done') {
-                  return (
-                    <div key={i} className="flex gap-2 items-start">
-                      <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }}>
-                        <Bot className="w-3 h-3 text-white" />
-                      </div>
-                      <div className="flex-1 p-3 rounded-xl border space-y-2" style={{ background: 'rgba(16,185,129,0.06)', borderColor: 'rgba(16,185,129,0.3)' }}>
-                        <div
-                          className="ai-studio-markdown"
-                          dangerouslySetInnerHTML={{
-                            __html: DOMPurify.sanitize(marked.parse(m.content || ''))
-                          }}
-                        />
-                        <div className="flex gap-2 pt-1">
-                          <button
-                            onClick={() => window.open('http://localhost:3000', '_blank')}
-                            className="px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer transition-all hover:scale-[1.02]"
-                            style={{ background: 'linear-gradient(135deg, #3b82f6, #6366f1)', color: '#fff' }}
-                          >
-                            🌐 Open Live Preview (New Tab)
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-                const isUser = m.role === 'user';
-                if (isUser) {
-                  return (
-                    <div key={i} className="flex justify-end">
-                      <div
-                        className="max-w-[85%] px-3 py-2 rounded-2xl rounded-br-md text-[11px] leading-relaxed whitespace-pre-wrap"
-                        style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', color: '#fff', boxShadow: '0 2px 10px rgba(124,58,237,0.25)' }}
-                      >
-                        {m.content}
-                      </div>
-                    </div>
-                  );
-                }
-                return (
-                  <div key={i} className="flex gap-2.5 items-start">
-                    <div
-                      className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
-                      style={{ background: 'var(--gradient-primary)' }}
-                    >
-                      <Bot className="w-3.5 h-3.5 text-white" />
-                    </div>
-                    <div
-                      className="max-w-[90%] px-3.5 py-2.5 rounded-2xl rounded-bl-md text-[12px] leading-relaxed border space-y-1 bg-zinc-900/60 border-zinc-800"
-                    >
-                      <div
-                        className="ai-studio-markdown"
-                        dangerouslySetInnerHTML={{
-                          __html: DOMPurify.sanitize(marked.parse(m.content || ''))
-                        }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Quick prompts */}
-            {latestRunId && runChangeCount > 0 && (
-              <div className="px-3 pb-2">
-                <button
-                  onClick={() => setDiffOpen(true)}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[11px] font-semibold cursor-pointer hover:opacity-90 transition-opacity"
-                  style={{ background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', color: 'var(--color-accent)' }}
-                  title="Agent ke changes ka diff dekho — file per revert bhi kar sakte ho"
-                >
-                  <GitCompareArrows className="w-3.5 h-3.5 shrink-0" />
-                  Review Changes ({runChangeCount})
-                  <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(251,191,36,0.15)', color: 'var(--color-accent)' }}>
-                    diff + revert
-                  </span>
-                </button>
-              </div>
-            )}
-            <div className="px-3 pb-2 grid grid-cols-2 gap-1.5">
-              {QUICK_PROMPTS.map((q) => (
-                <button
-                  key={q.label}
-                  onClick={() => q.isWizard ? openProjectWizard() : handleSend(q.prompt)}
-                  disabled={running}
-                  className={`px-2 py-1.5 rounded-lg text-[10px] text-left transition-all cursor-pointer disabled:opacity-40 hover:scale-[1.02] ${
-                    q.isWizard ? 'col-span-2 font-semibold text-center' : ''
-                  }`}
-                  style={{
-                    background: q.isWizard ? 'linear-gradient(135deg, rgba(59,130,246,0.18), rgba(99,102,241,0.18))' : 'rgba(75,139,252,0.07)',
-                    border: q.isWizard ? '1px solid rgba(99,102,241,0.35)' : '1px solid rgba(75,139,252,0.2)',
-                    color: q.isWizard ? '#93c5fd' : 'var(--color-primary)'
-                  }}
-                >
-                  {q.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="p-3 border-t flex items-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
-              <textarea
-                value={copilotInput}
-                onChange={(e) => setCopilotInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey || !e.shiftKey)) { e.preventDefault(); handleSend(); } }}
-                rows={2}
-                placeholder="Prompt likho... (Enter = run)"
-                className="flex-1 bg-transparent text-[11px] focus:outline-none resize-none"
-                style={{ color: 'var(--color-text-primary)' }}
-              />
-              {running && (
-                <button
-                  onClick={() => { abortRef.current?.abort(); setCopilotStatus({ label: '⏹ Stopping...', tone: 'error' }); }}
-                  className="w-7 h-7 rounded-lg flex items-center justify-center cursor-pointer"
-                  style={{ background: 'rgba(248,113,113,0.15)', color: 'var(--color-warning)', border: '1px solid rgba(248,113,113,0.3)' }}
-                  title="Stop agent"
-                >
-                  <Square className="w-3 h-3 fill-current" />
-                </button>
-              )}
+            <div className="flex items-center gap-1.5">
               <button
-                onClick={() => handleSend()}
-                disabled={!copilotInput.trim() || running}
-                className="w-7 h-7 rounded-lg flex items-center justify-center cursor-pointer disabled:opacity-40"
-                style={{ background: 'var(--gradient-primary)', color: '#fff' }}
+                onClick={() => setPlanGate(g => !g)}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                  planGate
+                    ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-xs'
+                    : 'bg-[#1a1d2d] text-zinc-400 border-[#2b304a]'
+                }`}
+                title={planGate ? 'Plan Gate ON (Review plan before execution)' : 'Autopilot ON (Instant execution)'}
               >
-                {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-4 h-4 stroke-[1.5]" />}
+                {planGate ? '🛡 Plan' : '⚡ Auto'}
+              </button>
+
+              <button
+                onClick={() => {
+                  setCopilotMessages([]);
+                  setPendingPlan(null);
+                  setPlanTasks([]);
+                  showToast('Chat history cleared', 'info');
+                }}
+                className="p-1.5 rounded-lg hover:bg-[#1f2338] text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                title="Clear Conversation"
+              >
+                <Trash2 size={14} />
               </button>
             </div>
           </div>
-        )}
+
+          {/* Planning Todo Milestones */}
+          {planTasks.length > 0 && (
+            <div className="p-3 bg-[#141724] border-b border-[#23273b] space-y-1.5">
+              <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider flex items-center gap-1.5">
+                <Sparkles size={11} /> Milestone Tasks
+              </span>
+              <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
+                {planTasks.map((t, idx) => (
+                  <div key={idx} className="flex items-center gap-2 text-xs font-mono text-zinc-300">
+                    <span className={t.status === 'completed' ? 'text-emerald-400 font-bold' : 'text-indigo-400 animate-pulse'}>
+                      {t.status === 'completed' ? '✓' : '▸'}
+                    </span>
+                    <span className={t.status === 'completed' ? 'line-through text-zinc-500' : ''}>{t.title}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Chat Messages Scroll Container */}
+          <div ref={endRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+            
+            {/* Empty State: Bolt.new Style Hero Starters */}
+            {copilotMessages.length === 0 && !pendingPlan && (
+              <div className="space-y-4 py-2">
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-900/30 to-purple-900/20 border border-indigo-500/20 shadow-lg text-center space-y-2">
+                  <div className="w-10 h-10 mx-auto rounded-2xl flex items-center justify-center bg-indigo-600/30 text-indigo-400 border border-indigo-500/40">
+                    <Sparkles size={20} />
+                  </div>
+                  <h3 className="text-sm font-bold text-white">What would you like to build?</h3>
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    Describe any fullstack web app in plain English or Hindi. Copilot will architect, code, test, and render live preview automatically.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 px-1">
+                    Try asking Copilot:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      'Hospital Appointment Booking with Doctor Filters',
+                      'Crypto Trading Simulator with Live Portfolio',
+                      'Space Rocket Launch Tracker with Timers',
+                      'Restaurant Food Delivery with Slide-Over Cart'
+                    ].map((promptText, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => handleSend(promptText)}
+                        className="text-left text-xs px-3 py-2 rounded-xl bg-[#151928] hover:bg-[#1f243b] text-zinc-300 hover:text-white border border-[#2a2f4c] transition-all cursor-pointer hover:border-indigo-500/50"
+                      >
+                        ✨ {promptText}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Pending Plan Approval Gate */}
+            {pendingPlan && (
+              <div className="rounded-2xl p-4 bg-[#161a2b] border border-indigo-500/40 space-y-3 shadow-xl animate-in fade-in">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <ShieldCheck size={14} className="text-indigo-400" /> Plan Generated
+                  </span>
+                  <span className="text-[10px] text-zinc-400 font-mono">Approve to proceed</span>
+                </div>
+                <div className="space-y-1.5">
+                  {pendingPlan.tasks.map((t, i) => (
+                    <div key={i} className="flex items-start gap-2 text-xs text-zinc-300 font-mono">
+                      <span className="text-indigo-400">▸</span>
+                      <span>{t.title}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 pt-2 border-t border-[#23273b]">
+                  <button
+                    onClick={approvePlan}
+                    className="flex-1 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-md shadow-indigo-600/30 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Play size={12} className="fill-white" /> Approve & Build
+                  </button>
+                  <button
+                    onClick={cancelPlan}
+                    className="px-3.5 py-2 rounded-xl text-xs font-medium bg-[#1e2235] hover:bg-[#282d47] text-zinc-300 transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Chat Timeline */}
+            {copilotMessages.map((m, i) => {
+              if (m.kind === 'thought') {
+                return (
+                  <div key={i} className="flex gap-2.5 items-start text-xs text-blue-300 font-mono bg-blue-950/20 p-3 rounded-2xl border border-blue-900/30">
+                    <Sparkles size={13} className="text-blue-400 mt-0.5 shrink-0" />
+                    <div>
+                      <span className="font-bold text-blue-400 block text-[9px] uppercase tracking-wider">{m.agent || 'Agent Thought'}</span>
+                      {m.content}
+                    </div>
+                  </div>
+                );
+              }
+              if (m.kind === 'file') {
+                return (
+                  <div key={i} className="flex items-center gap-2 text-xs text-emerald-300 font-mono bg-emerald-950/20 px-3 py-2 rounded-xl border border-emerald-900/30">
+                    <FilePlus2 size={13} className="text-emerald-400 shrink-0" />
+                    <span className="truncate">📄 {m.file || m.content}</span>
+                  </div>
+                );
+              }
+              if (m.kind === 'step') {
+                return (
+                  <div key={i} className="flex items-center gap-2 text-xs text-indigo-300 font-mono bg-indigo-950/20 px-3 py-2 rounded-xl border border-indigo-900/30">
+                    <Zap size={13} className="text-indigo-400 shrink-0" />
+                    <span className="truncate">{m.content}</span>
+                  </div>
+                );
+              }
+              if (m.kind === 'screenshot') {
+                return (
+                  <div key={i} className="space-y-2 p-3 rounded-2xl bg-[#141724] border border-purple-500/30 shadow-xl">
+                    <span className="text-xs font-semibold text-purple-300 flex items-center gap-1.5">
+                      📸 {m.message}
+                    </span>
+                    {m.image && m.image.length > 30 && !m.image.endsWith('undefined') && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={m.image} alt="Live App UI" className="rounded-xl border border-white/10 w-full object-cover shadow-md" />
+                    )}
+                  </div>
+                );
+              }
+              if (m.kind === 'aistudio_card') {
+                return (
+                  <AiStudioResponseCard
+                    key={i}
+                    message={m}
+                    onSelectFile={selectFile}
+                    onOpenDiff={() => setDiffOpen(true)}
+                    onRollback={rollbackTo}
+                    onOpenPreview={() => setWorkspaceMode('preview')}
+                  />
+                );
+              }
+              if (m.role === 'user') {
+                return (
+                  <div key={i} className="flex justify-end">
+                    <div className="max-w-[85%] px-4 py-2.5 rounded-2xl rounded-tr-xs text-xs leading-relaxed bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md shadow-indigo-600/20 font-medium">
+                      {m.content}
+                    </div>
+                  </div>
+                );
+              }
+              if (!m.content || !m.content.trim()) {
+                return null;
+              }
+              return (
+                <div key={i} className="flex gap-3 items-start">
+                  <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0 bg-gradient-to-br from-indigo-500 to-purple-600 shadow-md">
+                    <Bot size={14} className="text-white" />
+                  </div>
+                  <div
+                    className="max-w-[90%] px-4 py-3 rounded-2xl rounded-tl-xs text-xs leading-relaxed bg-[#151824] border border-[#23273b] text-zinc-200 space-y-1 shadow-md"
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(m.content || '')) }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Floating Prompt Composer */}
+          <div className="p-3 bg-[#10121a] border-t border-[#1f2333] space-y-2">
+            <div className="relative rounded-2xl bg-[#090a0f] border border-[#262b42] focus-within:border-indigo-500 shadow-inner transition-colors flex flex-col p-2.5">
+              <textarea
+                value={copilotInput}
+                onChange={(e) => setCopilotInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey || !e.shiftKey)) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                rows={2}
+                placeholder="Ask Copilot or type 'banao ecommerce app' in Hindi/English..."
+                className="w-full bg-transparent text-xs text-white placeholder-zinc-500 focus:outline-none resize-none font-sans leading-relaxed"
+              />
+
+              <div className="flex items-center justify-between pt-2 border-t border-[#1a1d2e] mt-1">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={toggleVoice}
+                    className={`p-1.5 rounded-lg flex items-center justify-center cursor-pointer transition-all ${
+                      isListening
+                        ? 'bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse'
+                        : 'bg-[#181a28] hover:bg-[#202438] text-zinc-400 hover:text-white border border-[#2a2f4a]'
+                    }`}
+                    title="Hands-free voice prompt (Hindi / Hinglish / English)"
+                  >
+                    {isListening ? <MicOff size={13} /> : <Mic size={13} />}
+                  </button>
+
+                  <span className="text-[10px] text-zinc-500 font-mono">
+                    {running ? 'Agent working...' : 'Enter = Run'}
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => handleSend()}
+                  disabled={!copilotInput.trim() || running}
+                  className="px-3 py-1.5 rounded-xl flex items-center gap-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-md shadow-indigo-600/30 disabled:opacity-40 cursor-pointer transition-all"
+                >
+                  {running ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                  <span>Generate</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        {/* ── RIGHT PANE: WORKSPACE (Code Editor OR Live Preview) ──────────────── */}
+        <main className="flex-1 flex flex-col overflow-hidden min-w-0 bg-[#090a0f]">
+          
+          {/* When in CODE EDITOR mode */}
+          {workspaceMode === 'code' && (
+            <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+              
+              {/* Tabs + Breadcrumbs Toolbar */}
+              <div className="flex items-center justify-between px-3 bg-[#10121a] border-b border-[#1f2333] shrink-0">
+                
+                {/* File Tabs */}
+                <div className="flex items-center gap-1 pt-1.5 overflow-x-auto">
+                  <button
+                    onClick={() => setSidebarOpen(!sidebarOpen)}
+                    className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-[#1a1d2e] mr-1"
+                    title={sidebarOpen ? 'Hide Files' : 'Show Files'}
+                  >
+                    <FolderTree size={14} />
+                  </button>
+
+                  {openTabs.map(p => {
+                    const isActive = activePath === p;
+                    const ext = p.split('.').pop()?.toLowerCase();
+                    return (
+                      <div
+                        key={p}
+                        onClick={() => selectFile(p)}
+                        className={`group flex items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-t-xl text-xs font-mono transition-all cursor-pointer shrink-0 border-t-2 ${
+                          isActive
+                            ? 'bg-[#090a0f] text-white border-indigo-500 shadow-sm font-semibold'
+                            : 'text-zinc-400 hover:text-zinc-200 border-transparent hover:bg-[#151722]'
+                        }`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: LANG_COLOR[ext] || '#818cf8' }} />
+                        <span className="truncate max-w-[150px]">{p.split('/').pop()}</span>
+                        {dirtyPaths.has(p) && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); closeTab(p); }}
+                          className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-[#23273b] text-zinc-400 hover:text-white transition-opacity"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {openTabs.length === 0 && (
+                    <div className="px-3 py-1.5 text-xs text-zinc-500">
+                      No files open — select from explorer
+                    </div>
+                  )}
+                </div>
+
+                {/* Right side tab controls */}
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={saveActiveFile}
+                    className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-[#1a1d2e]"
+                    title="Save File (Ctrl+S)"
+                  >
+                    <Save size={14} />
+                  </button>
+                  <button
+                    onClick={() => setTerminalOpen(!terminalOpen)}
+                    className={`p-1 rounded-lg text-xs flex items-center gap-1 transition-colors ${
+                      terminalOpen ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-white hover:bg-[#1a1d2e]'
+                    }`}
+                    title="Toggle Terminal"
+                  >
+                    <TerminalIcon size={14} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Breadcrumb + AI Quick Action Pills Bar */}
+              {activePath && (
+                <div className="flex items-center justify-between px-4 py-1.5 bg-[#0d0e14] border-b border-[#1b1e2c] shrink-0 text-xs">
+                  <div className="flex items-center gap-1 font-mono text-[11px] text-zinc-400">
+                    {activePath.split('/').map((seg, i, arr) => (
+                      <span key={i} className="flex items-center gap-1">
+                        <span className={i === arr.length - 1 ? 'text-zinc-200 font-semibold' : ''}>{seg}</span>
+                        {i < arr.length - 1 && <ChevronRight size={10} className="text-zinc-600" />}
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* AI Quick Actions */}
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => handleSend(`Explain how ${activePath} works`)}
+                      className="px-2.5 py-0.5 rounded-lg text-[10px] font-medium bg-[#161824] hover:bg-[#202334] text-zinc-300 hover:text-white border border-[#25293d] transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      <Code2 size={11} className="text-blue-400" /> Explain
+                    </button>
+                    <button
+                      onClick={() => handleSend(`Inspect ${activePath} for any potential bugs or edge cases and fix them`)}
+                      className="px-2.5 py-0.5 rounded-lg text-[10px] font-medium bg-[#161824] hover:bg-[#202334] text-zinc-300 hover:text-white border border-[#25293d] transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      <Bug size={11} className="text-amber-400" /> Find Bugs
+                    </button>
+                    <button
+                      onClick={() => handleSend(`Optimize performance and clean up ${activePath}`)}
+                      className="px-2.5 py-0.5 rounded-lg text-[10px] font-medium bg-[#161824] hover:bg-[#202334] text-zinc-300 hover:text-white border border-[#25293d] transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      <Zap size={11} className="text-emerald-400" /> Optimize
+                    </button>
+                    <button
+                      onClick={() => triggerInlineEdit()}
+                      className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      <Sparkles size={11} className="text-indigo-400" /> Edit (Ctrl+K)
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Editor + Left File Tree split */}
+              <div className="flex-1 flex overflow-hidden min-h-0">
+                {/* File Tree Panel */}
+                {sidebarOpen && (
+                  <div className="w-56 shrink-0 bg-[#0c0d12] border-r border-[#1a1d2b] flex flex-col">
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-[#1a1d2b] text-[10px] uppercase font-bold text-zinc-400 tracking-wider">
+                      <span>Explorer</span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleCreateFile()}
+                          className="p-1 hover:bg-[#1a1d2e] rounded text-zinc-400 hover:text-white cursor-pointer"
+                          title="New File"
+                        >
+                          <FilePlus2 size={13} />
+                        </button>
+                        <button
+                          onClick={() => handleCreateFolder()}
+                          className="p-1 hover:bg-[#1a1d2e] rounded text-zinc-400 hover:text-white cursor-pointer"
+                          title="New Folder"
+                        >
+                          <FolderPlus size={13} />
+                        </button>
+                        <button
+                          onClick={loadWorkspaceFiles}
+                          className="p-1 hover:bg-[#1a1d2e] rounded text-zinc-400 hover:text-white cursor-pointer"
+                          title="Refresh Explorer"
+                        >
+                          <RefreshCw size={12} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-2">
+                      {loadingFiles ? (
+                        <div className="p-4 text-center text-xs text-zinc-500">Loading files...</div>
+                      ) : files.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-zinc-500 flex flex-col items-center gap-2">
+                          <span>No files yet</span>
+                          <button
+                            onClick={() => handleCreateFile()}
+                            className="px-2 py-1 text-[11px] bg-indigo-600/20 text-indigo-300 rounded border border-indigo-500/30 hover:bg-indigo-600/30"
+                          >
+                            + Create File
+                          </button>
+                        </div>
+                      ) : (
+                        <TreeView
+                          tree={fileTreeFromFiles(files)}
+                          activePath={activePath}
+                          openTabs={openTabs}
+                          onSelect={selectFile}
+                          onRename={handleRename}
+                          onDelete={handleDelete}
+                          onDeleteFolder={handleDeleteFolder}
+                          onNewFileInFolder={handleCreateFile}
+                          onNewFolderInFolder={handleCreateFolder}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Monaco Editor Container */}
+                <div className="flex-1 min-h-0 relative">
+                  {activePath ? (
+                    <MonacoEditor
+                      height="100%"
+                      language={activeLang}
+                      value={activeContent}
+                      onMount={handleEditorMount}
+                      onChange={(v) => {
+                        if (!activePath) return;
+                        setFileContent(activePath, v || '');
+                        markDirty(activePath);
+                        runDiagnostics(activePath, v || '');
+                      }}
+                      theme="vs-dark"
+                      options={{
+                        automaticLayout: true,
+                        minimap: { enabled: false },
+                        scrollBeyondLastLine: false,
+                        wordWrap: 'on',
+                        fontSize: 13,
+                        fontFamily: "'JetBrains Mono', monospace",
+                        padding: { top: 14 },
+                        scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 },
+                      }}
+                    />
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center gap-3 text-sm text-zinc-500">
+                      <Code size={32} className="opacity-20" />
+                      <p>Select a file from the explorer on the left</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Collapsible Terminal Drawer */}
+              {terminalOpen && (
+                <div className="h-48 shrink-0 flex flex-col bg-[#090a0f] border-t border-[#1f2333]">
+                  <div className="flex items-center justify-between px-4 py-1.5 bg-[#10121a] border-b border-[#1f2333]">
+                    <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <TerminalIcon size={13} /> Integrated Terminal
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={runSingleFile}
+                        className="px-2.5 py-0.5 rounded-lg text-[10px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30"
+                      >
+                        <Play size={10} className="inline mr-1" /> Run File
+                      </button>
+                      <button
+                        onClick={() => terminalRef.current?.clear()}
+                        className="p-1 rounded hover:bg-[#1f2338] text-zinc-400 hover:text-white"
+                      >
+                        <Eraser size={13} />
+                      </button>
+                      <button
+                        onClick={() => setTerminalOpen(false)}
+                        className="p-1 rounded hover:bg-[#1f2338] text-zinc-400 hover:text-white"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex-1 min-h-0">
+                    <TerminalPanel innerRef={terminalRef} projectId={projectId} projectPath="" />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* When in LIVE PREVIEW mode (Bolt.new / Replit style full browser) */}
+          {workspaceMode === 'preview' && (
+            <div className="flex-1 flex flex-col overflow-hidden min-h-0 bg-[#090a0f]">
+              
+              {/* Browser Address Bar Header */}
+              <div className="flex items-center justify-between px-4 py-2 bg-[#10121a] border-b border-[#1f2333] shrink-0">
+                <div className="flex items-center gap-3">
+                  <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                    <Eye size={14} /> Live App Preview
+                  </span>
+
+                  {/* Responsive Switcher */}
+                  <div className="flex items-center bg-[#090a0f] rounded-xl p-0.5 border border-[#23273b]">
+                    <button
+                      onClick={() => setPreviewDevice('desktop')}
+                      className={`px-3 py-1 rounded-lg text-[10px] font-medium flex items-center gap-1.5 transition-all ${
+                        previewDevice === 'desktop' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      <Monitor size={12} /> Desktop
+                    </button>
+                    <button
+                      onClick={() => setPreviewDevice('tablet')}
+                      className={`px-3 py-1 rounded-lg text-[10px] font-medium flex items-center gap-1.5 transition-all ${
+                        previewDevice === 'tablet' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      <Tablet size={12} /> Tablet
+                    </button>
+                    <button
+                      onClick={() => setPreviewDevice('mobile')}
+                      className={`px-3 py-1 rounded-lg text-[10px] font-medium flex items-center gap-1.5 transition-all ${
+                        previewDevice === 'mobile' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      <Smartphone size={12} /> Mobile
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => setInspectorActive(!inspectorActive)}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-medium flex items-center gap-1.5 border transition-all ${
+                      inspectorActive
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                        : 'bg-[#181b28] text-zinc-400 border-[#262a40] hover:text-white'
+                    }`}
+                  >
+                    <Crosshair size={12} /> Inspect UI
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const iframe = document.querySelector('iframe');
+                      if (iframe) iframe.src = iframe.src;
+                      showToast('Preview refreshed', 'info');
+                    }}
+                    className="p-1.5 rounded-lg bg-[#181b28] hover:bg-[#23273b] text-zinc-400 hover:text-white border border-[#262a40]"
+                    title="Reload Preview"
+                  >
+                    <RefreshCw size={13} />
+                  </button>
+
+                  <button
+                    onClick={() => window.open(previewUrl, '_blank')}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-[#181b28] hover:bg-[#23273b] text-zinc-300 hover:text-white border border-[#262a40] transition-colors"
+                  >
+                    <ExternalLink size={12} /> Open in New Tab
+                  </button>
+                </div>
+              </div>
+
+              {/* Preview Viewport Frame */}
+              <div className="flex-1 min-h-0 flex items-center justify-center p-6 bg-[#07080b] overflow-auto">
+                <div
+                  className="h-full bg-black rounded-2xl overflow-hidden shadow-2xl border border-[#23273b] transition-all duration-300"
+                  style={{
+                    width: previewDevice === 'mobile' ? 375 : previewDevice === 'tablet' ? 768 : '100%',
+                  }}
+                >
+                  <iframe
+                    srcDoc={generateLiveAppHtml(files, contents, inspectorActive)}
+                    className="w-full h-full border-0"
+                    title="Live App"
+                    sandbox="allow-scripts allow-same-origin allow-modals allow-forms"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </main>
       </div>
 
-      {/* Prompt modal (new file/folder/rename) */}
-      <PromptModal modal={modalSpec} onClose={() => setUiModal(null)} onSubmit={submitModal} />
+      {/* ── 3. FLOATING MODALS & OVERLAYS ──────────────────────────────────────── */}
+      {/* Ctrl+K Floating Inline AI Prompt Box */}
+      {inlineEditOpen && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center pt-24 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-xl bg-[#12141e] border border-indigo-500/40 rounded-2xl shadow-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-indigo-400" />
+                <span className="text-xs font-bold text-white uppercase tracking-wider">Cursor-Style Inline AI (Ctrl+K)</span>
+              </div>
+              <span className="text-[10px] font-mono text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded">{activePath || 'active file'}</span>
+            </div>
+            <form onSubmit={handleInlineEditSubmit} className="flex gap-2">
+              <input
+                autoFocus
+                value={inlineEditPrompt}
+                onChange={(e) => setInlineEditPrompt(e.target.value)}
+                placeholder="e.g. Add validation, optimize logic, make responsive..."
+                className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+              />
+              <button
+                type="submit"
+                disabled={!inlineEditPrompt.trim() || inlineEditLoading}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 disabled:opacity-40 cursor-pointer"
+              >
+                {inlineEditLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                Apply
+              </button>
+              <button
+                type="button"
+                onClick={() => setInlineEditOpen(false)}
+                className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-xl text-xs font-semibold cursor-pointer"
+              >
+                Esc
+              </button>
+            </form>
+            <div className="flex justify-between items-center text-[10px] text-zinc-500">
+              <span>Surgically edits selected code block</span>
+              <span>Enter = Apply • Esc = Cancel</span>
+            </div>
+          </div>
+        </div>
+      )}
 
-      {/* Interactive Project Architect Wizard */}
+      {/* Interactive Project Architect Wizard Modal */}
       <ProjectWizardModal
         isOpen={wizardOpen}
         initialPrompt={wizardInitialPrompt}
@@ -2043,123 +1918,40 @@ ${(wizardConfig.features || []).map(f => `• **${f.name}**: ${f.description || 
         onBuildProject={handleWizardBuild}
       />
 
-      {/* Quick Open — Ctrl+P */}
-      {quickOpenOpen && (
-        <QuickOpen
-          files={files}
-          onPick={(f) => { setQuickOpenOpen(false); selectFile(f); }}
-          onClose={() => setQuickOpenOpen(false)}
-        />
-      )}
-
-      {/* Find in Files — Ctrl+Shift+F */}
-      {searchOpen && (
-        <SearchOverlay
-          q={searchQuery}
-          onQueryChange={setSearchQuery}
-          caseSensitive={searchCase}
-          onCaseChange={setSearchCase}
-          results={searchResults}
-          searching={searching}
-          onPick={openSearchResult}
-          onClose={() => setSearchOpen(false)}
-        />
-      )}
-
-      {/* Diff Review — agent changes before/after + revert */}
+      {/* Diff Review Modal */}
       {diffOpen && latestRunId && (
         <DiffReviewModal
-          runId={latestRunId}
+          isOpen={diffOpen}
           onClose={() => setDiffOpen(false)}
-          onReverted={() => {
-            // Live refresh: tree + editor from DB (revert events may have
-            // landed outside the open SSE stream)
-            api.get(`/memory/project/${projectId}`)
-              .then(r => {
-                if (Array.isArray(r.data?.files)) {
-                  setFiles(r.data.files);
-                  setContents({});
-                  setDirtyPaths(new Set());
-                }
-              })
-              .catch(() => {});
-            setRunChangeCount(0);
-          }}
+          runId={latestRunId}
+          onReverted={loadWorkspaceFiles}
         />
       )}
 
-      {/* Command Palette — Ctrl+Shift+P */}
-      {cmdPaletteOpen && (
-        <CommandPalette
-          commands={commands}
-          onRun={runCommand}
-          onClose={() => setCmdPaletteOpen(false)}
-        />
-      )}
+      {/* ── 4. STATUS BAR ──────────────────────────────────────────────────────── */}
+      <footer className="h-6 shrink-0 flex items-center justify-between px-4 bg-[#0a0b0f] border-t border-[#1a1d2b] text-[10px] text-zinc-400 font-mono">
+        <div className="flex items-center gap-4">
+          <span className="flex items-center gap-1.5 text-zinc-300">
+            <GitBranch size={12} className="text-indigo-400" /> main
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            {activePath ? activePath : 'No active file'}
+          </span>
+          <span className="uppercase">{activeLang}</span>
+          <span className={problems > 0 ? 'text-amber-400 font-bold' : 'text-zinc-500'}>
+            {problems > 0 ? `⚠ ${problems} problems` : '✓ 0 errors'}
+          </span>
+        </div>
 
-      {/* Context menu (right-click on tree) */}
-      {ctxMenu && (
-        <>
-          <div className="fixed inset-0 z-[90]" onClick={() => setCtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }} />
-          <div
-            className="fixed z-[100] rounded-lg py-1 text-[11px] shadow-2xl"
-            style={{
-              left: ctxMenu.x,
-              top: ctxMenu.y,
-              width: 180,
-              background: '#1c1f28',
-              border: '1px solid rgba(255,255,255,0.08)',
-              boxShadow: '0 8px 30px rgba(0,0,0,0.6)',
-              color: 'var(--color-text-primary)',
-            }}
-          >
-            {ctxMenu.isDir && (
-              <>
-                <button
-                  onClick={() => { const p = ctxMenu.path; setCtxMenu(null); createFileInFolder(p); }}
-                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left cursor-pointer hover:bg-white/5"
-                >
-                  <FilePlus2 className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-primary)' }} /> New File
-                </button>
-                <button
-                  onClick={() => { const p = ctxMenu.path; setCtxMenu(null); createFolderInFolder(p); }}
-                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left cursor-pointer hover:bg-white/5"
-                >
-                  <FolderPlus className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-primary)' }} /> New Folder
-                </button>
-                <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '3px 0' }} />
-              </>
-            )}
-            <button
-              onClick={ctxRename}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-left cursor-pointer hover:bg-white/5"
-            >
-              <Pencil className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--color-accent)' }} /> Rename
-            </button>
-            <button
-              onClick={ctxDelete}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-left cursor-pointer hover:bg-white/5"
-              style={{ color: 'var(--color-warning)' }}
-            >
-              <Trash2 className="w-4 h-4 stroke-[1.5]" /> Delete
-            </button>
-          </div>
-        </>
-      )}
-
-      {/* Status bar — full width, bottom of the IDE */}
-      <div className="flex items-center gap-4 px-4 py-1 shrink-0 text-[10px]" style={{ background: 'var(--gradient-primary)', color: '#fff' }}>
-        <span className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-white inline-block" />
-          {activePath ? activePath.split('/').pop() : 'no file'}
-        </span>
-        <span className="opacity-90">{activeLang}</span>
-        <span className={`flex items-center gap-1 ${problems > 0 ? 'font-bold' : ''}`}>
-          {problems > 0 ? `⚠ ${problems} problems` : '✓ no problems'}
-        </span>
-        {running && <span className="flex items-center gap-1.5 opacity-90"><Loader2 className="w-3 h-3 animate-spin" /> agent running...</span>}
-        <span className="ml-auto opacity-80">Ln {activeContent.split('\n').length} • UTF-8 • AI-Dost v3</span>
-      </div>
+        <div className="flex items-center gap-3">
+          <span className="text-zinc-500 flex items-center gap-1">
+            <Zap size={10} className="text-emerald-400" /> Groq + Gemini Cascade
+          </span>
+          <span>UTF-8</span>
+          <span className="text-zinc-300">AI-Dost v3.0</span>
+        </div>
+      </footer>
     </div>
   );
 }

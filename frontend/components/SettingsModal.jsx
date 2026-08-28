@@ -187,7 +187,7 @@ export default function SettingsModal({ isOpen, onClose }) {
                 <label className="font-semibold text-[#e2e8f0] text-xs uppercase tracking-widest flex items-center gap-1.5 mb-3">
                   <Key className="w-3 h-3" /> Custom API Keys (Optional)
                 </label>
-                <div className="space-y-3">
+                <form onSubmit={e => e.preventDefault()} className="space-y-3">
                   {[
                     { label: 'Gemini', val: customGeminiKey, set: setCustomGeminiKey, color: '#4285f4', placeholder: 'Leave empty to use Waaw default' },
                     { label: 'Groq', val: customGroqKey, set: setCustomGroqKey, color: '#f7971e', placeholder: 'Leave empty to use Waaw default' },
@@ -212,7 +212,7 @@ export default function SettingsModal({ isOpen, onClose }) {
                       />
                     </div>
                   ))}
-                </div>
+                </form>
               </div>
 
               {/* Voice Assistant Config */}

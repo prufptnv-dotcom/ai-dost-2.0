@@ -257,6 +257,384 @@ export default { kit: { adapter } }`,
     %sveltekit.body%
   </body>
 </html>`
+}
+  },
+  'express': {
+    name: 'Express API',
+    description: 'REST API server with Express.js',
+    dependencies: { express: '^4.18.0', cors: '^2.8.5', 'body-parser': '^1.20.2' },
+    devDependencies: { nodemon: '^3.0.0' },
+    scripts: { dev: 'nodemon index.js', start: 'node index.js' },
+    files: {
+      'index.js': `const express = require('express');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+const fs = require('fs').promises;
+const path = require('path');
+const todosRouter = require('./routes/todos');
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+const DATA_FILE = path.join(__dirname, 'data/todos.json');
+
+app.use(cors());
+app.use(bodyParser.json());
+app.use(express.static(path.join(__dirname, '../client/dist')));
+
+app.use('/api/todos', todosRouter);
+
+app.get('*', (req, res) => { res.sendFile(path.join(__dirname, '../client/dist/index.html')); });
+
+app.listen(PORT, () => console.log(\`Server running on port \${PORT}\`));`,
+      'package.json': `{
+  "name": "{{projectName}}-server",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon index.js",
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.0",
+    "cors": "^2.8.5",
+    "body-parser": "^1.20.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  }
+}`,
+      'data/todos.json': `[]`
+    }
+  },
+  'nuxt': {
+    name: 'Nuxt 3',
+    description: 'Full-stack Vue framework with Nuxt 3',
+    dependencies: { nuxt: '^3.8.0', vue: '^3.3.0' },
+    devDependencies: { '@nuxt/devtools': '^1.0.0' },
+    scripts: { dev: 'nuxt dev', build: 'nuxt build', generate: 'nuxt generate', preview: 'nuxt preview' },
+    files: {
+      'package.json': `{
+  "name": "{{projectName}}",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview"
+  },
+  "dependencies": {
+    "nuxt": "^3.8.0",
+    "vue": "^3.3.0"
+  },
+  "devDependencies": {
+    "@nuxt/devtools": "^1.0.0"
+  }
+}`,
+      'nuxt.config.ts': `export default defineNuxtConfig({
+  devtools: { enabled: true },
+  ssr: true,
+  app: {
+    head: { title: '{{projectName}}', meta: [{ name: 'viewport', content: 'width=device-width, initial-scale=1' }] }
+  },
+  modules: []
+})`,
+      'app.vue': `<template>
+  <div class="app">
+    <header><h1>{{projectName}}</h1></header>
+    <main><NuxtPage /></main>
+  </div>
+</template>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; line-height: 1.5; }
+.app { min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 2rem; }
+header { text-align: center; margin-bottom: 2rem; }
+</style>`,
+      'pages/index.vue': `<template>
+  <div>
+    <h1>{{projectName}}</h1>
+    <p>A modern Nuxt 3 application</p>
+    <button @click="count++">Count: {{ count }}</button>
+  </div>
+</template>
+<script setup>
+import { ref } from 'vue'
+const count = ref(0)
+</script>`,
+      'assets/main.css': `* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; line-height: 1.5; }`
+    }
+  },
+  'remix': {
+    name: 'Remix',
+    description: 'Full-stack React framework with Remix',
+    dependencies: { '@remix-run/react': '^2.8.0', '@remix-run/node': '^2.8.0', react: '^18.2.0', 'react-dom': '^18.2.0' },
+    devDependencies: { '@remix-run/dev': '^2.8.0', vite: '^5.0.0', '@vitejs/plugin-react': '^4.2.0', typescript: '^5.0.0' },
+    scripts: { dev: 'remix dev', build: 'remix build', start: 'remix-serve ./build/index.js' },
+    files: {
+      'package.json': `{
+  "name": "{{projectName}}",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "remix dev",
+    "build": "remix build",
+    "start": "remix-serve ./build/index.js"
+  },
+  "dependencies": {
+    "@remix-run/react": "^2.8.0",
+    "@remix-run/node": "^2.8.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@remix-run/dev": "^2.8.0",
+    "vite": "^5.0.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "typescript": "^5.0.0"
+  }
+}`,
+      'vite.config.ts': `import { remix } from '@remix-run/dev';
+import { defineConfig } from 'vite';
+export default defineConfig({ plugins: [remix()], server: { host: '0.0.0.0', port: 3000 } })`,
+      'tsconfig.json': `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  "include": ["remix.env.d.ts", "**/*.ts", "**/*.tsx"]
+}`,
+      'remix.config.js': `module.exports = { ignoredRouteFiles: ['**/.*'] }`,
+      'app/root.tsx': `import { Links, Meta, Outlet, Scripts } from '@remix-run/react';
+export const links = () => [{ rel: 'stylesheet', href: 'https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css' }];
+export default function Root() {
+  return (
+    <html lang="en">
+      <head><Meta /><Links /></head>
+      <body><Outlet /><Scripts /></body>
+    </html>
+  );
+}`,
+      'app/routes/_index.tsx': `export default function Index() {
+  const [count, setCount] = React.useState(0);
+  return (
+    <main style={{padding: '2rem', textAlign: 'center'}}>
+      <h1>{{projectName}}</h1>
+      <p>A modern Remix application</p>
+      <button onClick={() => setCount(c => c + 1)}>Count: {count}</button>
+    </main>
+  );
+}`,
+      'app/entry.client.tsx': `import { hydrateRoot } from 'react-dom/client';
+import { RemixBrowser } from '@remix-run/react';
+hydrateRoot(document, <RemixBrowser />);`,
+      'app/entry.server.tsx': `import { RemixServer } from '@remix-run/react';
+import { renderToString } from 'react-dom/server';
+export default function handleRequest(request, responseStatusCode, responseHeaders, remixContext) {
+  return new Response(renderToString(<RemixServer context={remixContext} url={request.url} />), {
+    status: responseStatusCode,
+    headers: responseHeaders
+  });
+}`
+    }
+  },
+  'expo': {
+    name: 'Expo (React Native)',
+    description: 'Cross-platform React Native with Expo',
+    dependencies: { expo: '~50.0.0', 'react-native': '0.73.0', react: '18.2.0' },
+    devDependencies: { '@babel/core': '^7.20.0', '@expo/cli': '^0.10.0' },
+    scripts: { dev: 'expo start', build: 'expo build', start: 'expo start' },
+    files: {
+      'package.json': `{
+  "name": "{{projectName}}",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "scripts": {
+    "dev": "expo start",
+    "build": "expo build",
+    "start": "expo start"
+  },
+  "dependencies": {
+    "expo": "~50.0.0",
+    "expo-router": "~3.4.0",
+    "react-native": "0.73.0",
+    "react": "18.2.0",
+    "react-native-safe-area-context": "4.8.0",
+    "react-native-screens": "~3.29.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0",
+    "@expo/cli": "^0.10.0"
+  }
+}`,
+      'app.json': `{
+  "expo": {
+    "name": "{{projectName}}",
+    "slug": "{{projectName}}",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": { "image": "./assets/splash.png", "resizeMode": "contain", "backgroundColor": "#ffffff" },
+    "ios": { "supportsTablet": true },
+    "android": { "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#ffffff" } },
+    "web": { "favicon": "./assets/favicon.png" },
+    "plugins": ["expo-router"]
+  }
+}`,
+      'app/_layout.tsx': `import { Stack } from 'expo-router';
+export default function Layout() {
+  return <Stack screenOptions={{ headerShown: false }} />;
+}`,
+      'app/index.tsx': `import { View, Text, Button, StyleSheet } from 'react-native';
+export default function Index() {
+  const [count, setCount] = React.useState(0);
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>{{projectName}}</Text>
+      <Text>A modern Expo application</Text>
+      <Button title="Count: {count}" onPress={() => setCount(c => c + 1)} />
+    </View>
+  );
+}
+const styles = StyleSheet.create({
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
+  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 16 }
+});`
+    }
+  },
+  'tauri': {
+    name: 'Tauri (Rust + Web)',
+    description: 'Desktop apps with Rust backend + Web frontend',
+    dependencies: { '@tauri-apps/api': '^1.5.0', react: '^18.2.0', 'react-dom': '^18.2.0' },
+    devDependencies: { '@tauri-apps/cli': '^1.5.0', vite: '^5.0.0', '@vitejs/plugin-react': '^4.2.0', typescript: '^5.0.0' },
+    scripts: { dev: 'tauri dev', build: 'tauri build' },
+    files: {
+      'package.json': `{
+  "name": "{{projectName}}",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^1.5.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^1.5.0",
+    "vite": "^5.0.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "typescript": "^5.0.0"
+  }
+}`,
+      'vite.config.ts': `import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+export default defineConfig({
+  plugins: [react()],
+  server: { host: '0.0.0.0', port: 5173 },
+  build: { outDir: '../dist' }
+})`,
+      'tsconfig.json': `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  "include": ["src", "vite.config.ts"]
+}`,
+      'src/main.tsx': `import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+import './index.css';
+ReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>);`,
+      'src/App.tsx': `import { useState } from 'react';
+import './App.css';
+import { invoke } from '@tauri-apps/api/core';
+
+function App() {
+  const [count, setCount] = useState(0);
+  const [greeting, setGreeting] = useState('');
+  
+  async function greet() {
+    const msg = await invoke('greet', { name: 'World' });
+    setGreeting(msg);
+  }
+
+  return (
+    <div className="app">
+      <header><h1>{{projectName}}</h1></header>
+      <main>
+        <p>A modern Tauri (Rust + React) application</p>
+        <button onClick={() => setCount(c => c + 1)}>Count: {count}</button>
+        <button onClick={greet}>Greet from Rust</button>
+        {greeting && <p>{greeting}</p>}
+      </main>
+    </div>
+  );
+}
+export default App;`,
+      'src/index.css': `* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; line-height: 1.5; }
+.app { min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 2rem; }
+header { text-align: center; margin-bottom: 2rem; }
+button { padding: 0.75rem 1.5rem; font-size: 1rem; cursor: pointer; background: #3b82f6; color: white; border: none; border-radius: 0.5rem; }
+button:hover { background: #2563eb; }`,
+      'src-tauri/Cargo.toml': `[package]
+name = "{{projectName}}"
+version = "1.0.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "1.5", features = [] }
+
+[dependencies]
+tauri = { version = "1.5", features = ["macos-private-api", "api-all"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+`,
+      'src-tauri/src/main.rs': `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+use tauri::{command, generate_context, Builder, Manager};
+
+#[command]
+fn greet(name: &str) -> String {
+  format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+fn main() {
+  Builder::default()
+    .invoke_handler(tauri::generate_handler![greet])
+    .run(generate_context!())
+    .expect("error while running tauri application");
+}
+`,
+      'src-tauri/tauri.conf.json': `{
+  "build": { "beforeDevCommand": "npm run dev", "beforeBuildCommand": "npm run build", "devPath": "http://localhost:5173", "distDir": "../dist" },
+  "package": { "productName": "{{projectName}}", "version": "1.0.0" },
+  "tauri": {
+    "allowlist": { "all": true },
+    "windows": [{ "title": "{{projectName}}", "width": 800, "height": 600 }],
+    "security": { "csp": null }
+  }
+}`
     }
   }
 };
@@ -329,9 +707,13 @@ class PlannerService {
   detectFramework(prompt) {
     const p = prompt.toLowerCase();
     if (p.includes('next') || p.includes('nextjs')) return 'nextjs';
+    if (p.includes('nuxt')) return 'nuxt';
+    if (p.includes('remix')) return 'remix';
+    if (p.includes('expo') || p.includes('react native') || p.includes('mobile app')) return 'expo';
+    if (p.includes('tauri') || p.includes('rust') || p.includes('desktop app')) return 'tauri';
     if (p.includes('astro')) return 'astro';
     if (p.includes('svelte')) return 'sveltekit';
-    if (p.includes('vue') || p.includes('nuxt')) return 'nextjs'; // fallback
+    if (p.includes('vue')) return 'nuxt';
     if (p.includes('react') || p.includes('vite')) return 'react-vite';
     return 'react-vite';
   }
@@ -418,12 +800,53 @@ class PlannerService {
   }
 
   getRequiredPorts(frameworkKey) {
-    const ports = { 'react-vite': [5173], 'nextjs': [3000], 'astro': [4321], 'sveltekit': [5173], 'nuxt': [3000], 'remix': [3000] };
+    const ports = { 
+      'react-vite': [5173], 
+      'nextjs': [3000], 
+      'astro': [4321], 
+      'sveltekit': [5173], 
+      'nuxt': [3000], 
+      'remix': [3000],
+      'expo': [8081, 19000, 19001],
+      'tauri': [5173]
+    };
     return ports[frameworkKey] || [5173];
   }
 
   listTemplates() {
     return Object.entries(FRAMEWORK_TEMPLATES).map(([key, t]) => ({ key, name: t.name, description: t.description }));
+  }
+
+  mergeTemplates(frontendKey, backendKey, projectName) {
+    const frontend = FRAMEWORK_TEMPLATES[frontendKey];
+    const backend = FRAMEWORK_TEMPLATES[backendKey];
+    if (!frontend || !backend) {
+      throw new Error(`Unknown template keys: ${frontendKey}, ${backendKey}`);
+    }
+
+    const mergedFiles = {};
+    for (const [path, content] of Object.entries(frontend.files)) {
+      mergedFiles[`client/${path}`] = content.replace(/\{\{projectName\}\}/g, projectName);
+    }
+    for (const [path, content] of Object.entries(backend.files)) {
+      mergedFiles[`server/${path}`] = content.replace(/\{\{projectName\}\}/g, projectName);
+    }
+    mergedFiles['package.json'] = JSON.stringify({
+    name: projectName,
+    version: "1.0.0",
+    private: true,
+    workspaces: ["client", "server"],
+    scripts: {
+      dev: 'concurrently "npm run dev --workspace=client" "npm run dev --workspace=server"',
+      build: "npm run build --workspaces",
+      "install:all": "npm install --workspaces"
+    },
+    devDependencies: {
+      concurrently: "^8.2.0"
+    }
+  }, null, 2);
+
+    return { files: mergedFiles, projectName };
   }
 }
 

@@ -808,25 +808,109 @@ p { color: #64748b; }`,
     });
     return files;
   }
+
+  // ── MULTI-AGENT AUTONOMOUS PIPELINE ─────────────────────────────────────────
+  
+  // 1. Architect Agent: Determine stack and design architecture blueprint
+  async planArchitecture(prompt) {
+    const { detectCategory } = require('./fullstackTrainer');
+    const category = detectCategory(prompt);
+    const p = (prompt || '').toLowerCase();
+    let framework = 'react-vite';
+    let language = 'javascript';
+
+    if (/\b(python|fastapi|flask|django|streamlit)\b/i.test(p)) {
+      framework = 'python-fastapi';
+      language = 'python';
+    } else if (/\b(next|nextjs|next\.js|app router)\b/i.test(p)) {
+      framework = 'nextjs';
+      language = 'typescript';
+    } else if (/\b(vue|nuxt)\b/i.test(p)) {
+      framework = 'vue-vite';
+      language = 'javascript';
+    } else if (/\b(svelte|sveltekit)\b/i.test(p)) {
+      framework = 'sveltekit';
+      language = 'javascript';
+    } else if (/\b(go|golang|gin)\b/i.test(p)) {
+      framework = 'go-gin';
+      language = 'go';
+    }
+
+    const categoryFeatures = {
+      ecommerce: ['Product Catalog & Search Filters', 'Interactive Shopping Cart Drawer', 'Order Checkout REST API', 'Responsive Dark Mode Grid'],
+      dashboard: ['Real-Time KPI Metric Cards', 'Interactive Revenue & Growth Charts', 'Customer & Transaction Tables', 'Export & Filter Tools'],
+      chat_social: ['Message Threads & User Feeds', 'Real-Time Interactivity', 'Profile & Reaction Handlers', 'REST Messaging API'],
+      kanban: ['Agile Columns (Todo, In-Progress, Done)', 'Task Creation & Priority Badges', 'Drag/Move Status Handlers', 'Local Persistence API'],
+      ai_studio: ['Prompt Synthesis & Code Runner', 'Interactive Playground & Copy Tools', 'Model Selector & Output History', 'Clean Monospace Dark UI'],
+      general: ['Responsive Modern UI Layout', 'State Management & Interactivity', 'Backend REST API & Seed Data', 'Error Boundaries & Input Validation']
+    };
+
+    return {
+      category,
+      framework,
+      language,
+      name: prompt.slice(0, 30).replace(/[^a-zA-Z0-9]/g, '-').toLowerCase() || 'ai-dost-app',
+      features: categoryFeatures[category] || categoryFeatures.general
+    };
+  }
+
+  // 2. Task Manager Agent: Generate structured TODO tasks
+  async createTodoList(prompt, architecture) {
+    const tasks = [];
+    const cat = architecture.category || 'general';
+
+    tasks.push({
+      id: 'task-1',
+      title: 'Scaffold Project Structure & Config',
+      description: `Initialize ${architecture.framework} with Tailwind CSS, Lucide icons, and modern Vite config.`,
+      status: 'pending',
+      files: ['package.json', 'index.html', 'vite.config.js']
+    });
+
+    tasks.push({
+      id: 'task-2',
+      title: `Build ${cat.toUpperCase()} Core Components & UI Layout`,
+      description: `Implement ${architecture.features.slice(0, 2).join(' & ')} with sleek dark glassmorphism styling.`,
+      status: 'pending',
+      files: ['src/App.jsx', 'src/index.css', 'src/main.jsx']
+    });
+
+    tasks.push({
+      id: 'task-3',
+      title: 'Implement Backend REST API & Data Store',
+      description: 'Create Express server.js with REST CRUD endpoints, CORS, and seed mock data.',
+      status: 'pending',
+      files: ['server.js', 'src/services/api.js']
+    });
+
+    tasks.push({
+      id: 'task-4',
+      title: 'DevOps & Live Background Dev Server',
+      description: 'Install dependencies (npm install) and launch dev server with zero port collisions.',
+      status: 'pending',
+      files: ['package.json']
+    });
+
+    tasks.push({
+      id: 'task-5',
+      title: 'Vision QA & Self-Healing Verification',
+      description: 'Perform visual layout checks, inspect console output, and auto-correct any runtime errors.',
+      status: 'pending',
+      files: []
+    });
+
+    return tasks;
+  }
 }
 
 // Self-healing: analyze error and suggest fix
-async function suggestFix(error, context) {
-  // Use Groq for quick error analysis
+async function suggestFix(error, context, options) {
   if (options?.groqService) {
     try {
-      const fixPrompt = `Analyze this error and provide a code fix:
-
-Error: ${error}
-Context: ${context}
-
-Return ONLY the fixed code block with a brief explanation. No markdown formatting.`;
-      
+      const fixPrompt = `Analyze this error and provide a code fix:\n\nError: ${error}\nContext: ${context}\n\nReturn ONLY the fixed code block with a brief explanation.`;
       const resp = await options.groqService.chat(fixPrompt, [], 'agent', options.customKeys?.groq);
       if (resp && resp.trim().length > 5) return resp;
-    } catch (e) {
-      // Ignore errors in fix suggestion
-    }
+    } catch (_) {}
   }
   return null;
 }

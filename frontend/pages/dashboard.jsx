@@ -217,21 +217,23 @@ export default function Dashboard() {
         onNewChat={handleNewChat}
       />
 
-      <TopBar
-        sidebarPadding={sidebarWidth}
-        title={meta.title}
-        subtitle={meta.subtitle}
-        model={model}
-        onModelChange={setModel}
-        onOpenVoice={handleOpenVoice}
-        onOpenSettings={handleOpenSettings}
-        onOpenCommandPalette={handleOpenPalette}
-      />
+      {view !== 'copilot' && (
+        <TopBar
+          sidebarPadding={sidebarWidth}
+          title={meta.title}
+          subtitle={meta.subtitle}
+          model={model}
+          onModelChange={setModel}
+          onOpenVoice={handleOpenVoice}
+          onOpenSettings={handleOpenSettings}
+          onOpenCommandPalette={handleOpenPalette}
+        />
+      )}
 
       {/* Main content */}
       <main
         className="absolute top-0 right-0 bottom-0 transition-[padding] duration-300"
-        style={{ left: sidebarWidth, paddingTop: TOPBAR_H }}
+        style={{ left: sidebarWidth, paddingTop: view === 'copilot' ? 0 : TOPBAR_H }}
       >
         <div className="h-full w-full overflow-hidden">
           <AnimatePresence mode="wait">

@@ -200,6 +200,160 @@ Here is what you can do and what features are available to the user on this plat
             return 'Gemini service me error: ' + error.message;
         }
     }
+
+    // Vision analysis for screenshots
+    async analyzeScreenshot(base64Image, mimeType = 'image/png', prompt = null) {
+        try {
+            const API_KEY = process.env.GEMINI_API_KEY;
+            if (!API_KEY || API_KEY === 'your_gemini_key') {
+                logger.error('❌ GEMINI API Key not found for vision analysis!');
+                return { success: false, error: 'No API key', analysis: null };
+            }
+
+            const visionPrompt = prompt || `Analyze this UI screenshot for issues. Look for:
+
+VISUAL & LAYOUT BUGS:
+1. Broken layout: overlapping elements, misaligned content, broken grid/flex containers
+2. Missing elements: navigation, buttons, forms, images, cards, modals, dropdowns
+3. White/blank screens: empty pages, failed renders, missing content
+4. Overflow issues: horizontal scroll, content cut off, text overflow
+
+CSS GRID/FLEXBOX ISSUES:
+5. Flex container not working: items not aligning, wrapping incorrectly
+6. Grid layout broken: columns not matching, gaps missing, auto-fit issues
+7. Centering problems: items not centered vertically/horizontally
+
+RESPONSIVE DESIGN ISSUES:
+8. Mobile breakpoints: content not adapting at <768px, <480px
+9. Tablet/desktop layouts: content too wide/narrow, touch targets too small
+10. Orientation issues: landscape vs portrait problems
+
+ACCESSIBILITY ISSUES (WCAG):
+11. Color contrast: text/background ratios below 4.5:1 (AA) or 3:1 (large text)
+12. Missing alt text: images without descriptive alt attributes
+13. Missing labels: form inputs without associated labels
+14. Focus indicators: missing focus rings on interactive elements
+14. ARIA issues: missing roles, states, live regions
+15. Heading hierarchy: h1-h6 order violations
+
+CONSOLE & RUNTIME ERRORS:
+16. JavaScript errors visible in console
+17. Network failures: failed API calls, 404s, CORS errors
+18. Hydration mismatches (React/Next.js)
+19. Missing dependencies: modules not found
+
+LOADING & STATE ISSUES:
+20. Missing loading states: spinners, skeletons, progress bars
+21. Error boundaries: missing error fallbacks
+22. Empty states: no empty list/placeholder UI
+
+Return a JSON object with:
+{
+  "issues": ["specific issue with location/context", ...],
+  "severity": "critical|major|minor|none",
+  "suggestions": ["specific fix with CSS/JS code pattern", ...],
+  "summary": "Brief summary of the UI state",
+  "categories": {
+    "layout": ["issue1", ...],
+    "accessibility": ["issue1", ...],
+    "responsive": ["issue1", ...],
+    "console": ["issue1", ...],
+    "loading": ["issue1", ...]
+  }
+}`;
+
+            const contents = [{
+                role: 'user',
+                parts: [
+                    { text: visionPrompt },
+                    {
+                        inlineData: {
+                            mimeType: mimeType,
+                            data: base64Image
+                        }
+                    }
+                ]
+            }];
+
+            const bodyPayload = { 
+                contents,
+                generationConfig: {
+                    temperature: 0.1,
+                    maxOutputTokens: 2048,
+                    responseMimeType: 'application/json'
+                }
+            };
+
+            const models = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite'];
+            let lastError = null;
+
+            for (const model of models) {
+                const endpoint = `/models/${model}:generateContent?key=${API_KEY}`;
+                try {
+                    // Add timeout wrapper to prevent hanging
+                    const timeoutPromise = new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Vision request timeout')), 25000)
+                    );
+                    
+                    const result = await Promise.race([
+                        this.client.post(endpoint, bodyPayload),
+                        timeoutPromise
+                    ]);
+
+                    logger.info(`✅ Gemini Vision response received (model: ${model})`);
+
+                    if (result.data.candidates && result.data.candidates[0] && result.data.candidates[0].content) {
+                        const responseText = result.data.candidates[0].content.parts[0].text;
+                        try {
+                            const analysis = JSON.parse(responseText);
+                            return { success: true, analysis, rawResponse: responseText };
+                        } catch (parseError) {
+                            // Try to extract JSON from response
+                            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+                            if (jsonMatch) {
+                                const analysis = JSON.parse(jsonMatch[0]);
+                                return { success: true, analysis, rawResponse: responseText };
+                            }
+                            return { success: false, error: 'Failed to parse vision response', analysis: null, rawResponse: responseText };
+                        }
+                    } else {
+                        return { success: false, error: 'No vision response content', analysis: null };
+                    }
+                } catch (error) {
+                    lastError = error;
+                    if (error.status === 429) {
+                        logger.warn(`⚠️ Gemini Vision model ${model} rate limited, trying next...`);
+                        continue;
+                    }
+                    if (error.status === 404) {
+                        logger.warn(`⚠️ Gemini Vision model ${model} not available, trying next...`);
+                        continue;
+                    }
+                    // Don't break on timeout, try next model
+                    if (error.message?.includes('timeout')) {
+                        logger.warn(`⚠️ Gemini Vision model ${model} timeout, trying next...`);
+                        continue;
+                    }
+                    break;
+                }
+            }
+
+            logger.error('❌ All Gemini Vision models failed');
+            return { success: false, error: lastError?.message || 'Vision analysis failed', analysis: null };
+
+        } catch (error) {
+            logger.error('❌ Gemini Vision Error:', error.message);
+            return { success: false, error: error.message, analysis: null };
+        }
+    }
 }
 
 module.exports = GeminiService;
+
+// Add text-only generation for auto-fix
+async function generateFixes(prompt) {
+  const instance = new GeminiService();
+  return instance._chat(prompt, [], null, 'project');
+}
+
+module.exports.generateFixes = generateFixes;

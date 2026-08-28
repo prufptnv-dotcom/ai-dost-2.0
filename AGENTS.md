@@ -148,6 +148,33 @@ start_ai_engine.bat
 - **Corrections**: `/correct <text>` saves user corrections for future context
 - **Cross-Session**: Memory persists across restarts (SQLite in ai-engine)
 
+### 10. Autonomous Full-Stack Generation (NEW v2.1)
+- **One-Prompt Project Generation**: Single prompt → complete React + Express app (17 files)
+- **Template Fallback**: Deterministic templates when AI providers fail (react-vite + express merge)
+- **Auto-Detection**: Keywords like "full stack", "project generat", "create project" trigger generation
+- **Auto-Tests**: Runs `npm test` automatically if test script exists in package.json
+
+### 11. Sandbox-Based Preview & Visual Verification (NEW v2.1)
+- **Isolated Docker Preview**: Creates sandbox container, copies project, installs deps, starts dev server
+- **Auto-Screenshot**: Playwright captures full-page screenshot of running app
+- **Vision Analysis**: Gemini 1.5 Flash analyzes screenshot for UI bugs (layout, missing elements, console errors)
+- **Iterative Auto-Fix Loop**: LLM generates code fixes → applies via `apply_diff` → re-screenshots → re-analyzes (max 3 iterations)
+- **Fix Reports**: Saves `vision-fix-report.json` with issues, suggestions, applied fixes
+
+### 12. Multi-Framework Template Support
+- **React + Vite** (default): Modern React with Vite bundler
+- **Next.js App Router**: Full-stack React with App Router
+- **Astro**: Static site builder with islands architecture
+- **SvelteKit**: Full-stack Svelte framework
+- **Auto-Detection**: Prompt keywords select framework (e.g., "next" → Next.js, "astro" → Astro)
+
+### 13. Enhanced Agent Capabilities
+- **MAX_STEPS**: 50 (was 14)
+- **Provider Timeouts**: 30s per provider (was 12s)
+- **Ollama Timeout**: 60s (was 20s)
+- **Scaffold Total Timeout**: 30s hard limit
+- **npm Install**: 180s timeout with completion wait
+
 ## ⌃ Keyboard Shortcuts
 
 | Shortcut | Action |

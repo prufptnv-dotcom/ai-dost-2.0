@@ -6,7 +6,7 @@ const sandboxManager = require('./sandboxManager');
 const FRAMEWORK_CONFIGS = {
   vite: {
     detect: ['vite.config.js', 'vite.config.ts', 'vite.config.mjs', 'vite.config.cjs'],
-    devCommand: 'npm run dev',
+    devCommand: 'npm run dev -- --host 0.0.0.0',
     buildCommand: 'npm run build',
     port: 5173,
     outputDir: 'dist',
@@ -124,7 +124,7 @@ class DevServerManager extends EventEmitter {
     this.emit('log', { sandboxId, message: `Installing dependencies with: ${cmd}`, type: 'info' });
     
     const result = await sandboxManager.exec(sandboxId, `cd ${projectPath} && ${cmd}`, {
-      timeout: 120000
+      timeout: 180000
     });
 
     if (!result.success) {
@@ -215,13 +215,13 @@ class DevServerManager extends EventEmitter {
       this.servers.delete(sandboxId);
     });
 
-    await this.waitForServer(serverInfo.url, 60000);
+    await this.waitForServer(serverInfo.url, 180000);
 
     this.emit('ready', { sandboxId, url: serverInfo.url, framework: config.framework });
     return { success: true, url: serverInfo.url, framework: config.framework, port: finalHostPort };
   }
 
-  async waitForServer(url, timeout = 30000) {
+  async waitForServer(url, timeout = 180000) {
     const start = Date.now();
     while (Date.now() - start < timeout) {
       try {

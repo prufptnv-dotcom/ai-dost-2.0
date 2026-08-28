@@ -161,4 +161,37 @@ async function retrieveLearning(userId, query, topK = 3) {
   }
 }
 
-module.exports = { health, queryRag, buildIndex, runCrew, tts, xlsxGenerate, webSearch, saveLearning, retrieveLearning, BASE };
+async function generate(prompt, opts = {}) {
+  const { systemPrompt, model = 'auto', temperature = 0.7, maxTokens = 2048 } = opts;
+  return engineFetch('/ai/generate', {
+    prompt,
+    system_prompt: systemPrompt,
+    model,
+    temperature,
+    max_tokens: maxTokens,
+  }, 30000);
+}
+
+async function codeComplete(prefix, suffix = '', language = 'javascript', filename = 'file.js') {
+  return engineFetch('/ai/code/complete', { prefix, suffix, language, filename }, 10000);
+}
+
+async function codeAnalyze(code, language = 'python') {
+  return engineFetch('/ai/code/analyze', { code, language }, 10000);
+}
+
+module.exports = {
+  health,
+  queryRag,
+  buildIndex,
+  runCrew,
+  tts,
+  xlsxGenerate,
+  webSearch,
+  saveLearning,
+  retrieveLearning,
+  generate,
+  codeComplete,
+  codeAnalyze,
+  BASE
+};

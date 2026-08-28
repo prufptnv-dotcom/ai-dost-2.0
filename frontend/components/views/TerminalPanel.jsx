@@ -134,7 +134,7 @@ const TerminalPanel = forwardRef(({ projectId, projectPath, className = '', onCo
     });
 
     const socket = io(BACKEND_URL, {
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
     });

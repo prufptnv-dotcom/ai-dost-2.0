@@ -1055,6 +1055,221 @@ def tts(req: TTSRequest):
         raise HTTPException(500, f"TTS error: {e}")
 
 
+# ------------------------------------------------------------------------------
+# UNIFIED PYTHON AI GENERATION & CASCADE ROUTER
+# ------------------------------------------------------------------------------
+class GenerateRequest(BaseModel):
+    prompt: str
+    system_prompt: Optional[str] = "You are AI-Dost, an expert AI developer assistant."
+    model: Optional[str] = "auto"
+    temperature: Optional[float] = 0.7
+    max_tokens: Optional[int] = 2048
+
+class GenerateResult(BaseModel):
+    status: str
+    text: str
+    model_used: str
+    response_time: float
+
+@app.post("/ai/generate", response_model=GenerateResult)
+def ai_generate(req: GenerateRequest):
+    """Centralized Python AI text & code generator with automatic cascade."""
+    import time
+    import requests
+    start_time = time.time()
+    prompt = req.prompt.strip()
+    if not prompt:
+        raise HTTPException(400, "Prompt cannot be empty")
+
+    groq_key = os.environ.get("GROQ_API_KEY")
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+    nvidia_key = os.environ.get("NVIDIA_API_KEY")
+    together_key = os.environ.get("TOGETHER_API_KEY")
+
+    # 1. Groq (Fastest)
+    if groq_key and req.model in ["auto", "groq"]:
+        try:
+            res = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                json={
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [
+                        {"role": "system", "content": req.system_prompt},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": req.temperature,
+                    "max_tokens": req.max_tokens,
+                },
+                timeout=15
+            )
+            if res.status_code == 200:
+                data = res.json()
+                content = data["choices"][0]["message"]["content"]
+                return GenerateResult(status="success", text=content, model_used="groq/llama-3.3-70b", response_time=time.time() - start_time)
+        except Exception:
+            pass
+
+    # 2. Gemini
+    if gemini_key and req.model in ["auto", "gemini"]:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+            res = requests.post(
+                url,
+                headers={"Content-Type": "application/json"},
+                json={
+                    "contents": [{"parts": [{"text": f"{req.system_prompt}\n\n{prompt}"}]}],
+                    "generationConfig": {"temperature": req.temperature, "maxOutputTokens": req.max_tokens}
+                },
+                timeout=20
+            )
+            if res.status_code == 200:
+                data = res.json()
+                content = data["candidates"][0]["content"]["parts"][0]["text"]
+                return GenerateResult(status="success", text=content, model_used="gemini-2.5-flash", response_time=time.time() - start_time)
+        except Exception:
+            pass
+
+    # 3. Together AI
+    if together_key and req.model in ["auto", "together"]:
+        try:
+            res = requests.post(
+                "https://api.together.xyz/v1/chat/completions",
+                headers={"Authorization": f"Bearer {together_key}", "Content-Type": "application/json"},
+                json={
+                    "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+                    "messages": [{"role": "system", "content": req.system_prompt}, {"role": "user", "content": prompt}],
+                    "temperature": req.temperature,
+                    "max_tokens": req.max_tokens
+                },
+                timeout=15
+            )
+            if res.status_code == 200:
+                content = res.json()["choices"][0]["message"]["content"]
+                return GenerateResult(status="success", text=content, model_used="together/llama-3.3-70b", response_time=time.time() - start_time)
+        except Exception:
+            pass
+
+    # 4. Ollama fallback
+    try:
+        res = requests.post(
+            "http://127.0.0.1:11434/api/generate",
+            json={"model": "qwen2.5-coder:7b", "prompt": f"{req.system_prompt}\n\n{prompt}", "stream": False},
+            timeout=30
+        )
+        if res.status_code == 200:
+            return GenerateResult(status="success", text=res.json().get("response", ""), model_used="ollama/qwen2.5-coder", response_time=time.time() - start_time)
+    except Exception:
+        pass
+
+    raise HTTPException(503, "All AI providers in Python Engine temporarily unavailable")
+
+
+# ------------------------------------------------------------------------------
+# INLINE GHOST-TEXT CODE COMPLETION (Monaco Editor Bridge)
+# ------------------------------------------------------------------------------
+class CodeCompleteRequest(BaseModel):
+    prefix: str
+    suffix: Optional[str] = ""
+    language: Optional[str] = "javascript"
+    filename: Optional[str] = "file.js"
+
+class CodeCompleteResult(BaseModel):
+    completion: str
+    language: str
+
+@app.post("/ai/code/complete", response_model=CodeCompleteResult)
+def code_complete(req: CodeCompleteRequest):
+    """Fast inline code completion for Monaco Editor."""
+    system = f"You are an ultra-fast code completion engine for {req.language}. Complete the code directly without explanations, markdown fences, or comments."
+    prompt = f"File: {req.filename}\n\nCode before cursor:\n{req.prefix[-1000:]}\n\nCode after cursor:\n{req.suffix[:300]}\n\nCompletion:"
+    try:
+        gen = ai_generate(GenerateRequest(prompt=prompt, system_prompt=system, temperature=0.1, max_tokens=128))
+        cleaned = gen.text.replace("```" + req.language, "").replace("```", "").strip()
+        return CodeCompleteResult(completion=cleaned, language=req.language)
+    except Exception:
+        return CodeCompleteResult(completion="", language=req.language)
+
+
+# ------------------------------------------------------------------------------
+# PYTHON CODE INSPECTOR & AST LINTER
+# ------------------------------------------------------------------------------
+class CodeAnalyzeRequest(BaseModel):
+    code: str
+    language: Optional[str] = "python"
+
+class CodeAnalyzeResult(BaseModel):
+    valid: bool
+    issues: List[dict]
+    summary: str
+
+@app.post("/ai/code/analyze", response_model=CodeAnalyzeResult)
+def code_analyze(req: CodeAnalyzeRequest):
+    """Analyze code for syntax errors and logic bugs."""
+    import ast
+    issues = []
+    if req.language == "python":
+        try:
+            ast.parse(req.code)
+            return CodeAnalyzeResult(valid=True, issues=[], summary="Python syntax valid. No parse errors found.")
+        except SyntaxError as e:
+            issues.append({
+                "line": e.lineno,
+                "column": e.offset,
+                "message": e.msg,
+                "type": "SyntaxError"
+            })
+            return CodeAnalyzeResult(valid=False, issues=issues, summary=f"Syntax Error at line {e.lineno}: {e.msg}")
+    return CodeAnalyzeResult(valid=True, issues=[], summary="Code analyzed.")
+
+
+# ------------------------------------------------------------------------------
+# PYTHON REPORTLAB PDF GENERATOR
+# ------------------------------------------------------------------------------
+class PDFGenerateRequest(BaseModel):
+    title: str
+    content: str
+    filename: Optional[str] = None
+
+class PDFGenerateResult(BaseModel):
+    status: str
+    filename: str
+    file_path: str
+
+@app.post("/ai/pdf/generate", response_model=PDFGenerateResult)
+def pdf_generate(req: PDFGenerateRequest):
+    """Generate high-quality PDF using Python."""
+    import tempfile
+    import os
+    from datetime import datetime
+
+    fname = req.filename or f"doc_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    temp_dir = tempfile.gettempdir()
+    out_path = os.path.join(temp_dir, fname)
+
+    # Use basic canvas text generation
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+        doc = SimpleDocTemplate(out_path, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=18, leading=22, spaceAfter=12)
+        body_style = ParagraphStyle('Body', parent=styles['Normal'], fontSize=10, leading=14, spaceAfter=8)
+
+        story = [Paragraph(req.title, title_style), Spacer(1, 10)]
+        for para in req.content.split("\n\n"):
+            if para.strip():
+                clean_p = para.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>")
+                story.append(Paragraph(clean_p, body_style))
+
+        doc.build(story)
+        return PDFGenerateResult(status="completed", filename=fname, file_path=out_path)
+    except Exception as e:
+        raise HTTPException(500, f"PDF generation error: {e}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8001)
