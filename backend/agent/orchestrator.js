@@ -1,4 +1,5 @@
 const fs = require('fs');
+const DiffEngine = require('./diffEngine');
 const path = require('path');
 const { exec } = require('child_process');
 const { promisify } = require('util');
@@ -269,11 +270,17 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           
           const search = parameters.search || parameters.search_block || '';
           const replace = parameters.replace || parameters.new_code || parameters.replacement || '';
-          if (!content.includes(search)) {
-            return { success: false, error: `SEARCH block not found in ${parameters.path}. Use read_file to get exact content first.` };
+          
+          const diffResult = DiffEngine.apply(content, search, replace);
+          
+          if (!diffResult.success) {
+            return { 
+              success: false, 
+              error: diffResult.error 
+            };
           }
           
-          const newContent = content.replace(search, replace);
+          const newContent = diffResult.newContent;
           fs.mkdirSync(require('path').dirname(filePath), { recursive: true });
           fs.writeFileSync(filePath, newContent, 'utf-8');
           
@@ -282,13 +289,20 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             if (inMem) inMem.content = newContent;
             else projectFiles.push({ path: parameters.path, content: newContent });
           }
-          return { success: true, message: `Diff applied to ${parameters.path}`, changedFile: parameters.path, newContent };
+          return { 
+            success: true, 
+            message: `Diff applied to ${parameters.path} (Strategy: ${diffResult.strategy}, Confidence: ${diffResult.confidence})`, 
+            changedFile: parameters.path,
+            strategy: diffResult.strategy,
+            confidence: diffResult.confidence,
+            newContent 
+          };
         } catch (e) {
           return { success: false, error: e.message };
         }
       }
 
-      case 'execute_command':
+        case 'execute_command':
       case 'run_terminal': {
         return (async () => {
           const cmd = parameters.command || '';
