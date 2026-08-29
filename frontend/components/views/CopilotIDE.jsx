@@ -312,7 +312,7 @@ function generateLiveAppHtml(files = [], contents = {}, inspectorActive = false)
     window.fetch = async function(url, options = {}) {
       const rawUrl = String(url || '').split('?')[0];
       const withoutProto = rawUrl.indexOf('://') !== -1 ? rawUrl.split('://')[1].split('/').slice(1).join('/') : rawUrl;
-      const cleanPath = withoutProto.replace(/^api\//, '').replace(/^\//, '');
+      const cleanPath = withoutProto.startsWith('api/') ? withoutProto.slice(4) : (withoutProto.startsWith('/') ? withoutProto.slice(1) : withoutProto);
       const method = (options.method || 'GET').toUpperCase();
       const resource = cleanPath.split('/')[0] || 'items';
 
