@@ -27,15 +27,15 @@ class AgentOrchestrator {
   }
 
   resolveSafePath(projectPath, userPath) {
-    if (!userPath) return null;
-    const path = require('path');
-    const normalized = path.normalize(userPath).replace(/^(\.\.(\/|\\|$))+/, '');
-    const absolutePath = path.isAbsolute(normalized) ? normalized : path.join(projectPath, normalized);
-    const relative = path.relative(projectPath, absolutePath);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) {
-        return null;
+    if (typeof projectPath !== 'string' || typeof userPath !== 'string' || !userPath.trim()) return null;
+    const base = path.resolve(projectPath);
+    if (path.isAbsolute(userPath)) return null;
+    const target = path.resolve(base, userPath);
+    const relative = path.relative(base, target);
+    if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
+      return null;
     }
-    return absolutePath;
+    return target;
   }
 
   constructor(options = {}) {
@@ -216,7 +216,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     switch (action) {
       case 'read_file': {
         try {
-          const filePath = path.join(this.projectPath, parameters.path);
+          const filePath = this.resolveSafePath(this.projectPath, parameters.path);
+          if (!filePath) return { success: false, error: 'Invalid or unsafe file path.' };
           if (!fs.existsSync(filePath)) {
             const inMem = projectFiles.find(f => f.path === parameters.path);
             if (inMem) return { success: true, content: (inMem.content || '').substring(0, 8000), note: 'Loaded from memory' };
@@ -234,7 +235,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           // Auto-inject base boilerplate if writing React/Express files into an empty workspace
           this.injectBaseBoilerplate(this.projectPath, projectFiles);
 
-          const filePath = path.join(this.projectPath, parameters.path);
+          const filePath = this.resolveSafePath(this.projectPath, parameters.path);
+          if (!filePath) return { success: false, error: 'Invalid or unsafe file path.' };
           fs.mkdirSync(path.dirname(filePath), { recursive: true });
           fs.writeFileSync(filePath, parameters.content || '', 'utf-8');
           // Update in-memory files if present
@@ -251,7 +253,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 
       case 'apply_diff': {
         try {
-          const filePath = path.join(this.projectPath, parameters.path);
+          const filePath = this.resolveSafePath(this.projectPath, parameters.path);
+          if (!filePath) return { success: false, error: 'Invalid or unsafe file path.' };
           let content;
           try {
             content = fs.readFileSync(filePath, 'utf-8');
@@ -269,7 +272,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           try {
             fs.mkdirSync(path.dirname(filePath), { recursive: true });
             fs.writeFileSync(filePath, newContent, 'utf-8');
-          } catch (_) {}
+          } catch (writeErr) {
+            return { success: false, error: writeErr.message };
+          }
           // Update in-memory file array if present
           if (projectFiles && Array.isArray(projectFiles)) {
             const inMem = projectFiles.find(f => f.path === parameters.path);
@@ -517,7 +522,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       case 'read_file_tree':
       case 'list_directory': {
         try {
-          const targetPath = parameters.path ? path.join(this.projectPath, parameters.path) : this.projectPath;
+          const targetPath = parameters.path ? this.resolveSafePath(this.projectPath, parameters.path) : this.projectPath;
+          if (!targetPath) return { success: false, error: 'Invalid or unsafe directory path.' };
           if (!fs.existsSync(targetPath)) {
             const inMemPaths = projectFiles.map(f => f.path);
             return { success: true, files: inMemPaths, count: inMemPaths.length, note: 'In-memory workspace list' };
