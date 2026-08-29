@@ -26,7 +26,8 @@ class ContextRetriever {
   isPathSafe(workspacePath, relativePath) {
     const ws = path.resolve(workspacePath);
     const target = path.resolve(ws, relativePath);
-    return target.startsWith(ws);
+    const rel = path.relative(ws, target);
+    return rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel));
   }
 
   tokenize(text) {
