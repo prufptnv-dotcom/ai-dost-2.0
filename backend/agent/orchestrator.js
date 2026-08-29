@@ -15,6 +15,7 @@ const MistralService = require('../services/mistralService');
 const HuggingFaceService = require('../services/huggingfaceService');
 const OpenRouterService = require('../services/openrouterService');
 const CodebaseIndexer = require('./codebaseIndexer');
+const ContextRetriever = require('./contextRetriever');
 const logger = require('../logger');
 
 class AgentOrchestrator {
@@ -22,6 +23,10 @@ class AgentOrchestrator {
     this.projectPath = options.projectPath || os.tmpdir();
     this.customKeys = options.customKeys || {};
     this.codebaseIndexer = options.codebaseIndexer || new CodebaseIndexer();
+    this.contextRetriever = options.contextRetriever || new ContextRetriever({ 
+      codebaseIndexer: this.codebaseIndexer,
+      legacySearch: async (query) => await this.executeTool('search_codebase', { query, projectPath: this.projectPath })
+    });
     this.agentSystemPrompt = `You are the Lead Autonomous Systems Architect & Principal Engineer of AI-Dost Copilot.
 You build production-grade, enterprise-ready full-stack applications with 100% autonomy (Brain + Hands + Eyes).
 
@@ -336,6 +341,28 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             matches: matches.slice(0, 10),
             symbols: symbols.slice(0, 10),
             count: matches.length + symbols.length
+          };
+        } catch (err) {
+          return { success: false, error: err.message };
+        }
+      }
+
+      case 'get_relevant_context': {
+        const query = parameters.query || '';
+        const ws = parameters.workspacePath || this.projectPath;
+        const topK = parseInt(parameters.topK, 10) || 12;
+        try {
+          if (!this.contextRetriever) return { success: false, error: 'ContextRetriever not initialized.' };
+          const result = await this.contextRetriever.retrieve(ws, query, { topK });
+          const compact = result.context.map(c => ({
+             path: c.path,
+             symbols: c.symbols,
+             preview: c.preview.substring(0, 2000)
+          }));
+          return {
+             success: true,
+             stats: result.stats,
+             context: compact
           };
         } catch (err) {
           return { success: false, error: err.message };
@@ -1267,7 +1294,7 @@ p { color: #64748b; }`,
 
       const ALLOWED = [
         'read_file', 'write_file', 'apply_diff', 'run_terminal', 'execute_command',
-        'list_directory', 'read_file_tree', 'search_codebase', 'search_codebase_index', 'run_tests',
+        'list_directory', 'read_file_tree', 'search_codebase', 'search_codebase_index', 'get_relevant_context', 'run_tests',
         'take_screenshot', 'inspect_visual_dom', 'generate_project_from_prompt',
         'resume_from_chat', 'FINAL_ANSWER'
       ];
@@ -1333,7 +1360,25 @@ p { color: #64748b; }`,
       }
     } catch (_) {}
 
-    const messages = this.buildInitialContext(prompt, targetWorkspace);
+    // 2.5 Hybrid Context Retrieval
+    let systemContext = '';
+    try {
+      if (this.contextRetriever) {
+         const retrievalResult = await this.contextRetriever.retrieve(targetWorkspace, prompt, { topK: 12 });
+         if (retrievalResult && retrievalResult.context && retrievalResult.context.length > 0) {
+            systemContext = "\n\nRELEVANT REPOSITORY CONTEXT:\n" + JSON.stringify(
+               retrievalResult.context.map(c => ({
+                 path: c.path,
+                 symbols: c.symbols,
+                 imports: c.imports,
+                 preview: c.preview
+               })), null, 2
+            );
+         }
+      }
+    } catch (_) {}
+
+    const messages = this.buildInitialContext(prompt + systemContext, targetWorkspace);
     const steps = [];
     const MAX_STEPS = 50;
 
