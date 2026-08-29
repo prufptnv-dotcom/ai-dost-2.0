@@ -10,6 +10,7 @@ const OpenRouterService = require('../services/openrouterService');
 const MistralService = require('../services/mistralService');
 const TogetherService = require('../services/togetherService');
 const CerebrasService = require('../services/cerebrasService');
+const OpenAIService = require('../services/openaiService');
 
 // Helper to check if response indicates rate limit or error
 function isRateLimitedOrError(response) {
@@ -360,6 +361,11 @@ router.post('/', async (req, res) => {
 // Helper for cascading failover across AI models with better error handling
 async function executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys) {
     const tiers = [
+        {
+            name: 'OpenAI (GPT-4o / GPT-4o-mini)',
+            fn: () => OpenAIService.chat(groqMsg, cleanHistory, customKeys?.openai, mode),
+            check: (r) => isValidResponse(r)
+        },
         { 
             name: 'Groq (Llama 3.3 70B)', 
             fn: () => GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq),
