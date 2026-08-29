@@ -18,6 +18,7 @@ import DiffReviewModal from './DiffReviewModal';
 import ProjectWizardModal from './ProjectWizardModal';
 import TaskStepItem from './TaskStepItem';
 import VisualDebugger from './VisualDebugger';
+import { syncFileToWebContainer } from '../../lib/webcontainer';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
@@ -1032,6 +1033,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                   return [...prev, { path: filePath, content, lastModified: Date.now() }];
                 });
                 setContents(prev => ({ ...prev, [filePath]: content }));
+                syncFileToWebContainer(filePath, content);
 
                 // Advance milestone task status dynamically
                 setPlanTasks(prev => {

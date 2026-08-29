@@ -982,47 +982,55 @@ p { color: #64748b; }`,
     };
   }
 
-  // 2. Task Manager Agent: Generate structured TODO tasks
+  // 2. Task Manager Agent: Generate structured 6-phase TODO tasks
   async createTodoList(prompt, architecture) {
     const tasks = [];
     const cat = architecture.category || 'general';
 
     tasks.push({
       id: 'task-1',
-      title: 'Scaffold Project Structure & Config',
-      description: `Initialize ${architecture.framework} with Tailwind CSS, Lucide icons, and modern Vite config.`,
+      title: '1. Initialize Baseline Vite & React Architecture',
+      description: `Scaffold ${architecture.framework} with Tailwind CSS, Lucide icons, and modern Vite build config.`,
       status: 'pending',
-      files: ['package.json', 'index.html', 'vite.config.js']
+      files: ['package.json', 'index.html', 'vite.config.js', 'src/main.jsx']
     });
 
     tasks.push({
       id: 'task-2',
-      title: `Build ${cat.toUpperCase()} Core Components & UI Layout`,
-      description: `Implement ${architecture.features.slice(0, 2).join(' & ')} with sleek dark glassmorphism styling.`,
+      title: '2. Configure Data Models & Initial State Store',
+      description: 'Define application state management, data models, and realistic seed data records.',
       status: 'pending',
-      files: ['src/App.jsx', 'src/index.css', 'src/main.jsx']
+      files: ['src/data/mockData.js', 'src/context/AppContext.jsx']
     });
 
     tasks.push({
       id: 'task-3',
-      title: 'Implement Backend REST API & Data Store',
-      description: 'Create Express server.js with REST CRUD endpoints, CORS, and seed mock data.',
+      title: '3. Implement Backend REST API & Server Endpoints',
+      description: 'Create Express server.js with REST CRUD endpoints, CORS headers, and seed handlers.',
       status: 'pending',
       files: ['server.js', 'src/services/api.js']
     });
 
     tasks.push({
       id: 'task-4',
-      title: 'DevOps & Live Background Dev Server',
-      description: 'Install dependencies (npm install) and launch dev server with zero port collisions.',
+      title: `4. Construct ${cat.toUpperCase()} Core UI Components`,
+      description: `Implement ${architecture.features.slice(0, 2).join(' & ')} with sleek dark Linear glassmorphic styling.`,
       status: 'pending',
-      files: ['package.json']
+      files: ['src/App.jsx', 'src/components/Header.jsx', 'src/index.css']
     });
 
     tasks.push({
       id: 'task-5',
-      title: 'Vision QA & Self-Healing Verification',
-      description: 'Perform visual layout checks, inspect console output, and auto-correct any runtime errors.',
+      title: '5. Wire Interactive Features & Client-Side CRUD',
+      description: 'Connect form submissions, dynamic state changes, filter search, and responsive drawers.',
+      status: 'pending',
+      files: ['src/App.jsx', 'src/services/api.js']
+    });
+
+    tasks.push({
+      id: 'task-6',
+      title: '6. Live Preview Verification & Visual QA Inspection',
+      description: 'Perform visual layout checks, inspect console output, and auto-correct any runtime anomalies.',
       status: 'pending',
       files: []
     });

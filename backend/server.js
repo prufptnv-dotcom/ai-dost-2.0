@@ -180,6 +180,13 @@ app.use((req, res, next) => {
     next();
 });
 
+// Cross-Origin Isolation headers for WebContainer in-browser runtime
+app.use((req, res, next) => {
+    res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    next();
+});
+
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 

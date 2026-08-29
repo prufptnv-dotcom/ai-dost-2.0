@@ -1,4 +1,4 @@
-﻿import { WebContainer } from '@webcontainer/api';
+import { WebContainer } from '@webcontainer/api';
 
 let webcontainerInstance = null;
 let bootPromise = null;
@@ -85,4 +85,23 @@ export async function bootSandboxServer(files, onServerReady, onTerminalLog) {
   });
 
   return { webcontainer, devProcess };
+}
+
+// Synchronize a single file write event into the live WebContainer VFS
+export async function syncFileToWebContainer(filePath, content) {
+  if (!webcontainerInstance) return false;
+  try {
+    const clean = String(filePath || '').replace(/^\/+/, '');
+    if (!clean) return false;
+    const parts = clean.split('/');
+    if (parts.length > 1) {
+      const dir = parts.slice(0, -1).join('/');
+      await webcontainerInstance.fs.mkdir(dir, { recursive: true });
+    }
+    await webcontainerInstance.fs.writeFile(clean, content || '');
+    return true;
+  } catch (err) {
+    console.warn('[WebContainer] syncFileToWebContainer warning:', err?.message || err);
+    return false;
+  }
 }
