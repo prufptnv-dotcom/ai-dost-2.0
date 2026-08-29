@@ -85,10 +85,15 @@ class CodebaseIndexer {
   }
 
   isPathSafe(workspacePath, targetPath) {
-    const resolvedWorkspace = path.resolve(workspacePath);
-    const resolvedTarget = path.resolve(resolvedWorkspace, targetPath);
-    const rel = path.relative(resolvedWorkspace, resolvedTarget);
-    return !rel.startsWith('..') && !path.isAbsolute(rel);
+    const ws = path.resolve(workspacePath);
+    const target = path.resolve(ws, targetPath);
+    
+    // Secret blocking
+    const blockedSecrets = ['.env', '.pem', '.key', 'id_rsa', 'secrets.json', 'credentials'];
+    const basename = path.basename(target).toLowerCase();
+    if (blockedSecrets.some(sec => basename.includes(sec))) return false;
+    
+    return target === ws || target.startsWith(ws + path.sep);
   }
 
   isSecretOrIgnoredFile(filename) {

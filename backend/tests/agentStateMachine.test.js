@@ -234,6 +234,9 @@ test('Agent State Machine Test Suite', async (t) => {
   });
 
   await t.test('16-20. Verification command discovery via real executeTool', async () => {
+      const sandboxMgr = require('../sandbox/SandboxManager');
+      sandboxMgr.createSandbox = async () => ({ id: 'mock-sb-id' });
+      sandboxMgr.exec = async (id, cmd) => ({ success: true, exitCode: 0, stdout: cmd.includes('test') || cmd === 'pytest' || cmd.includes('unittest') ? 'test_passed' : cmd.includes('build') ? 'build_passed' : 'lint_passed' });
     const o = new AgentOrchestrator({ apiKey: 'dummy' });
     const verifyWs = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-'));
     

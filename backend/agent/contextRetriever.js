@@ -26,7 +26,13 @@ class ContextRetriever {
   isPathSafe(workspacePath, relativePath) {
     const ws = path.resolve(workspacePath);
     const target = path.resolve(ws, relativePath);
-    return target.startsWith(ws);
+    
+    // Secret blocking
+    const blockedSecrets = ['.env', '.pem', '.key', 'id_rsa', 'secrets.json', 'credentials'];
+    const basename = path.basename(target).toLowerCase();
+    if (blockedSecrets.some(sec => basename.includes(sec))) return false;
+    
+    return target === ws || target.startsWith(ws + path.sep);
   }
 
   tokenize(text) {

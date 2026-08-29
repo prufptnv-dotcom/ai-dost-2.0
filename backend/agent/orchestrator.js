@@ -26,16 +26,17 @@ class AgentOrchestrator {
     return require('crypto').createHash('sha256').update(content).digest('hex');
   }
 
-  resolveSafePath(projectPath, userPath) {
-    if (!userPath) return null;
-    const path = require('path');
-    const normalized = path.normalize(userPath).replace(/^(\.\.(\/|\\|$))+/, '');
-    const absolutePath = path.isAbsolute(normalized) ? normalized : path.join(projectPath, normalized);
-    const relative = path.relative(projectPath, absolutePath);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) {
-        return null;
-    }
-    return absolutePath;
+  resolveSafePath(workspacePath, targetPath) {
+    if (!workspacePath || !targetPath) return null;
+    const normalizedTarget = targetPath.replace(/\\/g, '/');
+    if (normalizedTarget.includes('../') || normalizedTarget.includes('..\\')) return null;
+    const ws = require('path').resolve(workspacePath);
+    const target = require('path').resolve(ws, targetPath);
+    if (target !== ws && !target.startsWith(ws + require('path').sep)) return null;
+    const blockedSecrets = ['.env', '.pem', '.key', 'id_rsa', 'secrets.json', 'credentials'];
+    const basename = require('path').basename(target).toLowerCase();
+    if (blockedSecrets.some(sec => basename.includes(sec))) return null;
+    return target;
   }
 
   constructor(options = {}) {
@@ -216,7 +217,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     switch (action) {
       case 'read_file': {
         try {
-          const filePath = path.join(this.projectPath, parameters.path);
+          const filePath = this.resolveSafePath(this.projectPath, parameters.path);
+          if (!filePath) return { success: false, error: 'Access denied: Invalid or unsafe path' };
+          
           if (!fs.existsSync(filePath)) {
             const inMem = projectFiles.find(f => f.path === parameters.path);
             if (inMem) return { success: true, content: (inMem.content || '').substring(0, 8000), note: 'Loaded from memory' };
@@ -231,13 +234,14 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 
       case 'write_file': {
         try {
-          // Auto-inject base boilerplate if writing React/Express files into an empty workspace
           this.injectBaseBoilerplate(this.projectPath, projectFiles);
-
-          const filePath = path.join(this.projectPath, parameters.path);
-          fs.mkdirSync(path.dirname(filePath), { recursive: true });
+          
+          const filePath = this.resolveSafePath(this.projectPath, parameters.path);
+          if (!filePath) return { success: false, error: 'Access denied: Invalid or unsafe path' };
+          
+          fs.mkdirSync(require('path').dirname(filePath), { recursive: true });
           fs.writeFileSync(filePath, parameters.content || '', 'utf-8');
-          // Update in-memory files if present
+          
           if (projectFiles && Array.isArray(projectFiles)) {
             const inMem = projectFiles.find(f => f.path === parameters.path);
             if (inMem) inMem.content = parameters.content || '';
@@ -251,7 +255,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 
       case 'apply_diff': {
         try {
-          const filePath = path.join(this.projectPath, parameters.path);
+          const filePath = this.resolveSafePath(this.projectPath, parameters.path);
+          if (!filePath) return { success: false, error: 'Access denied: Invalid or unsafe path' };
+          
           let content;
           try {
             content = fs.readFileSync(filePath, 'utf-8');
@@ -260,17 +266,17 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             if (!inMem) return { success: false, error: `File not found: ${parameters.path}. Use read_file first.` };
             content = inMem.content || '';
           }
+          
           const search = parameters.search || parameters.search_block || '';
           const replace = parameters.replace || parameters.new_code || parameters.replacement || '';
           if (!content.includes(search)) {
-            return { success: false, error: `SEARCH block not found in ${parameters.path}. Use read_file to get exact content first, then retry apply_diff.` };
+            return { success: false, error: `SEARCH block not found in ${parameters.path}. Use read_file to get exact content first.` };
           }
+          
           const newContent = content.replace(search, replace);
-          try {
-            fs.mkdirSync(path.dirname(filePath), { recursive: true });
-            fs.writeFileSync(filePath, newContent, 'utf-8');
-          } catch (_) {}
-          // Update in-memory file array if present
+          fs.mkdirSync(require('path').dirname(filePath), { recursive: true });
+          fs.writeFileSync(filePath, newContent, 'utf-8');
+          
           if (projectFiles && Array.isArray(projectFiles)) {
             const inMem = projectFiles.find(f => f.path === parameters.path);
             if (inMem) inMem.content = newContent;
@@ -291,19 +297,19 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             return { success: false, error: 'Command blocked for safety.', exit_code: 1 };
           }
           try {
-            if (!this.sandbox) {
-              const SandboxManager = require('../sandbox/SandboxManager');
-              this.sandbox = new SandboxManager(this.projectId || 'orchestrator-task', this.projectPath);
-              await this.sandbox.start();
+            const sandboxMgr = require('../sandbox/SandboxManager');
+            if (!this.sandboxId) {
+              const sb = await sandboxMgr.createSandbox(this.projectId || 'orchestrator-task', { workdir: ws });
+              this.sandboxId = sb.id;
             }
-            const r = await this.sandbox.executeCommand(cmd, 20000);
+            const r = await sandboxMgr.exec(this.sandboxId, cmd, { timeout: 30000 });
             return {
               success: r.success,
               stdout: (r.stdout || '').substring(0, 3000),
               stderr: (r.stderr || '').substring(0, 3000),
-              exit_code: r.exit_code,
-              selfHealingHint: r.exit_code !== 0
-                ? `Command failed with exit code ${r.exit_code}. Stderr: ${(r.stderr || '').substring(0, 500)}. Analyze the error and fix the code before retrying.`
+              exit_code: r.exitCode,
+              selfHealingHint: !r.success
+                ? `Command failed with exit code ${r.exitCode}. Stderr: ${(r.stderr || '').substring(0, 500)}.`
                 : null
             };
           } catch (err) {
@@ -389,93 +395,104 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       }
 
       case 'run_tests': {
-        return new Promise((resolve) => {
-          let cmd = 'python -m unittest discover';
-          const hasPackageJson = projectFiles.some(f => f.path === 'package.json') || fs.existsSync(path.join(this.projectPath, 'package.json'));
-          if (hasPackageJson) {
-            cmd = 'npm test';
-          } else if (parameters.framework === 'pytest') {
-            cmd = 'pytest';
-          }
-          exec(cmd, { cwd: this.projectPath, timeout: 25000 }, (err, stdout, stderr) => {
-            const exitCode = err ? (err.code !== undefined ? err.code : 1) : 0;
-            resolve({
-              success: exitCode === 0,
+        return (async () => {
+          try {
+            let cmd = 'python -m unittest discover';
+            const hasPackageJson = projectFiles.some(f => f.path === 'package.json') || fs.existsSync(require('path').join(this.projectPath, 'package.json'));
+            if (hasPackageJson) {
+              cmd = 'npm test';
+            } else if (parameters.framework === 'pytest') {
+              cmd = 'pytest';
+            }
+            const sandboxMgr = require('../sandbox/SandboxManager');
+            if (!this.sandboxId) {
+              const sb = await sandboxMgr.createSandbox(this.projectId || 'orchestrator-task', { workdir: this.projectPath });
+              this.sandboxId = sb.id;
+            }
+            const r = await sandboxMgr.exec(this.sandboxId, cmd, { timeout: 45000 });
+            return {
+              success: r.success,
               command: cmd,
-              stdout: (stdout || '').substring(0, 3000),
-              stderr: (stderr || '').substring(0, 3000),
-              exit_code: exitCode,
-              summary: exitCode === 0 ? '✅ All tests passed' : '❌ Tests failed'
-            });
-          });
-        });
+              stdout: (r.stdout || '').substring(0, 3000),
+              stderr: (r.stderr || '').substring(0, 3000),
+              exit_code: r.exitCode,
+              summary: r.success ? '✅ All tests passed' : '❌ Tests failed'
+            };
+          } catch (err) {
+            return { success: false, error: err.message, exit_code: 1 };
+          }
+        })();
       }
 
       case 'verify_project': {
-        const ws = parameters.workspacePath || this.projectPath;
-        const scope = parameters.scope || 'all';
-        const checks = [];
-        let success = true;
+        return (async () => {
+          const ws = parameters.workspacePath || this.projectPath;
+          const scope = parameters.scope || 'all';
+          const checks = [];
+          let success = true;
 
-        try {
-          const runCmd = (name, cmd) => {
-             return new Promise(resolve => {
-                exec(cmd, { cwd: ws, timeout: 30000 }, (err, stdout, stderr) => {
-                   const exitCode = err ? (err.code || 1) : 0;
-                   resolve({
-                      name,
-                      command: cmd,
-                      success: exitCode === 0,
-                      exitCode,
-                      stdout: (stdout || '').substring(0, 3000),
-                      stderr: (stderr || '').substring(0, 3000)
-                   });
-                });
-             });
-          };
+          try {
+            const sandboxMgr = require('../sandbox/SandboxManager');
+            if (!this.sandboxId) {
+              const sb = await sandboxMgr.createSandbox(this.projectId || 'orchestrator-task', { workdir: this.projectPath });
+              this.sandboxId = sb.id;
+            }
 
-          const pkgPath = path.join(ws, 'package.json');
-          if (fs.existsSync(pkgPath)) {
-            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-            const scripts = pkg.scripts || {};
-            if ((scope === 'all' || scope === 'lint') && scripts.lint) {
-              const res = await runCmd('lint', 'npm run lint');
-              checks.push(res);
-              if (!res.success) success = false;
+            const runCmd = async (name, cmd) => {
+              const r = await sandboxMgr.exec(this.sandboxId, cmd, { timeout: 60000 });
+              return {
+                name,
+                command: cmd,
+                success: r.success,
+                exitCode: r.exitCode,
+                stdout: (r.stdout || '').substring(0, 3000),
+                stderr: (r.stderr || '').substring(0, 3000)
+              };
+            };
+
+            const pkgPath = require('path').join(ws, 'package.json');
+            if (fs.existsSync(pkgPath)) {
+              const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+              const scripts = pkg.scripts || {};
+              if ((scope === 'all' || scope === 'lint') && scripts.lint) {
+                const res = await runCmd('lint', 'npm run lint');
+                checks.push(res);
+                if (!res.success) success = false;
+              }
+              if ((scope === 'all' || scope === 'build') && scripts.build) {
+                const res = await runCmd('build', 'npm run build');
+                checks.push(res);
+                if (!res.success) success = false;
+              }
+              if ((scope === 'all' || scope === 'tests') && scripts.test) {
+                const res = await runCmd('test', 'npm test');
+                checks.push(res);
+                if (!res.success) success = false;
+              }
+            } else {
+               const hasPytest = fs.existsSync(require('path').join(ws, 'pytest.ini')) || fs.existsSync(require('path').join(ws, 'conftest.py'));
+               const cmd = hasPytest ? 'pytest' : 'python -m unittest discover';
+               const res = await runCmd('test', cmd);
+               checks.push(res);
+               if (!res.success) success = false;
             }
-            if ((scope === 'all' || scope === 'build') && scripts.build) {
-              const res = await runCmd('build', 'npm run build');
-              checks.push(res);
-              if (!res.success) success = false;
+
+            if (checks.length === 0) {
+              checks.push({
+                 name: 'none',
+                 command: 'none',
+                 success: true,
+                 exitCode: 0,
+                 stdout: 'No verification scripts found.',
+                 stderr: ''
+              });
             }
-            if ((scope === 'all' || scope === 'tests') && scripts.test) {
-              const res = await runCmd('test', 'npm test');
-              checks.push(res);
-              if (!res.success) success = false;
-            }
-          } else {
-             const hasPytest = fs.existsSync(path.join(ws, 'pytest.ini')) || fs.existsSync(path.join(ws, 'conftest.py'));
-             const cmd = hasPytest ? 'pytest' : 'python -m unittest discover';
-             const res = await runCmd('test', cmd);
-             checks.push(res);
-             if (!res.success) success = false;
+
+            return { success, checks };
+          } catch (err) {
+            return { success: false, error: err.message };
           }
-
-          if (checks.length === 0) {
-            checks.push({
-               name: 'none',
-               command: 'none',
-               success: true,
-               exitCode: 0,
-               stdout: 'No verification scripts found.',
-               stderr: ''
-            });
-          }
-
-          return { success, checks };
-        } catch (err) {
-          return { success: false, error: err.message };
-        }
+        })();
       }
 
       case 'generate_project_from_prompt': {
@@ -488,18 +505,20 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             const projectType = this.detectProjectType(cleanPrompt);
             const projectFiles = await this.generateProjectFiles(projectType, prompt, targetDir);
             
-            // Initialize git repo
+            const sandboxMgr = require('../sandbox/SandboxManager');
+            if (!this.sandboxId) {
+              const sb = await sandboxMgr.createSandbox(this.projectId || 'orchestrator-task', { workdir: this.projectPath });
+              this.sandboxId = sb.id;
+            }
+            
             try {
-              await execPromise('git init', { cwd: targetDir, timeout: 10000 });
+              await sandboxMgr.exec(this.sandboxId, 'git init', { timeout: 10000 });
             } catch (_) {}
             
-            // Install dependencies if package.json was created
             if (projectFiles.some(f => f.path === 'package.json')) {
               try {
-                await execPromise('npm install', { cwd: targetDir, timeout: 120000 });
-              } catch (e) {
-                // npm install partial or failed, continuing...
-              }
+                await sandboxMgr.exec(this.sandboxId, 'npm install', { timeout: 120000 });
+              } catch (e) {}
             }
             
             resolve({ 
@@ -517,13 +536,15 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       case 'read_file_tree':
       case 'list_directory': {
         try {
-          const targetPath = parameters.path ? path.join(this.projectPath, parameters.path) : this.projectPath;
+          const targetPath = parameters.path ? this.resolveSafePath(this.projectPath, parameters.path) : this.projectPath;
+          if (!targetPath) return { success: false, error: 'Access denied: Invalid or unsafe path' };
+          
           if (!fs.existsSync(targetPath)) {
             const inMemPaths = projectFiles.map(f => f.path);
             return { success: true, files: inMemPaths, count: inMemPaths.length, note: 'In-memory workspace list' };
           }
           const diskFiles = fs.readdirSync(targetPath, { recursive: true });
-          const filtered = diskFiles.filter(f => !f.includes('node_modules') && !f.includes('.git'));
+          const filtered = diskFiles.filter(f => !f.includes('node_modules') && !f.includes('.git') && !f.includes('.env') && !f.includes('.pem'));
           return { success: true, files: filtered, count: filtered.length };
         } catch (e) {
           return { success: false, error: e.message };
