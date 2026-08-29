@@ -43,6 +43,7 @@ class AgentOrchestrator {
   constructor(options = {}) {
     this.projectPath = options.projectPath || os.tmpdir();
     this.customKeys = options.customKeys || {};
+    this.diagnosticManager = new (require('./diagnostics/DiagnosticManager'))();
     this.codebaseIndexer = options.codebaseIndexer || new CodebaseIndexer();
     this.contextRetriever = options.contextRetriever || new ContextRetriever({ 
       codebaseIndexer: this.codebaseIndexer,
@@ -1637,19 +1638,47 @@ p { color: #64748b; }`,
           projectPath: targetWorkspace
         });
 
-        if (['write_file', 'apply_diff'].includes(parsed.action) && toolResult.success && targetFilePath) {
-             const afterHash = this.getFileHash(targetFilePath);
-             if (beforeHash !== afterHash) {
-                 internalState.changedFiles.push({
-                     path: require('path').relative(targetWorkspace, targetFilePath).replace(/\\/g, '/'),
-                     operation: parsed.action,
-                     beforeHash,
-                     afterHash
-                 });
-             }
-        }
+        
+          if (['write_file', 'apply_diff'].includes(parsed.action) && toolResult.success && targetFilePath) {
+               const afterHash = this.getFileHash(targetFilePath);
+               if (beforeHash !== afterHash) {
+                   internalState.changedFiles.push({
+                       path: require('path').relative(targetWorkspace, targetFilePath).replace(/\\/g, '/'),
+                       operation: parsed.action,
+                       beforeHash,
+                       afterHash
+                   });
 
-        if (parsed.action === 'verify_project') {
+                   // --- Diagnostics Interceptor ---
+                   if (this.diagnosticManager) {
+                       try {
+                           if (!this.sandboxId) {
+                               const sandboxMgr = require('../sandbox/SandboxManager');
+                               const available = await sandboxMgr.isDockerAvailable();
+                               if (available) {
+                                   const sb = await sandboxMgr.createSandbox(this.projectId || 'orchestrator-task', { workdir: targetWorkspace });
+                                   this.sandboxId = sb.id;
+                               }
+                           }
+                           if (this.sandboxId) {
+                               const diagResult = await this.diagnosticManager.runDiagnostics(this.sandboxId, targetWorkspace, targetFilePath, afterHash);
+                               if (diagResult && diagResult.hasErrors) {
+                                   toolResult.success = false;
+                                   toolResult.error = `Action applied, but produced DIAGNOSTICS ERRORS:\n\n${diagResult.formattedErrors}`;
+                                   if (internalState.state !== 'REPAIR' && internalState.state !== 'DIAGNOSE') {
+                                       internalState.state = 'DIAGNOSE';
+                                   }
+                               }
+                           }
+                       } catch (diagErr) {
+                           console.error('[Diagnostics] Failed to run diagnostics:', diagErr.message);
+                       }
+                   }
+                   // -------------------------------
+               }
+          }
+
+          if (parsed.action === 'verify_project') {
            internalState.verification = toolResult;
            if (typeof onStepUpdate === 'function') {
               onStepUpdate({ type: "verification", success: toolResult.success, checks: toolResult.checks });
