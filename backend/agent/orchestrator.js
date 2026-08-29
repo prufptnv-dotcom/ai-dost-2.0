@@ -19,6 +19,25 @@ const ContextRetriever = require('./contextRetriever');
 const logger = require('../logger');
 
 class AgentOrchestrator {
+
+  getFileHash(filePath) {
+    if (!require('fs').existsSync(filePath)) return null;
+    const content = require('fs').readFileSync(filePath);
+    return require('crypto').createHash('sha256').update(content).digest('hex');
+  }
+
+  resolveSafePath(projectPath, userPath) {
+    if (!userPath) return null;
+    const path = require('path');
+    const normalized = path.normalize(userPath).replace(/^(\.\.(\/|\\|$))+/, '');
+    const absolutePath = path.isAbsolute(normalized) ? normalized : path.join(projectPath, normalized);
+    const relative = path.relative(projectPath, absolutePath);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+        return null;
+    }
+    return absolutePath;
+  }
+
   constructor(options = {}) {
     this.projectPath = options.projectPath || os.tmpdir();
     this.customKeys = options.customKeys || {};
@@ -390,6 +409,73 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             });
           });
         });
+      }
+
+      case 'verify_project': {
+        const ws = parameters.workspacePath || this.projectPath;
+        const scope = parameters.scope || 'all';
+        const checks = [];
+        let success = true;
+
+        try {
+          const runCmd = (name, cmd) => {
+             return new Promise(resolve => {
+                exec(cmd, { cwd: ws, timeout: 30000 }, (err, stdout, stderr) => {
+                   const exitCode = err ? (err.code || 1) : 0;
+                   resolve({
+                      name,
+                      command: cmd,
+                      success: exitCode === 0,
+                      exitCode,
+                      stdout: (stdout || '').substring(0, 3000),
+                      stderr: (stderr || '').substring(0, 3000)
+                   });
+                });
+             });
+          };
+
+          const pkgPath = path.join(ws, 'package.json');
+          if (fs.existsSync(pkgPath)) {
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+            const scripts = pkg.scripts || {};
+            if ((scope === 'all' || scope === 'lint') && scripts.lint) {
+              const res = await runCmd('lint', 'npm run lint');
+              checks.push(res);
+              if (!res.success) success = false;
+            }
+            if ((scope === 'all' || scope === 'build') && scripts.build) {
+              const res = await runCmd('build', 'npm run build');
+              checks.push(res);
+              if (!res.success) success = false;
+            }
+            if ((scope === 'all' || scope === 'tests') && scripts.test) {
+              const res = await runCmd('test', 'npm test');
+              checks.push(res);
+              if (!res.success) success = false;
+            }
+          } else {
+             const hasPytest = fs.existsSync(path.join(ws, 'pytest.ini')) || fs.existsSync(path.join(ws, 'conftest.py'));
+             const cmd = hasPytest ? 'pytest' : 'python -m unittest discover';
+             const res = await runCmd('test', cmd);
+             checks.push(res);
+             if (!res.success) success = false;
+          }
+
+          if (checks.length === 0) {
+            checks.push({
+               name: 'none',
+               command: 'none',
+               success: true,
+               exitCode: 0,
+               stdout: 'No verification scripts found.',
+               stderr: ''
+            });
+          }
+
+          return { success, checks };
+        } catch (err) {
+          return { success: false, error: err.message };
+        }
       }
 
       case 'generate_project_from_prompt': {
@@ -1294,7 +1380,7 @@ p { color: #64748b; }`,
 
       const ALLOWED = [
         'read_file', 'write_file', 'apply_diff', 'run_terminal', 'execute_command',
-        'list_directory', 'read_file_tree', 'search_codebase', 'search_codebase_index', 'get_relevant_context', 'run_tests',
+        'list_directory', 'read_file_tree', 'search_codebase', 'search_codebase_index', 'get_relevant_context', 'run_tests', 'verify_project',
         'take_screenshot', 'inspect_visual_dom', 'generate_project_from_prompt',
         'resume_from_chat', 'FINAL_ANSWER'
       ];
@@ -1345,7 +1431,48 @@ p { color: #64748b; }`,
     };
   }
 
-  // ── Production-Safe Plan Execution Loop ───────────────────────────────────
+  getStateInstruction(state, stateObj) {
+     switch (state) {
+       case 'INSPECT':
+         return "State: INSPECT. Inspect the codebase using get_relevant_context, search_codebase, or read_file to understand the current implementation. Do not modify files. Output FINAL_ANSWER when inspection is complete.";
+       case 'PLAN':
+         return "State: PLAN. Create a structured implementation plan. Store it internally or write it down. Output FINAL_ANSWER when the plan is ready.";
+       case 'IMPLEMENT':
+         return "State: IMPLEMENT. Execute your plan using write_file, apply_diff, and run_terminal. Output FINAL_ANSWER when implementation is complete.";
+       case 'VERIFY':
+         return "State: VERIFY. Run the verify_project tool to check if the project builds and passes tests. Output FINAL_ANSWER after running it.";
+       case 'DIAGNOSE':
+         return "State: DIAGNOSE. Verification failed. Use get_relevant_context or read_file to locate the cause of the failure based on the verification output. Output FINAL_ANSWER when you have identified the problem.";
+       case 'REPAIR':
+         return `State: REPAIR. Attempt ${stateObj.repairs + 1} of ${stateObj.maxRepairs}. Fix the identified issues using write_file or apply_diff. Output FINAL_ANSWER when fixes are applied.`;
+       case 'REVIEW':
+         return "State: REVIEW. Perform a final review of the changes. Output FINAL_ANSWER starting with 'Acceptable' if everything is perfect, or 'Problems' if further repair is needed.";
+       default:
+         return "";
+     }
+  }
+
+  advanceState(stateObj, transition, onStepUpdate) {
+     const s = stateObj.state;
+     if (s === 'INSPECT') transition('PLAN');
+     else if (s === 'PLAN') transition('IMPLEMENT');
+     else if (s === 'IMPLEMENT') transition('VERIFY');
+     else if (s === 'VERIFY') {
+        if (stateObj.verification && stateObj.verification.success) transition('REVIEW');
+        else transition('DIAGNOSE');
+     }
+     else if (s === 'DIAGNOSE') transition('REPAIR');
+     else if (s === 'REPAIR') {
+        stateObj.repairs++;
+        if (stateObj.repairs >= stateObj.maxRepairs) transition('FAILED');
+        else transition('VERIFY');
+     }
+     else if (s === 'REVIEW') {
+        if (stateObj.answer && stateObj.answer.toLowerCase().includes('problem')) transition('REPAIR');
+        else transition('DONE');
+     }
+  }
+
   async executePlan(prompt, workspacePath = this.projectPath, onStepUpdate = null) {
     const targetWorkspace = typeof workspacePath === 'string' ? workspacePath : this.projectPath;
     this.projectPath = targetWorkspace;
@@ -1378,26 +1505,95 @@ p { color: #64748b; }`,
       }
     } catch (_) {}
 
+    const internalState = {
+      state: "INIT",
+      step: 0,
+      task: prompt,
+      workspacePath: targetWorkspace,
+      plan: [],
+      currentTask: null,
+      changedFiles: [],
+      verification: { checks: null, success: null },
+      failures: [],
+      repairs: 0,
+      maxRepairs: 5,
+      completed: false,
+      answer: ''
+    };
+
+    const emitState = (st, stepData = {}) => {
+       if (typeof onStepUpdate === 'function') {
+          onStepUpdate({
+            type: "state",
+            state: st.state,
+            step: st.step,
+            ...stepData
+          });
+       }
+    };
+
+    const transition = (nextState, metadata = {}) => {
+      const allowed = {
+        'INIT': ['INSPECT', 'FAILED'],
+        'INSPECT': ['PLAN', 'FAILED'],
+        'PLAN': ['IMPLEMENT', 'FAILED'],
+        'IMPLEMENT': ['VERIFY', 'FAILED'],
+        'VERIFY': ['REVIEW', 'DIAGNOSE', 'FAILED'],
+        'DIAGNOSE': ['REPAIR', 'FAILED'],
+        'REPAIR': ['VERIFY', 'FAILED'],
+        'REVIEW': ['DONE', 'REPAIR', 'FAILED']
+      };
+
+      if (allowed[internalState.state] && allowed[internalState.state].includes(nextState)) {
+        internalState.state = nextState;
+        emitState(internalState, metadata);
+      } else {
+        internalState.failures.push(`Invalid transition from ${internalState.state} to ${nextState}`);
+        internalState.state = 'FAILED';
+        emitState(internalState, { error: `Invalid transition to ${nextState}` });
+      }
+    };
+
+    transition('INSPECT');
+
     const messages = this.buildInitialContext(prompt + systemContext, targetWorkspace);
     const steps = [];
     const MAX_STEPS = 50;
 
     for (let step = 0; step < MAX_STEPS; step++) {
+      internalState.step++;
+      if (internalState.state === 'DONE' || internalState.state === 'FAILED') break;
+
+      const stateInstruction = this.getStateInstruction(internalState.state, internalState);
+      messages.push({ role: 'user', content: `[STATE: ${internalState.state}]\n${stateInstruction}` });
+
       try {
         const rawResp = await this.callModel(messages);
         const parsed = this.parseAgentResponse(rawResp);
 
-        if (parsed.action === 'FINAL_ANSWER') {
-          const finalStep = this.sanitizeStepForClient(step + 1, 'FINAL_ANSWER', {}, { success: true, message: parsed.answer || 'Completed.' }, 'completed');
-          steps.push(finalStep);
-          if (typeof onStepUpdate === 'function') onStepUpdate(finalStep);
+        
 
-          return {
-            success: true,
-            completed: true,
-            answer: parsed.answer || 'All planned engineering tasks have been completed successfully.',
-            steps
-          };
+        if (parsed.action === 'FINAL_ANSWER') {
+           internalState.answer = parsed.answer || 'Task processed.';
+           const finalStep = this.sanitizeStepForClient(internalState.step, 'FINAL_ANSWER', {}, { success: true, message: internalState.answer }, 'completed');
+           steps.push(finalStep);
+           
+           if (internalState.state === 'VERIFY' && !internalState.verification.checks) {
+               internalState.failures.push("Verification bypassed by LLM.");
+               transition('DIAGNOSE');
+           } else {
+               this.advanceState(internalState, transition, onStepUpdate);
+           }
+           continue;
+        }
+
+                let targetFilePath = null;
+        let beforeHash = null;
+        if (['write_file', 'apply_diff'].includes(parsed.action) && parsed.parameters?.path) {
+            targetFilePath = this.resolveSafePath(targetWorkspace, parsed.parameters.path);
+            if (targetFilePath) {
+                beforeHash = this.getFileHash(targetFilePath);
+            }
         }
 
         // Execute valid tool
@@ -1406,8 +1602,27 @@ p { color: #64748b; }`,
           projectPath: targetWorkspace
         });
 
+        if (['write_file', 'apply_diff'].includes(parsed.action) && toolResult.success && targetFilePath) {
+             const afterHash = this.getFileHash(targetFilePath);
+             if (beforeHash !== afterHash) {
+                 internalState.changedFiles.push({
+                     path: require('path').relative(targetWorkspace, targetFilePath).replace(/\\/g, '/'),
+                     operation: parsed.action,
+                     beforeHash,
+                     afterHash
+                 });
+             }
+        }
+
+        if (parsed.action === 'verify_project') {
+           internalState.verification = toolResult;
+           if (typeof onStepUpdate === 'function') {
+              onStepUpdate({ type: "verification", success: toolResult.success, checks: toolResult.checks });
+           }
+        }
+
         const stepRecord = this.sanitizeStepForClient(
-          step + 1,
+          internalState.step,
           parsed.action,
           parsed.parameters,
           toolResult,
@@ -1426,32 +1641,45 @@ p { color: #64748b; }`,
         });
         messages.push({
           role: 'user',
-          content: `OBSERVATION from ${parsed.action}:\n${JSON.stringify(toolResult)}\n\n${
+          content: `OBSERVATION from ${parsed.action}:\n${JSON.stringify(toolResult).substring(0, 5000)}\n\n${
             toolResult.success
-              ? 'Continue with the next engineering step, or output FINAL_ANSWER if the objective is fully achieved.'
-              : 'The tool action reported an issue. Analyze the error above, self-correct, and retry with the proper action.'
+              ? 'Continue. Output FINAL_ANSWER when the current state objectives are fully achieved.'
+              : 'Tool action failed. Analyze the error, self-correct, and retry.'
           }`
         });
 
       } catch (err) {
-        const errStep = this.sanitizeStepForClient(step + 1, 'error_recovery', {}, { success: false, error: err.message }, 'failed');
+        internalState.failures.push(err.message);
+        const errStep = this.sanitizeStepForClient(internalState.step, 'error_recovery', {}, { success: false, error: err.message }, 'failed');
         steps.push(errStep);
         if (typeof onStepUpdate === 'function') {
           onStepUpdate(errStep);
         }
 
-        // Self-healing attempt: feed error back into messages
+        // Self-healing attempt
         messages.push({
           role: 'user',
-          content: `ERROR at step ${step + 1}: ${err.message}. Please recover and issue the next valid JSON tool call.`
+          content: `ERROR at step ${internalState.step}: ${err.message}. Please recover and issue the next valid JSON tool call.`
         });
       }
     }
 
+    if (internalState.state !== 'DONE' && internalState.state !== 'FAILED') {
+       internalState.state = 'FAILED';
+       internalState.failures.push('Reached maximum execution limit of 50 steps.');
+    }
+
+    internalState.completed = (internalState.state === 'DONE');
+    
     return {
-      success: true,
-      completed: false,
-      message: 'Reached maximum execution limit of 50 steps.',
+      success: internalState.completed,
+      completed: internalState.completed,
+      state: internalState.state,
+      answer: internalState.answer || 'All planned engineering tasks have been completed.',
+      changedFiles: internalState.changedFiles,
+      verification: internalState.verification,
+      failures: internalState.failures,
+      repairs: internalState.repairs,
       steps
     };
   }
