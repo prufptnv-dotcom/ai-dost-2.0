@@ -14,12 +14,14 @@ const DeepSeekService = require('../services/deepseekService');
 const MistralService = require('../services/mistralService');
 const HuggingFaceService = require('../services/huggingfaceService');
 const OpenRouterService = require('../services/openrouterService');
+const CodebaseIndexer = require('./codebaseIndexer');
 const logger = require('../logger');
 
 class AgentOrchestrator {
   constructor(options = {}) {
     this.projectPath = options.projectPath || os.tmpdir();
     this.customKeys = options.customKeys || {};
+    this.codebaseIndexer = options.codebaseIndexer || new CodebaseIndexer();
     this.agentSystemPrompt = `You are the Lead Autonomous Systems Architect & Principal Engineer of AI-Dost Copilot.
 You build production-grade, enterprise-ready full-stack applications with 100% autonomy (Brain + Hands + Eyes).
 
@@ -320,6 +322,24 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         }));
 
         return { success: true, results };
+      }
+
+      case 'search_codebase_index': {
+        const query = parameters.query || '';
+        const ws = parameters.workspacePath || this.projectPath;
+        try {
+          await this.codebaseIndexer.indexWorkspace(ws);
+          const matches = this.codebaseIndexer.searchFiles(ws, query);
+          const symbols = this.codebaseIndexer.findSymbol(ws, query);
+          return {
+            success: true,
+            matches: matches.slice(0, 10),
+            symbols: symbols.slice(0, 10),
+            count: matches.length + symbols.length
+          };
+        } catch (err) {
+          return { success: false, error: err.message };
+        }
       }
 
       case 'run_tests': {
@@ -1247,7 +1267,7 @@ p { color: #64748b; }`,
 
       const ALLOWED = [
         'read_file', 'write_file', 'apply_diff', 'run_terminal', 'execute_command',
-        'list_directory', 'read_file_tree', 'search_codebase', 'run_tests',
+        'list_directory', 'read_file_tree', 'search_codebase', 'search_codebase_index', 'run_tests',
         'take_screenshot', 'inspect_visual_dom', 'generate_project_from_prompt',
         'resume_from_chat', 'FINAL_ANSWER'
       ];
@@ -1305,6 +1325,13 @@ p { color: #64748b; }`,
 
     // 1. Always ensure base boilerplate exists before custom generation
     this.injectBaseBoilerplate(targetWorkspace);
+
+    // 2. Ensure codebase index is up to date for the target workspace
+    try {
+      if (this.codebaseIndexer && typeof this.codebaseIndexer.indexWorkspace === 'function') {
+        await this.codebaseIndexer.indexWorkspace(targetWorkspace);
+      }
+    } catch (_) {}
 
     const messages = this.buildInitialContext(prompt, targetWorkspace);
     const steps = [];
