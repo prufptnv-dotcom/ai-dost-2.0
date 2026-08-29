@@ -4,6 +4,17 @@ const { exec } = require('child_process');
 const { promisify } = require('util');
 const execPromise = promisify(exec);
 const os = require('os');
+const OpenAIService = require('../services/openaiService');
+const GroqService = require('../services/groqService');
+const GeminiService = require('../services/geminiService');
+const CerebrasService = require('../services/cerebrasService');
+const NvidiaService = require('../services/nvidiaService');
+const TogetherService = require('../services/togetherService');
+const DeepSeekService = require('../services/deepseekService');
+const MistralService = require('../services/mistralService');
+const HuggingFaceService = require('../services/huggingfaceService');
+const OpenRouterService = require('../services/openrouterService');
+const logger = require('../logger');
 
 class AgentOrchestrator {
   constructor(options = {}) {
@@ -17,7 +28,7 @@ You build production-grade, enterprise-ready full-stack applications with 100% a
 - **Atomic File Operations:** Write complete, runnable code. Do NOT output truncated placeholders, \`// TODO\`, or \`/* Implement logic here */\`.
 - **Modular Chunking (No Monolithic Dumps):** Never dump all application logic into a single monolithic file. Always deconstruct UI into modular components (\`src/components/\`), API clients into (\`src/services/api.js\`), and backend services into (\`server.js\`).
 - **Dependency Graph Planning:**
-  1. Define schema & data models (\`models/\`, \`db/\`).
+  1. Define schema & data models (\`models/\`, \`db/\\).
   2. Implement backend routes, auth middleware, and validation (\`server.js\`, \`routes/\`).
   3. Construct state stores and API client hooks (\`src/services/api.js\`, \`src/store/\`).
   4. Build modular UI views with glassmorphic tokens (\`src/components/\`, \`src/App.jsx\`).
@@ -67,14 +78,16 @@ Shape 2 (Final Answer):
 `;
     
     this.services = {
-      groq: options.groqService,
-      gemini: options.geminiService,
-      openrouter: options.openrouterService,
-      nvidia: options.nvidiaService,
-      together: options.togetherService,
-      deepseek: options.deepseekService,
-      mistral: options.mistralService,
-      huggingface: options.huggingfaceService
+      openai: options.openaiService || OpenAIService,
+      groq: options.groqService || GroqService,
+      gemini: options.geminiService || GeminiService,
+      openrouter: options.openrouterService || OpenRouterService,
+      nvidia: options.nvidiaService || NvidiaService,
+      together: options.togetherService || TogetherService,
+      deepseek: options.deepseekService || DeepSeekService,
+      mistral: options.mistralService || MistralService,
+      huggingface: options.huggingfaceService || HuggingFaceService,
+      cerebras: options.cerebrasService || CerebrasService
     };
   }
 
@@ -1036,6 +1049,339 @@ p { color: #64748b; }`,
     });
 
     return tasks;
+  }
+
+  // ── Workspace Summary Helper ──────────────────────────────────────────────
+  getWorkspaceSummary(targetPath = this.projectPath) {
+    try {
+      if (!fs.existsSync(targetPath)) return 'Workspace is empty (new directory).';
+      const entries = fs.readdirSync(targetPath, { withFileTypes: true });
+      const files = [];
+      for (const entry of entries) {
+        if (['node_modules', '.git', '.next', 'dist', 'build', '.cache'].includes(entry.name)) continue;
+        if (entry.isDirectory()) {
+          files.push(`${entry.name}/`);
+          try {
+            const subEntries = fs.readdirSync(path.join(targetPath, entry.name), { withFileTypes: true });
+            for (const sub of subEntries.slice(0, 10)) {
+              if (!['node_modules', '.git'].includes(sub.name)) {
+                files.push(`  ${entry.name}/${sub.name}${sub.isDirectory() ? '/' : ''}`);
+              }
+            }
+          } catch (_) {}
+        } else {
+          files.push(entry.name);
+        }
+      }
+      return files.length > 0 ? files.join('\n') : 'Workspace is currently empty.';
+    } catch (_) {
+      return 'Workspace initialized.';
+    }
+  }
+
+  // ── Initial Context Builder ───────────────────────────────────────────────
+  buildInitialContext(prompt, workspacePath = this.projectPath) {
+    const summary = this.getWorkspaceSummary(workspacePath);
+    return [
+      {
+        role: 'user',
+        content: `TARGET PROJECT PATH: ${workspacePath}\nEXISTING WORKSPACE FILES:\n${summary}\n\nUSER OBJECTIVE:\n${prompt}\n\nPlease inspect the workspace and begin generating the necessary code files step-by-step using JSON tool actions.`
+      }
+    ];
+  }
+
+  // ── Model Invocation Cascade ──────────────────────────────────────────────
+  async callModel(messages) {
+    const contextBlock = messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
+    const agentPrompt = `${this.agentSystemPrompt}\n\n---\n\n${contextBlock}\n\nASSISTANT (respond with valid JSON only):`;
+
+    const isErrorResp = (r) => !r || 
+      typeof r !== 'string' ||
+      r.includes('API key set nahi') || 
+      r.includes('API error') || 
+      r.includes('service me error') || 
+      r.includes('Rate limit') || 
+      r.includes('rate_limit_exceeded') || 
+      r.includes('Credit limit') ||
+      r.includes('Quota exceeded') ||
+      r.includes('429') || 
+      r.trim().length <= 5;
+
+    // 1. OpenAI (GPT-4o / GPT-4o-mini)
+    try {
+      if (this.services.openai && typeof this.services.openai.chat === 'function') {
+        const resp = await this.services.openai.chat(agentPrompt, [], 'agent', this.customKeys?.openai);
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 2. Groq (Ultra-Fast)
+    try {
+      if (this.services.groq && typeof this.services.groq.chat === 'function') {
+        const resp = await this.services.groq.chat(agentPrompt, [], 'agent', this.customKeys?.groq);
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 3. Gemini
+    try {
+      if (this.services.gemini && typeof this.services.gemini.chat === 'function') {
+        const resp = await this.services.gemini.chat(agentPrompt, [], null, 'agent', this.customKeys?.gemini);
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 4. Cerebras
+    try {
+      if (this.services.cerebras && typeof this.services.cerebras.chat === 'function') {
+        const resp = await this.services.cerebras.chat(agentPrompt, [], 'agent', this.customKeys?.cerebras);
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 5. NVIDIA
+    try {
+      if (this.services.nvidia && typeof this.services.nvidia.chat === 'function') {
+        const resp = await this.services.nvidia.chat(agentPrompt, [], this.customKeys?.nvidia, 'agent');
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 6. Together
+    try {
+      if (this.services.together && typeof this.services.together.chat === 'function') {
+        const resp = await this.services.together.chat(agentPrompt, [], this.customKeys?.together);
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 7. DeepSeek
+    try {
+      if (this.services.deepseek && typeof this.services.deepseek.chat === 'function') {
+        const resp = await this.services.deepseek.chat(agentPrompt, [], this.customKeys?.deepseek);
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 8. Mistral
+    try {
+      if (this.services.mistral && typeof this.services.mistral.chat === 'function') {
+        const resp = await this.services.mistral.chat(agentPrompt, [], this.customKeys?.mistral, 'agent');
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 9. HuggingFace
+    try {
+      if (this.services.huggingface && typeof this.services.huggingface.chat === 'function') {
+        const resp = await this.services.huggingface.chat(agentPrompt);
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 10. OpenRouter
+    try {
+      if (this.services.openrouter && typeof this.services.openrouter.chat === 'function') {
+        const resp = await this.services.openrouter.chat(agentPrompt, [], this.customKeys?.openrouter, 'agent');
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 11. Local Ollama Fallback
+    try {
+      const res = await fetch('http://127.0.0.1:11434/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: process.env.OLLAMA_MODEL || 'qwen2.5-coder:7b', prompt: agentPrompt, stream: false }),
+        signal: AbortSignal.timeout(30000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.response && data.response.trim().length > 5) return data.response;
+      }
+    } catch (_) {}
+
+    throw new Error('All AI providers in cascade are unavailable.');
+  }
+
+  // ── Agent Response Parser ─────────────────────────────────────────────────
+  parseAgentResponse(raw) {
+    if (!raw || typeof raw !== 'string') {
+      return { thought: 'No output received.', action: 'FINAL_ANSWER', answer: 'No response from model.' };
+    }
+
+    let parsed = null;
+    const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*$/gi, '').trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+
+    if (jsonMatch) {
+      try {
+        parsed = JSON.parse(jsonMatch[0]);
+      } catch (_) {
+        try {
+          const repaired = jsonMatch[0].replace(/(?<=:\s*"[\s\S]*?)\r?\n(?=[\s\S]*?")/g, '\\n');
+          parsed = JSON.parse(repaired);
+        } catch (_) {}
+      }
+    }
+
+    if (parsed && typeof parsed.action === 'string') {
+      const params = parsed.parameters || {};
+      const normalizedParams = {
+        path:      params.path || params.filepath || params.file_path || params.file || params.filename || params.name || params.target,
+        content:   params.content !== undefined ? params.content : (params.code !== undefined ? params.code : (params.body !== undefined ? params.body : (params.text !== undefined ? params.text : params.file_content))),
+        search:    params.search || params.target || params.old_code || params.find || params.search_block,
+        replace:   params.replace || params.new_code || params.replacement || params.replace_block,
+        command:   params.command || params.cmd || params.terminal_command || params.exec,
+        query:     params.query || params.search || params.term || params.text,
+        framework: params.framework,
+        prompt:    params.prompt || params.description || params.project_prompt || params.user_prompt,
+        targetDir: params.targetDir || params.target_dir || params.directory || params.dir,
+        url:       params.url
+      };
+
+      let action = parsed.action;
+      if (action === 'execute_command') action = 'run_terminal';
+      if (action === 'read_file_tree') action = 'list_directory';
+      if (action === 'inspect_visual_dom') action = 'take_screenshot';
+
+      const ALLOWED = [
+        'read_file', 'write_file', 'apply_diff', 'run_terminal', 'execute_command',
+        'list_directory', 'read_file_tree', 'search_codebase', 'run_tests',
+        'take_screenshot', 'inspect_visual_dom', 'generate_project_from_prompt',
+        'resume_from_chat', 'FINAL_ANSWER'
+      ];
+
+      if (!ALLOWED.includes(action)) {
+        action = 'FINAL_ANSWER';
+      }
+
+      return {
+        thought: parsed.thought || 'Executing step...',
+        action,
+        parameters: normalizedParams,
+        answer: parsed.answer
+      };
+    }
+
+    // Markdown fallback: if code block is generated for a named file
+    const codeBlockMatch = raw.match(/```(?:[a-zA-Z]+)?\r?\n([\s\S]+?)```/);
+    const fileMentionMatch = raw.match(/([\w\-\.\/]+\.(?:html|css|js|jsx|ts|tsx|py|json|md|sql|go|c|cpp|rs))/i);
+    if (codeBlockMatch && fileMentionMatch) {
+      return {
+        thought: `Writing code into ${fileMentionMatch[1]}`,
+        action: 'write_file',
+        parameters: { path: fileMentionMatch[1], content: codeBlockMatch[1] }
+      };
+    }
+
+    return {
+      thought: 'Task completed.',
+      action: 'FINAL_ANSWER',
+      answer: raw.trim()
+    };
+  }
+
+  // ── Step Sanitization for Client Callback ─────────────────────────────────
+  sanitizeStepForClient(step, action, parameters = {}, result = null, status = 'completed') {
+    return {
+      step,
+      action,
+      parameters: {
+        path: parameters?.path,
+        command: parameters?.command,
+        query: parameters?.query,
+        targetDir: parameters?.targetDir
+      },
+      result: result?.success !== undefined ? { success: result.success, message: result.message || result.error || 'Executed' } : result,
+      status
+    };
+  }
+
+  // ── Production-Safe Plan Execution Loop ───────────────────────────────────
+  async executePlan(prompt, workspacePath = this.projectPath, onStepUpdate = null) {
+    const targetWorkspace = typeof workspacePath === 'string' ? workspacePath : this.projectPath;
+    this.projectPath = targetWorkspace;
+
+    // 1. Always ensure base boilerplate exists before custom generation
+    this.injectBaseBoilerplate(targetWorkspace);
+
+    const messages = this.buildInitialContext(prompt, targetWorkspace);
+    const steps = [];
+    const MAX_STEPS = 50;
+
+    for (let step = 0; step < MAX_STEPS; step++) {
+      try {
+        const rawResp = await this.callModel(messages);
+        const parsed = this.parseAgentResponse(rawResp);
+
+        if (parsed.action === 'FINAL_ANSWER') {
+          const finalStep = this.sanitizeStepForClient(step + 1, 'FINAL_ANSWER', {}, { success: true, message: parsed.answer || 'Completed.' }, 'completed');
+          steps.push(finalStep);
+          if (typeof onStepUpdate === 'function') onStepUpdate(finalStep);
+
+          return {
+            success: true,
+            completed: true,
+            answer: parsed.answer || 'All planned engineering tasks have been completed successfully.',
+            steps
+          };
+        }
+
+        // Execute valid tool
+        const toolResult = await this.executeTool(parsed.action, {
+          ...parsed.parameters,
+          projectPath: targetWorkspace
+        });
+
+        const stepRecord = this.sanitizeStepForClient(
+          step + 1,
+          parsed.action,
+          parsed.parameters,
+          toolResult,
+          toolResult.success ? 'completed' : 'failed'
+        );
+        steps.push(stepRecord);
+
+        if (typeof onStepUpdate === 'function') {
+          onStepUpdate(stepRecord);
+        }
+
+        // Observation feedback for next iteration
+        messages.push({
+          role: 'assistant',
+          content: JSON.stringify({ thought: parsed.thought, action: parsed.action, parameters: parsed.parameters })
+        });
+        messages.push({
+          role: 'user',
+          content: `OBSERVATION from ${parsed.action}:\n${JSON.stringify(toolResult)}\n\n${
+            toolResult.success
+              ? 'Continue with the next engineering step, or output FINAL_ANSWER if the objective is fully achieved.'
+              : 'The tool action reported an issue. Analyze the error above, self-correct, and retry with the proper action.'
+          }`
+        });
+
+      } catch (err) {
+        const errStep = this.sanitizeStepForClient(step + 1, 'error_recovery', {}, { success: false, error: err.message }, 'failed');
+        steps.push(errStep);
+        if (typeof onStepUpdate === 'function') {
+          onStepUpdate(errStep);
+        }
+
+        // Self-healing attempt: feed error back into messages
+        messages.push({
+          role: 'user',
+          content: `ERROR at step ${step + 1}: ${err.message}. Please recover and issue the next valid JSON tool call.`
+        });
+      }
+    }
+
+    return {
+      success: true,
+      completed: false,
+      message: 'Reached maximum execution limit of 50 steps.',
+      steps
+    };
   }
 }
 
