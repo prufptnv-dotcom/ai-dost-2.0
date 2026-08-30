@@ -19,6 +19,8 @@ const DependencyGraph = require('./dependency/DependencyGraph');
 const TaskScheduler = require('./concurrency/TaskScheduler');
 const CodebaseIndexer = require('./codebaseIndexer');
 const ContextRetriever = require('./contextRetriever');
+const visualVerifier = require('./verification/VisualVerifier');
+const devServerManager = require('../sandbox/devServerManager');
 const logger = require('../logger');
 
 class AgentOrchestrator {
@@ -452,26 +454,45 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 
           try {
             const sandboxMgr = require('../sandbox/SandboxManager');
-            if (!this.sandboxId) {
-              const sb = await sandboxMgr.createSandbox(this.projectId || 'orchestrator-task', { workdir: this.projectPath });
-              this.sandboxId = sb.id;
+            if (!this.sandboxId && process.env.DOCKER_ENABLED === 'true') {
+              try {
+                const sb = await sandboxMgr.createSandbox(this.projectId || 'orchestrator-task', { workdir: this.projectPath });
+                this.sandboxId = sb.id;
+              } catch (_) {}
             }
 
             const runCmd = async (name, cmd) => {
-              const r = await sandboxMgr.exec(this.sandboxId, cmd, { timeout: 60000 });
-              return {
-                name,
-                command: cmd,
-                success: r.success,
-                exitCode: r.exitCode,
-                stdout: (r.stdout || '').substring(0, 3000),
-                stderr: (r.stderr || '').substring(0, 3000)
-              };
+              if (this.sandboxId) {
+                const r = await sandboxMgr.exec(this.sandboxId, cmd, { timeout: 60000 });
+                return {
+                  name,
+                  command: cmd,
+                  success: r.success,
+                  exitCode: r.exitCode,
+                  stdout: (r.stdout || '').substring(0, 3000),
+                  stderr: (r.stderr || '').substring(0, 3000)
+                };
+              }
+              // Host fallback
+              const { exec } = require('child_process');
+              return new Promise((resolve) => {
+                exec(cmd, { cwd: ws, timeout: 60000 }, (err, stdout, stderr) => {
+                  resolve({
+                    name,
+                    command: cmd,
+                    success: !err,
+                    exitCode: err ? (err.code || 1) : 0,
+                    stdout: (stdout || '').substring(0, 3000),
+                    stderr: (stderr || err?.message || '').substring(0, 3000)
+                  });
+                });
+              });
             };
 
             const pkgPath = require('path').join(ws, 'package.json');
             if (fs.existsSync(pkgPath)) {
-              const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+              let pkg = {};
+              try { pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')); } catch (_) {}
               const scripts = pkg.scripts || {};
               if ((scope === 'all' || scope === 'lint') && scripts.lint) {
                 const res = await runCmd('lint', 'npm run lint');
@@ -494,6 +515,37 @@ ReactDOM.createRoot(document.getElementById('root')).render(
                const res = await runCmd('test', cmd);
                checks.push(res);
                if (!res.success) success = false;
+            }
+
+            // 2. Playwright Visual Verification (if web project or dev server active/requested)
+            if (scope === 'all' || scope === 'visual') {
+              const projectId = this.projectId || path.basename(ws);
+              const server = devServerManager.getServerByProject(projectId);
+              let targetUrl = server?.url;
+              let hostPort = server?.hostPort;
+
+              if (targetUrl) {
+                const vResult = await visualVerifier.verify(targetUrl, {
+                  projectId,
+                  projectPath: ws,
+                  allowedPorts: hostPort ? [hostPort, 3000, 5173, 8080, 4321, 5000] : []
+                });
+
+                checks.push({
+                  name: 'visual_verification',
+                  command: `playwright verify ${vResult.url}`,
+                  success: vResult.success,
+                  status: vResult.status,
+                  exitCode: vResult.success ? 0 : 1,
+                  stdout: vResult.success ? `Visual Verification PASSED. Page "${vResult.pageTitle}" loaded cleanly with 0 fatal errors.` : '',
+                  stderr: vResult.failureReason || '',
+                  screenshotPath: vResult.screenshotPath,
+                  consoleErrors: vResult.consoleErrors,
+                  pageErrors: vResult.pageErrors
+                });
+
+                if (!vResult.success) success = false;
+              }
             }
 
             if (checks.length === 0) {
@@ -572,11 +624,36 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 
       case 'inspect_visual_dom':
       case 'take_screenshot': {
-        return {
-          success: true,
-          message: 'Visual inspection frame active. Live DOM preview rendered without breaking console errors.',
-          url: parameters.url || 'http://localhost:3000'
-        };
+        try {
+          const ws = parameters.workspacePath || this.projectPath;
+          const projectId = this.projectId || path.basename(ws);
+          let targetUrl = parameters.url;
+          if (!targetUrl) {
+            const server = devServerManager.getServerByProject(projectId);
+            targetUrl = server?.url || `http://127.0.0.1:3000`;
+          }
+          const vResult = await visualVerifier.verify(targetUrl, {
+            projectId,
+            projectPath: ws,
+            includeBase64: true
+          });
+          return {
+            success: vResult.success,
+            screenshot: vResult.screenshotBase64,
+            screenshotPath: vResult.screenshotPath,
+            url: vResult.url,
+            pageTitle: vResult.pageTitle,
+            status: vResult.status,
+            failureReason: vResult.failureReason,
+            consoleErrors: vResult.consoleErrors,
+            pageErrors: vResult.pageErrors,
+            message: vResult.success
+              ? `Screenshot captured successfully from ${vResult.url}`
+              : `Visual verification failed: ${vResult.failureReason}`
+          };
+        } catch (e) {
+          return { success: false, error: `Screenshot failed: ${e.message}` };
+        }
       }
 
       case 'resume_from_chat': {
