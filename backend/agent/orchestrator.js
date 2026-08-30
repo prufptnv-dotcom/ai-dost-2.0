@@ -15,6 +15,8 @@ const DeepSeekService = require('../services/deepseekService');
 const MistralService = require('../services/mistralService');
 const HuggingFaceService = require('../services/huggingfaceService');
 const OpenRouterService = require('../services/openrouterService');
+const DependencyGraph = require('./dependency/DependencyGraph');
+const TaskScheduler = require('./concurrency/TaskScheduler');
 const CodebaseIndexer = require('./codebaseIndexer');
 const ContextRetriever = require('./contextRetriever');
 const logger = require('../logger');
@@ -44,6 +46,8 @@ class AgentOrchestrator {
     this.projectPath = options.projectPath || os.tmpdir();
     this.customKeys = options.customKeys || {};
     this.diagnosticManager = new (require('./diagnostics/DiagnosticManager'))();
+    this.dependencyGraph = new DependencyGraph();
+    this.taskScheduler = new TaskScheduler();
     this.codebaseIndexer = options.codebaseIndexer || new CodebaseIndexer();
     this.contextRetriever = options.contextRetriever || new ContextRetriever({ 
       codebaseIndexer: this.codebaseIndexer,
@@ -1376,12 +1380,12 @@ p { color: #64748b; }`,
   // ── Agent Response Parser ─────────────────────────────────────────────────
   parseAgentResponse(raw) {
     if (!raw || typeof raw !== 'string') {
-      return { thought: 'No output received.', action: 'FINAL_ANSWER', answer: 'No response from model.' };
+      return [{ thought: 'No output received.', action: 'FINAL_ANSWER', answer: 'No response from model.' }];
     }
 
     let parsed = null;
     const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*$/gi, '').trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    const jsonMatch = cleaned.match(/[\[\{][\s\S]*[\]\}]/);
 
     if (jsonMatch) {
       try {
@@ -1394,63 +1398,72 @@ p { color: #64748b; }`,
       }
     }
 
-    if (parsed && typeof parsed.action === 'string') {
-      const params = parsed.parameters || {};
-      const normalizedParams = {
-        path:      params.path || params.filepath || params.file_path || params.file || params.filename || params.name || params.target,
-        content:   params.content !== undefined ? params.content : (params.code !== undefined ? params.code : (params.body !== undefined ? params.body : (params.text !== undefined ? params.text : params.file_content))),
-        search:    params.search || params.target || params.old_code || params.find || params.search_block,
-        replace:   params.replace || params.new_code || params.replacement || params.replace_block,
-        command:   params.command || params.cmd || params.terminal_command || params.exec,
-        query:     params.query || params.search || params.term || params.text,
-        framework: params.framework,
-        prompt:    params.prompt || params.description || params.project_prompt || params.user_prompt,
-        targetDir: params.targetDir || params.target_dir || params.directory || params.dir,
-        url:       params.url
-      };
+    const processAction = (p) => {
+      if (p && typeof p.action === 'string') {
+        const params = p.parameters || {};
+        const normalizedParams = {
+          path:      params.path || params.filepath || params.file_path || params.file || params.filename || params.name || params.target,
+          content:   params.content !== undefined ? params.content : (params.code !== undefined ? params.code : (params.body !== undefined ? params.body : (params.text !== undefined ? params.text : params.file_content))),
+          search:    params.search || params.target || params.old_code || params.find || params.search_block,
+          replace:   params.replace || params.new_code || params.replacement || params.replace_block,
+          command:   params.command || params.cmd || params.terminal_command || params.exec,
+          query:     params.query || params.search || params.term || params.text,
+          framework: params.framework,
+          prompt:    params.prompt || params.description || params.project_prompt || params.user_prompt,
+          targetDir: params.targetDir || params.target_dir || params.directory || params.dir,
+          url:       params.url
+        };
 
-      let action = parsed.action;
-      if (action === 'execute_command') action = 'run_terminal';
-      if (action === 'read_file_tree') action = 'list_directory';
-      if (action === 'inspect_visual_dom') action = 'take_screenshot';
+        let action = p.action;
+        if (action === 'execute_command') action = 'run_terminal';
+        if (action === 'read_file_tree') action = 'list_directory';
+        if (action === 'inspect_visual_dom') action = 'take_screenshot';
 
-      const ALLOWED = [
-        'read_file', 'write_file', 'apply_diff', 'run_terminal', 'execute_command',
-        'list_directory', 'read_file_tree', 'search_codebase', 'search_codebase_index', 'get_relevant_context', 'run_tests', 'verify_project',
-        'take_screenshot', 'inspect_visual_dom', 'generate_project_from_prompt',
-        'resume_from_chat', 'FINAL_ANSWER'
-      ];
+        const ALLOWED = [
+          'read_file', 'write_file', 'apply_diff', 'run_terminal', 'execute_command',
+          'list_directory', 'read_file_tree', 'search_codebase', 'search_codebase_index', 'get_relevant_context', 'run_tests', 'verify_project',
+          'take_screenshot', 'inspect_visual_dom', 'generate_project_from_prompt',
+          'resume_from_chat', 'FINAL_ANSWER'
+        ];
 
-      if (!ALLOWED.includes(action)) {
-        action = 'FINAL_ANSWER';
+        if (!ALLOWED.includes(action)) {
+          action = 'FINAL_ANSWER';
+        }
+
+        return {
+          thought: p.thought || 'Executing step...',
+          action,
+          parameters: normalizedParams,
+          answer: p.answer
+        };
       }
+      return null;
+    };
 
-      return {
-        thought: parsed.thought || 'Executing step...',
-        action,
-        parameters: normalizedParams,
-        answer: parsed.answer
-      };
+    if (Array.isArray(parsed)) {
+      const results = parsed.map(processAction).filter(Boolean);
+      if (results.length > 0) return results;
+    } else {
+      const result = processAction(parsed);
+      if (result) return [result];
     }
 
-    // Markdown fallback: if code block is generated for a named file
     const codeBlockMatch = raw.match(/```(?:[a-zA-Z]+)?\r?\n([\s\S]+?)```/);
     const fileMentionMatch = raw.match(/([\w\-\.\/]+\.(?:html|css|js|jsx|ts|tsx|py|json|md|sql|go|c|cpp|rs))/i);
     if (codeBlockMatch && fileMentionMatch) {
-      return {
+      return [{
         thought: `Writing code into ${fileMentionMatch[1]}`,
         action: 'write_file',
         parameters: { path: fileMentionMatch[1], content: codeBlockMatch[1] }
-      };
+      }];
     }
 
-    return {
+    return [{
       thought: 'Task completed.',
       action: 'FINAL_ANSWER',
       answer: raw.trim()
-    };
+    }];
   }
-
   // ── Step Sanitization for Client Callback ─────────────────────────────────
   sanitizeStepForClient(step, action, parameters = {}, result = null, status = 'completed') {
     return {
@@ -1605,12 +1618,11 @@ p { color: #64748b; }`,
 
       try {
         const rawResp = await this.callModel(messages);
-        const parsed = this.parseAgentResponse(rawResp);
+        const parsedList = this.parseAgentResponse(rawResp);
 
-        
-
-        if (parsed.action === 'FINAL_ANSWER') {
-           internalState.answer = parsed.answer || 'Task processed.';
+        const finalAnswerItem = parsedList.find(p => p.action === 'FINAL_ANSWER');
+        if (finalAnswerItem) {
+           internalState.answer = finalAnswerItem.answer || 'Task processed.';
            const finalStep = this.sanitizeStepForClient(internalState.step, 'FINAL_ANSWER', {}, { success: true, message: internalState.answer }, 'completed');
            steps.push(finalStep);
            
@@ -1623,33 +1635,48 @@ p { color: #64748b; }`,
            continue;
         }
 
-                let targetFilePath = null;
-        let beforeHash = null;
-        if (['write_file', 'apply_diff'].includes(parsed.action) && parsed.parameters?.path) {
-            targetFilePath = this.resolveSafePath(targetWorkspace, parsed.parameters.path);
-            if (targetFilePath) {
-                beforeHash = this.getFileHash(targetFilePath);
-            }
-        }
-
-        // Execute valid tool
-        const toolResult = await this.executeTool(parsed.action, {
-          ...parsed.parameters,
-          projectPath: targetWorkspace
-        });
-
+        let batchResults = [];
+        let hasErrors = false;
         
-          if (['write_file', 'apply_diff'].includes(parsed.action) && toolResult.success && targetFilePath) {
-               const afterHash = this.getFileHash(targetFilePath);
-               if (beforeHash !== afterHash) {
-                   internalState.changedFiles.push({
-                       path: require('path').relative(targetWorkspace, targetFilePath).replace(/\\/g, '/'),
-                       operation: parsed.action,
-                       beforeHash,
-                       afterHash
-                   });
+        const writes = parsedList.filter(p => ['write_file', 'apply_diff'].includes(p.action));
+        if (writes.length > 0) {
+            const results = await this.taskScheduler.schedule(parsedList, async (action, parameters) => {
+                let beforeHash = null;
+                let targetFilePath = null;
+                if (parameters && parameters.path) {
+                    targetFilePath = this.resolveSafePath(targetWorkspace, parameters.path);
+                    if (targetFilePath && ['write_file', 'apply_diff'].includes(action)) beforeHash = this.getFileHash(targetFilePath);
+                }
 
-                   // --- Diagnostics Interceptor ---
+                const res = await this.executeTool(action, { ...parameters, projectPath: targetWorkspace });
+
+                if (['write_file', 'apply_diff'].includes(action) && res.success && targetFilePath) {
+                    const afterHash = this.getFileHash(targetFilePath);
+                    if (beforeHash !== afterHash) {
+                        internalState.changedFiles.push({
+                            path: require('path').relative(targetWorkspace, targetFilePath).replace(/\\/g, '/'),
+                            operation: action,
+                            beforeHash,
+                            afterHash
+                        });
+                        
+                        let content = '';
+                        try { content = require('fs').readFileSync(targetFilePath, 'utf8'); } catch(_) {}
+                        this.dependencyGraph.addOrUpdate(targetFilePath, content);
+                    }
+                } else if (action === 'read_file' && res.success && targetFilePath) {
+                    this.dependencyGraph.addOrUpdate(targetFilePath, res.content);
+                }
+                
+                return { action, parameters, result: res, targetFilePath, afterHash: targetFilePath ? this.getFileHash(targetFilePath) : null };
+            });
+
+            for (let i = 0; i < parsedList.length; i++) {
+                const parsed = parsedList[i];
+                const schedResult = results[i] || { success: false, error: 'Task aborted' };
+                const res = schedResult.result || { success: false, error: schedResult.error };
+
+                if (['write_file', 'apply_diff'].includes(parsed.action) && res.success && schedResult.targetFilePath) {
                    if (this.diagnosticManager) {
                        try {
                            if (!this.sandboxId) {
@@ -1661,10 +1688,10 @@ p { color: #64748b; }`,
                                }
                            }
                            if (this.sandboxId) {
-                               const diagResult = await this.diagnosticManager.runDiagnostics(this.sandboxId, targetWorkspace, targetFilePath, afterHash);
+                               const diagResult = await this.diagnosticManager.runDiagnostics(this.sandboxId, targetWorkspace, schedResult.targetFilePath, schedResult.afterHash);
                                if (diagResult && diagResult.hasErrors) {
-                                   toolResult.success = false;
-                                   toolResult.error = `Action applied, but produced DIAGNOSTICS ERRORS:\n\n${diagResult.formattedErrors}`;
+                                   res.success = false;
+                                   res.error = `Action applied, but produced DIAGNOSTICS ERRORS:\n\n${diagResult.formattedErrors}`;
                                    if (internalState.state !== 'REPAIR' && internalState.state !== 'DIAGNOSE') {
                                        internalState.state = 'DIAGNOSE';
                                    }
@@ -1674,41 +1701,55 @@ p { color: #64748b; }`,
                            console.error('[Diagnostics] Failed to run diagnostics:', diagErr.message);
                        }
                    }
-                   // -------------------------------
-               }
-          }
-
-          if (parsed.action === 'verify_project') {
-           internalState.verification = toolResult;
-           if (typeof onStepUpdate === 'function') {
-              onStepUpdate({ type: "verification", success: toolResult.success, checks: toolResult.checks });
-           }
+                }
+                batchResults.push({ parsed, result: res });
+            }
+        } else {
+            for (const parsed of parsedList) {
+                let targetFilePath = null;
+                if (parsed.parameters && parsed.parameters.path) {
+                    targetFilePath = this.resolveSafePath(targetWorkspace, parsed.parameters.path);
+                }
+                const res = await this.executeTool(parsed.action, { ...parsed.parameters, projectPath: targetWorkspace });
+                
+                if (parsed.action === 'read_file' && res.success && targetFilePath) {
+                    this.dependencyGraph.addOrUpdate(targetFilePath, res.content);
+                }
+                if (parsed.action === 'verify_project') {
+                   internalState.verification = res;
+                   if (typeof onStepUpdate === 'function') {
+                      onStepUpdate({ type: "verification", success: res.success, checks: res.checks });
+                   }
+                }
+                batchResults.push({ parsed, result: res });
+            }
         }
 
-        const stepRecord = this.sanitizeStepForClient(
-          internalState.step,
-          parsed.action,
-          parsed.parameters,
-          toolResult,
-          toolResult.success ? 'completed' : 'failed'
-        );
-        steps.push(stepRecord);
-
-        if (typeof onStepUpdate === 'function') {
-          onStepUpdate(stepRecord);
+        let assistantContent = [];
+        let obsContent = [];
+        for (const { parsed, result } of batchResults) {
+            const stepRecord = this.sanitizeStepForClient(
+              internalState.step,
+              parsed.action,
+              parsed.parameters,
+              result,
+              result.success ? 'completed' : 'failed'
+            );
+            steps.push(stepRecord);
+            if (typeof onStepUpdate === 'function') onStepUpdate(stepRecord);
+            
+            assistantContent.push(JSON.stringify({ thought: parsed.thought, action: parsed.action, parameters: parsed.parameters }));
+            obsContent.push(`OBSERVATION from ${parsed.action}:\n${JSON.stringify(result).substring(0, 5000)}`);
+            if (!result.success) hasErrors = true;
         }
 
-        // Observation feedback for next iteration
-        messages.push({
-          role: 'assistant',
-          content: JSON.stringify({ thought: parsed.thought, action: parsed.action, parameters: parsed.parameters })
-        });
+        messages.push({ role: 'assistant', content: assistantContent.join('\n') });
         messages.push({
           role: 'user',
-          content: `OBSERVATION from ${parsed.action}:\n${JSON.stringify(toolResult).substring(0, 5000)}\n\n${
-            toolResult.success
+          content: `${obsContent.join('\n\n')}\n\n${
+            !hasErrors
               ? 'Continue. Output FINAL_ANSWER when the current state objectives are fully achieved.'
-              : 'Tool action failed. Analyze the error, self-correct, and retry.'
+              : 'Tool action(s) failed. Analyze the error, self-correct, and retry.'
           }`
         });
 
