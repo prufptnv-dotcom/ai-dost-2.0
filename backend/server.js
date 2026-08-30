@@ -316,7 +316,7 @@ Return ONLY valid JSON (no markdown, no code fences, no prose) with EXACTLY this
 STRICT RULES:
 - NEVER return empty arrays or null.
 - INFER THE INDUSTRY/ROLE: Read the user's prompt carefully. If they mention "Skill India", infer a training, education, management, or administrative role. If they mention a specific job, tailor everything to that job.
-- If the user provides very little detail, GENERATE realistic placeholder content tailored to the inferred industry — the user will edit it later. 
+- If the user provides very little detail, GENERATE realistic placeholder content tailored to the inferred industry — the user will edit it later.
 - Experience: 1-3 jobs, each with 3-5 bullets using action verbs + measurable results.
 - Summary: minimum 3 sentences, never 1 line.
 - Extract everything available from the user's prompt (real name, company, college, years, skills, phone, email) and USE it.
@@ -452,7 +452,7 @@ const regenerateSectionHandler = async (req, res) => {
 
     try {
         const systemInstruction = `You are an expert resume writer. The user wants to improve a specific section of their resume: "${targetSection}".
-        
+
 CURRENT CONTENT: ${JSON.stringify(currentData)}
 FULL RESUME CONTEXT: ${JSON.stringify(fullResumeContext)}
 USER REQUEST (if any): ${userPrompt || "Make it sound more professional, impactful, and results-oriented."}
@@ -472,7 +472,7 @@ Return ONLY the rewritten JSON object/array for this specific section, matching 
         });
         const chatData = await chatRes.json();
         const content = chatData.reply || chatData.message || '';
-        
+
         let newSectionData;
         try {
             newSectionData = JSON.parse(content.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim());
@@ -497,7 +497,7 @@ const atsAnalyzeHandler = async (req, res) => {
 
     try {
         const prompt = `You are an expert ATS (Applicant Tracking System). Analyze this resume against this Job Description.
-        
+
 RESUME: ${JSON.stringify(resumeData)}
 JOB DESCRIPTION: ${jobDescription}
 
@@ -523,7 +523,7 @@ Return ONLY valid JSON matching this schema exactly (no markdown fences):
         });
         const chatData = await chatRes.json();
         const content = chatData.reply || chatData.message || '';
-        
+
         let analysis;
         try {
             analysis = JSON.parse(content.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim());
@@ -548,7 +548,7 @@ const autoTailorHandler = async (req, res) => {
 
     try {
         const systemInstruction = `You are an expert ATS resume writer. The user wants to tailor their resume to fit a specific Job Description.
-        
+
 CURRENT RESUME: ${JSON.stringify(resumeData)}
 JOB DESCRIPTION: ${jobDescription}
 MISSING KEYWORDS TO INTEGRATE: ${missingKeywords ? JSON.stringify(missingKeywords) : 'None provided'}
@@ -570,7 +570,7 @@ Return ONLY the updated full resume JSON object matching the exact schema. No ma
         });
         const chatData = await chatRes.json();
         const content = chatData.reply || chatData.message || '';
-        
+
         let tailoredResume;
         try {
             tailoredResume = JSON.parse(content.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim());
@@ -912,6 +912,52 @@ setupLspServer(server);
 // ── Raw Terminal WebSocket (CodeEditor widget) ─────────────────────
 const { setupTerminalWsServer } = require('./sockets/terminalWs');
 setupTerminalWsServer(server);
+
+// ── Dev Server HMR & WebSocket Reverse Proxy ────────────────────────
+const devServerManager = require('./sandbox/devServerManager');
+const net = require('net');
+
+server.on('upgrade', (request, socket, head) => {
+  const url = request.url || '';
+  const pathname = url.split('?')[0];
+
+  let projectId = null;
+  const previewMatch = pathname.match(/^\/api\/preview\/([^\/]+)/);
+  if (previewMatch) {
+    projectId = previewMatch[1];
+  } else {
+    const referer = request.headers['referer'] || '';
+    const refMatch = referer.match(/\/api\/preview\/([^\/\?]+)/);
+    if (refMatch) projectId = refMatch[1];
+  }
+
+  if (projectId) {
+    const devServer = devServerManager.getServerByProject(projectId);
+    if (devServer && devServer.hostPort && devServer.state === 'READY') {
+      const devSocket = net.connect(devServer.hostPort, '127.0.0.1', () => {
+        devSocket.write(`${request.method} ${request.url} HTTP/${request.httpVersion}\r\n`);
+        for (let i = 0; i < request.rawHeaders.length; i += 2) {
+          let headerName = request.rawHeaders[i];
+          let headerVal = request.rawHeaders[i + 1];
+          if (headerName.toLowerCase() === 'host') headerVal = `127.0.0.1:${devServer.hostPort}`;
+          devSocket.write(`${headerName}: ${headerVal}\r\n`);
+        }
+        devSocket.write('\r\n');
+        if (head && head.length > 0) devSocket.write(head);
+        devSocket.pipe(socket);
+        socket.pipe(devSocket);
+      });
+
+      devSocket.on('error', (err) => {
+        logger.warn(`[HMR Proxy] Error connecting to dev server :${devServer.hostPort}:`, err.message);
+        socket.destroy();
+      });
+      socket.on('error', () => {
+        devSocket.destroy();
+      });
+    }
+  }
+});
 
 function startServer(port = PORT) {
   return server.listen(port, () => {

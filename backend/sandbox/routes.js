@@ -20,16 +20,16 @@ router.post('/create', async (req, res) => {
   try {
     const { projectId, options, ports } = req.body;
     if (!projectId) return res.status(400).json({ success: false, error: 'projectId required' });
-    
+
     const sandboxOptions = { ...options };
     if (ports && Array.isArray(ports)) {
       sandboxOptions.ports = ports;
     }
-    
+
     const sandbox = await sandboxManager.createSandbox(projectId, sandboxOptions);
     const sessionId = crypto.randomUUID();
     activeSessions.set(sessionId, { sandboxId: sandbox.id, projectId, createdAt: Date.now() });
-    
+
     const inspect = await sandbox.container.inspect();
     const exposedPorts = {};
     if (inspect.NetworkSettings.Ports) {
@@ -39,9 +39,9 @@ router.post('/create', async (req, res) => {
         }
       }
     }
-    
-    res.json({ 
-      success: true, 
+
+    res.json({
+      success: true,
       sandbox: {
         id: sandbox.id,
         projectId: sandbox.projectId,
@@ -60,9 +60,9 @@ router.get('/:sandboxId', async (req, res) => {
   try {
     const sandbox = sandboxManager.getSandbox(req.params.sandboxId);
     if (!sandbox) return res.status(404).json({ success: false, error: 'Sandbox not found' });
-    
-    res.json({ 
-      success: true, 
+
+    res.json({
+      success: true,
       sandbox: {
         id: sandbox.id,
         projectId: sandbox.projectId,
@@ -81,7 +81,7 @@ router.post('/:sandboxId/exec', async (req, res) => {
   try {
     const { command, options } = req.body;
     if (!command) return res.status(400).json({ success: false, error: 'command required' });
-    
+
     const result = await sandboxManager.exec(req.params.sandboxId, command, options);
     res.json({ success: true, result });
   } catch (err) {
@@ -93,7 +93,7 @@ router.post('/:sandboxId/files/write', async (req, res) => {
   try {
     const { filePath, content } = req.body;
     if (!filePath) return res.status(400).json({ success: false, error: 'filePath required' });
-    
+
     await sandboxManager.writeFile(req.params.sandboxId, filePath, content || '');
     res.json({ success: true });
   } catch (err) {
@@ -105,7 +105,7 @@ router.get('/:sandboxId/files/read', async (req, res) => {
   try {
     const { path: filePath } = req.query;
     if (!filePath) return res.status(400).json({ success: false, error: 'path query required' });
-    
+
     const content = await sandboxManager.readFile(req.params.sandboxId, filePath);
     res.json({ success: true, content });
   } catch (err) {
@@ -162,22 +162,29 @@ router.post('/:sandboxId/dev/build', async (req, res) => {
   }
 });
 
+router.post('/:sandboxId/dev/restart', async (req, res) => {
+  try {
+    const { customCommand } = req.body || {};
+    const result = await devServerManager.restartDevServer(req.params.sandboxId, { customCommand });
+    res.json({ success: true, result });
+  } catch (err) {
+    sandboxError(res, err);
+  }
+});
+
 router.get('/:sandboxId/dev/status', async (req, res) => {
   try {
+    const status = devServerManager.getStatus(req.params.sandboxId);
+    res.json({ success: true, ...status });
+  } catch (err) {
+    sandboxError(res, err);
+  }
+});
+
+router.get('/:sandboxId/dev/logs', async (req, res) => {
+  try {
     const server = devServerManager.getServer(req.params.sandboxId);
-    if (!server) return res.json({ success: true, running: false });
-    
-    res.json({ 
-      success: true, 
-      running: true, 
-      server: {
-        framework: server.framework,
-        url: server.url,
-        hostPort: server.hostPort,
-        containerPort: server.containerPort,
-        startedAt: server.startedAt
-      }
-    });
+    res.json({ success: true, logs: server?.logs || [] });
   } catch (err) {
     sandboxError(res, err);
   }
@@ -187,7 +194,7 @@ router.post('/:sandboxId/ports/expose', async (req, res) => {
   try {
     const { containerPort } = req.body;
     if (!containerPort) return res.status(400).json({ success: false, error: 'containerPort required' });
-    
+
     const result = await sandboxManager.exposePort(req.params.sandboxId, containerPort);
     res.json({ success: true, result });
   } catch (err) {
@@ -213,8 +220,8 @@ router.delete('/:sandboxId', async (req, res) => {
 router.get('/project/:projectId', async (req, res) => {
   try {
     const sandboxes = sandboxManager.getSandboxesForProject(req.params.projectId);
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       sandboxes: sandboxes.map(s => ({
         id: s.id,
         projectId: s.projectId,

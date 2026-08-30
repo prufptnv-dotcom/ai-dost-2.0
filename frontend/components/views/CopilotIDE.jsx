@@ -529,10 +529,10 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
   const [activePath, setActivePath] = useState(null);
   const [contents, setContents] = useState({});
   const [dirtyPaths, setDirtyPaths] = useState(() => new Set());
-  
+
   // Workspace Mode: 'code' | 'preview'
   const [workspaceMode, setWorkspaceMode] = useState('code');
-  
+
   // Left Sidebar & Terminal Collapsible States
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [terminalOpen, setTerminalOpen] = useState(false);
@@ -551,7 +551,10 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
   // Live preview configuration
   const [previewDevice, setPreviewDevice] = useState('desktop');
   const [inspectorActive, setInspectorActive] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState('http://localhost:3000');
+  const [previewUrl, setPreviewUrl] = useState(`/api/preview/${projectId}`);
+  const [previewSourceMode, setPreviewSourceMode] = useState('live'); // 'live' | 'mock'
+  const [devServerStatus, setDevServerStatus] = useState({ running: false, state: 'STOPPED', url: null });
+  const [devServerLoading, setDevServerLoading] = useState(false);
 
   // Modals & Overlays
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -582,6 +585,68 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
   const showToast = useCallback((msg, type = 'info') => {
     if (onToast) onToast(msg, type);
   }, [onToast]);
+
+  const loadDevServerStatus = useCallback(async () => {
+    try {
+      const res = await api.get(`/preview/${projectId}/status`);
+      if (res.data?.success) {
+        setDevServerStatus(res.data);
+      }
+    } catch (_) {}
+  }, [projectId]);
+
+  useEffect(() => {
+    loadDevServerStatus();
+    const interval = setInterval(loadDevServerStatus, 5000);
+    return () => clearInterval(interval);
+  }, [loadDevServerStatus]);
+
+  const handleStartDevServer = async () => {
+    setDevServerLoading(true);
+    try {
+      showToast('🚀 Starting Dev Server...', 'info');
+      const res = await api.post(`/preview/${projectId}/dev/start`, { projectPath: '.' });
+      if (res.data?.success) {
+        showToast(`✅ Dev Server Ready on port ${res.data.hostPort || res.data.port || ''}`, 'success');
+        setDevServerStatus(prev => ({ ...prev, running: true, state: 'READY', url: res.data.url }));
+        if (iframeRef.current) iframeRef.current.src = `/api/preview/${projectId}?t=${Date.now()}`;
+      } else {
+        showToast(`❌ Dev Server Start Failed: ${res.data?.error || 'Unknown error'}`, 'error');
+      }
+    } catch (err) {
+      showToast(`Dev Server error: ${err.message}`, 'error');
+    } finally {
+      setDevServerLoading(false);
+      loadDevServerStatus();
+    }
+  };
+
+  const handleStopDevServer = async () => {
+    try {
+      await api.post(`/preview/${projectId}/dev/stop`);
+      showToast('⏹️ Dev Server Stopped', 'info');
+      setDevServerStatus(prev => ({ ...prev, running: false, state: 'STOPPED' }));
+    } catch (err) {
+      showToast(`Stop error: ${err.message}`, 'error');
+    }
+  };
+
+  const handleRestartDevServer = async () => {
+    setDevServerLoading(true);
+    try {
+      showToast('🔄 Restarting Dev Server...', 'info');
+      const res = await api.post(`/preview/${projectId}/dev/restart`);
+      if (res.data?.success) {
+        showToast('✅ Dev Server Restarted', 'success');
+        if (iframeRef.current) iframeRef.current.src = `/api/preview/${projectId}?t=${Date.now()}`;
+      }
+    } catch (err) {
+      showToast(`Restart error: ${err.message}`, 'error');
+    } finally {
+      setDevServerLoading(false);
+      loadDevServerStatus();
+    }
+  };
 
   // Voice input setup
   const toggleVoice = () => {
@@ -982,16 +1047,16 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
             if (data.type === 'run_started') {
               setLatestRunId(data.runId || null);
               latestRunIdRef.current = data.runId || null;
-            } 
+            }
             else if (data.type === 'plan' || data.type === 'plan_tasks') {
               const tasks = Array.isArray(data.tasks) ? data.tasks : (Array.isArray(data.plan?.tasks) ? data.plan.tasks : []);
               if (tasks.length > 0) {
-                setPlanTasks(tasks.map((t, idx) => ({ 
-                  ...t, 
-                  status: idx === 0 ? 'in_progress' : (t.status || 'pending') 
+                setPlanTasks(tasks.map((t, idx) => ({
+                  ...t,
+                  status: idx === 0 ? 'in_progress' : (t.status || 'pending')
                 })));
               }
-            } 
+            }
             else if (data.type === 'thinking' || data.type === 'thought' || data.type === 'agent_status') {
               const msg = data.message || data.thought;
               if (msg && msg.trim()) {
@@ -999,7 +1064,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                 setCopilotStatus({ label: msg.substring(0, 45) + '...', tone: 'work' });
                 setPlanTasks(prev => prev.map(t => t.status === 'in_progress' ? { ...t, logSnippet: msg.substring(0, 60) } : t));
               }
-            } 
+            }
             else if (data.type === 'tool_call') {
               const action = data.action;
               const label = STATUS_BY_ACTION[action] || `Executing ${action}...`;
@@ -1017,7 +1082,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                   return t;
                 });
               });
-            } 
+            }
             else if (data.type === 'file_written' || data.type === 'file_changed' || data.type === 'file') {
               const filePath = data.path || data.file;
               const content = data.content || '';
@@ -1059,13 +1124,13 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                   setOpenTabs(prev => prev.includes(filePath) ? prev : [...prev, filePath]);
                 }
               }
-            } 
+            }
             else if (data.type === 'step') {
               const log = data.stepLog || {};
               if (log.thought || log.action) {
                 setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'step', content: log.thought || log.action }]);
               }
-            } 
+            }
             else if (data.type === 'screenshot') {
               if (data.data) {
                 setCopilotMessages(prev => [...prev, {
@@ -1076,7 +1141,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                   message: data.message || 'Live Application UI Verification Snapshot'
                 }]);
               }
-            } 
+            }
             else if (data.type === 'vision') {
               setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: `👁️ Vision QA: ${data.message}` }]);
             }
@@ -1084,7 +1149,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
               const stepCount = Array.isArray(data.steps) ? data.steps.length : (data.steps || '?');
               setPlanTasks(prev => prev.map(t => ({ ...t, status: 'completed' })));
               setCopilotStatus({ label: `✅ Done — ${stepCount} steps`, tone: 'success' });
-              
+
               setCopilotMessages(prev => [
                 ...prev,
                 {
@@ -1363,10 +1428,10 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
 
       {/* ── 2. MASTER 2-COLUMN SPLIT (Left: AI Copilot | Right: Code/Preview) ───── */}
       <div className="flex-1 flex overflow-hidden min-h-0">
-        
+
         {/* ── LEFT PANE: AI COPILOT CHAT & AUTONOMOUS ENGINE ─────────────────── */}
         <aside className="w-[430px] shrink-0 flex flex-col bg-[#090a0f] border-r border-white/[0.08] z-10">
-          
+
           {/* Copilot Header */}
           <div className="flex items-center justify-between px-4 py-2.5 bg-[#0f1117] border-b border-white/[0.08]">
             <div className="flex items-center gap-2">
@@ -1424,7 +1489,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
 
           {/* Chat Messages Scroll Container */}
           <div ref={endRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-            
+
             {/* Empty State: Linear/Cursor Style Hero Starters */}
             {copilotMessages.length === 0 && !pendingPlan && (
               <div className="space-y-4 py-2">
@@ -1610,7 +1675,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                     {isListening ? <MicOff size={13} /> : <Mic size={13} />}
                   </button>
 
-                  <button 
+                  <button
                     type="button"
                     onClick={() => handleSend('Show active files context')}
                     className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.06] transition-colors cursor-pointer"
@@ -1618,7 +1683,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                     <Paperclip className="w-3 h-3 text-neutral-400" />
                     <span>Context</span>
                   </button>
-                  <button 
+                  <button
                     type="button"
                     onClick={() => setTerminalOpen(!terminalOpen)}
                     className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.06] transition-colors cursor-pointer"
@@ -1649,14 +1714,14 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
 
         {/* ── RIGHT PANE: WORKSPACE (Code Editor OR Live Preview) ──────────────── */}
         <main className="flex-1 flex flex-col overflow-hidden min-w-0 bg-[#090a0f]">
-          
+
           {/* When in CODE EDITOR mode */}
           {workspaceMode === 'code' && (
             <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-              
+
               {/* Tabs + Breadcrumbs Toolbar */}
               <div className="flex items-center justify-between px-3 bg-[#0f1117] border-b border-white/[0.08] shrink-0">
-                
+
                 {/* File Tabs */}
                 <div className="flex items-center gap-1 pt-1.5 overflow-x-auto">
                   <button
@@ -1900,13 +1965,71 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
           {/* When in LIVE PREVIEW mode (Linear / Vercel style full browser) */}
           {workspaceMode === 'preview' && (
             <div className="flex-1 flex flex-col overflow-hidden min-h-0 bg-[#090a0f]">
-              
+
               {/* Browser Address Bar & Device Toolbar */}
               <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-[#0f1117] border-b border-white/[0.08] shrink-0">
                 <div className="flex items-center gap-3">
                   <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 uppercase tracking-wider font-mono">
                     <Eye size={14} /> Preview
                   </span>
+
+                  {/* Dev Server Live Status Badge */}
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#090a0f] border border-white/[0.08] text-[11px] font-mono">
+                    {devServerStatus.state === 'READY' ? (
+                      <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        Live Dev Server (:{devServerStatus.hostPort || '5173'})
+                      </span>
+                    ) : devServerStatus.state === 'STARTING' || devServerStatus.state === 'CREATING' ? (
+                      <span className="flex items-center gap-1.5 text-amber-400 font-medium">
+                        <Loader2 size={12} className="animate-spin" />
+                        Booting ({devServerStatus.state})...
+                      </span>
+                    ) : devServerStatus.state === 'FAILED' ? (
+                      <span className="flex items-center gap-1.5 text-red-400 font-medium">
+                        <span className="w-2 h-2 rounded-full bg-red-400" />
+                        Server Error
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-neutral-400">
+                        <span className="w-2 h-2 rounded-full bg-neutral-600" />
+                        Server Idle
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Dev Server Actions */}
+                  <div className="flex items-center gap-1">
+                    {devServerStatus.state !== 'READY' && (
+                      <button
+                        onClick={handleStartDevServer}
+                        disabled={devServerLoading}
+                        className="px-2.5 py-1 rounded-md text-[10px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-all cursor-pointer flex items-center gap-1"
+                        title="Start Real Dev Server"
+                      >
+                        <Play size={11} className="fill-emerald-400" /> Start Server
+                      </button>
+                    )}
+                    {devServerStatus.state === 'READY' && (
+                      <>
+                        <button
+                          onClick={handleRestartDevServer}
+                          disabled={devServerLoading}
+                          className="px-2 py-1 rounded-md text-[10px] font-medium bg-sky-500/15 text-sky-300 border border-sky-500/30 hover:bg-sky-500/25 transition-all cursor-pointer flex items-center gap-1"
+                          title="Restart Dev Server"
+                        >
+                          <RotateCcw size={11} /> Restart
+                        </button>
+                        <button
+                          onClick={handleStopDevServer}
+                          className="px-2 py-1 rounded-md text-[10px] font-medium bg-red-500/15 text-red-300 border border-red-500/30 hover:bg-red-500/25 transition-all cursor-pointer flex items-center gap-1"
+                          title="Stop Dev Server"
+                        >
+                          <Square size={11} className="fill-red-400" /> Stop
+                        </button>
+                      </>
+                    )}
+                  </div>
 
                   {/* Responsive Device Switcher */}
                   <div className="flex items-center bg-[#090a0f] rounded-lg p-0.5 border border-white/[0.08]">
@@ -1951,17 +2074,25 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                 {/* Simulated URL Path Bar */}
                 <div className="hidden lg:flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[#090a0f] border border-white/[0.08] text-[11px] font-mono text-neutral-400 max-w-xs truncate">
                   <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  <span className="text-neutral-500">https://</span>
-                  <span className="text-neutral-200 truncate">{projectId || 'app'}.aidost.local</span>
+                  <span className="text-neutral-500">/api/preview/</span>
+                  <span className="text-neutral-200 truncate">{projectId || 'workspace'}</span>
                 </div>
 
-                {/* Actions: Visual QA, Refresh & Popout */}
+                {/* Actions: Source Mode, Visual QA, Refresh & Popout */}
                 <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setPreviewSourceMode(m => m === 'live' ? 'mock' : 'live')}
+                    className="px-2 py-1 rounded-md text-[10px] font-medium bg-[#161821] hover:bg-[#1c1f2b] text-neutral-300 hover:text-white border border-white/[0.08] transition-colors cursor-pointer"
+                    title="Toggle Live Server Proxy vs In-Browser Babel"
+                  >
+                    Mode: {previewSourceMode === 'live' ? '⚡ Live Proxy' : '🎨 In-Browser'}
+                  </button>
+
                   <button
                     onClick={() => setVisualDebuggerOpen(prev => !prev)}
                     className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
-                      visualDebuggerOpen 
-                        ? 'bg-sky-500/20 text-sky-400 border-sky-500/40' 
+                      visualDebuggerOpen
+                        ? 'bg-sky-500/20 text-sky-400 border-sky-500/40'
                         : 'bg-[#161821] hover:bg-[#1c1f2b] text-neutral-300 hover:text-white border-white/[0.08]'
                     }`}
                     title="Visual QA Auto-Debugger"
@@ -1971,7 +2102,13 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
 
                   <button
                     onClick={() => {
-                      if (iframeRef.current) iframeRef.current.src = iframeRef.current.src;
+                      if (iframeRef.current) {
+                        if (previewSourceMode === 'live') {
+                          iframeRef.current.src = `/api/preview/${projectId}?t=${Date.now()}`;
+                        } else {
+                          iframeRef.current.srcdoc = generateLiveAppHtml(files, contents, inspectorActive);
+                        }
+                      }
                       showToast('Preview refreshed', 'info');
                     }}
                     className="p-1.5 rounded-md bg-[#161821] hover:bg-[#1c1f2b] text-neutral-400 hover:text-white border border-white/[0.08] hover:border-white/[0.18] transition-colors cursor-pointer"
@@ -1981,10 +2118,10 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                   </button>
 
                   <button
-                    onClick={() => window.open(previewUrl, '_blank')}
+                    onClick={() => window.open(`/api/preview/${projectId}`, '_blank')}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-[#161821] hover:bg-[#1c1f2b] text-neutral-300 hover:text-white border border-white/[0.08] hover:border-white/[0.18] transition-colors cursor-pointer"
                   >
-                    <ExternalLink size={12} className="text-sky-400" /> Open in New Tab
+                    <ExternalLink size={12} className="text-sky-400" /> Open in Tab
                   </button>
                 </div>
               </div>
@@ -1992,10 +2129,10 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
               {/* Visual QA Inspector Drawer */}
               {visualDebuggerOpen && (
                 <div className="px-4 py-2 bg-[#090a0f] border-b border-white/[0.08] animate-in fade-in">
-                  <VisualDebugger 
-                    iframeRef={iframeRef} 
-                    onTriggerFix={(p) => handleSend(p)} 
-                    isRepairing={running} 
+                  <VisualDebugger
+                    iframeRef={iframeRef}
+                    onTriggerFix={(p) => handleSend(p)}
+                    isRepairing={running}
                   />
                 </div>
               )}
@@ -2010,7 +2147,8 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                 >
                   <iframe
                     ref={iframeRef}
-                    srcDoc={generateLiveAppHtml(files, contents, inspectorActive)}
+                    src={previewSourceMode === 'live' ? `/api/preview/${projectId}` : undefined}
+                    srcDoc={previewSourceMode === 'mock' ? generateLiveAppHtml(files, contents, inspectorActive) : undefined}
                     className="w-full h-full border-0 bg-[#090a0f]"
                     title="Live App"
                     sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"

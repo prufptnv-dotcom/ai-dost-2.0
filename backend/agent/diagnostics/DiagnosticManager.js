@@ -8,16 +8,14 @@ class DiagnosticManager {
   }
 
   async runDiagnostics(sandboxId, workspacePath, filePath, fileHash) {
-    if (!this.sandboxMgr) return { hasErrors: false, diagnostics: [], formattedErrors: '' };
-    
-    const cacheKey = `${sandboxId}:${filePath}:${fileHash}`;
+    const cacheKey = `${sandboxId || 'host'}:${filePath}:${fileHash || ''}`;
     if (this.cache.has(cacheKey)) {
         return this.cache.get(cacheKey);
     }
 
     const applicableAdapters = this.adapters.filter(a => a.canHandle(filePath));
     let allDiagnostics = [];
-    
+
     for (const adapter of applicableAdapters) {
        try {
            const diags = await adapter.run(sandboxId, workspacePath, filePath);

@@ -68,11 +68,11 @@ class SandboxManager extends EventEmitter {
     const sandboxPath = path.join(SANDBOX_DIR, `${projectId}-${sandboxId}`);
     await fs.mkdir(sandboxPath, { recursive: true });
 
-    const portBindings = options.ports ? {} : {};
-    if (options.ports) {
-      for (const port of options.ports) {
-        portBindings[`${port}/tcp`] = [{ HostPort: '' }];
-      }
+    const defaultDevPorts = [3000, 5173, 8080, 8000, 4321, 8081, 1420, 5000, 3001];
+    const portsToExpose = Array.from(new Set([...defaultDevPorts, ...(options.ports || [])]));
+    const portBindings = {};
+    for (const port of portsToExpose) {
+      portBindings[`${port}/tcp`] = [{ HostPort: '' }];
     }
 
     const config = {
@@ -99,7 +99,7 @@ class SandboxManager extends EventEmitter {
           Memory: this.parseMemory(config.memory),
           NanoCpus: Math.floor(config.cpus * 1e9),
           NetworkMode: config.network,
-          Binds: Object.entries(config.volumes).map(([host, cfg]) => 
+          Binds: Object.entries(config.volumes).map(([host, cfg]) =>
             `${host}:${cfg.bind}:${cfg.mode}`
           ),
           PortBindings: portBindings,
@@ -121,7 +121,7 @@ class SandboxManager extends EventEmitter {
       });
 
       await container.start();
-      
+
       const sandbox = {
         id: sandboxId,
         projectId,
@@ -192,17 +192,17 @@ class SandboxManager extends EventEmitter {
       const timeoutMs = options.timeout === 0 ? 0 : (options.timeout || 60000);
       const timeout = timeoutMs ? setTimeout(() => reject(new Error('Exec timeout')), timeoutMs) : null;
       const clearTimer = () => { if (timeout) clearTimeout(timeout); };
-      
+
       exec.start({ hijack: true, stdin: !!options.input }, (err, stream) => {
         if (err) { clearTimer(); return reject(err); }
-        
+
         let stdout = '', stderr = '';
         stream.on('data', chunk => {
           const str = chunk.toString();
           if (chunk[0] === 1) stdout += str;
           else if (chunk[0] === 2) stderr += str;
         });
-        
+
         stream.on('end', async () => {
           clearTimer();
           const inspect = await exec.inspect();
@@ -213,9 +213,9 @@ class SandboxManager extends EventEmitter {
             success: inspect.ExitCode === 0
           });
         });
-        
+
         stream.on('error', err => { clearTimer(); reject(err); });
-        
+
         if (options.input) {
           stream.write(options.input);
           stream.end();
@@ -227,7 +227,7 @@ class SandboxManager extends EventEmitter {
   async writeFile(sandboxId, filePath, content) {
     const sandbox = this.containers.get(sandboxId);
     if (!sandbox) throw new Error(`Sandbox ${sandboxId} not found`);
-    
+
     const fullPath = this._resolveSafe(sandbox.path, filePath);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
     await fs.writeFile(fullPath, content);
@@ -237,7 +237,7 @@ class SandboxManager extends EventEmitter {
   async readFile(sandboxId, filePath) {
     const sandbox = this.containers.get(sandboxId);
     if (!sandbox) throw new Error(`Sandbox ${sandboxId} not found`);
-    
+
     const fullPath = this._resolveSafe(sandbox.path, filePath);
     try {
       return await fs.readFile(fullPath, 'utf-8');
@@ -250,7 +250,7 @@ class SandboxManager extends EventEmitter {
   async listFiles(sandboxId, dirPath = '.') {
     const sandbox = this.containers.get(sandboxId);
     if (!sandbox) throw new Error(`Sandbox ${sandboxId} not found`);
-    
+
     const fullPath = this._resolveSafe(sandbox.path, dirPath);
     let entries;
     try {
@@ -272,7 +272,7 @@ class SandboxManager extends EventEmitter {
 
     const inspect = await sandbox.container.inspect();
     const boundPort = inspect.NetworkSettings.Ports[`${containerPort}/tcp`]?.[0]?.HostPort;
-    
+
     if (boundPort) {
       sandbox.ports.set(containerPort, parseInt(boundPort));
       return { containerPort, hostPort: parseInt(boundPort) };
@@ -316,7 +316,7 @@ class SandboxManager extends EventEmitter {
         await this.destroy(id);
       }
     }
-    
+
     if (this.containers.size > MAX_CONTAINERS) {
       const sorted = Array.from(this.containers.values())
         .sort((a, b) => a.lastActivity - b.lastActivity);

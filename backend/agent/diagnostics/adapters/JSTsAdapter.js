@@ -18,9 +18,22 @@ class JSTsAdapter {
     // 1. Basic JS syntax check
     if (['.js', '.jsx'].includes(ext)) {
       try {
-        const res = await this.sandboxMgr.exec(sandboxId, `node -c "${relPath}"`);
-        if (!res.success) {
-          diagnostics.push(this.parseNodeSyntaxError(res.stderr || res.stdout, relPath));
+        if (this.sandboxMgr && sandboxId) {
+          const res = await this.sandboxMgr.exec(sandboxId, `node -c "${relPath}"`);
+          if (!res.success) {
+            diagnostics.push(this.parseNodeSyntaxError(res.stderr || res.stdout, relPath));
+          }
+        } else {
+          const { exec } = require('child_process');
+          const fullPath = path.resolve(workspacePath || '.', filePath);
+          await new Promise((resolve) => {
+            exec(`node -c "${fullPath}"`, (err, stdout, stderr) => {
+              if (err) {
+                diagnostics.push(this.parseNodeSyntaxError(stderr || stdout || err.message, relPath));
+              }
+              resolve();
+            });
+          });
         }
       } catch (e) {
         // execution failed completely
@@ -89,7 +102,7 @@ class JSTsAdapter {
           });
        }
     }
-    
+
     // Fallback if no structured matches were found but command failed
     if (errors.length === 0 && output.trim().length > 0) {
        errors.push({
