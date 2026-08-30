@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const logger = require('../../logger');
+const artifactService = require('../../services/artifactService');
 
 // Deterministic fatal vs non-fatal error classifiers
 const FATAL_ERROR_PATTERNS = [
@@ -270,12 +271,14 @@ class VisualVerifier {
           navigationStatus = navResponse.status();
         }
       } catch (navErr) {
-        if (navErr.name === 'TimeoutError' || (navErr.message && navErr.message.includes('Timeout'))) {
-          status = 'TIMEOUT';
-          failureReason = `Navigation timed out after ${timeoutMs}ms`;
-        } else {
-          status = 'FAIL';
-          failureReason = `Navigation failed: ${navErr.message}`;
+        if (status !== 'SECURITY_ERROR') {
+          if (navErr.name === 'TimeoutError' || (navErr.message && navErr.message.includes('Timeout'))) {
+            status = 'TIMEOUT';
+            failureReason = `Navigation timed out after ${timeoutMs}ms`;
+          } else {
+            status = 'FAIL';
+            failureReason = `Navigation failed: ${navErr.message}`;
+          }
         }
       }
 
@@ -368,6 +371,28 @@ class VisualVerifier {
       } catch (_) {}
     }
 
+    let registeredArtifact = null;
+    if (fs.existsSync(screenshotPath)) {
+      try {
+        registeredArtifact = artifactService.registerFile({
+          filePath: screenshotPath,
+          projectId: projectId || 'default',
+          name: path.basename(screenshotPath),
+          type: 'verification_screenshot',
+          mimeType: 'image/png',
+          metadata: {
+            status,
+            pageTitle,
+            hasRootElement,
+            durationMs,
+            url: validUrl
+          }
+        });
+      } catch (artErr) {
+        logger.warn(`[VisualVerifier] Artifact registration warning: ${artErr.message}`);
+      }
+    }
+
     return {
       success,
       status,
@@ -379,6 +404,7 @@ class VisualVerifier {
       httpStatus: navigationStatus,
       screenshotPath: relativeScreenshotPath,
       screenshotFullPath: fs.existsSync(screenshotPath) ? screenshotPath : null,
+      artifactId: registeredArtifact?.id || null,
       screenshotBase64,
       consoleErrors: consoleLogs.filter(c => c.type === 'error'),
       allConsoleLogs: consoleLogs,
@@ -395,3 +421,4 @@ class VisualVerifier {
 }
 
 module.exports = new VisualVerifier();
+

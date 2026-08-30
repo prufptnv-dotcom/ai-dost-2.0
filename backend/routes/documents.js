@@ -8,6 +8,7 @@ const router = express.Router();
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const artifactService = require('../services/artifactService');
 
 const DOWNLOADS_DIR = path.join(__dirname, '../../frontend/public/downloads');
 fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
@@ -393,11 +394,35 @@ router.post('/generate', async (req, res) => {
         }
 
         logger.info(`📄 ${t.toUpperCase()} generated: ${finalName}`);
+
+        // Register in Universal Artifact Registry
+        let registeredArtifact = null;
+        try {
+            const fullDocPath = path.join(DOWNLOADS_DIR, finalName);
+            registeredArtifact = artifactService.registerFile({
+                filePath: fullDocPath,
+                projectId: req.body.projectId || 'default',
+                conversationId: req.body.conversationId || null,
+                taskId: req.body.taskId || null,
+                name: finalName,
+                type: `document_${t}`,
+                metadata: {
+                    topic,
+                    title: safeTitle,
+                    generatedAt: new Date().toISOString()
+                },
+                userId: req.body.userId || 'local-user'
+            });
+        } catch (regErr) {
+            logger.warn(`📄 Artifact registration warning for ${finalName}: ${regErr.message}`);
+        }
+
         res.json({
             success: true,
             type: t,
             downloadUrl: `/downloads/${finalName}`,
             filename: finalName,
+            artifactId: registeredArtifact?.id || null,
             message: `${t.toUpperCase()} file ready!`,
         });
     } catch (e) {

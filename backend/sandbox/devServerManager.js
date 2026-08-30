@@ -5,6 +5,7 @@ const { spawn } = require('child_process');
 const net = require('net');
 const os = require('os');
 const sandboxManager = require('./sandboxManager');
+const workspaceManager = require('../services/workspaceManager');
 
 const FRAMEWORK_CONFIGS = {
   vite: {
@@ -95,7 +96,7 @@ class DevServerManager extends EventEmitter {
 
   // Workspace directory resolver
   _workspaceDir(projectId) {
-    return path.join(os.tmpdir(), `agent-ws-${projectId || 'default'}`);
+    return workspaceManager.getWorkspacePath(projectId);
   }
 
   async detectFramework(targetId, projectPath = '.') {

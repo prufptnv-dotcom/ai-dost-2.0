@@ -1,15 +1,8 @@
-const Database = require('better-sqlite3');
-const path = require('path');
+const { getDatabase } = require('./db');
 const logger = require('./logger');
 
-let db = null;
-
 function getDb() {
-  if (!db) {
-    db = new Database(path.join(__dirname, 'data', 'app.db'));
-    db.pragma('journal_mode = WAL');
-  }
-  return db;
+  return getDatabase();
 }
 
 // Upsert a project file so CopilotIDE's /memory/project/:id refresh sees it

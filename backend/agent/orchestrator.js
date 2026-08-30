@@ -45,7 +45,7 @@ class AgentOrchestrator {
   }
 
   constructor(options = {}) {
-    this.projectPath = options.projectPath || os.tmpdir();
+    this.projectPath = options.projectPath || require('../services/workspaceManager').getWorkspacePath('default');
     this.customKeys = options.customKeys || {};
     this.diagnosticManager = new (require('./diagnostics/DiagnosticManager'))();
     this.dependencyGraph = new DependencyGraph();
@@ -1907,8 +1907,8 @@ async function injectBaseBoilerplate(workspace) {
 async function runAutonomousCopilotLoop({ prompt, workspace, onStepUpdate, onLogStream }) {
   await injectBaseBoilerplate(workspace);
   if (onLogStream) onLogStream('📦 System: Base React+Vite template injected to prevent compilation crash.');
-  const orchestrator = new AgentOrchestrator({ projectPath: typeof workspace === 'string' ? workspace : os.tmpdir() });
-  return orchestrator.executePlan(prompt, typeof workspace === 'string' ? workspace : os.tmpdir(), onStepUpdate);
+  const orchestrator = new AgentOrchestrator({ projectPath: typeof workspace === 'string' ? workspace : require('../services/workspaceManager').getWorkspacePath('default') });
+  return orchestrator.executePlan(prompt, typeof workspace === 'string' ? workspace : require('../services/workspaceManager').getWorkspacePath('default'), onStepUpdate);
 }
 
 module.exports = AgentOrchestrator;

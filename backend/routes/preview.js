@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const devServerManager = require('../sandbox/devServerManager');
+const workspaceManager = require('../services/workspaceManager');
 const logger = require('../logger');
 
 const { Database } = (() => {
@@ -60,7 +61,7 @@ const MIME = {
 };
 
 function workspaceOf(projectId) {
-  return path.join(os.tmpdir(), `agent-ws-${projectId || 'default'}`);
+  return workspaceManager.getWorkspacePath(projectId);
 }
 
 function safeJoin(root, rel) {

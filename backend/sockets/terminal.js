@@ -1,6 +1,7 @@
 const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const workspaceManager = require('../services/workspaceManager');
 const logger = require('../logger');
 let pty;
 try {
@@ -36,7 +37,7 @@ function getShell() {
 
 function createSession(projectId, projectPath) {
   // Align with the agent workspace so terminal & agent share the same dir
-  const cwd = projectPath || path.join(require('os').tmpdir(), `agent-ws-${projectId}`);
+  const cwd = projectPath || workspaceManager.getWorkspacePath(projectId);
   try {
     fs.mkdirSync(cwd, { recursive: true });
   } catch (_) {}

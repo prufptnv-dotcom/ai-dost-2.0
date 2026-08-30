@@ -159,48 +159,7 @@ def health():
     }
 
 
-@app.post("/ai/rag/query", response_model=RagResult)
-def rag_query(req: RagQuery):
-    if not req.directory or not os.path.isdir(req.directory):
-        raise HTTPException(400, "Directory valid nahi hai")
-    if not req.question or not req.question.strip():
-        raise HTTPException(400, "Question khali hai")
-    try:
-        index = _get_index(req.directory, rebuild=req.rebuild)
-        query_engine = index.as_query_engine(
-            llm=_llm(),
-            similarity_top_k=req.top_k,
-            response_mode="compact",
-        )
-        answer = query_engine.query(req.question).response or ""
-        nodes = index.as_retriever(similarity_top_k=req.top_k, embed_model=_embeddings()).retrieve(req.question)
-        sources = [
-            {
-                "file": n.node.metadata.get("file_name", "?"),
-                "path": n.node.metadata.get("file_path", "?"),
-                "score": round(float(n.score), 3) if n.score is not None else None,
-                "snippet": (n.node.text or "")[:300],
-            }
-            for n in nodes
-        ]
-        return RagResult(answer=str(answer), sources=sources)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, f"RAG error: {e}")
 
-
-@app.post("/ai/rag/index")
-def rag_index(req: RagQuery):
-    """Explicitly build/re-build the index for a directory (no question needed)."""
-    if not req.directory or not os.path.isdir(req.directory):
-        raise HTTPException(400, "Directory valid nahi hai")
-    try:
-        index = _get_index(req.directory, rebuild=True)
-        # Using Chroma, ref_doc_info might not be instantly available the same way, but it's okay
-        return {"status": "ok", "directory": req.directory, "documents_indexed": True}
-    except Exception as e:
-        raise HTTPException(500, f"Index error: {e}")
 
 class ScrapeRequest(BaseModel):
     url: str
@@ -1270,6 +1229,285 @@ def pdf_generate(req: PDFGenerateRequest):
         raise HTTPException(500, f"PDF generation error: {e}")
 
 
+
+# ------------------------------------------------------------------------------
+# RAG RETRIEVAL CONTRACTS (PHASE 2F.1)
+# ------------------------------------------------------------------------------
+class RetrievalFilter(BaseModel):
+    source_types: Optional[List[str]] = []
+    limit: Optional[int] = 10
+
+class RetrievalRequest(BaseModel):
+    version: str = "1"
+    user_id: str
+    project_id: str
+    query: str
+    mode: Optional[str] = "HYBRID"
+    filters: Optional[RetrievalFilter] = RetrievalFilter()
+
+class RetrievalResultItem(BaseModel):
+    source_entity_id: str
+    project_id: str
+    source_type: str
+    chunk_id: str
+    score: float
+    version_hash: str
+    metadata: dict
+
+class RetrievalResponse(BaseModel):
+    version: str = "1"
+    results: List[RetrievalResultItem]
+
+
+AUTHORITY_SCORES = {
+    "workspace_file": 1.0,
+    "artifact": 0.9,
+    "verification_result": 0.9,
+    "context_node": 0.8,
+    "message": 0.6,
+    "execution_history": 0.5
+}
+
+def get_authority_score(source_type: str) -> float:
+    return AUTHORITY_SCORES.get(source_type, 0.5)
+
+@app.post("/ai/rag/query", response_model=RetrievalResponse)
+def rag_query(req: RetrievalRequest):
+    """
+    Phase 2F.4 Hybrid Retrieval & Ranking
+    """
+    if not req.project_id:
+        raise HTTPException(400, "project_id is required for tenant isolation")
+    
+    if not rag_collection:
+        raise HTTPException(503, "Vector store is unavailable")
+
+    query_text = req.query.strip()
+    if not query_text:
+        return RetrievalResponse(version=req.version, results=[])
+
+    mode = (req.mode or "HYBRID").upper()
+    if mode not in ["EXACT", "FULL_TEXT", "SEMANTIC", "HYBRID"]:
+        raise HTTPException(400, "unsupported mode")
+
+    limit = req.filters.limit if req.filters and req.filters.limit else 10
+    limit = max(1, min(limit, 100))
+
+    where_filter = {"project_id": {"$eq": req.project_id}}
+    
+    if req.filters and req.filters.source_types:
+        if len(req.filters.source_types) == 1:
+            where_filter = {
+                "$and": [
+                    {"project_id": {"$eq": req.project_id}},
+                    {"source_type": {"$eq": req.filters.source_types[0]}}
+                ]
+            }
+        else:
+            where_filter = {
+                "$and": [
+                    {"project_id": {"$eq": req.project_id}},
+                    {"source_type": {"$in": req.filters.source_types}}
+                ]
+            }
+
+    entity_candidates = {}
+
+    def add_candidate(meta, chunk_id, sem_score, kw_score):
+        src_id = meta.get("source_entity_id")
+        if not src_id: return
+        auth_score = get_authority_score(meta.get("source_type", ""))
+        
+        # Ranking Formula
+        # alpha=0.6, beta=0.3, gamma=0.1
+        final_score = (0.6 * sem_score) + (0.3 * kw_score) + (0.1 * auth_score)
+
+        if src_id not in entity_candidates or final_score > entity_candidates[src_id]["score"]:
+            entity_candidates[src_id] = {
+                "source_entity_id": src_id,
+                "project_id": meta.get("project_id", req.project_id),
+                "source_type": meta.get("source_type", "unknown"),
+                "chunk_id": chunk_id,
+                "score": final_score,
+                "version_hash": meta.get("version_hash", ""),
+                "metadata": {k: v for k, v in meta.items() if str(k).startswith("custom_")}
+            }
+
+    try:
+        if mode in ["FULL_TEXT", "HYBRID", "EXACT"]:
+            kw_results = rag_collection.get(
+                where=where_filter,
+                where_document={"$contains": query_text}
+            )
+            if kw_results and kw_results["ids"]:
+                for idx, c_id in enumerate(kw_results["ids"]):
+                    add_candidate(kw_results["metadatas"][idx], c_id, sem_score=0.0, kw_score=1.0)
+                    
+        if mode in ["SEMANTIC", "HYBRID"]:
+            sem_results = rag_collection.query(
+                query_texts=[query_text],
+                n_results=limit * 3,
+                where=where_filter
+            )
+            if sem_results and sem_results["ids"] and len(sem_results["ids"][0]) > 0:
+                for idx, c_id in enumerate(sem_results["ids"][0]):
+                    dist = sem_results["distances"][0][idx]
+                    meta = sem_results["metadatas"][0][idx]
+                    
+                    norm_score = 1.0 / (1.0 + dist)
+                    
+                    kw_score = 1.0 if (mode == "HYBRID" and meta.get("source_entity_id") in entity_candidates and entity_candidates[meta["source_entity_id"]]["chunk_id"] == c_id) else 0.0
+                    
+                    # Apply semantic threshold
+                    if norm_score > 0.4 or kw_score > 0:
+                        add_candidate(meta, c_id, sem_score=norm_score, kw_score=kw_score)
+                    
+    except Exception as e:
+        if mode == "HYBRID":
+            pass # Fallback to whatever candidates we have
+        else:
+            raise HTTPException(500, f"Retrieval failed: {str(e)}")
+
+    sorted_results = sorted(entity_candidates.values(), key=lambda x: x["score"], reverse=True)
+    return RetrievalResponse(version=req.version, results=sorted_results[:limit])
+
+
+
+# ------------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------
+# RAG INDEXING SYNC CONTRACTS (PHASE 2F.3)
+# ------------------------------------------------------------------------------
+import hashlib
+import chromadb
+from chromadb.config import Settings
+from llama_index.core.node_parser import SentenceSplitter
+
+# Initialize ChromaDB persistent client
+chroma_client = None
+# Using default embedding function (all-MiniLM-L6-v2) for zero-configuration local execution
+try:
+    chroma_client = chromadb.PersistentClient(path='./chroma_db', settings=Settings(anonymized_telemetry=False))
+    rag_collection = chroma_client.get_or_create_collection(name="ai_dost_derived_index")
+except Exception as e:
+    print(f"Warning: Could not initialize Chroma collection: {e}")
+    rag_collection = None
+
+text_splitter = SentenceSplitter(chunk_size=512, chunk_overlap=50)
+
+def generate_chunk_id(project_id: str, source_entity_id: str, version_hash: str, index: int) -> str:
+    s = f"{project_id}_{source_entity_id}_{version_hash}_{index}"
+    return hashlib.sha256(s.encode()).hexdigest()
+
+class IndexDocument(BaseModel):
+    source_entity_id: str
+    source_type: str
+    version_hash: str
+    content: Optional[str] = ""
+    metadata: Optional[dict] = {}
+
+class IndexRequest(BaseModel):
+    version: str = "1"
+    project_id: str
+    action: str  # "upsert" or "delete"
+    documents: List[IndexDocument]
+
+class IndexResponse(BaseModel):
+    status: str
+    processed_count: int
+    chunks_created: int = 0
+    chunks_deleted: int = 0
+
+@app.post("/ai/rag/index", response_model=IndexResponse)
+def rag_index(req: IndexRequest):
+    """
+    Phase 2F.3 Embedding & Vector Index Pipeline
+    """
+    if not req.project_id:
+        raise HTTPException(400, "project_id is required for tenant isolation")
+    
+    if req.action not in ["upsert", "delete"]:
+        raise HTTPException(400, "invalid action")
+
+    if not rag_collection:
+        raise HTTPException(503, "Vector store is unavailable")
+
+    chunks_created = 0
+    chunks_deleted = 0
+
+    for doc in req.documents:
+        if not doc.source_entity_id:
+            raise HTTPException(400, "source_entity_id is required")
+
+        # 1. Always purge existing vectors for this entity to ensure idempotency and stale data removal
+        try:
+            # Chroma delete by metadata
+            rag_collection.delete(where={
+                "$and": [
+                    {"project_id": {"$eq": req.project_id}},
+                    {"source_entity_id": {"$eq": doc.source_entity_id}}
+                ]
+            })
+            # We don't know exactly how many were deleted easily via the API without querying first, 
+            # but idempotency is achieved.
+            chunks_deleted += 1 
+        except Exception as e:
+            # If nothing to delete, chroma might ignore or throw depending on version. We continue.
+            pass
+
+        # 2. If upsert, chunk and embed
+        if req.action == "upsert" and doc.content:
+            chunks = text_splitter.split_text(doc.content)
+            ids = []
+            documents = []
+            metadatas = []
+            
+            for idx, chunk_text in enumerate(chunks):
+                chunk_id = generate_chunk_id(req.project_id, doc.source_entity_id, doc.version_hash, idx)
+                
+                # Enforce project isolation and lineage in vector metadata
+                meta = {
+                    "project_id": req.project_id,
+                    "source_entity_id": doc.source_entity_id,
+                    "source_type": doc.source_type,
+                    "version_hash": doc.version_hash,
+                    "chunk_index": idx,
+                    "embedding_model": "default-minilm-l6-v2"
+                }
+                
+                # Merge custom metadata securely (ensuring it doesn't overwrite system keys)
+                if doc.metadata:
+                    for k, v in doc.metadata.items():
+                        if k not in meta and isinstance(v, (str, int, float, bool)):
+                            meta[f"custom_{k}"] = v
+
+                ids.append(chunk_id)
+                documents.append(chunk_text)
+                metadatas.append(meta)
+
+            if ids:
+                try:
+                    rag_collection.add(
+                        ids=ids,
+                        documents=documents,
+                        metadatas=metadatas
+                    )
+                    chunks_created += len(ids)
+                except Exception as e:
+                    raise HTTPException(500, f"Vector store insertion failed: {e}")
+
+    return IndexResponse(
+        status="success", 
+        processed_count=len(req.documents),
+        chunks_created=chunks_created,
+        chunks_deleted=chunks_deleted
+    )
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8001)
+
+
+
+
+
+

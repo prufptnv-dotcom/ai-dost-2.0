@@ -1,26 +1,36 @@
-# Feature Registry & Module Health Matrix
+# Feature Registry
 
-**Document Type:** Master Feature Inventory  
-**Status:** Active  
-**Last Updated:** 2026-08-30
+This document catalogs active, planned, and deprecated features along with their canonical locations.
 
----
+## 1. Project Management
+*   **Projects Store:** \ackend/db/dao/ProjectDAO.js\, \ackend/services/projectService.js\
+*   **Workspace Lifecycle:** \ackend/services/workspaceManager.js\
+*   **Authorization:** \ackend/services/projectAuthorization.js\
 
-| Feature / Module | Subsystem | Status | Health | Test Coverage | Master Goal Alignment |
-|---|---|---|---|---|---|
-| **Agent Orchestrator** | `backend/agent/orchestrator.js` | Production | 🟢 Healthy | High (190 tests) | P0.1 Runtime |
-| **Smart Diff Engine** | `backend/agent/diffEngine.js` | Production | 🟢 Healthy | High (Unit) | P0.1 Runtime |
-| **Lock Manager** | `backend/agent/concurrency/LockManager.js` | Production | 🟢 Healthy | High (Unit) | P0.1 Concurrency |
-| **Dependency Graph** | `backend/agent/dependency/DependencyGraph.js` | Production | 🟢 Healthy | High (Unit) | P0.1 Graph |
-| **Task Scheduler** | `backend/agent/concurrency/TaskScheduler.js` | Production | 🟢 Healthy | High (Unit) | P0.1 Scheduling |
-| **AST Diagnostics** | `backend/agent/diagnostics/` | Production | 🟢 Healthy | High (Unit) | P0.3 Verifier |
-| **Live Dev Server & Proxy** | `backend/sandbox/devServerManager.js` & `routes/preview.js` | Production | 🟢 Healthy | High (10 tests) | P0.1 Live Preview |
-| **Visual Verifier** | `backend/agent/verification/VisualVerifier.js` | Production | 🟢 Healthy | High (10 tests) | P0.2 Visual QA |
-| **Docker Sandbox** | `backend/sandbox/SandboxManager.js` | Beta | 🟢 Functional (Dual mode) | Medium | P0.2 Security |
-| **Unified Chat** | `backend/routes/chat.js` | Production | 🟢 Healthy | High | P3 Front Door |
-| **Document Generator** | `backend/routes/documents.js` | Production | 🟢 Healthy (PDF/DOCX/PPTX/CSV/XLSX) | High | P4 Documents |
-| **Image Generator** | `backend/routes/image.js` | Production | 🟢 Healthy (Pollinations fallback) | Medium | P5 Media |
-| **Research / Tavily** | `backend/routes/chat.js` & `services/` | Production | 🟢 Healthy | Medium | P6 Research |
-| **Resume Builder** | `frontend/components/ResumeBuilder.jsx` | Beta | 🟡 Needs core agent unification | Low (UI only) | P7 Workflows |
-| **Telegram Bot** | `backend/services/telegramBot.js` | Production | 🟢 Healthy (Long polling) | Manual/E2E | P3 Entry Points |
-| **Figma MCP** | `backend/routes/figma.js` | Beta | 🟡 Key dependent | Medium | Connectors |
+## 2. Agent Artifacts & Visuals
+*   **Artifact Registry:** \ackend/db/dao/ArtifactDAO.js\, \ackend/services/artifactService.js\
+*   **Visual Verifier:** \ackend/agent/verification/VisualVerifier.js\
+*   **Document Generation:** \ackend/routes/documents.js\ (integrated with ArtifactService)
+*   **Image Generation:** \ackend/routes/image.js\ (integrated with ArtifactService)
+
+## 3. Communication
+*   **Conversations & Messages:** \ackend/db/dao/ConversationDAO.js\, \ackend/db/dao/MessageDAO.js\
+
+## 4. Context & Memory
+*   **Context Nodes & Edges:** \ackend/db/dao/ContextNodeDAO.js\, \ackend/db/dao/ContextEdgeDAO.js\
+*   **Project-Scoped Memory:** \ackend/services/memoryService.js\
+*   **Legacy Migrator:** \ackend/db/legacyMemoryMigrator.js\ (idempotent, migrates personal_brain_memory.json)
+
+## 5. Agent Runtime (Planned - Phase 2)
+*   **Autonomous Engine:** TBD
+*   **RAG Pipeline:** TBD
+
+## [Phase 2F.1] Retrieval Contracts
+- **RetrievalService**: Node.js boundary enforcing schema validation, identity, tenant isolation, and error mapping for external indexing engines.
+- **Python Retrieval Scaffold**: Stub REST endpoints defining the strict cross-process boundary for RAG.
+
+## [Phase 2F.2] Retrieval Sync Pipeline
+- **Entity Hashing**: Deterministic SHA-256 generation in Node.js for tracking ersion_hash across canonical text and metadata.
+- **IndexSyncService**: Safely pushes upsert and delete entity events to the Python i-engine index, strictly enforcing project isolation rules before transmission.
+- **Stale Detection**: Ability to instantly detect if retrieved vector results match canonical content.
+

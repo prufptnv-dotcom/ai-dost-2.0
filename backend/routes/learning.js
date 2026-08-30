@@ -1,114 +1,61 @@
-const express = require('express');
+﻿const express = require('express');
 const logger = require('../logger');
 const router = express.Router();
-const fs = require('fs');
-const path = require('path');
 const GroqService = require('../services/groqService');
-
-const MEMORY_FILE = path.join(__dirname, '../data/personal_brain_memory.json');
-
-// Helper to read learning brain memory
-function getBrainMemory() {
-    try {
-        if (!fs.existsSync(path.dirname(MEMORY_FILE))) {
-            fs.mkdirSync(path.dirname(MEMORY_FILE), { recursive: true });
-        }
-        if (!fs.existsSync(MEMORY_FILE)) {
-            const initialData = {
-                totalFeedback: 0,
-                positiveCount: 0,
-                negativeCount: 0,
-                feedbackLogs: [],
-                learnedRules: [
-                    "Always write production-ready code with flawless grammar.",
-                    "Match user's language (Hindi/Hinglish/English) precisely.",
-                    "Avoid self-deprecating disclaimers or imaginary system bug lists."
-                ],
-                scannedFiles: ["main.py", "index.html", "style.css", "server.js", "AICompanion.jsx"]
-            };
-            fs.writeFileSync(MEMORY_FILE, JSON.stringify(initialData, null, 2));
-            return initialData;
-        }
-        const raw = fs.readFileSync(MEMORY_FILE, 'utf-8');
-        return JSON.parse(raw);
-    } catch (e) {
-        return {
-            totalFeedback: 0,
-            positiveCount: 0,
-            negativeCount: 0,
-            feedbackLogs: [],
-            learnedRules: [],
-            scannedFiles: []
-        };
-    }
-}
-
-// Helper to write learning brain memory
-function saveBrainMemory(data) {
-    try {
-        if (!fs.existsSync(path.dirname(MEMORY_FILE))) {
-            fs.mkdirSync(path.dirname(MEMORY_FILE), { recursive: true });
-        }
-        fs.writeFileSync(MEMORY_FILE, JSON.stringify(data, null, 2));
-    } catch (e) {
-        logger.error("Failed to save personal brain memory:", e.message);
-    }
-}
+const { getDatabase } = require('../db');
+const MemoryService = require('../services/memoryService');
+const projectAuth = require('../services/projectAuthorization');
 
 // 1. Submit Feedback (Thumbs Up / Down + Correction)
 router.post('/feedback', async (req, res) => {
     try {
-        const { type, message, aiReply, correction, category } = req.body;
-        const memory = getBrainMemory();
-        
-        memory.totalFeedback += 1;
-        if (type === 'up') {
-            memory.positiveCount += 1;
-        } else {
-            memory.negativeCount += 1;
-            if (correction) {
-                memory.learnedRules.push(`Correction from User: ${correction}`);
-            
-            // Sync with Python AI Engine Long-Term Vector Memory (ChromaDB)
-            
-                fetch('http://127.0.0.1:8001/ai/agent/learn', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: `Rule: ${correction}` })
-                }).catch(err => console.error("Failed to sync memory with Python AI Engine:", err));
-            
-            }
+        const { type, message, aiReply, correction, category, projectId } = req.body;
+
+        // M3 Security: Ensure user has access to this project, if provided
+        // Legacy frontend doesn't send projectId, so default to 'default' project.
+        const targetProjectId = projectId || 'default';
+        const userId = req.user?.id || req.headers['x-user-id'] || 'local-user';
+
+        const auth = projectAuth.verifyOwnership(targetProjectId, userId);
+        if (!auth.authorized) {
+            return res.status(auth.status).json({ success: false, error: auth.error });
         }
 
-        const logEntry = {
-            id: Date.now().toString(),
+        const db = getDatabase();
+        const memoryService = new MemoryService(db);
+
+        // Record the feedback
+        memoryService.addFeedbackLog(targetProjectId, {
             type,
             category: category || 'general',
-            message: message ? message.substring(0, 500) : '',
-            aiReply: aiReply ? aiReply.substring(0, 500) : '',
-            correction: correction || '',
-            timestamp: new Date().toISOString()
-        };
+            message,
+            aiReply,
+            correction
+        });
 
-        memory.feedbackLogs.unshift(logEntry);
-        // Keep max 100 logs
-        if (memory.feedbackLogs.length > 100) {
-            memory.feedbackLogs = memory.feedbackLogs.slice(0, 100);
+        // Sync with Python AI Engine Long-Term Vector Memory (ChromaDB)
+        if (correction) {
+            fetch('http://127.0.0.1:8001/ai/agent/learn', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: `Rule: ${correction}` })
+            }).catch(err => console.error("Failed to sync memory with Python AI Engine:", err));
         }
 
-        saveBrainMemory(memory);
+        const stats = memoryService.getProjectStats(targetProjectId);
 
         res.json({
             success: true,
-            message: type === 'up' ? 'Positive feedback recorded! Personal Brain learning updated.' : 'Correction recorded! Personal Brain has self-corrected.',
+            message: type === 'up' || type === 'positive' ? 'Positive feedback recorded! Personal Brain learning updated.' : 'Correction recorded! Personal Brain has self-corrected.',
             stats: {
-                totalFeedback: memory.totalFeedback,
-                positiveCount: memory.positiveCount,
-                negativeCount: memory.negativeCount,
-                rulesCount: memory.learnedRules.length
+                totalFeedback: stats.totalFeedback,
+                positiveCount: stats.positiveCount,
+                negativeCount: stats.negativeCount,
+                rulesCount: stats.rulesCount
             }
         });
     } catch (e) {
+        logger.error("Feedback error:", e);
         res.status(500).json({ success: false, error: e.message });
     }
 });
@@ -116,16 +63,27 @@ router.post('/feedback', async (req, res) => {
 // 2. Get Learning Stats for Secret Personal Brain Console
 router.get('/stats', (req, res) => {
     try {
-        const memory = getBrainMemory();
+        const targetProjectId = req.query.projectId || 'default';
+        const userId = req.user?.id || req.headers['x-user-id'] || 'local-user';
+
+        const auth = projectAuth.verifyOwnership(targetProjectId, userId);
+        if (!auth.authorized) {
+            return res.status(auth.status).json({ success: false, error: auth.error });
+        }
+
+        const db = getDatabase();
+        const memoryService = new MemoryService(db);
+        const stats = memoryService.getProjectStats(targetProjectId);
+
         res.json({
             success: true,
-            totalFeedback: memory.totalFeedback,
-            positiveCount: memory.positiveCount,
-            negativeCount: memory.negativeCount,
-            learnedRules: memory.learnedRules.slice(-10),
-            scannedFilesCount: memory.scannedFiles.length,
-            scannedFiles: memory.scannedFiles,
-            recentLogs: memory.feedbackLogs.slice(0, 5)
+            totalFeedback: stats.totalFeedback,
+            positiveCount: stats.positiveCount,
+            negativeCount: stats.negativeCount,
+            learnedRules: stats.learnedRules,
+            scannedFilesCount: stats.scannedFilesCount,
+            scannedFiles: stats.scannedFiles,
+            recentLogs: stats.recentLogs
         });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
@@ -135,17 +93,27 @@ router.get('/stats', (req, res) => {
 // 3. Chat with Personal Autonomous Model in Secret Console
 router.post('/chat', async (req, res) => {
     try {
-        const { prompt, history } = req.body;
-        const memory = getBrainMemory();
-        
-        const learnedContext = memory.learnedRules.slice(-10).map((rule, i) => `${i + 1}. ${rule}`).join('\n');
-        
+        const { prompt, history, projectId } = req.body;
+
+        const targetProjectId = projectId || 'default';
+        const userId = req.user?.id || req.headers['x-user-id'] || 'local-user';
+
+        const auth = projectAuth.verifyOwnership(targetProjectId, userId);
+        if (!auth.authorized) {
+            return res.status(auth.status).json({ success: false, error: auth.error });
+        }
+
+        const db = getDatabase();
+        const memoryService = new MemoryService(db);
+        const stats = memoryService.getProjectStats(targetProjectId);
+        const learnedContext = memoryService.getProjectLearnedContext(targetProjectId);
+
         const personalSystemPrompt = `You are AI-Dost Personal Brain, an autonomous self-learning AI model running inside the user's secret developer inspector console.
 You have "Aakh" (Vision/File Scanning capabilities) and continuously analyze user feedback, project files, and chat quality.
 
-Current Learning Memory Summary:
-- Total User Feedbacks Logged: ${memory.totalFeedback} (${memory.positiveCount} Thumbs Up 👍, ${memory.negativeCount} Thumbs Down 👎)
-- Scanned Workspace Files: ${memory.scannedFiles.join(', ')}
+Current Learning Memory Summary for Project "${targetProjectId}":
+- Total User Feedbacks Logged: ${stats.totalFeedback} (${stats.positiveCount} Thumbs Up ðŸ‘, ${stats.negativeCount} Thumbs Down ðŸ‘Ž)
+- Scanned Workspace Files: ${stats.scannedFiles.join(', ')}
 - Accumulated Learned Rules & Corrections:
 ${learnedContext || "No custom corrections logged yet."}
 
@@ -154,7 +122,7 @@ Answer the user's questions candidly about what you have learned, how much progr
 
         const fullPrompt = `${personalSystemPrompt}\n\nUSER QUESTION: ${prompt}`;
         const reply = await GroqService.chat(fullPrompt, history || [], 'chat', null);
-        
+
         res.json({
             success: true,
             reply: reply || "Personal Brain is active and continuously scanning your workspace!"

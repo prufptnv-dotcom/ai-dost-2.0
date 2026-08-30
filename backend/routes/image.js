@@ -2,6 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const logger = require('../logger');
+const artifactService = require('../services/artifactService');
 const router = express.Router();
 
 // Free image pipeline: Pollinations (no key) primary → Gemini 2.5 Flash Image fallback (free key).
@@ -83,11 +84,59 @@ router.post('/generate', async (req, res) => {
     const task = queue.then(async () => {
         const buf = await tryDownload(url);
         if (buf) {
-            return { success: true, imageUrl: url, provider: 'pollinations', message: 'Image ready' };
+            const file = `gen-${Date.now()}.png`;
+            const filePath = path.join(UPLOAD_DIR, file);
+            fs.writeFileSync(filePath, buf);
+            let registeredArtifact = null;
+            try {
+                registeredArtifact = artifactService.registerFile({
+                    filePath,
+                    projectId: req.body.projectId || 'default',
+                    conversationId: req.body.conversationId || null,
+                    taskId: req.body.taskId || null,
+                    name: file,
+                    type: 'generated_image',
+                    mimeType: 'image/png',
+                    metadata: { prompt: p, provider: 'pollinations' },
+                    userId: req.body.userId || 'local-user'
+                });
+            } catch (regErr) {
+                logger.warn(`🖼️ Image artifact registration warning: ${regErr.message}`);
+            }
+            return {
+                success: true,
+                imageUrl: `${base}/uploads/${file}`,
+                artifactId: registeredArtifact?.id || null,
+                provider: 'pollinations',
+                message: 'Image ready'
+            };
         }
         const file = await geminiImage(p);
         if (file) {
-            return { success: true, imageUrl: `${base}/uploads/${file}`, provider: 'gemini', message: 'Image ready (Gemini fallback)' };
+            const filePath = path.join(UPLOAD_DIR, file);
+            let registeredArtifact = null;
+            try {
+                registeredArtifact = artifactService.registerFile({
+                    filePath,
+                    projectId: req.body.projectId || 'default',
+                    conversationId: req.body.conversationId || null,
+                    taskId: req.body.taskId || null,
+                    name: file,
+                    type: 'generated_image',
+                    mimeType: 'image/png',
+                    metadata: { prompt: p, provider: 'gemini' },
+                    userId: req.body.userId || 'local-user'
+                });
+            } catch (regErr) {
+                logger.warn(`🖼️ Gemini image artifact registration warning: ${regErr.message}`);
+            }
+            return {
+                success: true,
+                imageUrl: `${base}/uploads/${file}`,
+                artifactId: registeredArtifact?.id || null,
+                provider: 'gemini',
+                message: 'Image ready (Gemini fallback)'
+            };
         }
         return {
             success: true,
