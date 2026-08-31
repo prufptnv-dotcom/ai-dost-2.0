@@ -12,6 +12,8 @@ import DOMPurify from 'dompurify';
 import api from '../../services/api';
 import { ImageCard, ImageLightbox } from './ImageLightbox';
 import ChatArtifactsCanvas from '../chat/ChatArtifactsCanvas';
+import BrandLogo from '../ui/BrandLogo';
+import { AiDostMark } from '../brand/AiDostMark';
 
 const STORAGE_KEY = 'ai_dost_messages_chat';
 const SESSIONS_KEY = 'ai_dost_chat_sessions';
@@ -273,34 +275,32 @@ function MessageBubble({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2 }}
+      transition={{ duration: 0.12 }}
       className={`flex gap-3.5 ${isUser ? 'flex-row-reverse' : ''}`}
     >
-      {/* Avatar */}
-      <div
-        className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 shadow-md"
-        style={{
-          background: isUser ? 'linear-gradient(135deg, #3b82f6, #8b5cf6)' : 'linear-gradient(135deg, #10b981, #06b6d4)',
-          border: isUser ? '1px solid rgba(59,130,246,0.4)' : '1px solid rgba(16,185,129,0.4)',
-        }}
-      >
-        {isUser ? <User className="w-4 h-4 text-white" /> : <Bot className="w-4 h-4 text-white" />}
+      {/* Avatar / Monogram */}
+      <div className="flex-shrink-0 mt-0.5 select-none">
+        {isUser ? (
+          <div className="w-7 h-7 rounded-xs flex items-center justify-center bg-canvas-surface border border-border text-ink-muted text-xs font-mono">
+            U
+          </div>
+        ) : (
+          <div className="w-7 h-7 rounded-xs flex items-center justify-center bg-canvas-surface border border-border text-accent-primary">
+            <AiDostMark size={16} />
+          </div>
+        )}
       </div>
 
-      {/* Bubble */}
+      {/* Bubble / Editorial Message Block */}
       <div className={`max-w-[92%] md:max-w-[82%] flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
         <div
-          className="px-4 py-3.5 rounded-2xl text-sm leading-relaxed"
-          style={{
-            background: isUser ? 'linear-gradient(135deg, #2563eb, #7c3aed)' : 'rgba(255,255,255,0.065)',
-            border: isUser ? 'none' : '1px solid rgba(255,255,255,0.12)',
-            color: '#f8fafc',
-            borderTopRightRadius: isUser ? 4 : 18,
-            borderTopLeftRadius: isUser ? 18 : 4,
-            boxShadow: isUser ? '0 4px 18px rgba(37,99,235,0.35)' : '0 4px 16px rgba(0,0,0,0.25)',
-          }}
+          className={`px-3.5 py-2.5 text-xs leading-relaxed ${
+            isUser
+              ? 'rounded-xs bg-canvas-surface border border-border text-paper-100'
+              : 'rounded-xs bg-canvas-surface/40 border border-border-subtle text-paper-100'
+          }`}
         >
           {isStreaming && msg.content.length === 0 ? (
             <div className="flex items-center gap-2 py-1">
@@ -442,22 +442,15 @@ function MessageBubble({
 function DeepAnalyzing() {
   return (
     <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
-      className="flex items-center gap-4 py-3 px-2"
+      className="flex items-center gap-2.5 py-2 px-3.5 rounded-md bg-canvas-surface border border-border text-txt-secondary text-xs max-w-sm"
     >
-      <div className="deep-analyzing-orb">
-        <div className="orb-core" />
-        <div className="orb-ring" />
-        <div className="orb-ring" />
-        <div className="orb-ring" />
-      </div>
-      <div>
-        <p className="text-sm font-semibold text-white">Deep reasoning in progress...</p>
-        <p className="text-xs text-slate-400">
-          Streaming instant response from AI cascade
-        </p>
+      <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
+      <div className="flex flex-col">
+        <span className="font-medium text-txt-primary">Synthesizing response...</span>
+        <span className="text-[10px] text-txt-muted">Evaluating multi-model cascade</span>
       </div>
     </motion.div>
   );
@@ -1069,44 +1062,45 @@ export default function ChatView({
   };
 
   return (
-    <div className="h-full flex flex-row overflow-hidden bg-[#0b0e14]">
+    <div className="h-full flex flex-row overflow-hidden bg-canvas-base">
       {/* Left / Main Chat Panel */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
         {/* Docked Sticky Sub-Header Bar */}
-        <div className="shrink-0 px-4 md:px-8 py-2.5 bg-[#0e121b]/90 backdrop-blur-md border-b border-white/10 z-20">
+        <div className="shrink-0 px-4 md:px-8 py-2 bg-canvas-subtle/80 border-b border-border z-20">
           <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <div className="relative">
                 <button
+                  type="button"
                   onClick={() => setSessionsOpen(!sessionsOpen)}
                   title="Sessions"
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 cursor-pointer transition-colors shadow-sm"
+                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated border border-border text-txt-primary cursor-pointer transition-fast shadow-xs focus-ring"
                 >
-                  <span>💬 {sessions.find((s) => s.id === sessionId)?.title || 'Default chat'}</span>
-                  <span className="text-[10px] text-slate-400">▾</span>
+                  <span className="truncate max-w-[140px] sm:max-w-[200px]">{sessions.find((s) => s.id === sessionId)?.title || 'Default session'}</span>
+                  <span className="text-[10px] text-txt-muted">▾</span>
                 </button>
                 {sessionsOpen && (
                   <div
-                    className="absolute top-full left-0 mt-1.5 w-64 rounded-xl overflow-hidden z-50 shadow-2xl bg-[#0d1117] border border-white/15 backdrop-blur-xl"
+                    className="absolute top-full left-0 mt-1.5 w-64 rounded-lg overflow-hidden z-50 shadow-popover bg-canvas-surface border border-border-strong"
                   >
-                    <div className="max-h-56 overflow-y-auto py-1">
-                      {[{ id: 'default', title: 'Default chat' }, ...sessions].map((s) => (
+                    <div className="max-h-56 overflow-y-auto py-1 divide-y divide-border-subtle">
+                      {[{ id: 'default', title: 'Default session' }, ...sessions].map((s) => (
                         <div
                           key={s.id}
-                          className="flex items-center gap-1.5 px-3 py-2 cursor-pointer hover:bg-white/10 transition-colors"
-                          style={{ background: s.id === sessionId ? 'rgba(59,130,246,0.15)' : 'transparent' }}
+                          className={`flex items-center gap-1.5 px-3 py-2 cursor-pointer transition-fast ${
+                            s.id === sessionId ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-white/5 text-txt-secondary'
+                          }`}
                         >
                           <span
                             className="flex-1 truncate text-xs"
-                            style={{ color: s.id === sessionId ? '#60a5fa' : '#e2e8f0' }}
                             onClick={() => switchSession(s.id)}
                           >
                             {s.title}
                           </span>
                           {s.id !== 'default' && (
                             <div className="flex items-center gap-1">
-                              <button onClick={() => renameSession(s.id)} title="Rename" className="p-1 rounded hover:bg-white/10 cursor-pointer text-[11px] text-slate-400">✏️</button>
-                              <button onClick={() => deleteSession(s.id)} title="Delete" className="p-1 rounded hover:bg-white/10 cursor-pointer text-[11px] text-slate-400">🗑️</button>
+                              <button onClick={() => renameSession(s.id)} title="Rename" className="p-1 rounded-xs hover:bg-white/10 cursor-pointer text-[10px] text-txt-muted hover:text-txt-primary">✏️</button>
+                              <button onClick={() => deleteSession(s.id)} title="Delete" className="p-1 rounded-xs hover:bg-white/10 cursor-pointer text-[10px] text-txt-muted hover:text-status-error">🗑️</button>
                             </div>
                           )}
                         </div>
@@ -1116,26 +1110,27 @@ export default function ChatView({
                 )}
               </div>
               <button
+                type="button"
                 onClick={createSession}
-                title="Nayi chat"
-                className="w-8 h-8 rounded-xl flex items-center justify-center cursor-pointer bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 transition-colors text-sm font-semibold"
+                title="New session"
+                className="w-7 h-7 rounded-md flex items-center justify-center cursor-pointer bg-canvas-surface hover:bg-canvas-elevated border border-border text-txt-secondary hover:text-txt-primary transition-fast text-xs focus-ring"
               >
                 +
               </button>
             </div>
 
             {/* Persona Tone Selector */}
-            <div className="flex items-center gap-1.5 bg-black/30 p-1 rounded-xl border border-white/10">
+            <div className="flex items-center gap-1 bg-canvas-surface p-0.5 rounded-md border border-border">
               {PERSONAS.map((p) => (
                 <button
                   key={p.id}
+                  type="button"
                   onClick={() => setPersonaAndSave(p.id)}
-                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all cursor-pointer"
-                  style={{
-                    background: persona === p.id ? 'linear-gradient(135deg, rgba(59,130,246,0.3), rgba(139,92,246,0.3))' : 'transparent',
-                    border: persona === p.id ? '1px solid rgba(139,92,246,0.5)' : '1px solid transparent',
-                    color: persona === p.id ? '#c084fc' : '#94a3b8',
-                  }}
+                  className={`px-2 py-1 rounded-xs text-[11px] font-medium transition-fast cursor-pointer focus-ring ${
+                    persona === p.id
+                      ? 'bg-canvas-elevated text-accent border border-border shadow-xs'
+                      : 'text-txt-muted hover:text-txt-secondary border border-transparent'
+                  }`}
                 >
                   {p.label}
                 </button>
@@ -1258,20 +1253,22 @@ export default function ChatView({
             <div className="max-w-4xl mx-auto">
               {backendHistory && backendHistory.length > 0 && (
                 <button
+                  type="button"
                   onClick={loadBackendHistory}
-                  className="mb-2 flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-purple-500/10 border border-purple-500/30 text-purple-300 hover:bg-purple-500/20 transition-all cursor-pointer"
+                  className="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated border border-border text-txt-secondary hover:text-txt-primary transition-fast cursor-pointer focus-ring"
                 >
-                  <HistoryIcon className="w-3.5 h-3.5" /> Purani baatein load karo ({backendHistory.length} saved)
+                  <HistoryIcon className="w-3.5 h-3.5" /> Previous conversation history ({backendHistory.length} saved)
                 </button>
               )}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
                 {QUICK_PROMPTS.map(({ icon: Icon, label, prompt }) => (
                   <button
                     key={label}
+                    type="button"
                     onClick={() => sendMessage(prompt)}
-                    className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs transition-all cursor-pointer hover:bg-white/10 bg-white/5 border border-white/10 text-slate-300 text-left"
+                    className="flex items-center gap-2 px-3 py-2 rounded-md text-xs transition-fast cursor-pointer bg-canvas-surface hover:bg-canvas-elevated border border-border text-txt-secondary hover:text-txt-primary text-left focus-ring"
                   >
-                    <Icon className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                    <Icon className="w-3.5 h-3.5 text-accent shrink-0" />
                     <span className="truncate">{label}</span>
                   </button>
                 ))}
@@ -1281,43 +1278,32 @@ export default function ChatView({
         )}
 
         {/* Input Area */}
-        <div className="px-4 md:px-8 pb-5 pt-2 bg-gradient-to-t from-[#0b0e14] via-[#0b0e14]/90 to-transparent">
+        <div className="px-4 md:px-8 pb-4 pt-2 bg-canvas-base border-t border-border-subtle">
           <div className="max-w-4xl mx-auto">
             {attachment && (
-              <div className="flex items-center gap-2 mb-2 px-3.5 py-2 rounded-xl text-xs bg-purple-500/10 border border-purple-500/30">
-                <Paperclip className="w-3.5 h-3.5 text-purple-400" />
-                <span className="truncate text-slate-200">{attachment.name}</span>
+              <div className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-md text-xs bg-canvas-surface border border-border">
+                <Paperclip className="w-3.5 h-3.5 text-accent" />
+                <span className="truncate text-txt-primary">{attachment.name}</span>
                 <button
+                  type="button"
                   onClick={() => setAttachment(null)}
-                  className="ml-auto px-2 py-0.5 rounded-lg text-[10px] text-slate-400 hover:text-white cursor-pointer hover:bg-white/10"
+                  className="ml-auto px-1.5 py-0.5 rounded-xs text-[10px] text-txt-muted hover:text-txt-primary cursor-pointer hover:bg-canvas-elevated"
                 >
-                  ✕ hatao
+                  ✕ remove
                 </button>
               </div>
             )}
             <div
-              className="flex items-end gap-2.5 px-4 py-3 rounded-2xl transition-all bg-white/[0.06] border border-white/15 focus-within:border-blue-500/60 focus-within:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
+              className="relative rounded-xl bg-canvas-surface border border-border focus-within:border-border-focus focus-within:shadow-md transition-fast"
             >
-              <select
-                value={model}
-                onChange={handleModelChange}
-                title="Model select karo"
-                className="shrink-0 mb-0.5 px-2 py-1.5 rounded-lg text-xs font-semibold bg-black/40 border border-white/15 text-slate-300 cursor-pointer focus:outline-none"
-              >
-                {MODEL_OPTIONS.map((m) => (
-                  <option key={m.id} value={m.id} style={{ color: '#0b0d12', background: '#fff' }}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
               <textarea
                 ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 rows={Math.min(5, Math.max(1, input.split('\n').length))}
-                placeholder="AI-Dost se kuch bhi pucho... (Enter = send, Shift+Enter = newline)"
-                className="flex-1 bg-transparent resize-none text-sm focus:outline-none placeholder:text-slate-500 text-slate-100 leading-relaxed py-1"
+                placeholder="Ask AI-Dost anything, generate code, or orchestrate agent... (Enter = send, Shift+Enter = newline)"
+                className="w-full bg-transparent resize-none text-sm focus:outline-none placeholder:text-txt-muted text-txt-primary leading-relaxed px-4 pt-3 pb-2 font-sans"
               />
               <input
                 ref={fileInputRef}
@@ -1326,45 +1312,72 @@ export default function ChatView({
                 className="hidden"
                 onChange={handleFileSelect}
               />
-              <button
-                onClick={() => fileInputRef.current && fileInputRef.current.click()}
-                title="File attach (image / PDF / text)"
-                className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors cursor-pointer hover:bg-white/10 text-slate-400 hover:text-slate-200"
-              >
-                <Paperclip className="w-4 h-4" />
-              </button>
-              <button
-                onClick={onOpenVoice}
-                title="Voice input"
-                className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors cursor-pointer hover:bg-purple-500/20 text-purple-400 hover:text-purple-300"
-              >
-                <Mic className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => sendMessage()}
-                disabled={!input.trim() || thinking}
-                title="Send (Enter)"
-                className="w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md hover:shadow-blue-500/30 disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                <Send className="w-4 h-4" />
-              </button>
+              <div className="flex items-center justify-between px-3 pb-2.5 pt-1 border-t border-border-subtle select-none">
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={model}
+                    onChange={handleModelChange}
+                    title="Select model"
+                    className="px-2 py-1 rounded-sm text-xs font-medium bg-canvas-elevated border border-border text-txt-secondary cursor-pointer focus:outline-none"
+                  >
+                    {MODEL_OPTIONS.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                    title="Attach file"
+                    className="p-1.5 rounded-sm hover:bg-canvas-elevated text-txt-muted hover:text-txt-primary transition-fast cursor-pointer focus-ring"
+                  >
+                    <Paperclip className="w-4 h-4" />
+                  </button>
+                  {onOpenVoice && (
+                    <button
+                      type="button"
+                      onClick={onOpenVoice}
+                      title="Voice input"
+                      className="p-1.5 rounded-sm hover:bg-canvas-elevated text-txt-muted hover:text-accent transition-fast cursor-pointer focus-ring"
+                    >
+                      <Mic className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-txt-muted hidden sm:inline">
+                    <kbd className="font-mono">Enter</kbd> to send
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => sendMessage()}
+                    disabled={!input.trim() || thinking}
+                    title="Send message"
+                    className="flex items-center justify-center w-8 h-8 rounded-md bg-accent text-white hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-fast cursor-pointer shadow-xs focus-ring"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center justify-between gap-3 mt-2 px-1">
-              <p className="text-[10px] text-slate-500">
-                AI-Dost v2.0 • Live Artifacts Canvas & In-Chat Code Runner Active
-              </p>
+            <div className="flex items-center justify-between gap-3 mt-2 px-1 text-[11px] text-txt-muted">
+              <span>AI-Dost • Live Artifacts Canvas & Code Execution Active</span>
               <div className="flex items-center gap-1.5 shrink-0">
                 <button
+                  type="button"
                   onClick={exportMarkdown}
-                  title="Export as Markdown"
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold text-slate-400 hover:text-slate-200 border border-white/10 hover:bg-white/10 transition-colors"
+                  title="Export Markdown"
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[11px] text-txt-muted hover:text-txt-primary border border-border hover:bg-canvas-surface transition-fast cursor-pointer"
                 >
                   <FileDown className="w-3 h-3" /> .md
                 </button>
                 <button
+                  type="button"
                   onClick={exportPdf}
-                  title="Export as PDF"
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold text-slate-400 hover:text-slate-200 border border-white/10 hover:bg-white/10 transition-colors"
+                  title="Export PDF"
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[11px] text-txt-muted hover:text-txt-primary border border-border hover:bg-canvas-surface transition-fast cursor-pointer"
                 >
                   <Download className="w-3 h-3" /> PDF
                 </button>
@@ -1373,6 +1386,7 @@ export default function ChatView({
           </div>
         </div>
       </div>
+
 
       {/* Right / Claude-Style Live Artifacts Canvas (Split Screen) */}
       <AnimatePresence>

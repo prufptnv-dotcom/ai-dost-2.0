@@ -166,7 +166,7 @@ test('PlannerExecutionLoop', async (t) => {
     
     // The task should be FAILED
     // Since task ID is generated inside run(), we can't easily assert on it unless we mock or query tasks
-    const tasks = db.prepare('SELECT * FROM agent_tasks ORDER BY created_at DESC').all();
+    const tasks = db.prepare('SELECT * FROM agent_tasks ORDER BY rowid DESC').all();
     assert.strictEqual(tasks[0].status, 'FAILED');
   });
 

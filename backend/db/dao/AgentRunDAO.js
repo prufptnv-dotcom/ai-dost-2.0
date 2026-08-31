@@ -48,6 +48,21 @@ class AgentRunDAO {
   listByTask(taskId) {
     return this.db.prepare('SELECT * FROM agent_runs WHERE task_id = ? ORDER BY attempt DESC').all(taskId);
   }
+
+  countByTask(taskId) {
+    const row = this.db.prepare('SELECT COUNT(*) as count FROM agent_runs WHERE task_id = ?').get(taskId);
+    return row ? row.count : 0;
+  }
+
+  countActiveByProject(projectId) {
+    const row = this.db.prepare(`
+      SELECT COUNT(*) as count
+      FROM agent_runs r
+      JOIN agent_tasks t ON r.task_id = t.id
+      WHERE t.project_id = ? AND r.status IN ('PENDING', 'RUNNING', 'WAITING', 'VERIFYING')
+    `).get(projectId);
+    return row ? row.count : 0;
+  }
 }
 
 module.exports = AgentRunDAO;

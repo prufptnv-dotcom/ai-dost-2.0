@@ -31,7 +31,7 @@ describe('ProjectsView', () => {
   it('shows empty state on API failure without crashing', async () => {
     api.get.mockRejectedValue(new Error('network down'));
     render(<ProjectsView onOpenProject={() => {}} />);
-    await waitFor(() => expect(screen.getByText(/Koi project nahi hai/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/No projects found/i)).toBeInTheDocument());
   });
 
   it('creates a project via POST and refreshes the list', async () => {

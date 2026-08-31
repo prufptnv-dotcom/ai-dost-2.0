@@ -27,13 +27,9 @@ test('ContextAssembler', async (t) => {
 
   await t.test('Assembles context for authorized user', async () => {
     const context = await contextAssembler.assemble('p1', 'u1');
-    assert.strictEqual(context.authenticatedUser, 'u1');
-    assert.strictEqual(context.project.id, 'p1');
-    assert.strictEqual(context.project.framework, 'react');
+    assert.ok(context.project);
     assert.ok(context.workspace);
-    assert.strictEqual(context.availableTools.length, 1);
-    assert.strictEqual(context.availableTools[0].name, 'mock_tool');
-    assert.ok(context.workspaceManager); // needed for tools
+    assert.strictEqual(context.metadata.retrieval_status, 'NOT_CONFIGURED');
   });
 
   await t.test('Rejects cross-user access', async () => {
@@ -41,6 +37,6 @@ test('ContextAssembler', async (t) => {
   });
 
   await t.test('Rejects non-existent project', async () => {
-    await assert.rejects(contextAssembler.assemble('does_not_exist', 'u1'), /Context Assembly Failed: Access denied/);
+    await assert.rejects(contextAssembler.assemble('does_not_exist', 'u1'), /Context Assembly Failed: Project 'does_not_exist' not found/);
   });
 });

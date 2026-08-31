@@ -1,17 +1,22 @@
-import { useState, useEffect, useRef } from 'react';
-import { Image as ImageIcon, Wand2, Download, Loader2, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Image as ImageIcon, Wand2, Download, Loader2,
+  RefreshCw, Sparkles, Trash2, X
+} from 'lucide-react';
 import api from '../../services/api';
 import { ImageLightbox, SmartImg } from './ImageLightbox';
+import { Button } from '../ui/Button';
+import { EmptyState } from '../ui/EmptyState';
 
 const HISTORY_KEY = 'ai_dost_images_history';
 
 const STYLES = [
   { id: 'default', label: 'Default', suffix: '' },
-  { id: 'photo', label: 'Realistic photo', suffix: ', photorealistic, 8k, sharp focus, professional photography' },
-  { id: '3d', label: '3D render', suffix: ', 3d render, octane render, cinematic lighting' },
-  { id: 'anime', label: 'Anime', suffix: ', anime style, studio ghibli inspired, vibrant colors' },
-  { id: 'pixel', label: 'Pixel art', suffix: ', pixel art, 16-bit, retro game style' },
-  { id: 'oil', label: 'Oil painting', suffix: ', oil painting, renaissance style, textured brushstrokes' },
+  { id: 'photo', label: 'Photorealistic', suffix: ', photorealistic, 8k, sharp focus, professional photography' },
+  { id: '3d', label: '3D Render', suffix: ', 3d render, octane render, cinematic lighting' },
+  { id: 'anime', label: 'Anime / Ghibli', suffix: ', anime style, studio ghibli inspired, vibrant colors' },
+  { id: 'pixel', label: 'Pixel Art', suffix: ', pixel art, 16-bit, retro game style' },
+  { id: 'oil', label: 'Oil Painting', suffix: ', oil painting, renaissance style, textured brushstrokes' },
 ];
 
 const SEED_VARIANTS = 2;
@@ -27,14 +32,16 @@ export default function ImageView({ onToast }) {
   const scrollRef = useRef(null);
 
   const showToast = onToast || ((m, t) => {
-    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('ai_dost_toast', { detail: { type: t || 'success', message: m } }));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('ai_dost_toast', { detail: { type: t || 'success', message: m } }));
+    }
   });
 
   useEffect(() => {
     try {
       const h = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
       setHistory(Array.isArray(h) ? h : []);
-    } catch (e) { /* noop */ }
+    } catch (_) {}
   }, []);
 
   const saveHistory = (entries) => {
@@ -48,6 +55,7 @@ export default function ImageView({ onToast }) {
   const clearHistory = () => {
     setHistory([]);
     localStorage.removeItem(HISTORY_KEY);
+    showToast('Image history cleared', 'success');
   };
 
   const generate = async (text) => {
@@ -69,7 +77,7 @@ export default function ImageView({ onToast }) {
       saveHistory(newImages);
       showToast(`${newImages.length} images generated`, 'success');
     } catch (e) {
-      showToast(`Image generate failed: ${e?.message || 'API error'}`, 'error');
+      showToast(`Image generation failed: ${e?.message || 'API error'}`, 'error');
     } finally {
       setLoading(false);
       setProgress(0);
@@ -81,105 +89,123 @@ export default function ImageView({ onToast }) {
   }, [images]);
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="shrink-0 px-6 py-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'var(--gradient-primary)' }}>
-            <ImageIcon className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h1 className="text-base font-bold" style={{ color: 'var(--color-text-primary)' }}>Image Generator</h1>
-            <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>Pollinations AI — 100% free, unlimited</p>
+    <div className="h-full flex flex-col bg-canvas-base select-none overflow-hidden">
+      {/* Header Strip */}
+      <div className="shrink-0 px-6 py-4 border-b border-border bg-canvas-subtle">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <ImageIcon className="w-5 h-5 text-accent-primary" />
+            <div>
+              <h1 className="text-base font-semibold text-paper-100 font-display">
+                Image Generator
+              </h1>
+              <p className="text-xs text-ink-muted mt-0.5">
+                Generate high-resolution visual assets and mockups via Pollinations AI.
+              </p>
+            </div>
           </div>
           {history.length > 0 && (
-            <button onClick={clearHistory} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] cursor-pointer" style={{ color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}>
-              <Trash2 className="w-3.5 h-3.5" /> History clear
-            </button>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={Trash2}
+              onClick={clearHistory}
+            >
+              Clear History
+            </Button>
           )}
         </div>
 
-        {/* Style chips */}
-        <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
+        {/* Style selector chips */}
+        <div className="flex gap-1.5 mt-3 overflow-x-auto pb-1">
           {STYLES.map((s) => (
             <button
               key={s.id}
+              type="button"
               onClick={() => setStyle(s)}
-              className="shrink-0 px-3 py-1.5 rounded-full text-[11px] font-medium transition-all cursor-pointer"
-              style={{
-                background: style.id === s.id ? 'var(--gradient-primary)' : 'rgba(255,255,255,0.04)',
-                border: '1px solid ' + (style.id === s.id ? 'transparent' : 'var(--color-border)'),
-                color: style.id === s.id ? '#fff' : 'var(--color-text-secondary)',
-              }}
+              className={`shrink-0 px-2.5 py-1 rounded-xs text-xs font-mono transition-fast cursor-pointer ${
+                style.id === s.id
+                  ? 'bg-accent-primary text-paper-100 font-medium'
+                  : 'bg-canvas-surface border border-border text-paper-200 hover:text-paper-100'
+              }`}
             >
               {s.label}
             </button>
           ))}
         </div>
 
-        {/* Input */}
-        <div className="mt-3 flex items-center gap-2 rounded-2xl p-2" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}>
-          <Wand2 className="w-4 h-4 ml-1 shrink-0" style={{ color: 'var(--color-primary)' }} />
+        {/* Prompt Input Dock */}
+        <div className="mt-3 flex items-center gap-2 rounded-xs p-1.5 bg-canvas-surface border border-border">
+          <Wand2 className="w-4 h-4 ml-1.5 text-accent-primary shrink-0" />
           <input
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') generate(); }}
-            placeholder="Kya banana hai? e.g. 'a robot in a futuristic city, neon lights'"
-            className="flex-1 bg-transparent text-sm focus:outline-none"
-            style={{ color: 'var(--color-text-primary)' }}
+            placeholder="Describe the image you want to generate..."
+            className="flex-1 bg-transparent text-xs font-sans text-paper-100 placeholder:text-ink-muted focus:outline-none"
           />
-          <button
+          <Button
+            variant="primary"
+            size="sm"
+            icon={loading ? Loader2 : Sparkles}
             onClick={() => generate()}
             disabled={!prompt.trim() || loading}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold cursor-pointer disabled:opacity-40"
-            style={{ background: 'var(--gradient-primary)', color: '#fff' }}
           >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            Generate
-          </button>
+            {loading ? 'Generating...' : 'Generate'}
+          </Button>
         </div>
+
         {loading && (
-          <div className="mt-2 flex items-center gap-3">
-            <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
-              <div className="h-full rounded-full transition-all duration-300" style={{ width: `${progress}%`, background: 'var(--gradient-primary)' }} />
+          <div className="mt-2 flex items-center gap-3 font-mono text-[10px] text-ink-muted">
+            <div className="flex-1 h-1 rounded-full overflow-hidden bg-canvas-elevated">
+              <div
+                className="h-full bg-accent-primary transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              />
             </div>
-            <span className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>{progress}% — {SEED_VARIANTS} variants</span>
+            <span>{progress}% — rendering {SEED_VARIANTS} variants</span>
           </div>
         )}
       </div>
 
-      {/* Body */}
+      {/* Main Grid Workspace */}
       <div className="flex-1 overflow-y-auto" ref={scrollRef}>
         <div className="max-w-5xl mx-auto px-6 py-6">
           {images.length === 0 && history.length === 0 && !loading && (
-            <div className="text-center pt-16">
-              <div className="w-16 h-16 mx-auto rounded-2xl flex items-center justify-center" style={{ background: 'rgba(161,66,244,0.1)' }}>
-                <ImageIcon className="w-8 h-8" style={{ color: 'var(--color-secondary)' }} />
-              </div>
-              <h2 className="mt-4 text-base font-bold" style={{ color: 'var(--color-text-primary)' }}>Kuch bhi banao — free me</h2>
-              <p className="mt-1 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                Logo, wallpapers, anime characters, product mockups — prompt likho aur Generate dabao.
-              </p>
-            </div>
-          )}
-
-          {loading && images.length === 0 && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {[0, 1, 2, 3].map((i) => (
-                <div key={i} className="aspect-[3/2] rounded-2xl skeleton" />
-              ))}
-            </div>
+            <EmptyState
+              icon={ImageIcon}
+              title="No generated images"
+              description="Type a descriptive prompt above and select a style preset to create visual assets."
+            />
           )}
 
           {images.length > 0 && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {images.map((img, i) => (
-                <div key={img.seed} className="group relative rounded-2xl overflow-hidden cursor-pointer" style={{ border: '1px solid var(--color-border)' }} onClick={() => setLightboxUrl(img.url)}>
-                  <SmartImg src={img.url} alt={img.prompt} delay={i * 900} className="w-full aspect-[3/2] object-cover transition-transform duration-300 group-hover:scale-105" />
-                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-between p-2 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.8))' }}>
-                    <span className="text-[10px] truncate max-w-[70%]" style={{ color: '#e2e8f0' }}>Variant {i + 1}</span>
-                    <a href={img.url} download={`ai-dost-${i + 1}.png`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold" style={{ background: 'rgba(255,255,255,0.15)', color: '#fff' }}>
-                      <Download className="w-3 h-3" /> Save
+                <div
+                  key={img.seed}
+                  className="group relative rounded-sm border border-border overflow-hidden bg-canvas-surface cursor-pointer shadow-xs"
+                  onClick={() => setLightboxUrl(img.url)}
+                >
+                  <SmartImg
+                    src={img.url}
+                    alt={img.prompt}
+                    delay={i * 800}
+                    className="w-full aspect-[3/2] object-cover transition-transform duration-200 group-hover:scale-105"
+                  />
+                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-between p-2 bg-black/75 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span className="text-[10px] font-mono text-paper-100 truncate max-w-[70%]">
+                      Variant {i + 1}
+                    </span>
+                    <a
+                      href={img.url}
+                      download={`ai-dost-${i + 1}.png`}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="p-1 rounded-xs bg-white/10 hover:bg-white/20 text-white text-[10px] font-medium"
+                    >
+                      <Download className="w-3 h-3" />
                     </a>
                   </div>
                 </div>
@@ -189,16 +215,28 @@ export default function ImageView({ onToast }) {
 
           {/* History */}
           {history.length > 0 && images.length === 0 && !loading && (
-            <div className="mt-6">
-              <div className="flex items-center gap-2 mb-3 text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-muted)' }}>
-                <RefreshCw className="w-3.5 h-3.5" /> Recent creations
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-wider text-ink-muted font-semibold">
+                <RefreshCw className="w-3.5 h-3.5" /> Recent Generations
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {history.slice(0, 8).map((h, i) => (
-                  <button key={i} onClick={() => setLightboxUrl(h.url)} className="group relative rounded-2xl overflow-hidden cursor-pointer" style={{ border: '1px solid var(--color-border)' }}>
-                    <SmartImg src={h.url} alt={h.prompt} delay={i * 700} className="w-full aspect-[3/2] object-cover" />
-                    <div className="absolute inset-x-0 bottom-0 p-2 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.8))' }}>
-                      <span className="block text-[10px] truncate" style={{ color: '#e2e8f0' }}>{h.prompt}</span>
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setLightboxUrl(h.url)}
+                    className="group relative rounded-sm border border-border overflow-hidden bg-canvas-surface cursor-pointer text-left shadow-xs"
+                  >
+                    <SmartImg
+                      src={h.url}
+                      alt={h.prompt}
+                      delay={i * 600}
+                      className="w-full aspect-[3/2] object-cover"
+                    />
+                    <div className="absolute inset-x-0 bottom-0 p-1.5 bg-black/75 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <span className="block text-[10px] font-sans text-paper-100 truncate">
+                        {h.prompt}
+                      </span>
                     </div>
                   </button>
                 ))}
@@ -208,7 +246,7 @@ export default function ImageView({ onToast }) {
         </div>
       </div>
 
-      {/* Image lightbox */}
+      {/* Lightbox Modal */}
       {lightboxUrl && (
         <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
       )}

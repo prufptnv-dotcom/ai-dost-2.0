@@ -15,8 +15,9 @@ class PlannerExecutionLoop {
     const taskId = this.executionController.generateId('task');
     this.agentTaskDao.create({
       id: taskId,
-      projectId: context.project.id,
-      prompt: intent,
+      projectId: projectId,
+      userId: userId,
+      title: intent,
       status: 'PENDING'
     });
 
@@ -53,33 +54,38 @@ class PlannerExecutionLoop {
     if (this.activeRuns.has(runId)) {
       throw new Error(`Run ${runId} is already actively executing`);
     }
+    this.activeRuns.add(runId);
 
-    const run = this.agentRunDao.getById(runId);
-    if (!run) throw new Error(`Run ${runId} not found`);
-    const task = this.agentTaskDao.getById(run.task_id);
-    const intent = task ? task.prompt : "";
-    const context = await this.contextAssembler.assemble(projectId, userId, intent);
-    if (!run) throw new Error(`Run ${runId} not found`);
-    if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(run.status)) {
-      throw new Error(`Cannot resume a run that is ${run.status}`);
+    try {
+      const run = this.agentRunDao.getById(runId);
+      if (!run) throw new Error(`Run ${runId} not found`);
+      const task = this.agentTaskDao.getById(run.task_id);
+      const intent = task ? (task.title || task.prompt || "") : "";
+      const context = await this.contextAssembler.assemble(projectId, userId, intent);
+      if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(run.status)) {
+        throw new Error(`Cannot resume a run that is ${run.status}`);
+      }
+
+      // Recover any steps that were in RUNNING state during a crash
+      await this.executionController.recoverStaleSteps(runId);
+
+      const checkpoint = await this.executionController.loadCheckpoint(runId);
+      if (!checkpoint) {
+        throw new Error(`Cannot resume run ${runId}: No checkpoint found.`);
+      }
+
+      const { stepQueue, repairAttempts, goal } = checkpoint;
+
+      // Ensure run is correctly marked as RUNNING or VERIFYING based on state
+      if (run.status === 'PENDING' || run.status === 'WAITING') {
+        await this.executionController.startRun(runId);
+      }
+
+      return await this.executeQueue(runId, run.task_id, context, stepQueue || [], repairAttempts || 0, goal, maxRepairs);
+    } catch (err) {
+      this.activeRuns.delete(runId);
+      throw err;
     }
-
-    // Recover any steps that were in RUNNING state during a crash
-    await this.executionController.recoverStaleSteps(runId);
-
-    const checkpoint = await this.executionController.loadCheckpoint(runId);
-    if (!checkpoint) {
-      throw new Error(`Cannot resume run ${runId}: No checkpoint found.`);
-    }
-
-    const { stepQueue, repairAttempts, goal } = checkpoint;
-    
-    // Ensure run is correctly marked as RUNNING or VERIFYING based on state
-    if (run.status === 'PENDING' || run.status === 'WAITING') {
-      await this.executionController.startRun(runId);
-    }
-
-    return this.executeQueue(runId, run.task_id, context, stepQueue || [], repairAttempts || 0, goal, maxRepairs);
   }
 
   async executeQueue(runId, taskId, context, initialStepQueue, initialRepairAttempts, goal, maxRepairs) {

@@ -1,18 +1,20 @@
-import { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  Search, Mic, Moon, Sun, Command, Bot,
-  ChevronDown, Sparkles, Settings, User, LogOut
+  Search, Mic, Moon, Sun, ChevronDown, Check,
+  Bot, ShieldCheck
 } from 'lucide-react';
+import ProjectSwitcher from './ui/ProjectSwitcher';
+import { StatusIndicator } from './ui/Badge';
+import { IconButton } from './ui/Button';
 
 const MODEL_OPTIONS = [
-  { value: 'auto', label: 'Auto (Smart Pick)' },
-  { value: 'gemini', label: 'Gemini Flash' },
-  { value: 'groq', label: 'Groq Llama' },
-  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'auto', label: 'Auto (Smart Cascade)' },
+  { value: 'gemini', label: 'Gemini 2.5 Flash' },
+  { value: 'groq', label: 'Groq Llama 3.3' },
+  { value: 'deepseek', label: 'DeepSeek V3' },
   { value: 'nvidia', label: 'NVIDIA GLM' },
   { value: 'openrouter', label: 'OpenRouter' },
-  { value: 'local:qwen2.5-coder:7b', label: 'Local (Ollama)' },
+  { value: 'local:qwen2.5-coder:7b', label: 'Ollama (Local Offline)' },
 ];
 
 export default function TopBar({
@@ -24,12 +26,14 @@ export default function TopBar({
   onOpenVoice,
   onOpenSettings,
   onOpenCommandPalette,
-  isThinking = false,
+  projects = [],
+  activeProjectId,
+  onSelectProject,
+  onNewProject,
+  runtimeStatus = null, // { status: 'working|verifying|idle', label: '...' }
 }) {
   const [isLight, setIsLight] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const modelMenuRef = useRef(null);
 
   useEffect(() => {
@@ -55,156 +59,134 @@ export default function TopBar({
     document.body.classList.toggle('light-theme', next);
   };
 
-  const currentModel = MODEL_OPTIONS.find(m => m.value === model) || MODEL_OPTIONS[0];
+  const currentModel = MODEL_OPTIONS.find((m) => m.value === model) || MODEL_OPTIONS[0];
 
   return (
     <header
-      className="fixed top-0 right-0 z-40 h-16 flex items-center gap-3 px-4 md:px-6 backdrop-blur-xl transition-[padding] duration-300"
-      style={{
-        left: sidebarPadding,
-        background: 'rgba(15,17,23,0.72)',
-        borderBottom: '1px solid var(--color-border)',
-      }}
+      className="fixed top-0 right-0 z-40 h-14 flex items-center justify-between gap-4 px-4 md:px-6 bg-canvas-base border-b border-border transition-[padding] duration-200"
+      style={{ left: sidebarPadding }}
+      role="banner"
     >
-      {/* Title */}
-      <div className="flex-1 min-w-0">
-        <h1 className="font-display font-bold text-white text-base md:text-lg truncate leading-tight">
-          {title}
-        </h1>
-        {subtitle && (
-          <p className="text-[11px] text-[var(--color-text-muted)] truncate hidden sm:block">
-            {subtitle}
-          </p>
+      {/* Left: View Title & Subtitle */}
+      <div className="flex items-center gap-3 min-w-0">
+        <div>
+          <h1 className="font-display font-semibold text-txt-primary text-sm md:text-base tracking-tight truncate leading-none">
+            {title}
+          </h1>
+          {subtitle && (
+            <p className="text-[11px] text-txt-muted truncate mt-1 hidden sm:block">
+              {subtitle}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Center: Project Switcher & Runtime Status */}
+      <div className="hidden md:flex items-center gap-3">
+        {projects && projects.length > 0 && (
+          <ProjectSwitcher
+            projects={projects}
+            activeProjectId={activeProjectId}
+            onSelectProject={onSelectProject}
+            onNewProject={onNewProject}
+          />
+        )}
+
+        {runtimeStatus && runtimeStatus.status && (
+          <StatusIndicator
+            status={runtimeStatus.status}
+            label={runtimeStatus.label || 'Agent Active'}
+            className="px-2.5 py-1 rounded-full bg-canvas-surface border border-border"
+          />
         )}
       </div>
 
-      {/* Command Palette Trigger */}
-      <button
-        onClick={onOpenCommandPalette}
-        className="hidden md:flex items-center gap-2 px-3 py-2 rounded-xl text-xs transition-all cursor-pointer"
-        style={{
-          background: 'rgba(255,255,255,0.04)',
-          border: '1px solid var(--color-border)',
-          color: 'var(--color-text-muted)',
-        }}
-        title="Command Palette (Ctrl+K)"
-      >
-        <Search className="w-3.5 h-3.5" />
-        <span>Ask anything...</span>
-        <span
-          className="ml-2 px-1.5 py-0.5 rounded-md text-[10px] font-mono"
-          style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--color-border)' }}
-        >
-          Ctrl K
-        </span>
-      </button>
+      {/* Right: Actions (Search, Model Switcher, Theme, Voice) */}
+      <div className="flex items-center gap-2">
+        {/* Command Palette Trigger */}
+        {onOpenCommandPalette && (
+          <button
+            type="button"
+            onClick={onOpenCommandPalette}
+            className="hidden sm:flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-canvas-surface hover:bg-canvas-elevated border border-border hover:border-border-strong text-txt-muted hover:text-txt-secondary text-xs transition-fast cursor-pointer focus-ring"
+            title="Command Palette (Ctrl+K)"
+          >
+            <Search className="w-3.5 h-3.5" />
+            <span>Search or command...</span>
+            <kbd className="ml-1 px-1.5 py-0.2 rounded-xs bg-canvas-base border border-border text-[10px] font-mono text-txt-muted">
+              Ctrl K
+            </kbd>
+          </button>
+        )}
 
-      {/* Model Selector */}
-      <div className="relative" ref={modelMenuRef}>
-        <button
-          onClick={() => setModelMenuOpen(!modelMenuOpen)}
-          className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer"
-          style={{
-            background: 'rgba(75,139,252,0.08)',
-            border: '1px solid rgba(75,139,252,0.25)',
-            color: 'var(--color-primary)',
-          }}
-        >
-          <Sparkles className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">{currentModel.label}</span>
-          <ChevronDown className="w-3 h-3" />
-        </button>
+        {/* Model Selector Dropdown */}
+        <div ref={modelMenuRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setModelMenuOpen(!modelMenuOpen)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-canvas-surface hover:bg-canvas-elevated border border-border hover:border-border-strong text-txt-secondary hover:text-txt-primary text-xs transition-fast cursor-pointer focus-ring"
+            aria-label="Select AI Model"
+            aria-haspopup="listbox"
+            aria-expanded={modelMenuOpen}
+          >
+            <Bot className="w-3.5 h-3.5 text-accent" />
+            <span className="max-w-[110px] truncate hidden sm:inline">{currentModel.label}</span>
+            <ChevronDown className="w-3 h-3 text-txt-muted" />
+          </button>
 
-        <AnimatePresence>
           {modelMenuOpen && (
-            <motion.div
-              initial={{ opacity: 0, y: -8, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -8, scale: 0.96 }}
-              transition={{ duration: 0.15 }}
-              className="absolute right-0 mt-2 w-56 rounded-xl py-2 z-50"
-              style={{
-                background: 'rgba(23,26,34,0.98)',
-                border: '1px solid var(--color-border)',
-                boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-                backdropFilter: 'blur(20px)',
-              }}
+            <div
+              role="listbox"
+              className="absolute right-0 mt-1.5 w-52 bg-canvas-surface border border-border-strong rounded-lg shadow-popover z-50 overflow-hidden py-1"
             >
-              <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">
-                AI Model
-              </p>
-              {MODEL_OPTIONS.map((m) => (
-                <button
-                  key={m.value}
-                  onClick={() => {
-                    onModelChange(m.value);
-                    setModelMenuOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-2 text-xs transition-colors cursor-pointer"
-                  style={{
-                    color: model === m.value ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                    background: model === m.value ? 'rgba(75,139,252,0.1)' : 'transparent',
-                  }}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </motion.div>
+              <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-txt-muted border-b border-border-subtle">
+                Inference Cascade
+              </div>
+              {MODEL_OPTIONS.map((m) => {
+                const isSelected = m.value === model;
+                return (
+                  <button
+                    key={m.value}
+                    role="option"
+                    aria-selected={isSelected}
+                    onClick={() => {
+                      onModelChange && onModelChange(m.value);
+                      setModelMenuOpen(false);
+                    }}
+                    className={`flex items-center justify-between w-full px-2.5 py-1.5 text-xs text-left transition-fast cursor-pointer ${
+                      isSelected
+                        ? 'bg-accent/10 text-accent font-medium'
+                        : 'text-txt-secondary hover:text-txt-primary hover:bg-white/5'
+                    }`}
+                  >
+                    <span className="truncate">{m.label}</span>
+                    {isSelected && <Check className="w-3.5 h-3.5 text-accent flex-shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
           )}
-        </AnimatePresence>
-      </div>
-
-      {/* Voice */}
-      <button
-        onClick={onOpenVoice}
-        className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer"
-        style={{
-          background: 'rgba(161,66,244,0.08)',
-          border: '1px solid rgba(161,66,244,0.25)',
-          color: 'var(--color-secondary)',
-        }}
-        title="Voice Assistant"
-      >
-        <Mic className="w-4 h-4" />
-        <span className="hidden lg:inline">Voice</span>
-      </button>
-
-      {/* Thinking indicator */}
-      {isThinking && (
-        <div className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: 'rgba(75,139,252,0.08)', border: '1px solid rgba(75,139,252,0.2)' }}>
-          <div className="typing-dots">
-            <span /><span /><span />
-          </div>
         </div>
-      )}
 
-      {/* Theme */}
-      <button
-        onClick={toggleTheme}
-        className="w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer"
-        style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}
-        title="Toggle theme"
-      >
-        {isLight ? <Moon className="w-4 h-4" style={{ color: 'var(--color-text-secondary)' }} /> : <Sun className="w-4 h-4" style={{ color: 'var(--color-text-secondary)' }} />}
-      </button>
+        {/* Voice Trigger */}
+        {onOpenVoice && (
+          <IconButton
+            icon={Mic}
+            size="sm"
+            variant="secondary"
+            onClick={onOpenVoice}
+            title="Voice Assistant (Ctrl+Shift+V)"
+          />
+        )}
 
-      {/* Settings */}
-      <button
-        onClick={onOpenSettings}
-        className="w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer"
-        style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}
-        title="Settings"
-      >
-        <Settings className="w-4 h-4" style={{ color: 'var(--color-text-secondary)' }} />
-      </button>
-
-      {/* Avatar */}
-      <div
-        className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white cursor-pointer"
-        style={{ background: 'var(--gradient-primary)', boxShadow: '0 0 14px var(--color-primary-glow)' }}
-        title="AI-Dost"
-      >
-        A
+        {/* Theme Toggle Button */}
+        <IconButton
+          icon={isLight ? Moon : Sun}
+          size="sm"
+          variant="secondary"
+          onClick={toggleTheme}
+          title={isLight ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+        />
       </div>
     </header>
   );

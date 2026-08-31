@@ -32,7 +32,7 @@ test('Phase 2F.2 - Indexing Sync Pipeline', async (t) => {
             throw new Error('INTERNAL_ERROR: crash');
           }
           lastPayload = payload;
-          return { status: "success", processed_count: payload.documents.length };
+          return { success: true, data: { status: "success", processed_count: payload.documents.length } };
         }
       }
     };

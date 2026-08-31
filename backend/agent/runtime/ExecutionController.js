@@ -97,7 +97,7 @@ class ExecutionController {
   async recordStep(runId, stepType, input) {
     const run = this.agentRunDao.getById(runId);
     if (!run) throw new Error(`Run ${runId} not found`);
-    if (run.status !== 'RUNNING') throw new Error(`Cannot record step while run is ${run.status}`);
+    if (run.status !== 'RUNNING' && run.status !== 'VERIFYING') throw new Error(`Cannot record step while run is ${run.status}`);
 
     const existingSteps = this.agentStepDao.listByRun(runId);
     const sequence = existingSteps.length + 1;

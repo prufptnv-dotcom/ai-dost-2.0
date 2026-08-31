@@ -1,11 +1,14 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageSquare, FolderOpen, Code2, Bot, Mic, Image as ImageIcon, FileText, History, Settings, CornerDownLeft, Sparkles, X, Loader2 } from 'lucide-react';
-import Sidebar from '../components/Sidebar';
-import TopBar from '../components/TopBar';
+import {
+  MessageSquare, FolderOpen, Code2, Bot, Mic, Image as ImageIcon,
+  FileText, History, Settings, CornerDownLeft, Sparkles, X, Loader2
+} from 'lucide-react';
+import AppShell from '../components/layout/AppShell';
 import ChatView from '../components/views/ChatView';
 import ProjectsView from '../components/views/ProjectsView';
+import ArtifactsView from '../components/views/ArtifactsView';
 import VoiceView from '../components/views/VoiceView';
 import ImageView from '../components/views/ImageView';
 import ResumeView from '../components/views/ResumeView';
@@ -20,44 +23,31 @@ import { useRouter } from 'next/router';
 
 const CopilotIDE = dynamic(() => import('../components/views/CopilotIDE'), {
   ssr: false,
-  loading: () => <div className="h-full flex items-center justify-center"><div className="w-8 h-8 rounded-xl animate-spin" style={{ background: 'var(--gradient-primary)' }} /></div>,
+  loading: () => (
+    <div className="h-full flex items-center justify-center bg-canvas-base">
+      <Loader2 className="w-6 h-6 animate-spin text-accent-primary" />
+    </div>
+  ),
 });
 
-const VIEW_META = {
-  chat: { title: 'AI-Dost Chat', subtitle: 'Kuch bhi puchho — bina judgement ke', icon: MessageSquare },
-  projects: { title: 'Projects', subtitle: 'Aapke saare projects ek jagah', icon: FolderOpen },
-  copilot: { title: 'Copilot IDE', subtitle: 'VS Code-style editor + Copilot agent', icon: Code2 },
-  agent: { title: 'Autonomous Agent', subtitle: 'Plan → Tools → Code → Screenshots', icon: Bot },
-  voice: { title: 'Voice Assistant', subtitle: 'Bolke kaam karo — Hinglish me', icon: Mic },
-  images: { title: 'Image Generator', subtitle: 'Prompt se free images — Pollinations AI', icon: ImageIcon },
-  resume: { title: 'Resume Builder', subtitle: 'Prompt se instant resume + preview', icon: FileText },
-  history: { title: 'Chat History', subtitle: 'Purani baatein — sab saved', icon: History },
-  mcp: { title: 'MCP Connectors', subtitle: 'Model Context Protocol server integrations', icon: Code2 },
-  settings: { title: 'Settings', subtitle: 'Models, keys aur preferences', icon: Settings },
-};
-
-const SIDEBAR_WIDTH = { collapsed: 72, expanded: 280 };
-const TOPBAR_H = 64;
-
 const PALETTE_ACTIONS = [
-  { id: 'chat', label: 'Chat kholo', hint: 'Ctrl+1', icon: MessageSquare },
-  { id: 'projects', label: 'Projects kholo', hint: 'Ctrl+2', icon: FolderOpen },
-  { id: 'copilot', label: 'Copilot IDE kholo', hint: 'Ctrl+3', icon: Code2 },
-  { id: 'agent', label: 'Agent kholo', hint: 'Ctrl+4', icon: Bot },
-  { id: 'voice', label: 'Voice assistant kholo', hint: 'Ctrl+5', icon: Mic },
-  { id: 'resume', label: 'Resume builder kholo', hint: 'Ctrl+6', icon: FileText },
-  { id: 'images', label: 'Images generator kholo', hint: 'Ctrl+9', icon: ImageIcon },
-  { id: 'history', label: 'History dekho', hint: 'Ctrl+7', icon: History },
-  { id: 'settings', label: 'Settings kholo', hint: 'Ctrl+8', icon: Settings },
-  { id: 'new-chat', label: 'Nayi chat shuru karo', hint: 'Ctrl+N', icon: Sparkles },
+  { id: 'chat', label: 'Open Chat', hint: 'Ctrl+1', icon: MessageSquare },
+  { id: 'agent', label: 'Open Agent Workbench', hint: 'Ctrl+2', icon: Bot },
+  { id: 'copilot', label: 'Open Copilot IDE', hint: 'Ctrl+3', icon: Code2 },
+  { id: 'projects', label: 'Open Projects', hint: 'Ctrl+4', icon: FolderOpen },
+  { id: 'artifacts', label: 'Open Artifacts', hint: 'Ctrl+5', icon: FileText },
+  { id: 'voice', label: 'Open Voice Assistant', hint: 'Ctrl+6', icon: Mic },
+  { id: 'settings', label: 'Open Settings', hint: 'Ctrl+7', icon: Settings },
+  { id: 'new-chat', label: 'Start New Conversation', hint: 'Ctrl+N', icon: Sparkles },
 ];
 
 export default function Dashboard() {
   const { mode } = useMode();
   const router = useRouter();
   const [view, setView] = useState('chat');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [theme, setTheme] = useState('dark');
   const [projects, setProjects] = useState([]);
+  const [activeProject, setActiveProject] = useState(null);
   const [model, setModel] = useState('auto');
   const [chatKey, setChatKey] = useState(0);
   const [resumeData, setResumeData] = useState(null);
@@ -68,13 +58,15 @@ export default function Dashboard() {
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDesc, setNewProjectDesc] = useState('');
   const [creating, setCreating] = useState(false);
+
   const paletteRef = useRef(null);
   const paletteInputRef = useRef(null);
 
-  // Sidebar persistence
+  // Load preferences
   useEffect(() => {
-    const saved = localStorage.getItem('ai_dost_sidebar_open');
-    if (saved !== null) setSidebarOpen(saved === '1');
+    const savedTheme = localStorage.getItem('ai_dost_theme') || 'dark';
+    setTheme(savedTheme);
+    document.body.classList.toggle('light-theme', savedTheme === 'light');
     setModel(localStorage.getItem('ai_dost_model') || 'auto');
   }, []);
 
@@ -84,29 +76,37 @@ export default function Dashboard() {
       try {
         const userId = localStorage.getItem('ai_dost_user_id') || 'demo_user_id';
         const data = await fetchProjects(userId);
-        setProjects(Array.isArray(data) ? data : []);
+        const projs = Array.isArray(data) ? data : [];
+        setProjects(projs);
+        if (projs.length > 0 && !activeProject) {
+          setActiveProject(projs[0]);
+        }
       } catch (e) {
         setProjects([]);
       }
     })();
   }, []);
 
-  const toggleSidebar = useCallback(() => {
-    setSidebarOpen(prev => {
-      localStorage.setItem('ai_dost_sidebar_open', prev ? '0' : '1');
-      return !prev;
+  const handleToggleTheme = useCallback(() => {
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('ai_dost_theme', next);
+      document.body.classList.toggle('light-theme', next === 'light');
+      return next;
     });
   }, []);
 
   const showToast = useCallback((message, type = 'success') => {
     const id = Date.now() + Math.random();
-    setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3500);
   }, []);
 
   useEffect(() => {
     const handler = (e) => {
-      if (e.detail && e.detail.message) showToast(e.detail.message, e.detail.type || 'success');
+      if (e.detail && e.detail.message) {
+        showToast(e.detail.message, e.detail.type || 'success');
+      }
     };
     window.addEventListener('ai_dost_toast', handler);
     return () => window.removeEventListener('ai_dost_toast', handler);
@@ -118,14 +118,10 @@ export default function Dashboard() {
   }, []);
 
   const handleNewChat = useCallback(() => {
-    setChatKey(k => k + 1);
+    setChatKey((k) => k + 1);
     go('chat');
-    showToast('Nayi chat shuru', 'success');
+    showToast('New conversation initialized', 'success');
   }, [go, showToast]);
-
-  const handleNewProject = useCallback(() => {
-    setShowCreateModal(true);
-  }, []);
 
   const handleOpenResumeWithData = useCallback((data) => {
     setResumeData(data);
@@ -134,68 +130,67 @@ export default function Dashboard() {
 
   const handleOpenVoice = useCallback(() => go('voice'), [go]);
   const handleOpenSettings = useCallback(() => go('settings'), [go]);
+
   const handleVoiceTranscript = useCallback((text) => {
     const t = text.toLowerCase();
-    if (/(resume|cv banao|cv ban|bio data)/.test(t)) { go('resume'); return; }
-    if (/(project|projects)/.test(t) && /(kholo|dekho|dikhao|show|open|list)/.test(t)) { go('projects'); return; }
-    if (/(agent|autonomous)/.test(t) && /(chalao|run|start|kholo)/.test(t)) { go('agent'); return; }
-    if (/(copilot|code editor|ide)/.test(t)) { go('copilot'); return; }
-    if (/(history|purani)/.test(t)) { go('history'); return; }
-    if (/(settings|setting)/.test(t)) { go('settings'); return; }
+    if (/(resume|cv)/.test(t)) { go('resume'); return; }
+    if (/(project|projects)/.test(t)) { go('projects'); return; }
+    if (/(agent|workbench|task)/.test(t)) { go('agent'); return; }
+    if (/(copilot|ide|editor)/.test(t)) { go('copilot'); return; }
+    if (/(history)/.test(t)) { go('history'); return; }
+    if (/(settings)/.test(t)) { go('settings'); return; }
   }, [go]);
-  const handleOpenPalette = useCallback(() => { setPaletteOpen(true); setPaletteQuery(''); setTimeout(() => paletteInputRef.current?.focus(), 60); }, []);
 
-  // Keyboard shortcuts
+  const handleOpenPalette = useCallback(() => {
+    setPaletteOpen(true);
+    setPaletteQuery('');
+    setTimeout(() => paletteInputRef.current?.focus(), 60);
+  }, []);
+
+  // Global keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
-      const mod = e.ctrlKey || e.metaKey;
-      if (mod && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); toggleSidebar(); return; }
-      if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); handleOpenPalette(); return; }
-      if (mod && e.key.toLowerCase() === 'n' && !e.shiftKey) { e.preventDefault(); handleNewChat(); return; }
-      if (mod && e.shiftKey && e.key.toLowerCase() === 'r') { e.preventDefault(); go('resume'); return; }
-      if (mod && e.shiftKey && e.key.toLowerCase() === 'c') { e.preventDefault(); go('copilot'); return; }
-      if (mod && e.shiftKey && e.key.toLowerCase() === 'g') { e.preventDefault(); go('copilot'); return; }
-      if (mod && e.shiftKey && e.key.toLowerCase() === 'v') { e.preventDefault(); go('voice'); return; }
-      if (mod && e.key.toLowerCase() === '1') { e.preventDefault(); go('chat'); return; }
-      if (mod && e.key.toLowerCase() === '2') { e.preventDefault(); go('projects'); return; }
-      if (mod && e.key.toLowerCase() === '3') { e.preventDefault(); go('copilot'); return; }
-      if (mod && e.key.toLowerCase() === '4') { e.preventDefault(); go('agent'); return; }
-      if (mod && e.key.toLowerCase() === '5') { e.preventDefault(); go('voice'); return; }
-      if (mod && e.key.toLowerCase() === '6') { e.preventDefault(); go('resume'); return; }
-      if (mod && e.key.toLowerCase() === '9') { e.preventDefault(); go('images'); return; }
-      if (mod && e.key.toLowerCase() === '7') { e.preventDefault(); go('history'); return; }
-      if (mod && e.key.toLowerCase() === '8') { e.preventDefault(); go('settings'); return; }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((p) => !p);
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        handleNewChat();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '1') { e.preventDefault(); go('chat'); }
+      if ((e.metaKey || e.ctrlKey) && e.key === '2') { e.preventDefault(); go('agent'); }
+      if ((e.metaKey || e.ctrlKey) && e.key === '3') { e.preventDefault(); go('copilot'); }
+      if ((e.metaKey || e.ctrlKey) && e.key === '4') { e.preventDefault(); go('projects'); }
+      if ((e.metaKey || e.ctrlKey) && e.key === '5') { e.preventDefault(); go('artifacts'); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [toggleSidebar, handleOpenPalette, handleNewChat, go]);
-
-  const sidebarWidth = sidebarOpen ? SIDEBAR_WIDTH.expanded : SIDEBAR_WIDTH.collapsed;
+  }, [go, handleNewChat]);
 
   const handleCreateProject = async (e) => {
     e.preventDefault();
-    if (!newProjectName.trim()) return;
+    if (!newProjectName.trim() || creating) return;
     setCreating(true);
     try {
       const userId = localStorage.getItem('ai_dost_user_id') || 'demo_user_id';
-      const newProj = await createProject(newProjectName.trim(), newProjectDesc.trim(), userId);
-      if (newProj?.project_id) {
-        setProjects(prev => [...prev, newProj]);
-        setShowCreateModal(false);
-        setNewProjectName('');
-        setNewProjectDesc('');
-        showToast('Project ban gaya!', 'success');
-      }
+      const created = await createProject({ name: newProjectName.trim(), description: newProjectDesc.trim(), userId });
+      setProjects((prev) => [created, ...prev]);
+      setActiveProject(created);
+      setShowCreateModal(false);
+      setNewProjectName('');
+      setNewProjectDesc('');
+      showToast(`Project "${created.name}" created`, 'success');
+      go('projects');
     } catch (err) {
-      showToast(`Create failed: ${err?.detail || err?.message}`, 'error');
+      showToast(err.message || 'Project creation failed', 'error');
     } finally {
       setCreating(false);
     }
   };
 
-  const filteredActions = PALETTE_ACTIONS.filter(a =>
-    a.label.toLowerCase().includes(paletteQuery.toLowerCase()) ||
-    (a.hint || '').toLowerCase().includes(paletteQuery.toLowerCase())
+  const filteredActions = PALETTE_ACTIONS.filter(
+    (a) => a.label.toLowerCase().includes(paletteQuery.toLowerCase()) || a.id.includes(paletteQuery.toLowerCase())
   );
 
   const runPaletteAction = (actionId) => {
@@ -203,83 +198,103 @@ export default function Dashboard() {
     else go(actionId);
   };
 
-  const meta = VIEW_META[view];
-
   return (
-    <div className="h-screen w-screen overflow-hidden" style={{ background: 'var(--color-bg)' }}>
-      <Sidebar
-        isOpen={sidebarOpen}
-        onToggle={toggleSidebar}
-        activeItem={view}
-        onItemClick={go}
-        userProjects={projects}
-        onNewProject={handleNewProject}
-        onNewChat={handleNewChat}
-      />
-
-      {view !== 'copilot' && (
-        <TopBar
-          sidebarPadding={sidebarWidth}
-          title={meta.title}
-          subtitle={meta.subtitle}
-          model={model}
-          onModelChange={setModel}
-          onOpenVoice={handleOpenVoice}
-          onOpenSettings={handleOpenSettings}
-          onOpenCommandPalette={handleOpenPalette}
-        />
-      )}
-
-      {/* Main content */}
-      <main
-        className="absolute top-0 right-0 bottom-0 transition-[padding] duration-300"
-        style={{ left: sidebarWidth, paddingTop: view === 'copilot' ? 0 : TOPBAR_H }}
-      >
-        <div className="h-full w-full overflow-hidden">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={view + chatKey}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.18 }}
-              className="h-full w-full"
-            >
-              {view === 'chat' && <ChatView key={chatKey} model={model} onModelChange={setModel} onOpenResumeWithData={handleOpenResumeWithData} onOpenVoice={handleOpenVoice} onNavigate={go} />}
-              {view === 'projects' && <ProjectsView onOpenProject={(id) => router.push(`/project/${id}`)} onToast={showToast} />}
-              {view === 'copilot' && (
-                <IDEErrorBoundary>
-                  <CopilotIDE projectId="copilot-workspace" projectName="Copilot Workspace" onToast={showToast} />
-                </IDEErrorBoundary>
-              )}
-              {view === 'agent' && <AgentView onToast={showToast} />}
-              {view === 'voice' && <VoiceView onToast={showToast} onTranscript={handleVoiceTranscript} onClose={() => go('chat')} />}
-              {view === 'images' && <ImageView onToast={showToast} />}
-              {view === 'resume' && <ResumeView initialResume={resumeData} onToast={showToast} onClose={() => go('chat')} />}
-              {view === 'history' && <HistoryView onToast={showToast} />}
-              {view === 'settings' && <SettingsView onToast={showToast} onModelChange={setModel} />}
-              {view === 'mcp' && <McpPanel />}
-            </motion.div>
-          </AnimatePresence>
-        </div>
-      </main>
+    <AppShell
+      currentView={view}
+      onSelectView={go}
+      onNewChat={handleNewChat}
+      theme={theme}
+      onToggleTheme={handleToggleTheme}
+      onOpenCommandPalette={handleOpenPalette}
+      activeProject={activeProject}
+    >
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={view + chatKey}
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          transition={{ duration: 0.12 }}
+          className="h-full w-full"
+        >
+          {view === 'chat' && (
+            <ChatView
+              key={chatKey}
+              model={model}
+              onModelChange={setModel}
+              onOpenResumeWithData={handleOpenResumeWithData}
+              onOpenVoice={handleOpenVoice}
+              onNavigate={go}
+            />
+          )}
+          {view === 'agent' && (
+            <AgentView
+              onToast={showToast}
+              onOpenFile={(filePath) => {
+                go('copilot');
+              }}
+            />
+          )}
+          {view === 'copilot' && (
+            <IDEErrorBoundary>
+              <CopilotIDE
+                projectId="copilot-workspace"
+                projectName="Copilot Workspace"
+                onToast={showToast}
+              />
+            </IDEErrorBoundary>
+          )}
+          {view === 'projects' && (
+            <ProjectsView
+              onOpenProject={(id) => router.push(`/project/${id}`)}
+              onToast={showToast}
+            />
+          )}
+          {view === 'artifacts' && (
+            <ArtifactsView onToast={showToast} />
+          )}
+          {view === 'voice' && (
+            <VoiceView
+              onToast={showToast}
+              onTranscript={handleVoiceTranscript}
+              onClose={() => go('chat')}
+            />
+          )}
+          {view === 'images' && <ImageView onToast={showToast} />}
+          {view === 'resume' && (
+            <ResumeView
+              initialResume={resumeData}
+              onToast={showToast}
+              onClose={() => go('chat')}
+            />
+          )}
+          {view === 'history' && <HistoryView onToast={showToast} />}
+          {view === 'settings' && (
+            <SettingsView
+              onToast={showToast}
+              onModelChange={setModel}
+            />
+          )}
+          {view === 'mcp' && <McpPanel />}
+        </motion.div>
+      </AnimatePresence>
 
       {/* Toasts */}
-      <div className="fixed bottom-5 right-5 z-[100] space-y-2">
+      <div className="fixed bottom-4 right-4 z-[100] space-y-2">
         <AnimatePresence>
-          {toasts.map(t => (
+          {toasts.map((t) => (
             <motion.div
               key={t.id}
-              initial={{ opacity: 0, x: 60 }}
+              initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 60 }}
-              className="flex items-center gap-2 px-4 py-3 rounded-xl text-xs font-medium shadow-2xl"
-              style={{
-                background: t.type === 'error' ? 'rgba(248,113,113,0.15)' : t.type === 'warning' ? 'rgba(250,204,21,0.15)' : 'rgba(52,211,153,0.15)',
-                border: `1px solid ${t.type === 'error' ? 'rgba(248,113,113,0.3)' : t.type === 'warning' ? 'rgba(250,204,21,0.3)' : 'rgba(52,211,153,0.3)'}`,
-                color: t.type === 'error' ? '#f87171' : t.type === 'warning' ? '#facc15' : '#34d399',
-                backdropFilter: 'blur(12px)',
-              }}
+              exit={{ opacity: 0, x: 20 }}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xs text-xs font-medium shadow-md border ${
+                t.type === 'error'
+                  ? 'bg-signal-error-subtle border-signal-error text-signal-error'
+                  : t.type === 'warning'
+                  ? 'bg-signal-warning-subtle border-signal-warning text-signal-warning'
+                  : 'bg-signal-success-subtle border-signal-success text-signal-success'
+              }`}
             >
               {t.message}
             </motion.div>
@@ -287,26 +302,27 @@ export default function Dashboard() {
         </AnimatePresence>
       </div>
 
-      {/* Command Palette */}
+      {/* Command Palette Modal */}
       <AnimatePresence>
         {paletteOpen && (
           <>
             <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[90]" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-xs"
               onClick={() => setPaletteOpen(false)}
             />
             <motion.div
               ref={paletteRef}
-              initial={{ opacity: 0, scale: 0.96, y: -10 }}
+              initial={{ opacity: 0, scale: 0.98, y: -8 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: -10 }}
-              transition={{ duration: 0.15 }}
-              className="fixed left-1/2 top-24 -translate-x-1/2 z-[95] w-full max-w-md rounded-2xl overflow-hidden shadow-2xl"
-              style={{ background: 'rgba(20,22,30,0.98)', border: '1px solid var(--color-border)', backdropFilter: 'blur(20px)' }}
+              exit={{ opacity: 0, scale: 0.98, y: -8 }}
+              transition={{ duration: 0.12 }}
+              className="fixed left-1/2 top-20 -translate-x-1/2 z-[95] w-full max-w-lg rounded-sm overflow-hidden shadow-modal bg-canvas-surface border border-border"
             >
-              <div className="flex items-center gap-3 px-4 py-3.5 border-b" style={{ borderColor: 'var(--color-border)' }}>
-                <Sparkles className="w-4 h-4" style={{ color: 'var(--color-primary)' }} />
+              <div className="flex items-center gap-3 px-3.5 py-3 border-b border-border">
+                <Sparkles className="w-4 h-4 text-accent-primary" />
                 <input
                   ref={paletteInputRef}
                   value={paletteQuery}
@@ -315,32 +331,31 @@ export default function Dashboard() {
                     if (e.key === 'Enter' && filteredActions.length > 0) runPaletteAction(filteredActions[0].id);
                     if (e.key === 'Escape') setPaletteOpen(false);
                   }}
-                  placeholder="Kya karna hai? Type karo..."
-                  className="flex-1 bg-transparent text-sm focus:outline-none"
-                  style={{ color: 'var(--color-text-primary)' }}
+                  placeholder="Type a command or jump to workspace view..."
+                  className="flex-1 bg-transparent text-sm text-paper-100 placeholder:text-ink-muted focus:outline-none font-sans"
                 />
-                <kbd className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--color-text-muted)' }}>ESC</kbd>
+                <kbd className="text-[9px] font-mono px-1.5 py-0.5 rounded-xs bg-canvas-elevated text-ink-muted">
+                  ESC
+                </kbd>
               </div>
-              <div className="max-h-72 overflow-y-auto py-2">
+              <div className="max-h-72 overflow-y-auto py-1 divide-y divide-border-subtle">
                 {filteredActions.length === 0 && (
-                  <div className="px-4 py-6 text-center text-xs" style={{ color: 'var(--color-text-muted)' }}>Kuch nahi mila</div>
+                  <div className="px-4 py-6 text-center text-xs text-ink-muted">No commands found</div>
                 )}
                 {filteredActions.map((a, i) => (
                   <button
                     key={a.id}
+                    type="button"
                     onClick={() => runPaletteAction(a.id)}
-                    onMouseEnter={(e) => e.currentTarget.scrollIntoView({ block: 'nearest' })}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left cursor-pointer"
-                    style={{ background: i === 0 ? 'rgba(75,139,252,0.12)' : 'transparent' }}
+                    className="w-full flex items-center justify-between gap-3 px-3.5 py-2 text-left hover:bg-canvas-elevated transition-fast cursor-pointer"
                   >
-                    <a.icon className="w-4 h-4" style={{ color: 'var(--color-primary)' }} />
-                    <span className="flex-1 text-sm" style={{ color: 'var(--color-text-primary)' }}>{a.label}</span>
-                    <kbd className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--color-text-muted)' }}>{a.hint}</kbd>
+                    <div className="flex items-center gap-2.5">
+                      <a.icon className="w-4 h-4 text-ink-muted" />
+                      <span className="text-xs text-paper-100">{a.label}</span>
+                    </div>
+                    <kbd className="text-[10px] font-mono text-ink-muted">{a.hint}</kbd>
                   </button>
                 ))}
-              </div>
-              <div className="px-4 py-2.5 border-t text-[10px]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}>
-                <CornerDownLeft className="w-3 h-3 inline mr-1" /> Enter = select
               </div>
             </motion.div>
           </>
@@ -352,18 +367,25 @@ export default function Dashboard() {
         {showCreateModal && (
           <>
             <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[90]" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-xs"
               onClick={() => setShowCreateModal(false)}
             />
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[95] w-full max-w-sm rounded-2xl p-6 shadow-2xl"
-              style={{ background: 'rgba(20,22,30,0.98)', border: '1px solid var(--color-border)', backdropFilter: 'blur(20px)' }}
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.98 }}
+              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[95] w-full max-w-sm rounded-sm p-5 shadow-modal bg-canvas-surface border border-border"
             >
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-base font-bold" style={{ color: 'var(--color-text-primary)' }}>Naya Project</h3>
-                <button onClick={() => setShowCreateModal(false)} className="cursor-pointer" style={{ color: 'var(--color-text-muted)' }}>
+              <div className="flex items-center justify-between mb-3 border-b border-border-subtle pb-2">
+                <h3 className="text-sm font-semibold text-paper-100 font-display">New Project</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="p-1 text-ink-muted hover:text-paper-100 cursor-pointer"
+                >
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -371,31 +393,28 @@ export default function Dashboard() {
                 <input
                   value={newProjectName}
                   onChange={(e) => setNewProjectName(e.target.value)}
-                  placeholder="Project ka naam (e.g. my-website)"
-                  className="w-full px-3.5 py-2.5 rounded-xl text-sm focus:outline-none"
-                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}
+                  placeholder="Project name (e.g. auth-service)"
+                  className="w-full px-3 py-2 rounded-xs text-xs bg-canvas-base border border-border text-paper-100 placeholder:text-ink-muted focus:outline-none focus:border-accent-primary"
                 />
                 <textarea
                   value={newProjectDesc}
                   onChange={(e) => setNewProjectDesc(e.target.value)}
                   placeholder="Description (optional)"
                   rows={2}
-                  className="w-full px-3.5 py-2.5 rounded-xl text-sm focus:outline-none resize-none"
-                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}
+                  className="w-full px-3 py-2 rounded-xs text-xs bg-canvas-base border border-border text-paper-100 placeholder:text-ink-muted focus:outline-none focus:border-accent-primary resize-none"
                 />
                 <button
                   type="submit"
                   disabled={!newProjectName.trim() || creating}
-                  className="w-full py-2.5 rounded-xl text-sm font-semibold cursor-pointer disabled:opacity-40"
-                  style={{ background: 'var(--gradient-primary)', color: '#fff' }}
+                  className="w-full py-2 rounded-xs text-xs font-medium bg-accent-primary hover:bg-accent-primary-strong text-paper-100 transition-fast cursor-pointer disabled:opacity-40"
                 >
-                  {creating ? <Loader2 className="w-4 h-4 inline animate-spin" /> : 'Project Banao'}
+                  {creating ? <Loader2 className="w-3.5 h-3.5 inline animate-spin" /> : 'Create Project'}
                 </button>
               </form>
             </motion.div>
           </>
         )}
       </AnimatePresence>
-    </div>
+    </AppShell>
   );
 }

@@ -7,18 +7,24 @@ test('RetrievalService - Phase 2F.1 Contract Tests', async (t) => {
   const mockApi = {
     post: async (path, payload) => {
       if (path === '/ai/rag/query') {
-        if (payload.query === 'malformed') return { version: "1" }; // missing results
-        if (payload.query === 'bad_version') return { version: "99", results: [] };
-        if (payload.query === 'leak') return { 
-          version: "1", 
-          results: [{ source_entity_id: 'x', project_id: 'OTHER_PROJECT', source_type: 'artifact' }] 
+        if (payload.query === 'malformed') return { success: true, data: { version: "1" } }; // missing results
+        if (payload.query === 'bad_version') return { success: true, data: { version: "99", results: [] } };
+        if (payload.query === 'leak') return {
+          success: true,
+          data: {
+            version: "1",
+            results: [{ source_entity_id: 'x', project_id: 'OTHER_PROJECT', source_type: 'artifact' }]
+          }
         };
-        
-        return { 
-          version: "1", 
-          results: [
-            { source_entity_id: 'e1', project_id: payload.project_id, source_type: 'artifact', score: 0.9, version_hash: 'abc', chunk_id: 'c1', metadata: {} }
-          ] 
+
+        return {
+          success: true,
+          data: {
+            version: "1",
+            results: [
+              { source_entity_id: 'e1', project_id: payload.project_id, source_type: 'artifact', score: 0.9, version_hash: 'abc', chunk_id: 'c1', metadata: {} }
+            ]
+          }
         };
       }
     }
@@ -78,7 +84,7 @@ test('RetrievalService - Phase 2F.1 Contract Tests', async (t) => {
   await t.test('8. Malformed Python response throws INTERNAL_ERROR', async () => {
     await assert.rejects(
       service.search({ userId: 'u1', projectId: 'p1', query: 'malformed' }),
-      /INTERNAL_ERROR: malformed response/
+      /INTERNAL_ERROR: missing results/
     );
   });
 

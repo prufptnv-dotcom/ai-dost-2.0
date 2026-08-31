@@ -18,6 +18,13 @@ import DiffReviewModal from './DiffReviewModal';
 import ProjectWizardModal from './ProjectWizardModal';
 import TaskStepItem from './TaskStepItem';
 import VisualDebugger from './VisualDebugger';
+import { FileExplorer } from '../ide/FileExplorer';
+import { WorkspaceTabs } from '../ide/WorkspaceTabs';
+import { EditorToolbar } from '../ide/EditorToolbar';
+import { TerminalDock } from '../ide/TerminalDock';
+import { AiInspector } from '../ide/AiInspector';
+import { DiffReview } from '../ide/DiffReview';
+import { configureMonacoThemes } from '../ide/MonacoTheme';
 import { syncFileToWebContainer } from '../../lib/webcontainer';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -562,6 +569,8 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
   const [diffOpen, setDiffOpen] = useState(false);
   const [latestRunId, setLatestRunId] = useState(null);
   const latestRunIdRef = useRef(null);
+  const [saving, setSaving] = useState(false);
+  const [diffModalOpen, setDiffModalOpen] = useState(false);
 
   // Voice Coding State
   const [isListening, setIsListening] = useState(false);
@@ -835,6 +844,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
   const saveActiveFile = async () => {
     if (!activePath) return;
     const content = contents[activePath] ?? '';
+    setSaving(true);
     try {
       await api.post(`/memory/project/${projectId}/file`, { path: activePath, content });
       setDirtyPaths(prev => {
@@ -846,6 +856,8 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
       showToast(`Saved ${activePath}`, 'success');
     } catch (err) {
       showToast(`Save failed: ${err.message}`, 'error');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -899,6 +911,11 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
   const handleEditorMount = (editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
+
+    try {
+      configureMonacoThemes(monaco);
+      monaco.editor.setTheme('aidost-dark');
+    } catch (_) {}
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, () => {
       triggerInlineEdit();
@@ -1718,247 +1735,130 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
           {/* When in CODE EDITOR mode */}
           {workspaceMode === 'code' && (
             <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-
-              {/* Tabs + Breadcrumbs Toolbar */}
-              <div className="flex items-center justify-between px-3 bg-[#0f1117] border-b border-white/[0.08] shrink-0">
-
-                {/* File Tabs */}
-                <div className="flex items-center gap-1 pt-1.5 overflow-x-auto">
-                  <button
-                    onClick={() => setSidebarOpen(!sidebarOpen)}
-                    className="p-1.5 rounded-md text-neutral-400 hover:text-white hover:bg-white/[0.06] mr-1 cursor-pointer transition-colors"
-                    title={sidebarOpen ? 'Hide Files' : 'Show Files'}
-                  >
-                    <FolderTree size={14} />
-                  </button>
-
-                  {openTabs.map(p => {
-                    const isActive = activePath === p;
-                    const ext = p.split('.').pop()?.toLowerCase();
-                    return (
-                      <div
-                        key={p}
-                        onClick={() => selectFile(p)}
-                        className={`group flex items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-t-lg text-xs font-mono transition-all cursor-pointer shrink-0 border-t-2 ${
-                          isActive
-                            ? 'bg-[#090a0f] text-white border-sky-400 shadow-sm font-semibold'
-                            : 'text-neutral-400 hover:text-neutral-200 border-transparent hover:bg-white/[0.03]'
-                        }`}
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: LANG_COLOR[ext] || '#38bdf8' }} />
-                        <span className="truncate max-w-[150px]">{p.split('/').pop()}</span>
-                        {dirtyPaths.has(p) && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
-                        <button
-                          onClick={(e) => { e.stopPropagation(); closeTab(p); }}
-                          className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-white/[0.1] text-neutral-400 hover:text-white transition-opacity"
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                  {openTabs.length === 0 && (
-                    <div className="px-3 py-1.5 text-xs text-neutral-500 font-mono">
-                      No files open — select from explorer
-                    </div>
-                  )}
-                </div>
-
-                {/* Right side tab controls */}
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={saveActiveFile}
-                    className="p-1 rounded-md text-neutral-400 hover:text-white hover:bg-white/[0.06] cursor-pointer transition-colors"
-                    title="Save File (Ctrl+S)"
-                  >
-                    <Save size={14} />
-                  </button>
-                  <button
-                    onClick={() => setTerminalOpen(!terminalOpen)}
-                    className={`p-1 rounded-md text-xs flex items-center gap-1 transition-colors cursor-pointer ${
-                      terminalOpen ? 'bg-sky-600 text-white shadow-glow-sm' : 'text-neutral-400 hover:text-white hover:bg-white/[0.06]'
-                    }`}
-                    title="Toggle Terminal"
-                  >
-                    <TerminalIcon size={14} />
-                  </button>
-                </div>
+              {/* Workspace Tabs & Rail Toggle */}
+              <div className="flex items-center bg-canvas-subtle border-b border-border">
+                <button
+                  type="button"
+                  onClick={() => setSidebarOpen(!sidebarOpen)}
+                  className="px-2.5 h-8 border-r border-border text-ink-muted hover:text-paper-100 hover:bg-canvas-surface cursor-pointer transition-fast flex items-center justify-center flex-shrink-0"
+                  title={sidebarOpen ? 'Hide Files' : 'Show Files'}
+                >
+                  <FolderTree size={14} />
+                </button>
+                <WorkspaceTabs
+                  tabs={openTabs}
+                  activePath={activePath}
+                  modifiedPaths={dirtyPaths}
+                  onSelectTab={selectFile}
+                  onCloseTab={closeTab}
+                  onNewTab={() => handleCreateFile()}
+                  className="flex-1 min-w-0 border-b-0"
+                />
               </div>
 
-              {/* Breadcrumb + AI Quick Action Pills Bar */}
-              {activePath && (
-                <div className="flex items-center justify-between px-4 py-1.5 bg-[#090a0f] border-b border-white/[0.08] shrink-0 text-xs">
-                  <div className="flex items-center gap-1 font-mono text-[11px] text-neutral-400">
-                    {activePath.split('/').map((seg, i, arr) => (
-                      <span key={i} className="flex items-center gap-1">
-                        <span className={i === arr.length - 1 ? 'text-neutral-200 font-medium' : ''}>{seg}</span>
-                        {i < arr.length - 1 && <ChevronRight size={10} className="text-neutral-600" />}
-                      </span>
-                    ))}
-                  </div>
+                {/* Editor Breadcrumb & Toolbar */}
+                {activePath && (
+                  <EditorToolbar
+                    activePath={activePath}
+                    isModified={dirtyPaths.has(activePath)}
+                    isSaving={saving}
+                    onSave={saveActiveFile}
+                    onFormat={() => formatFile(activePath)}
+                    onTogglePreview={() => setWorkspaceMode(workspaceMode === 'preview' ? 'code' : 'preview')}
+                    showPreview={workspaceMode === 'preview'}
+                    onToggleDiff={() => setDiffModalOpen(true)}
+                    showDiff={diffModalOpen}
+                    onAiAction={(action) => handleSend(`${action === 'explain' ? 'Explain how' : action === 'fix' ? 'Find and fix bugs in' : 'Refactor'} ${activePath}`)}
+                  />
+                )}
 
-                  {/* AI Quick Actions */}
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => handleSend(`Explain how ${activePath} works`)}
-                      className="px-2.5 py-0.5 rounded-md text-[10px] font-medium bg-[#161821] hover:bg-[#1c1f2b] text-neutral-300 hover:text-white border border-white/[0.08] hover:border-white/[0.18] transition-colors flex items-center gap-1 cursor-pointer"
-                    >
-                      <Code2 size={11} className="text-sky-400" /> Explain
-                    </button>
-                    <button
-                      onClick={() => handleSend(`Inspect ${activePath} for any potential bugs or edge cases and fix them`)}
-                      className="px-2.5 py-0.5 rounded-md text-[10px] font-medium bg-[#161821] hover:bg-[#1c1f2b] text-neutral-300 hover:text-white border border-white/[0.08] hover:border-white/[0.18] transition-colors flex items-center gap-1 cursor-pointer"
-                    >
-                      <Bug size={11} className="text-amber-400" /> Find Bugs
-                    </button>
-                    <button
-                      onClick={() => handleSend(`Optimize performance and clean up ${activePath}`)}
-                      className="px-2.5 py-0.5 rounded-md text-[10px] font-medium bg-[#161821] hover:bg-[#1c1f2b] text-neutral-300 hover:text-white border border-white/[0.08] hover:border-white/[0.18] transition-colors flex items-center gap-1 cursor-pointer"
-                    >
-                      <Zap size={11} className="text-emerald-400" /> Optimize
-                    </button>
-                    <button
-                      onClick={() => triggerInlineEdit()}
-                      className="px-2.5 py-0.5 rounded-md text-[10px] font-medium bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/30 transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
-                    >
-                      <Sparkles size={11} className="text-sky-400" /> Edit (Ctrl+K)
-                    </button>
+                {/* Editor + File Tree Split */}
+                <div className="flex-1 flex overflow-hidden min-h-0">
+                  {/* File Explorer Panel */}
+                  {sidebarOpen && (
+                    <FileExplorer
+                      files={files}
+                      activePath={activePath}
+                      onSelectFile={selectFile}
+                      onCreateFile={handleCreateFile}
+                      onCreateFolder={handleCreateFolder}
+                      onDeleteFile={handleDelete}
+                      onRefresh={loadWorkspaceFiles}
+                      loading={loadingFiles}
+                      className="w-56 flex-shrink-0"
+                    />
+                  )}
+
+                  {/* Monaco Editor Container */}
+                  <div className="flex-1 min-h-0 relative bg-canvas-base">
+                    {activePath ? (
+                      <MonacoEditor
+                        height="100%"
+                        language={activeLang}
+                        value={activeContent}
+                        onMount={handleEditorMount}
+                        onChange={(v) => {
+                          if (!activePath) return;
+                          setFileContent(activePath, v || '');
+                          markDirty(activePath);
+                          runDiagnostics(activePath, v || '');
+                        }}
+                        theme="aidost-dark"
+                        options={{
+                          automaticLayout: true,
+                          minimap: { enabled: false },
+                          scrollBeyondLastLine: false,
+                          wordWrap: 'on',
+                          fontSize: 13,
+                          fontFamily: "'JetBrains Mono', monospace",
+                          padding: { top: 12 },
+                          scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 },
+                        }}
+                      />
+                    ) : (
+                      <div className="h-full flex flex-col items-center justify-center gap-3 text-xs text-ink-muted select-none">
+                        <Code2 size={28} className="text-ink-muted/40" />
+                        <p>Select a file from the explorer on the left</p>
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
 
-              {/* Editor + Left File Tree split */}
-              <div className="flex-1 flex overflow-hidden min-h-0">
-                {/* File Tree Panel */}
-                {sidebarOpen && (
-                  <div className="w-56 shrink-0 bg-[#0f1117] border-r border-white/[0.08] flex flex-col">
-                    <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.08] text-[10px] uppercase font-bold text-neutral-400 font-mono tracking-wider">
-                      <span>Explorer</span>
-                      <div className="flex items-center gap-1">
+                {/* Integrated Terminal Dock */}
+                {terminalOpen && (
+                  <div className="h-48 shrink-0 flex flex-col bg-canvas-base border-t border-border">
+                    <div className="flex items-center justify-between px-3 py-1 bg-canvas-subtle border-b border-border text-xs font-mono">
+                      <span className="text-xs font-semibold text-paper-200 uppercase tracking-wider flex items-center gap-1.5">
+                        <TerminalIcon size={13} className="text-accent-primary" /> Terminal
+                      </span>
+                      <div className="flex items-center gap-2">
                         <button
-                          onClick={() => handleCreateFile()}
-                          className="p-1 hover:bg-white/[0.06] rounded text-neutral-400 hover:text-white cursor-pointer transition-colors"
-                          title="New File"
+                          onClick={runSingleFile}
+                          className="px-2 py-0.5 rounded-xs text-[10px] font-medium bg-canvas-surface hover:bg-canvas-elevated text-paper-200 border border-border cursor-pointer transition-fast"
                         >
-                          <FilePlus2 size={13} />
+                          <Play size={10} className="inline mr-1" /> Run File
                         </button>
                         <button
-                          onClick={() => handleCreateFolder()}
-                          className="p-1 hover:bg-white/[0.06] rounded text-neutral-400 hover:text-white cursor-pointer transition-colors"
-                          title="New Folder"
+                          onClick={() => terminalRef.current?.clear()}
+                          className="p-1 rounded-xs hover:bg-canvas-elevated text-ink-muted hover:text-paper-100 cursor-pointer transition-fast"
+                          title="Clear Terminal"
                         >
-                          <FolderPlus size={13} />
+                          <Eraser size={13} />
                         </button>
                         <button
-                          onClick={loadWorkspaceFiles}
-                          className="p-1 hover:bg-white/[0.06] rounded text-neutral-400 hover:text-white cursor-pointer transition-colors"
-                          title="Refresh Explorer"
+                          onClick={() => setTerminalOpen(false)}
+                          className="p-1 rounded-xs hover:bg-canvas-elevated text-ink-muted hover:text-paper-100 cursor-pointer transition-fast"
+                          title="Close Terminal"
                         >
-                          <RefreshCw size={12} />
+                          <X size={13} />
                         </button>
                       </div>
                     </div>
-
-                    <div className="flex-1 overflow-y-auto p-2">
-                      {loadingFiles ? (
-                        <div className="p-4 text-center text-xs text-neutral-500 font-mono">Loading files...</div>
-                      ) : files.length === 0 ? (
-                        <div className="p-4 text-center text-xs text-neutral-500 flex flex-col items-center gap-2 font-mono">
-                          <span>No files yet</span>
-                          <button
-                            onClick={() => handleCreateFile()}
-                            className="px-2 py-1 text-[11px] bg-sky-500/10 text-sky-400 rounded border border-sky-500/20 hover:bg-sky-500/20 cursor-pointer"
-                          >
-                            + Create File
-                          </button>
-                        </div>
-                      ) : (
-                        <TreeView
-                          tree={fileTreeFromFiles(files)}
-                          activePath={activePath}
-                          openTabs={openTabs}
-                          onSelect={selectFile}
-                          onRename={handleRename}
-                          onDelete={handleDelete}
-                          onDeleteFolder={handleDeleteFolder}
-                          onNewFileInFolder={handleCreateFile}
-                          onNewFolderInFolder={handleCreateFolder}
-                        />
-                      )}
+                    <div className="flex-1 min-h-0">
+                      <TerminalPanel innerRef={terminalRef} projectId={projectId} projectPath="" />
                     </div>
                   </div>
                 )}
-
-                {/* Monaco Editor Container */}
-                <div className="flex-1 min-h-0 relative">
-                  {activePath ? (
-                    <MonacoEditor
-                      height="100%"
-                      language={activeLang}
-                      value={activeContent}
-                      onMount={handleEditorMount}
-                      onChange={(v) => {
-                        if (!activePath) return;
-                        setFileContent(activePath, v || '');
-                        markDirty(activePath);
-                        runDiagnostics(activePath, v || '');
-                      }}
-                      theme="vs-dark"
-                      options={{
-                        automaticLayout: true,
-                        minimap: { enabled: false },
-                        scrollBeyondLastLine: false,
-                        wordWrap: 'on',
-                        fontSize: 13,
-                        fontFamily: "'JetBrains Mono', monospace",
-                        padding: { top: 14 },
-                        scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 },
-                      }}
-                    />
-                  ) : (
-                    <div className="h-full flex flex-col items-center justify-center gap-3 text-sm text-zinc-500">
-                      <Code size={32} className="opacity-20" />
-                      <p>Select a file from the explorer on the left</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Collapsible Terminal Drawer */}
-              {terminalOpen && (
-                <div className="h-48 shrink-0 flex flex-col bg-[#090a0f] border-t border-white/[0.08]">
-                  <div className="flex items-center justify-between px-4 py-1.5 bg-[#0f1117] border-b border-white/[0.08]">
-                    <span className="text-xs font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-1.5 font-mono">
-                      <TerminalIcon size={13} className="text-sky-400" /> Integrated Terminal
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={runSingleFile}
-                        className="px-2.5 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 cursor-pointer transition-colors"
-                      >
-                        <Play size={10} className="inline mr-1" /> Run File
-                      </button>
-                      <button
-                        onClick={() => terminalRef.current?.clear()}
-                        className="p-1 rounded-md hover:bg-white/[0.06] text-neutral-400 hover:text-white cursor-pointer transition-colors"
-                        title="Clear Terminal"
-                      >
-                        <Eraser size={13} />
-                      </button>
-                      <button
-                        onClick={() => setTerminalOpen(false)}
-                        className="p-1 rounded-md hover:bg-white/[0.06] text-neutral-400 hover:text-white cursor-pointer transition-colors"
-                        title="Close Terminal"
-                      >
-                        <X size={13} />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex-1 min-h-0">
-                    <TerminalPanel innerRef={terminalRef} projectId={projectId} projectPath="" />
-                  </div>
-                </div>
-              )}
             </div>
           )}
 

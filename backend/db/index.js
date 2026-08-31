@@ -4,6 +4,8 @@ const fs = require('fs');
 const MigrationRunner = require('./migrationRunner');
 const migration001 = require('./migrations/001_universal_schema');
 const migration002 = require('./migrations/002_agent_runtime');
+const migration003 = require('./migrations/003_agent_handoffs');
+const migration004 = require('./migrations/004_agent_handoff_results');
 const logger = require('../logger');
 
 let dbInstance = null;
@@ -26,7 +28,12 @@ function initDatabase(customPath = null) {
 
   // Run versioned migrations
   const runner = new MigrationRunner(dbInstance);
-  runner.runAll([migration001, { version: 2, name: '002_agent_runtime', up: migration002.up }]);
+  runner.runAll([
+    migration001,
+    { version: 2, name: '002_agent_runtime', up: migration002.up },
+    migration003,
+    migration004
+  ]);
 
   // Run legacy data migrator (idempotent)
   const LegacyMigrator = require('./legacyMigrator');

@@ -1,4 +1,6 @@
 module.exports = {
+  version: 3,
+  name: '003_agent_handoffs',
   up: (db) => {
     db.prepare(`
       CREATE TABLE IF NOT EXISTS agent_handoffs (

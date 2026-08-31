@@ -988,7 +988,6 @@ function saveChatHistory(req, res) {
 app.get('/api/chat/history', getChatHistory);
 app.get('/api/v1/chat/history', getChatHistory);
 app.delete('/api/chat/history', deleteChatHistory);
-app.delete('/api/v1/chat/history', deleteChatHistory);
 app.post('/api/chat/save', saveChatHistory);
 app.post('/api/v1/chat/save', saveChatHistory);
 
@@ -999,7 +998,7 @@ app.get('/', (req, res) => {
 });
 
 // Health check
-app.get('/health', (req, res) => {
+app.get(['/health', '/api/health', '/api/v1/health'], (req, res) => {
     res.json({
         status: 'OK',
         timestamp: new Date().toISOString(),
@@ -1031,12 +1030,9 @@ app.use((req, res, next) => {
 });
 
 // ── Error-normalization middleware ──────────────────────────────────────
-// Converts any thrown/rejected error into a consistent JSON envelope.
-// Handles: AppError, JSON parse errors, body-parser errors, timeouts.
 const { toAppError } = require('./utils/errors');
 
 app.use((err, req, res, next) => {
-    // Body-parser / JSON parse errors (malformed request body)
     if (err && (err.type === 'entity.parse.failed' || err instanceof SyntaxError)) {
         return res.status(400).json({ error: 'Invalid JSON in request body', code: 'BAD_JSON' });
     }
@@ -1072,7 +1068,6 @@ process.on('unhandledRejection', (reason) => {
 const PORT = process.env.PORT || 3000;
 const server = http.createServer(app);
 
-// ── Socket.io (real-time terminal) ───────────────────────────────────
 const io = new Server(server, {
   cors: {
     origin: '*',

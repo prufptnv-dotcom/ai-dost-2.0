@@ -1,121 +1,206 @@
-import { useState, useEffect } from 'react';
-import { Compass, Plug, Plus, Save, Trash2, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import {
+  Compass, Plug, Plus, Save, Trash2, X,
+  CheckCircle2, Server, Terminal, Shield, RefreshCw
+} from 'lucide-react';
+import { Button } from './ui/Button';
+import { Badge } from './ui/Badge';
+import { EmptyState } from './ui/EmptyState';
 
-export default function McpPanel({ onConfigSelect }) {
+export default function McpPanel({ onConfigSelect, onToast }) {
   const [configs, setConfigs] = useState([]);
   const [isEditing, setIsEditing] = useState(false);
   const [newConfig, setNewConfig] = useState({ name: '', command: '', args: '' });
 
   useEffect(() => {
-    const saved = localStorage.getItem('mcp_configs');
-    if (saved) {
-      setConfigs(JSON.parse(saved));
-    } else {
-      // Default examples
-      const defaults = [
-        { id: 1, name: 'SQLite DB', command: 'npx', args: '-y @modelcontextprotocol/server-sqlite --db test.db' },
-        { id: 2, name: 'GitHub', command: 'npx', args: '-y @modelcontextprotocol/server-github' }
-      ];
-      setConfigs(defaults);
-      localStorage.setItem('mcp_configs', JSON.stringify(defaults));
+    try {
+      const saved = localStorage.getItem('mcp_configs');
+      if (saved) {
+        setConfigs(JSON.parse(saved));
+      } else {
+        const defaults = [
+          { id: 1, name: 'SQLite DB Server', command: 'npx', args: '-y @modelcontextprotocol/server-sqlite --db test.db', status: 'Connected' },
+          { id: 2, name: 'GitHub Integration', command: 'npx', args: '-y @modelcontextprotocol/server-github', status: 'Connected' },
+          { id: 3, name: 'Filesystem Bridge', command: 'npx', args: '-y @modelcontextprotocol/server-filesystem /workspace', status: 'Connected' }
+        ];
+        setConfigs(defaults);
+        localStorage.setItem('mcp_configs', JSON.stringify(defaults));
+      }
+    } catch (_) {
+      setConfigs([]);
     }
   }, []);
 
-  const saveConfig = () => {
-    if (!newConfig.name || !newConfig.command) return;
-    const updated = [...configs, { ...newConfig, id: Date.now() }];
+  const saveConfig = (e) => {
+    e.preventDefault();
+    if (!newConfig.name.trim() || !newConfig.command.trim()) return;
+    const updated = [...configs, { ...newConfig, id: Date.now(), status: 'Connected' }];
     setConfigs(updated);
     localStorage.setItem('mcp_configs', JSON.stringify(updated));
     setIsEditing(false);
     setNewConfig({ name: '', command: '', args: '' });
+    if (onToast) onToast(`Added MCP Server "${newConfig.name}"`, 'success');
   };
 
-  const deleteConfig = (id) => {
-    const updated = configs.filter(c => c.id !== id);
+  const deleteConfig = (id, e) => {
+    e.stopPropagation();
+    const updated = configs.filter((c) => c.id !== id);
     setConfigs(updated);
     localStorage.setItem('mcp_configs', JSON.stringify(updated));
+    if (onToast) onToast('Removed MCP Server', 'success');
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-900 text-white p-6 overflow-y-auto">
-      <div className="flex items-center gap-3 mb-8">
-        <div className="p-3 bg-blue-500/20 rounded-xl text-blue-400">
-          <Compass size={28} />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold">MCP Connectors</h1>
-          <p className="text-slate-400 text-sm">Connect your autonomous agent to external tools and databases</p>
-        </div>
-      </div>
+    <div className="h-full overflow-y-auto px-4 sm:px-8 py-6 bg-canvas-base select-none">
+      <div className="max-w-5xl mx-auto space-y-6">
+        {/* Header Strip */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">
+          <div>
+            <h1 className="text-lg font-semibold text-paper-100 font-display">
+              Model Context Protocol (MCP) Connectors
+            </h1>
+            <p className="text-xs text-ink-muted mt-0.5">
+              Connect external databases, cloud filesystems, and developer tools to the autonomous Supervisor runtime.
+            </p>
+          </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-        {configs.map(config => (
-          <div key={config.id} className="p-4 bg-slate-800 rounded-xl border border-slate-700 hover:border-blue-500/50 transition-all group">
-            <div className="flex justify-between items-start mb-2">
-              <h3 className="font-bold text-lg flex items-center gap-2">
-                <Plug size={18} className="text-blue-400" />
-                {config.name}
-              </h3>
-              <button onClick={() => deleteConfig(config.id)} className="text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Trash2 size={16} />
-              </button>
-            </div>
-            <div className="font-mono text-xs text-slate-400 bg-slate-950 p-2 rounded break-all mb-4">
-              {config.command} {config.args}
-            </div>
-            <button 
-              onClick={() => onConfigSelect && onConfigSelect(config)}
-              className="w-full py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium transition-colors"
+          <div className="flex items-center gap-2">
+            <Button
+              variant="primary"
+              size="sm"
+              icon={Plus}
+              onClick={() => setIsEditing(true)}
             >
-              Use this Server
-            </button>
+              Add Connector
+            </Button>
           </div>
-        ))}
+        </div>
 
-        {isEditing ? (
-          <div className="p-4 bg-slate-800 rounded-xl border border-blue-500/50">
-            <div className="flex justify-between mb-4">
-              <h3 className="font-bold">Add New Server</h3>
-              <button onClick={() => setIsEditing(false)}><X size={18}/></button>
-            </div>
-            <input 
-              type="text" placeholder="Server Name (e.g., PostgreSQL)" 
-              className="w-full bg-slate-900 border border-slate-700 rounded p-2 mb-2 text-sm focus:border-blue-500 outline-none"
-              value={newConfig.name} onChange={e => setNewConfig({...newConfig, name: e.target.value})}
-            />
-            <input 
-              type="text" placeholder="Command (e.g., npx)" 
-              className="w-full bg-slate-900 border border-slate-700 rounded p-2 mb-2 text-sm focus:border-blue-500 outline-none"
-              value={newConfig.command} onChange={e => setNewConfig({...newConfig, command: e.target.value})}
-            />
-            <input 
-              type="text" placeholder="Args (e.g., -y @modelcontextprotocol/server-postgres)" 
-              className="w-full bg-slate-900 border border-slate-700 rounded p-2 mb-4 text-sm focus:border-blue-500 outline-none"
-              value={newConfig.args} onChange={e => setNewConfig({...newConfig, args: e.target.value})}
-            />
-            <button onClick={saveConfig} className="w-full py-2 bg-green-600 hover:bg-green-500 rounded-lg text-sm font-medium flex justify-center items-center gap-2">
-              <Save size={16} /> Save Server
-            </button>
-          </div>
+        {/* MCP Connectors Table */}
+        {configs.length === 0 ? (
+          <EmptyState
+            icon={Plug}
+            title="No MCP connectors configured"
+            description="Add your first Model Context Protocol server to allow AI-Dost to query local databases and APIs."
+            actionLabel="Add Connector"
+            onAction={() => setIsEditing(true)}
+          />
         ) : (
-          <button 
-            onClick={() => setIsEditing(true)}
-            className="p-4 border-2 border-dashed border-slate-700 hover:border-slate-500 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:text-slate-300 transition-colors min-h-[160px]"
-          >
-            <Plus size={32} className="mb-2" />
-            <span className="font-medium">Add MCP Server</span>
-          </button>
+          <div className="rounded-sm border border-border bg-canvas-surface overflow-hidden shadow-sm">
+            {/* Table Header */}
+            <div className="grid grid-cols-12 px-4 py-2.5 bg-canvas-subtle border-b border-border text-[11px] font-mono uppercase tracking-wider text-ink-muted">
+              <div className="col-span-4 sm:col-span-3">Connector Name</div>
+              <div className="col-span-5 sm:col-span-6">Command / Args</div>
+              <div className="col-span-3 sm:col-span-3 text-right">Actions</div>
+            </div>
+
+            {/* Table Rows */}
+            <div className="divide-y divide-border-subtle font-sans text-xs">
+              {configs.map((c) => (
+                <div
+                  key={c.id}
+                  className="grid grid-cols-12 items-center px-4 py-3 hover:bg-canvas-elevated transition-fast group"
+                >
+                  <div className="col-span-4 sm:col-span-3 flex items-center gap-2.5 min-w-0 pr-2">
+                    <Plug className="w-4 h-4 text-accent-primary flex-shrink-0" />
+                    <span className="font-medium text-paper-100 truncate">
+                      {c.name}
+                    </span>
+                  </div>
+
+                  <div className="col-span-5 sm:col-span-6 font-mono text-[11px] text-ink-muted truncate pr-2">
+                    {c.command} {c.args}
+                  </div>
+
+                  <div className="col-span-3 sm:col-span-3 flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onConfigSelect && onConfigSelect(c)}
+                      className="px-2 py-0.5 rounded-xs bg-canvas-base hover:bg-canvas-surface border border-border text-[11px] text-paper-200 hover:text-paper-100 transition-fast cursor-pointer"
+                    >
+                      Connect
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => deleteConfig(c.id, e)}
+                      className="p-1 rounded-xs text-ink-muted hover:text-signal-error hover:bg-canvas-base transition-fast cursor-pointer"
+                      title="Delete Connector"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
-      </div>
-      
-      <div className="mt-auto p-4 bg-blue-900/20 border border-blue-500/30 rounded-xl">
-        <h4 className="font-bold text-blue-400 mb-2">How it works</h4>
-        <p className="text-sm text-slate-300 mb-2">
-          Model Context Protocol (MCP) allows your autonomous agent to securely connect to local and remote resources.
-        </p>
-        <p className="text-xs text-slate-400">
-          When you click &quot;Use this Server&quot;, the connection settings will be passed to the Agent Workspace. The agent will then discover available tools (like database queries) and use them autonomously.
-        </p>
+
+        {/* Add Connector Modal */}
+        {isEditing && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+            <div className="w-full max-w-md rounded-sm bg-canvas-surface border border-border p-5 shadow-modal space-y-4">
+              <div className="flex items-center justify-between border-b border-border-subtle pb-2">
+                <h3 className="text-sm font-semibold text-paper-100 font-display">
+                  Add MCP Server
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setIsEditing(false)}
+                  className="p-1 text-ink-muted hover:text-paper-100 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={saveConfig} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-paper-200 mb-1">
+                    Server Name
+                  </label>
+                  <input
+                    value={newConfig.name}
+                    onChange={(e) => setNewConfig({ ...newConfig, name: e.target.value })}
+                    placeholder="e.g. Postgres DB"
+                    className="w-full px-3 py-2 rounded-xs bg-canvas-base border border-border text-paper-100 text-xs font-sans focus:outline-none focus:border-accent-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-paper-200 mb-1">
+                    Executable Command
+                  </label>
+                  <input
+                    value={newConfig.command}
+                    onChange={(e) => setNewConfig({ ...newConfig, command: e.target.value })}
+                    placeholder="e.g. npx"
+                    className="w-full px-3 py-2 rounded-xs bg-canvas-base border border-border text-paper-100 text-xs font-mono focus:outline-none focus:border-accent-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-paper-200 mb-1">
+                    Arguments
+                  </label>
+                  <input
+                    value={newConfig.args}
+                    onChange={(e) => setNewConfig({ ...newConfig, args: e.target.value })}
+                    placeholder="e.g. -y @modelcontextprotocol/server-postgres"
+                    className="w-full px-3 py-2 rounded-xs bg-canvas-base border border-border text-paper-100 text-xs font-mono focus:outline-none focus:border-accent-primary"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)}>
+                    Cancel
+                  </Button>
+                  <Button variant="primary" size="sm" type="submit" disabled={!newConfig.name.trim() || !newConfig.command.trim()}>
+                    Save Connector
+                  </Button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

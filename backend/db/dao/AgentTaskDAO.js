@@ -9,7 +9,7 @@ class AgentTaskDAO {
   }
 
   create(data) {
-    const { id, projectId, conversationId = null, userId, title = null, status = 'PENDING' } = data;
+    const { id, projectId, conversationId = null, userId = 'local-user', title = null, status = 'PENDING' } = data;
     this.db.prepare(`
       INSERT INTO agent_tasks (id, project_id, conversation_id, user_id, title, status)
       VALUES (?, ?, ?, ?, ?, ?)
