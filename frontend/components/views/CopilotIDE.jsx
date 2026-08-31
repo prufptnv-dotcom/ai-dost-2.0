@@ -696,12 +696,12 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
   };
 
   // Ctrl+K Inline AI Edit
-  const triggerInlineEdit = useCallback(() => {
+  const triggerInlineEdit = () => {
     const editor = editorRef.current;
     if (!editor) return;
     setInlineEditPrompt('');
     setInlineEditOpen(true);
-  }, []);
+  };
 
   const handleInlineEditSubmit = async (e) => {
     if (e) e.preventDefault();
@@ -1233,13 +1233,18 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
     setCopilotStatus({ label: 'Plan cancelled', tone: 'neutral' });
   };
 
+  const handleSendRef = useRef(handleSend);
+  useEffect(() => {
+    handleSendRef.current = handleSend;
+  });
+
   // Preview Iframe Auto-Fix & Inspector message listener
   useEffect(() => {
     const handleMessage = (e) => {
       if (!e.data || typeof e.data !== 'object') return;
       if (e.data.type === 'AUTO_FIX_ERROR') {
         showToast('⚡ Sending runtime error to Copilot for auto-healing...', 'info');
-        handleSend(`Fix this runtime error in the application: ${e.data.error}`);
+        handleSendRef.current(`Fix this runtime error in the application: ${e.data.error}`);
       } else if (e.data.type === 'INSPECT_ELEMENT') {
         const promptText = `Edit the <${e.data.tag}> element (class: "${e.data.className}", text: "${e.data.text}"): `;
         setCopilotInput(promptText);
@@ -1248,7 +1253,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [handleSend, showToast]);
+  }, [showToast]);
 
   // ── File & Folder CRUD + New Project Handlers ──────────────────────────────
   const handleCreateFile = async (parentFolder = '') => {

@@ -1,12 +1,10 @@
 import React from 'react';
 
 /**
- * AiDostMark - Signature "Editorial Workbench" developer monogram.
- * Geometric A/D monogram built from structural architectural strokes with
- * a distinctive open conversation notch. Crisp at 16px, monochrome-ready,
- * flat, without decorative glows or sparkles.
+ * AiDostMark - Dark Bento & Cyber/Operational developer monogram.
+ * Geometric A/D monogram with Bioluminescent Lime & Cyber Rust gradients.
  */
-export function AiDostMark({ size = 20, className = '', color = 'currentColor' }) {
+export function AiDostMark({ size = 20, className = '', color = 'url(#aiDostBentoLimeGrad)' }) {
   return (
     <svg
       width={size}
@@ -17,6 +15,17 @@ export function AiDostMark({ size = 20, className = '', color = 'currentColor' }
       className={className}
       aria-label="AI-Dost"
     >
+      <defs>
+        <linearGradient id="aiDostBentoLimeGrad" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#d9ff5a" />
+          <stop offset="100%" stopColor="#a3e635" />
+        </linearGradient>
+        <linearGradient id="aiDostCyberRustGrad" x1="0" y1="0" x2="4" y2="3" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#ff4d12" />
+          <stop offset="100%" stopColor="#ea580c" />
+        </linearGradient>
+      </defs>
+
       {/* Structural Backbone Stroke */}
       <rect x="3" y="3" width="3.5" height="18" rx="1" fill={color} />
 
@@ -29,17 +38,17 @@ export function AiDostMark({ size = 20, className = '', color = 'currentColor' }
       {/* Inner Workbench / Conversation Chamber Void */}
       <path
         d="M6.5 6.5H13.5C15.433 6.5 17 8.067 17 10C17 11.933 15.433 13.5 13.5 13.5H6.5V6.5Z"
-        fill="var(--ink-950, #11100f)"
+        fill="var(--color-canvas-surface, #18181d)"
       />
 
-      {/* Terracotta / Vermilion Focal Core Notch */}
+      {/* Cyber Rust Core Notch */}
       <rect
         x="9"
         y="8.5"
         width="4"
         height="3"
         rx="0.5"
-        fill="var(--accent-primary, #d45b3f)"
+        fill="url(#aiDostCyberRustGrad)"
       />
     </svg>
   );

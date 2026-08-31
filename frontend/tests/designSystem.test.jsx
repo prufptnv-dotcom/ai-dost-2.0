@@ -205,7 +205,7 @@ describe('Phase 3.2 — Core Design System Primitives', () => {
           <div>Main Canvas Content</div>
         </AppShell>
       );
-      expect(screen.getByText(/DOST/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/AI-Dost/i)[0]).toBeInTheDocument();
       expect(screen.getByText('Main Canvas Content')).toBeInTheDocument();
       expect(screen.getByText('Inspector Drawer')).toBeInTheDocument();
     });

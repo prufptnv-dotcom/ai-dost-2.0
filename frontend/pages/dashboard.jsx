@@ -6,7 +6,6 @@ import {
   FileText, History, Settings, CornerDownLeft, Sparkles, X, Loader2
 } from 'lucide-react';
 import AppShell from '../components/layout/AppShell';
-import ChatView from '../components/views/ChatView';
 import ProjectsView from '../components/views/ProjectsView';
 import ArtifactsView from '../components/views/ArtifactsView';
 import VoiceView from '../components/views/VoiceView';
@@ -26,6 +25,15 @@ const CopilotIDE = dynamic(() => import('../components/views/CopilotIDE'), {
   loading: () => (
     <div className="h-full flex items-center justify-center bg-canvas-base">
       <Loader2 className="w-6 h-6 animate-spin text-accent-primary" />
+    </div>
+  ),
+});
+
+const ChatView = dynamic(() => import('../components/views/ChatView'), {
+  ssr: false,
+  loading: () => (
+    <div className="h-full flex items-center justify-center bg-canvas-base">
+      <Loader2 className="w-6 h-6 animate-spin text-accent" />
     </div>
   ),
 });
@@ -78,8 +86,8 @@ export default function Dashboard() {
         const data = await fetchProjects(userId);
         const projs = Array.isArray(data) ? data : [];
         setProjects(projs);
-        if (projs.length > 0 && !activeProject) {
-          setActiveProject(projs[0]);
+        if (projs.length > 0) {
+          setActiveProject((prev) => prev || projs[0]);
         }
       } catch (e) {
         setProjects([]);

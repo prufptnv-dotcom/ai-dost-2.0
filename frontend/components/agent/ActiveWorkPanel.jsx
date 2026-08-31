@@ -94,6 +94,7 @@ export function ActiveWorkPanel({
                 <div className="text-xs font-semibold text-txt-primary mb-2 flex items-center gap-2">
                   <span>Visual Sandbox Preview</span>
                 </div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={screenshot}
                   alt="Sandbox visual verification"

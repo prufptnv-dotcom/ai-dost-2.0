@@ -2,36 +2,24 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send, Copy, Volume2, RefreshCw, ThumbsUp, ThumbsDown,
-  Sparkles, FileText, Mic, Paperclip, Bot, User, Check,
-  Lightbulb, Globe, Wand2, Eraser, History as HistoryIcon,
-  Pencil, Download, Search, ExternalLink, FileDown, ArrowRight,
-  Play, Terminal, Loader2, Code2, Eye, LayoutTemplate
+  Sparkles, FileText, Mic, Paperclip, Check,
+  Globe, Pencil, ExternalLink, ArrowRight,
+  Eye, LayoutTemplate,
 } from 'lucide-react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import api from '../../services/api';
 import { ImageCard, ImageLightbox } from './ImageLightbox';
 import ChatArtifactsCanvas from '../chat/ChatArtifactsCanvas';
-import BrandLogo from '../ui/BrandLogo';
 import { AiDostMark } from '../brand/AiDostMark';
+import SmartChatHeader from '../chat/SmartChatHeader';
+import CodeBlock from '../chat/CodeBlock';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const STORAGE_KEY = 'ai_dost_messages_chat';
 const SESSIONS_KEY = 'ai_dost_chat_sessions';
 const PERSONA_KEY = 'ai_dost_persona';
-
-const PERSONAS = [
-  { id: 'hinglish', label: '💬 Hinglish' },
-  { id: 'english', label: '🇬🇧 English' },
-  { id: 'formal', label: '🎩 Formal' },
-];
-
-const QUICK_PROMPTS = [
-  { icon: Sparkles, label: 'Calculator Widget', prompt: 'Ek modern interactive calculator widget bana do with HTML, Tailwind CSS and JavaScript' },
-  { icon: FileText, label: 'Resume banao', prompt: 'Mera resume bana do — full stack developer, 3 saal experience React aur Node.js me' },
-  { icon: Code2, label: 'Python Script', prompt: 'Python me ek recursive Fibonacci aur prime numbers generator script likho aur output print karo' },
-  { icon: Globe, label: 'Explain WebSockets', prompt: 'Explain how WebSockets work in simple Hinglish with architecture diagram' },
-  { icon: Search, label: 'Research AI News', prompt: 'Latest AI news aur major breakthrough trends search karo aur sources ke saath batao' },
-];
 
 const IMAGE_CREATE_INTENT =
   /\b(create|generate|make|draw|design)\b.*\b(image|photo|picture|logo|wallpaper|cartoon|anime|illustration|poster|meme|sketch|painting|drawing|art)\b|\b(image|photo|picture|logo|wallpaper|cartoon|anime|illustration|poster|meme|sketch|painting|drawing|art)\b.*\b(banao|bana|banake|make|create|generate|draw|design)\b/i;
@@ -48,7 +36,7 @@ const DOC_KEYWORDS = [
 ];
 
 const NAV_INTENTS = [
-  { re: /\b(projects?|meri projects?|my projects?)\b.*\b(kholo|dikhao|dikha|open|show|list)\b/i, view: 'projects', label: 'Projects View' },
+  { re: /\b(projects?|meri projects?|my projects?)\b.*\b(kholo|dikhao|dikha|open|show|list)\b/i, view: 'projects', label: 'Projects' },
   { re: /\b(history|purani baatein|chat history|old chats?)\b.*\b(kholo|dikhao|dikha|open|show|load|dekh)\b/i, view: 'history', label: 'Chat History' },
   { re: /\b(copilot|ide|code editor|editor)\b.*\b(kholo|dikhao|dikha|open|show)\b/i, view: 'copilot', label: 'Copilot IDE' },
   { re: /\b(agent mode|autonomous mode|agent)\b.*\b(kholo|dikhao|dikha|open|show|run|chal)\b/i, view: 'agent', label: 'Autonomous Agent' },
@@ -61,40 +49,25 @@ const SEARCH_INTENT =
   /\b(research|deep research)\b|\b(search|google|pata karo|dhundho)\b.*\b(karo|kar|karke|do)\b|\b(latest|current|today'?s|aaj ki)\b.*\b(news|update|price|weather|score|status)\b|\b(news|weather|stock price|cricket score|football score|match result|trending)\b.*\b(batao|bata|dikhao|kya hai|do|kar)\b/i;
 
 const MODEL_OPTIONS = [
-  { id: 'auto', label: '⚡ Auto (Smart Pick)' },
-  { id: 'groq', label: '🚀 Groq (GPT-OSS 120B)' },
-  { id: 'gemini', label: '✨ Gemini 2.5 Flash' },
-  { id: 'nvidia', label: '🔷 NVIDIA NIM' },
-  { id: 'together', label: '🧠 Together AI' },
-  { id: 'deepseek', label: '🐋 DeepSeek' },
-  { id: 'mistral', label: '🌬️ Mistral' },
-  { id: 'ollama', label: '💻 Ollama (Local Offline)' },
-];
-
-const FOLLOW_UPS = [
-  'Isme aur kya styling ya logic add kar sakte hain?',
-  'Interactive Claude Artifacts Canvas me open karo',
-  'Isse Copilot IDE me fullstack project me badlo',
-  'Code ka step-by-step mathematical breakdown do',
+  { id: 'auto', label: 'Auto' },
+  { id: 'groq', label: 'Groq' },
+  { id: 'gemini', label: 'Gemini' },
+  { id: 'nvidia', label: 'NVIDIA' },
+  { id: 'together', label: 'Together' },
+  { id: 'deepseek', label: 'DeepSeek' },
+  { id: 'mistral', label: 'Mistral' },
+  { id: 'ollama', label: 'Ollama (Local)' },
 ];
 
 const WELCOME = {
   id: 'welcome',
   role: 'assistant',
-  content: `Namaste! 🙏 Main **AI-Dost** hoon — aapka supercharged AI assistant.
-
-### 🌟 New Capabilities:
-- 🎨 **Claude-Style Live Canvas** — HTML/JS widgets chat ke right side me live run hote hain
-- ▶️ **In-Chat Code Interpreter** — Python & JS code block me direct \`Run\` dabayein
-- ⚡ **1-Click Copilot IDE Bridge** — Koi bhi code instantly full IDE workspace me bhejein
-- 🧠 **20+ Turn Context Memory** — Purana reference kabhi nahi bhulega
-- 🌐 **Perplexity-Grade Search** — Real-time sources and grounding
-
-Kya banana ya discuss karna hai aaj?`,
+  content: 'Namaste! Main AI-Dost hoon. Aap kya karna chahte hain aaj?',
   timestamp: new Date().toISOString(),
 };
 
-const renderMarkdown = (text) => DOMPurify.sanitize(marked.parse((text || '').replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '')));
+const renderMarkdown = (text) =>
+  DOMPurify.sanitize(marked.parse((text || '').replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '')));
 
 const extractImages = (content) => {
   const images = [];
@@ -104,7 +77,6 @@ const extractImages = (content) => {
   return images;
 };
 
-// Detect HTML / SVG code block for interactive Claude artifact
 function extractArtifact(content) {
   if (!content) return null;
   const htmlMatch = content.match(/```(?:html|xml|svg)\s*\n([\s\S]*?)```/i);
@@ -121,6 +93,60 @@ function extractArtifact(content) {
   return null;
 }
 
+
+
+function ParsedMarkdown({ content, isStreaming, onNavigate }) {
+  if (!content) return null;
+  const parts = content.split(/(```[\s\S]*?(?:```|$))/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.startsWith('```')) {
+          const inner = part.slice(3);
+          const isClosed = inner.endsWith('```');
+          const textContent = isClosed ? inner.slice(0, -3) : inner;
+          const newlineIdx = textContent.indexOf('\n');
+          let langLine = 'text';
+          let code = textContent;
+          if (newlineIdx !== -1) {
+            langLine = textContent.slice(0, newlineIdx).trim();
+            code = textContent.slice(newlineIdx + 1);
+          } else {
+            langLine = textContent.trim();
+            code = '';
+          }
+          return (
+            <CodeBlock
+              key={i}
+              code={code}
+              language={langLine || 'text'}
+              canRun={/^(python|py|javascript|js|node)$/i.test(langLine)}
+              canPreview={/^(html|react|jsx|tsx)$/i.test(langLine)}
+              onOpenIDE={() => {
+                if (onNavigate) {
+                  try {
+                    localStorage.setItem('ai_dost_copilot_import', JSON.stringify({
+                      title: 'chat-code',
+                      code: code,
+                      language: langLine,
+                      timestamp: Date.now()
+                    }));
+                  } catch (_) {}
+                  onNavigate('copilot');
+                }
+              }}
+            />
+          );
+        }
+        if (part) {
+          return <div key={i} className="prose-chat" dangerouslySetInnerHTML={{ __html: renderMarkdown(part) }} />;
+        }
+        return null;
+      })}
+    </>
+  );
+}
+
 function MessageBubble({
   msg,
   onOpenImage,
@@ -129,110 +155,14 @@ function MessageBubble({
   isLast,
   onVariants,
   onNavigate,
-  onOpenArtifact
+  onOpenArtifact,
 }) {
   const [copied, setCopied] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
   const isUser = msg.role === 'user';
   const isStreaming = !!msg.isStreaming;
   const images = isUser ? [] : extractImages(msg.content);
-  const proseRef = useRef(null);
-
   const detectedArtifact = !isUser && !isStreaming ? extractArtifact(msg.content) : null;
-
-  // Code Block Top Bar + Copy + In-Chat Execution Runner
-  useEffect(() => {
-    const el = proseRef.current;
-    if (!el || isStreaming) return;
-    el.querySelectorAll('pre').forEach((pre) => {
-      if (pre.querySelector('.chat-code-header')) return;
-      pre.style.position = 'relative';
-      pre.style.borderRadius = '12px';
-      pre.style.overflow = 'hidden';
-      pre.style.margin = '14px 0';
-      pre.style.background = '#0a0d14';
-      pre.style.border = '1px solid rgba(255,255,255,0.12)';
-
-      const code = pre.querySelector('code');
-      let lang = 'CODE';
-      if (code && code.className) {
-        const m = code.className.match(/language-([a-zA-Z0-9_-]+)/);
-        if (m) lang = m[1].toUpperCase();
-      }
-
-      const rawCode = code ? code.innerText : pre.innerText;
-
-      const header = document.createElement('div');
-      header.className = 'chat-code-header';
-      header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 14px;background:rgba(255,255,255,0.06);border-bottom:1px solid rgba(255,255,255,0.08);font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:0.5px;';
-
-      const langSpan = document.createElement('span');
-      langSpan.textContent = lang;
-
-      const btnGroup = document.createElement('div');
-      btnGroup.style.cssText = 'display:flex;align-items:center;gap:6px;';
-
-      // Run button for Python/JS
-      const isRunnable = /^(PYTHON|PY|JAVASCRIPT|JS|NODE)$/i.test(lang);
-      let runBtn = null;
-      let outputContainer = null;
-
-      if (isRunnable) {
-        runBtn = document.createElement('button');
-        runBtn.className = 'chat-code-run';
-        runBtn.innerHTML = '<span>▶ Run</span>';
-        runBtn.title = 'Execute code in sandbox';
-        runBtn.style.cssText = 'display:flex;align-items:center;gap:4px;border:none;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;background:rgba(16,185,129,0.2);color:#34d399;border:1px solid rgba(16,185,129,0.3);transition:all .15s;';
-        
-        outputContainer = document.createElement('div');
-        outputContainer.className = 'chat-code-output';
-        outputContainer.style.cssText = 'display:none;padding:10px 14px;background:#030712;border-top:1px solid rgba(255,255,255,0.08);font-family:monospace;font-size:11px;color:#cbd5e1;white-space:pre-wrap;max-height:180px;overflow-y:auto;';
-
-        runBtn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          runBtn.innerHTML = '<span>⏳ Running...</span>';
-          outputContainer.style.display = 'block';
-          outputContainer.innerHTML = '<span style="color:#94a3b8">Executing in sandbox environment...</span>';
-
-          try {
-            const res = await api.post('/chat/execute', { code: rawCode, language: lang });
-            const data = res.data;
-            if (data.success) {
-              outputContainer.innerHTML = `<span style="color:#34d399;font-weight:600;">[Exit Code 0 • ${data.duration || 0}ms]</span>\n${data.stdout || '(No output)'}`;
-            } else {
-              outputContainer.innerHTML = `<span style="color:#f87171;font-weight:600;">[Error • ${data.duration || 0}ms]</span>\n${data.stderr || data.error || 'Execution failed'}`;
-            }
-          } catch (err) {
-            outputContainer.innerHTML = `<span style="color:#f87171;">Failed to connect to execution sandbox: ${err.message}</span>`;
-          } finally {
-            runBtn.innerHTML = '<span>▶ Run Again</span>';
-          }
-        });
-        btnGroup.appendChild(runBtn);
-      }
-
-      // Copy button
-      const copyBtn = document.createElement('button');
-      copyBtn.className = 'chat-code-copy';
-      copyBtn.innerHTML = '<span>📋 Copy</span>';
-      copyBtn.title = 'Copy code';
-      copyBtn.style.cssText = 'display:flex;align-items:center;gap:4px;border:none;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;background:rgba(255,255,255,0.08);color:#e2e8f0;transition:all .15s;';
-      copyBtn.addEventListener('mouseenter', () => (copyBtn.style.background = 'rgba(255,255,255,0.2)'));
-      copyBtn.addEventListener('mouseleave', () => (copyBtn.style.background = 'rgba(255,255,255,0.08)'));
-      copyBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        navigator.clipboard.writeText(rawCode).then(() => {
-          copyBtn.innerHTML = '<span style="color:#34d399">✓ Copied!</span>';
-          setTimeout(() => (copyBtn.innerHTML = '<span>📋 Copy</span>'), 1500);
-        });
-      });
-      btnGroup.appendChild(copyBtn);
-
-      header.appendChild(langSpan);
-      header.appendChild(btnGroup);
-      pre.insertBefore(header, pre.firstChild);
-      if (outputContainer) pre.appendChild(outputContainer);
-    });
-  }, [msg.content, isStreaming]);
 
   const copyText = async () => {
     try {
@@ -242,14 +172,11 @@ function MessageBubble({
     } catch (e) { /* noop */ }
   };
 
-  const [speaking, setSpeaking] = useState(false);
-
   const speak = async () => {
     const text = msg.content.replace(/[*#`>\[\]]/g, '').slice(0, 1500);
     if (!text.trim()) return;
     try {
-      const audioUrl = `${api.defaults.baseURL}/agent/ai/tts`;
-      const ttsRes = await fetch(audioUrl, {
+      const ttsRes = await fetch(`${api.defaults.baseURL}/agent/ai/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, voice: 'en-IN-PrabhatNeural' }),
@@ -264,110 +191,95 @@ function MessageBubble({
         await audio.play();
         return;
       }
-    } catch (e) { /* fallback */ }
-
+    } catch (_) { /* fallback */ }
     try {
       const utter = new SpeechSynthesisUtterance(text);
       utter.lang = 'hi-IN';
       window.speechSynthesis.speak(utter);
-    } catch (e) { /* noop */ }
+    } catch (_) { /* noop */ }
   };
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 6 }}
+      initial={{ opacity: 0, y: 5 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.12 }}
-      className={`flex gap-3.5 ${isUser ? 'flex-row-reverse' : ''}`}
+      transition={{ duration: 0.15 }}
+      className={`group flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}
     >
-      {/* Avatar / Monogram */}
-      <div className="flex-shrink-0 mt-0.5 select-none">
-        {isUser ? (
-          <div className="w-7 h-7 rounded-xs flex items-center justify-center bg-canvas-surface border border-border text-ink-muted text-xs font-mono">
-            U
-          </div>
-        ) : (
-          <div className="w-7 h-7 rounded-xs flex items-center justify-center bg-canvas-surface border border-border text-accent-primary">
-            <AiDostMark size={16} />
-          </div>
-        )}
-      </div>
+      {/* Avatar */}
+      {!isUser && (
+        <div className="w-5 h-5 shrink-0 mt-0.5 opacity-70 select-none">
+          <AiDostMark size={18} />
+        </div>
+      )}
 
-      {/* Bubble / Editorial Message Block */}
-      <div className={`max-w-[92%] md:max-w-[82%] flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+      {/* Message Content */}
+      <div className={`flex flex-col min-w-0 ${isUser ? 'items-end max-w-[80%] ml-auto' : 'items-start w-full max-w-2xl'}`}>
         <div
-          className={`px-3.5 py-2.5 text-xs leading-relaxed ${
+          className={`${
             isUser
-              ? 'rounded-xs bg-canvas-surface border border-border text-paper-100'
-              : 'rounded-xs bg-canvas-surface/40 border border-border-subtle text-paper-100'
+              ? 'chat-user-message'
+              : 'text-sm leading-relaxed text-paper-100 w-full'
           }`}
         >
+          {/* Streaming cursor */}
           {isStreaming && msg.content.length === 0 ? (
-            <div className="flex items-center gap-2 py-1">
-              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-              <span className="text-xs text-slate-300">AI-Dost response stream kar raha hai...</span>
-            </div>
-          ) : isStreaming ? (
-            <div>
-              <div
-                ref={proseRef}
-                className="prose-chat"
-                dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
-              />
-              <span className="inline-block w-2 h-4 ml-1 bg-cyan-400 animate-pulse align-middle" />
-            </div>
+            <span className="inline-block w-2 h-4 bg-accent animate-pulse align-middle rounded-sm" />
           ) : (
-            <div
-              ref={proseRef}
-              className="prose-chat"
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
-            />
+            <>
+              {isUser ? (
+                <div className="whitespace-pre-wrap">{msg.content}</div>
+              ) : (
+                <ParsedMarkdown content={msg.content} isStreaming={isStreaming} onNavigate={onNavigate} />
+              )}
+              {isStreaming && (
+                <span className="inline-block w-2 h-4 ml-0.5 bg-accent animate-pulse align-middle rounded-sm" />
+              )}
+            </>
           )}
 
-          {/* Claude-Style Live Artifact Preview Trigger */}
+          {/* Artifact canvas trigger */}
           {detectedArtifact && (
-            <div className="mt-3 pt-2.5 border-t border-white/10 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <LayoutTemplate className="w-4 h-4 text-purple-400 animate-pulse" />
-                <span className="text-xs font-semibold text-purple-300">Interactive Canvas Ready</span>
-              </div>
+            <div className="mt-3 pt-2.5 border-t border-border-subtle flex items-center gap-2.5 w-fit">
+              <LayoutTemplate className="w-4 h-4 text-accent shrink-0" />
+              <span className="text-xs text-ink-muted flex-1">Interactive canvas ready</span>
               <button
                 onClick={() => onOpenArtifact && onOpenArtifact(detectedArtifact)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-purple-600/30 hover:bg-purple-600/40 border border-purple-500/50 text-purple-200 transition-all cursor-pointer shadow-lg hover:scale-[1.02]"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-accent-subtle border border-accent-border text-paper-200 hover:bg-canvas-elevated transition-fast cursor-pointer"
               >
-                <Eye className="w-3.5 h-3.5" />
-                <span>Live Canvas Kholo</span>
+                <Eye className="w-3 h-3" />
+                Open canvas
               </button>
             </div>
           )}
 
-          {/* Quick Action Navigation Chip */}
+          {/* Navigation chip */}
           {msg.navView && (
-            <div className="mt-3 pt-2.5 border-t border-white/10">
+            <div className="mt-3 pt-2.5 border-t border-border-subtle w-fit">
               <button
                 onClick={() => onNavigate && onNavigate(msg.navView)}
-                className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-400/40 hover:bg-blue-500/30 transition-all cursor-pointer shadow-lg"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-canvas-elevated border border-border text-paper-200 hover:bg-canvas-overlay transition-fast cursor-pointer"
               >
-                <span>👉 {msg.navLabel || msg.navView} me chalein</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+                {msg.navLabel || msg.navView}
+                <ArrowRight className="w-3 h-3" />
               </button>
             </div>
           )}
 
-          {/* Attached files */}
+          {/* Attachments */}
           {msg.attachments && msg.attachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-2">
               {msg.attachments.map((n, i) => (
-                <span key={i} className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg bg-blue-500/15 border border-blue-400/30 text-blue-300">
+                <span key={i} className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-canvas-elevated border border-border text-ink-muted">
                   <Paperclip className="w-2.5 h-2.5" /> {n}
                 </span>
               ))}
             </div>
           )}
 
-          {/* Search sources with Favicons */}
+          {/* Search sources */}
           {!isStreaming && msg.sources && msg.sources.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-2.5 pt-2.5 border-t border-white/10">
+            <div className="flex flex-wrap gap-1.5 mt-3 pt-2.5 border-t border-border-subtle">
               {msg.sources.map((s, i) => {
                 let domain = '';
                 try { domain = new URL(s.url).hostname; } catch (_) {}
@@ -377,12 +289,11 @@ function MessageBubble({
                     href={s.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-[10px] px-2.5 py-1.5 rounded-xl flex items-center gap-2 max-w-[240px] truncate bg-blue-500/10 border border-blue-400/30 text-blue-300 hover:bg-blue-500/20 transition-colors shadow-sm"
-                    title={s.url}
+                    className="text-[11px] px-2.5 py-1 rounded-lg flex items-center gap-1.5 max-w-[220px] truncate bg-canvas-elevated border border-border text-ink-muted hover:text-paper-100 transition-fast shadow-xs"
                   >
-                    <Globe className="w-3 h-3 text-blue-400 shrink-0" />
+                    <Globe className="w-3 h-3 shrink-0" />
                     <span className="truncate">[{i + 1}] {s.title || domain}</span>
-                    <ExternalLink className="w-2.5 h-2.5 shrink-0 opacity-70" />
+                    <ExternalLink className="w-2.5 h-2.5 shrink-0 opacity-60" />
                   </a>
                 );
               })}
@@ -391,7 +302,7 @@ function MessageBubble({
 
           {/* Generated images */}
           {!isStreaming && images.length > 0 && (
-            <div className={`grid gap-2.5 mt-3 ${images.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`} style={{ minWidth: 220 }}>
+            <div className={`grid gap-2 mt-3 w-fit ${images.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`} style={{ minWidth: 200 }}>
               {images.map((img, idx) => (
                 <ImageCard key={idx} src={img.url} alt={img.alt} index={idx} onOpen={onOpenImage} />
               ))}
@@ -399,38 +310,38 @@ function MessageBubble({
           )}
         </div>
 
-        {/* Action Toolbar */}
+        {/* Action toolbar — AI messages only */}
         {!isUser && !isStreaming && (
-          <div className="flex items-center gap-1 mt-1.5 px-1 bg-white/5 rounded-lg border border-white/5 py-0.5">
-            {[
-              { icon: Copy, fn: copyText, title: 'Copy' },
-              { icon: Volume2, fn: speak, title: 'Read aloud' },
-              { icon: ThumbsUp, fn: () => api.post('/learning/feedback', { type: 'positive', message: 'thumbs up' }).catch(() => {}), title: 'Good' },
-              { icon: ThumbsDown, fn: () => api.post('/learning/feedback', { type: 'negative', message: 'thumbs down' }).catch(() => {}), title: 'Needs work' },
-              ...(isLast ? [
-                { icon: RefreshCw, fn: () => onRegenerate && onRegenerate(), title: 'Regenerate' },
-                { icon: Sparkles, fn: () => onVariants && onVariants(), title: 'Variants' },
-              ] : []),
-            ].map(({ icon: Icon, fn, title }, i) => (
-              <button
-                key={i}
-                onClick={fn}
-                title={title}
-                className="w-6 h-6 rounded-md flex items-center justify-center transition-colors cursor-pointer hover:bg-white/15 text-slate-400 hover:text-slate-200"
-              >
-                {title === 'Copy' && copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Icon className="w-3 h-3" />}
+          <div className="chat-response-actions">
+            <button type="button" onClick={copyText} aria-label="Copy response" title="Copy">
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+            </button>
+            <button type="button" onClick={speak} aria-label="Read response aloud" title={speaking ? 'Stop reading' : 'Read aloud'}>
+              <Volume2 size={14} />
+            </button>
+            {isLast && onRegenerate && (
+              <button type="button" onClick={onRegenerate} aria-label="Try again" title="Try again">
+                <RefreshCw size={14} />
               </button>
-            ))}
+            )}
+            <button type="button" onClick={() => api.post('/learning/feedback', { type: 'positive', message: msg.content }).catch(() => {})} aria-label="Good response" title="Good response">
+              <ThumbsUp size={14} />
+            </button>
+            <button type="button" onClick={() => api.post('/learning/feedback', { type: 'negative', message: msg.content }).catch(() => {})} aria-label="Bad response" title="Bad response">
+              <ThumbsDown size={14} />
+            </button>
           </div>
         )}
+
+        {/* Edit button — user messages */}
         {isUser && !isStreaming && (
-          <div className="flex items-center gap-1 mt-1.5 px-1">
+          <div className="chat-response-actions" style={{ marginTop: '4px' }}>
             <button
               onClick={() => onEdit && onEdit(msg)}
               title="Edit message"
-              className="w-6 h-6 rounded-md flex items-center justify-center transition-colors cursor-pointer hover:bg-white/10 text-slate-400"
+              aria-label="Edit message"
             >
-              <Pencil className="w-3 h-3" />
+              <Pencil size={14} />
             </button>
           </div>
         )}
@@ -439,22 +350,22 @@ function MessageBubble({
   );
 }
 
-function DeepAnalyzing() {
+// ─── Thinking Indicator ───────────────────────────────────────────────────────
+
+function ThinkingDot({ label = 'Thinking…' }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
-      className="flex items-center gap-2.5 py-2 px-3.5 rounded-md bg-canvas-surface border border-border text-txt-secondary text-xs max-w-sm"
-    >
-      <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
-      <div className="flex flex-col">
-        <span className="font-medium text-txt-primary">Synthesizing response...</span>
-        <span className="text-[10px] text-txt-muted">Evaluating multi-model cascade</span>
-      </div>
-    </motion.div>
+    <div className="thinking-indicator" role="status" aria-live="polite">
+      <span className="thinking-dots">
+        <i />
+        <i />
+        <i />
+      </span>
+      <span>{label}</span>
+    </div>
   );
 }
+
+// ─── ChatView ────────────────────────────────────────────────────────────────
 
 export default function ChatView({
   model = 'auto',
@@ -471,25 +382,36 @@ export default function ChatView({
   const [showFollowUps, setShowFollowUps] = useState(false);
   const [lastReply, setLastReply] = useState('');
   const [localThinking, setLocalThinking] = useState(false);
+  const [thinkingLabel, setThinkingLabel] = useState('Thinking…');
   const [backendHistory, setBackendHistory] = useState(null);
-  const [suggestView, setSuggestView] = useState(null);
   const [lightboxUrl, setLightboxUrl] = useState(null);
   const [sessions, setSessions] = useState([]);
-  const [sessionsOpen, setSessionsOpen] = useState(false);
   const [attachment, setAttachment] = useState(null);
   const [persona, setPersona] = useState('hinglish');
   const [variants, setVariants] = useState(null);
   const [sessionId, setSessionId] = useState('default');
   const [activeArtifact, setActiveArtifact] = useState(null);
+  const [thinkingElapsed, setThinkingElapsed] = useState(0);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const newChatCount = useRef(0);
   const fileInputRef = useRef(null);
 
   const msgKey = (id) => (id === 'default' ? STORAGE_KEY : `ai_dost_messages_${id}`);
-
   const thinking = thinkingProp !== undefined ? thinkingProp : localThinking;
   const setThinking = typeof setIsThinkingProp === 'function' ? setIsThinkingProp : setLocalThinking;
+
+  // Thinking elapsed timer
+  useEffect(() => {
+    let interval = null;
+    if (thinking) {
+      setThinkingElapsed(0);
+      interval = setInterval(() => setThinkingElapsed((prev) => prev + 1), 1000);
+    } else {
+      setThinkingElapsed(0);
+    }
+    return () => { if (interval) clearInterval(interval); };
+  }, [thinking]);
 
   // Load persisted chat
   useEffect(() => {
@@ -500,25 +422,26 @@ export default function ChatView({
       if (Array.isArray(s) && s.length > 0) setSessions(s);
       const sid = localStorage.getItem('ai_dost_session_id');
       if (sid) setSessionId(sid);
-    } catch (e) { /* noop */ }
-
+    } catch (_) {}
     try {
       const saved = localStorage.getItem(msgKey(sessionId));
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setMessages(parsed);
-          return;
-        }
+        if (Array.isArray(parsed) && parsed.length > 0) { setMessages(parsed); return; }
       }
-    } catch (e) { /* noop */ }
+    } catch (_) {}
     setMessages([WELCOME]);
-    api.get('/chat/history', { params: { session_id: sessionId, limit: 50 } })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Load backend history on session change
+  useEffect(() => {
+    api.get(`/chat/history?session_id=${sessionId}`)
       .then((res) => {
         const rows = Array.isArray(res.data) ? res.data : (res.data?.history || []);
         if (rows.length > 0) setBackendHistory(rows);
       })
-      .catch(() => { /* backend off */ });
+      .catch(() => {});
   }, [sessionId]);
 
   const loadBackendHistory = () => {
@@ -534,28 +457,26 @@ export default function ChatView({
       setMessages(restored);
       setBackendHistory(null);
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('ai_dost_toast', { detail: { type: 'success', message: `Purani baatein load hui (${restored.length} messages)` } }));
+        window.dispatchEvent(new CustomEvent('ai_dost_toast', { detail: { type: 'success', message: `History loaded (${restored.length} messages)` } }));
       }
     }
   };
 
-  // Persist
+  // Persist messages
   useEffect(() => {
     if (messages.length > 0) {
-      try {
-        localStorage.setItem(msgKey(sessionId), JSON.stringify(messages));
-      } catch (e) { /* noop */ }
+      try { localStorage.setItem(msgKey(sessionId), JSON.stringify(messages)); } catch (_) {}
     }
   }, [messages, sessionId]);
 
-  // Save to backend history
+  // Save to backend
   useEffect(() => {
     if (messages.length > 1) {
       api.post('/chat/save', { session_id: sessionId, messages: messages.slice(-20) }).catch(() => {});
     }
   }, [messages, sessionId]);
 
-  // New chat signal from sidebar
+  // New chat from sidebar signal
   useEffect(() => {
     if (newChatCount.current > 0) {
       setMessages([WELCOME]);
@@ -564,61 +485,69 @@ export default function ChatView({
     }
   }, [onNewChatSignal]);
 
-  // Auto-scroll
+  // Smart Auto-scroll
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    const el = scrollRef.current;
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    // Only scroll if we're near the bottom
+    if (distFromBottom < 120) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
     }
   }, [messages, thinking]);
 
-  // 1-Click Bridge: Open Artifact into Copilot IDE
+  // Artifact → Copilot IDE bridge
   const handleOpenArtifactInCopilot = (art) => {
     try {
-      const payload = {
+      localStorage.setItem('ai_dost_copilot_import', JSON.stringify({
         title: art.title || 'chat-artifact',
         code: art.code || '',
         language: art.language || 'html',
         timestamp: Date.now(),
-      };
-      localStorage.setItem('ai_dost_copilot_import', JSON.stringify(payload));
+      }));
     } catch (_) {}
     if (onNavigate) onNavigate('copilot');
   };
 
+  // ─── sendMessage ─────────────────────────────────────────────────────────
   const sendMessage = useCallback(async (text) => {
     const content = (text || input).trim();
     if (!content || thinking) return;
     setInput('');
     setShowFollowUps(false);
 
-    const userMsg = { id: Date.now(), role: 'user', content, timestamp: new Date().toISOString(), attachments: attachment ? [attachment.name] : undefined };
+    const userMsg = {
+      id: Date.now(),
+      role: 'user',
+      content,
+      timestamp: new Date().toISOString(),
+      attachments: attachment ? [attachment.name] : undefined,
+    };
     setMessages((prev) => [...prev, userMsg]);
     setThinking(true);
-    setSuggestView(null);
+    setThinkingLabel('Thinking…');
 
-    // ── File/image/PDF analysis ──
+    // ── File / image / PDF analysis ──
     if (attachment) {
       try {
-        const payload = { message: content || 'Is file ka analysis do — Hinglish me, important points ke saath.' };
+        const payload = { message: content || 'Is file ka analysis do.' };
         if (attachment.type === 'image') { payload.imageBase64 = attachment.base64; payload.imageMime = attachment.mime; }
         else if (attachment.type === 'pdf') { payload.pdfBase64 = attachment.base64; }
         else if (attachment.type === 'text') { payload.text = attachment.text; }
         const res = await api.post('/chat/analyze', payload);
         const reply = res.data?.reply || 'File padh nahi paya — dobara try karo.';
-        const aiMsg = { id: Date.now() + 1, role: 'assistant', content: reply, timestamp: new Date().toISOString() };
-        setMessages((prev) => [...prev, aiMsg]);
+        setMessages((prev) => [...prev, { id: Date.now() + 1, role: 'assistant', content: reply, timestamp: new Date().toISOString() }]);
         setLastReply(reply);
         setShowFollowUps(true);
         setAttachment(null);
         setThinking(false);
         return;
-      } catch (e) {
-        setAttachment(null);
-      }
+      } catch (_) { setAttachment(null); }
     }
 
-    // ── Image generation intent ──
+    // ── Image generation ──
     if (IMAGE_CREATE_INTENT.test(content)) {
+      setThinkingLabel('Generating image…');
       try {
         const r1 = await api.post('/image/generate', { prompt: content });
         const urls = [r1.data?.imageUrl].filter(Boolean);
@@ -626,7 +555,7 @@ export default function ChatView({
           const imageReply = {
             id: Date.now() + 1,
             role: 'assistant',
-            content: `Haan bhai, ho gaya! 🎨 Maine aapki image banayi (HD quality):\n\n![Image 1](${urls[0]})\n\n[⬇️ Download Image](${urls[0]}) • [🔗 Full screen me kholo](${urls[0]})\n\nKuch aur change chahiye to batao! ✨`,
+            content: `Ho gayi image! 🎨\n\n![Image](${urls[0]})\n\n[⬇️ Download](${urls[0]})\n\nKuch aur change chahiye to batao.`,
             timestamp: new Date().toISOString(),
           };
           setMessages((prev) => [...prev, imageReply]);
@@ -635,10 +564,10 @@ export default function ChatView({
           setThinking(false);
           return;
         }
-      } catch (e) { /* fall through */ }
+      } catch (_) { /* fall through */ }
     }
 
-    // ── Document intent: pdf / docx / pptx / csv / xlsx ──
+    // ── Document generation ──
     const specificDoc = DOC_KEYWORDS
       .filter((k) => k.type !== 'docx')
       .map((k) => ({ type: k.type, pos: content.search(k.re) }))
@@ -647,35 +576,35 @@ export default function ChatView({
     const docxKeyword = DOC_KEYWORDS.find((k) => k.type === 'docx');
     const docIntent = specificDoc || (content.search(docxKeyword.re) >= 0 ? docxKeyword : null);
     if (docIntent) {
+      setThinkingLabel('Creating document…');
       try {
-        const topic = content.replace(docIntent.re, '').replace(/^(bihar|india|15 august|independence day|raksha|shaheed|shahid|martyr)[\s,:-]*/i, '').trim() || content;
+        const topic = content.replace(docIntent.re, '').trim() || content;
         const typeLabel = { docx: 'Word', pptx: 'PowerPoint', csv: 'CSV', xlsx: 'Excel', pdf: 'PDF' }[docIntent.type] || docIntent.type;
-        const toast = { id: Date.now() + 1, role: 'assistant', content: `⏳ **${typeLabel} file ban rahi hai...** AI research + generation chal raha hai.`, timestamp: new Date().toISOString() };
-        setMessages((prev) => [...prev, toast]);
+        setMessages((prev) => [...prev, { id: Date.now() + 1, role: 'assistant', content: `⏳ ${typeLabel} file ban rahi hai…`, timestamp: new Date().toISOString() }]);
         const r = await api.post('/document/generate', { type: docIntent.type, topic, title: content.slice(0, 50) });
         if (r.data?.success && r.data.downloadUrl) {
           const readyMsg = {
             id: Date.now() + 2,
             role: 'assistant',
-            content: `✅ **${typeLabel} file ready!**\n\n📄 **${r.data.filename}**\n\n[⬇️ Download karo](${r.data.downloadUrl}) • [🔗 Naye tab me kholo](${r.data.downloadUrl})\n\nAur koi badlaav chahiye to batao! ✨`,
+            content: `✅ **${typeLabel} ready!**\n\n📄 ${r.data.filename}\n\n[⬇️ Download](${r.data.downloadUrl})\n\nKoi aur badlaav chahiye to batao.`,
             timestamp: new Date().toISOString(),
           };
           setMessages((prev) => [...prev, readyMsg]);
           setLastReply(readyMsg.content);
           setShowFollowUps(true);
         } else {
-          setMessages((prev) => [...prev, { id: Date.now() + 2, role: 'assistant', content: `⚠️ File ban nahi payi: ${r.data?.error || 'unknown error'}`, timestamp: new Date().toISOString() }]);
+          setMessages((prev) => [...prev, { id: Date.now() + 2, role: 'assistant', content: `⚠️ File nahi bani: ${r.data?.error || 'unknown error'}`, timestamp: new Date().toISOString() }]);
         }
         setThinking(false);
         return;
       } catch (e) {
-        setMessages((prev) => [...prev, { id: Date.now() + 2, role: 'assistant', content: `⚠️ File banane me problem aayi: ${e?.message || 'backend error'}`, timestamp: new Date().toISOString() }]);
+        setMessages((prev) => [...prev, { id: Date.now() + 2, role: 'assistant', content: `⚠️ File banane mein dikkat aayi — dobara try karo.`, timestamp: new Date().toISOString() }]);
         setThinking(false);
         return;
       }
     }
 
-    // ── Resume intent detection ──
+    // ── Resume ──
     if (/(resume|cv|bio.?data|resume bana|cv bana)/i.test(content)) {
       try {
         const data = await api.post('/resume/generate', { prompt: content });
@@ -683,17 +612,17 @@ export default function ChatView({
           const resumeMsg = {
             id: Date.now() + 1,
             role: 'assistant',
-            content: `📄 **Resume ready!** Maine aapki details se ek professional resume bana diya hai.\n\n**${data.data.fullName || 'Developer'}** — ${data.data.summary || ''}\n\nSide preview me live dikh raha hai. PDF download kar sakte ho.`,
+            content: `📄 **Resume ready!**\n\n**${data.data.fullName || 'Developer'}** — ${data.data.summary || ''}\n\nSide preview mein dikh raha hai.`,
             timestamp: new Date().toISOString(),
             navView: 'resume',
-            navLabel: 'Resume Builder Open Karo'
+            navLabel: 'Open Resume Builder',
           };
           setMessages((prev) => [...prev, resumeMsg]);
           if (onOpenResumeWithData) onOpenResumeWithData(data.data);
           setThinking(false);
           return;
         }
-      } catch (e) { /* fall through */ }
+      } catch (_) { /* fall through */ }
     }
 
     // ── Navigation intent ──
@@ -702,10 +631,10 @@ export default function ChatView({
       const navReply = {
         id: Date.now() + 1,
         role: 'assistant',
-        content: `Le chal raha hoon **${nav.label}** me... 👉`,
+        content: `${nav.label} mein le ja raha hoon…`,
         timestamp: new Date().toISOString(),
         navView: nav.view,
-        navLabel: nav.label
+        navLabel: nav.label,
       };
       setMessages((prev) => [...prev, navReply]);
       setLastReply(navReply.content);
@@ -714,61 +643,38 @@ export default function ChatView({
       return;
     }
 
-    // ── Web search intent ──
+    // ── Web search ──
     if (SEARCH_INTENT.test(content)) {
+      setThinkingLabel('Searching…');
       try {
         const res = await api.post('/chat/search', { message: content });
-        const reply = res.data?.reply || 'Search se kuch nahi mila — thoda specific banao.';
+        const reply = res.data?.reply || 'Search se kuch nahi mila.';
         const sources = res.data?.sources || [];
-        const searchMsg = {
-          id: Date.now() + 1,
-          role: 'assistant',
-          content: reply,
-          sources,
-          timestamp: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, searchMsg]);
+        setMessages((prev) => [...prev, { id: Date.now() + 1, role: 'assistant', content: reply, sources, timestamp: new Date().toISOString() }]);
         setLastReply(reply);
         setShowFollowUps(true);
         setThinking(false);
         return;
-      } catch (e) { /* fall through */ }
+      } catch (_) { /* fall through */ }
     }
 
-    // ── Real-Time SSE Token Streaming ──
+    // ── SSE Streaming ──
     const history = messages
-      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
       .slice(-20)
-      .map(m => ({ role: m.role, content: String(m.content).slice(0, 2500) }));
+      .map((m) => ({ role: m.role, content: String(m.content).slice(0, 2500) }));
 
     const aiMsgId = Date.now() + 1;
-    const placeholder = {
-      id: aiMsgId,
-      role: 'assistant',
-      content: '',
-      timestamp: new Date().toISOString(),
-      isStreaming: true,
-    };
-
-    setMessages((prev) => [...prev, placeholder]);
+    setMessages((prev) => [...prev, { id: aiMsgId, role: 'assistant', content: '', timestamp: new Date().toISOString(), isStreaming: true }]);
 
     try {
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: content,
-          model: model === 'auto' ? 'auto' : model,
-          section: 'chat',
-          history,
-          mode: 'chat',
-          persona,
-        }),
+        body: JSON.stringify({ message: content, model: model === 'auto' ? 'auto' : model, section: 'chat', history, mode: 'chat', persona }),
       });
 
-      if (!response.ok) {
-        throw new Error(`Streaming failed with status: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`Streaming failed: ${response.status}`);
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -781,69 +687,65 @@ export default function ChatView({
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
-
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed.startsWith('data: ')) continue;
           const dataStr = trimmed.slice(6).trim();
           if (dataStr === '[DONE]') continue;
-
           try {
             const parsed = JSON.parse(dataStr);
             if (parsed.chunk) {
               accumulated += parsed.chunk;
               setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === aiMsgId ? { ...m, content: accumulated, isStreaming: true } : m
-                )
+                prev.map((m) => m.id === aiMsgId ? { ...m, content: accumulated, isStreaming: true } : m)
               );
             }
           } catch (_) {}
         }
       }
 
-      // Check final generated image tags
+      // Handle [GENERATE_IMAGE:] tag in response
       let finalReply = accumulated;
       const imageTagRegex = /\[GENERATE_IMAGE:\s*(.*?)\]/i;
       const imageMatch = finalReply.match(imageTagRegex);
       if (imageMatch) {
         const imagePromptText = imageMatch[1].trim();
         const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePromptText)}?width=768&height=512&nologo=true`;
-        finalReply = finalReply.replace(imageTagRegex, '🎨 Image ban gayi — neeche dekho:').trim();
+        finalReply = finalReply.replace(imageTagRegex, '').trim();
         finalReply += `\n\n![Generated: ${imagePromptText}](${pollinationsUrl})`;
       }
 
       setMessages((prev) =>
-        prev.map((m) =>
-          m.id === aiMsgId ? { ...m, content: finalReply || 'Kuch response nahi mila.', isStreaming: false } : m
-        )
+        prev.map((m) => m.id === aiMsgId ? { ...m, content: finalReply || 'Kuch response nahi mila.', isStreaming: false } : m)
       );
       setLastReply(finalReply);
 
-      // Auto open Claude-style artifact if HTML/widget is detected
+      // Auto-open artifact canvas if HTML detected
       const artifact = extractArtifact(finalReply);
-      if (artifact) {
-        setActiveArtifact(artifact);
+      if (artifact) setActiveArtifact(artifact);
+
+      // IDE bridge suggestion for project intent
+      if (PROJECT_INTENT.test(content)) {
+        const bridgeMsg = {
+          id: Date.now() + 2,
+          role: 'assistant',
+          content: 'Isko workspace mein open karke full project bana sakte hain.',
+          timestamp: new Date().toISOString(),
+          navView: 'copilot',
+          navLabel: 'Open in Workspace',
+        };
+        setMessages((prev) => [...prev, bridgeMsg]);
       }
 
-      if (PROJECT_INTENT.test(content)) setSuggestView('project');
       setShowFollowUps(true);
     } catch (err) {
-      console.warn('Stream failed, falling back to REST endpoint:', err.message);
+      // REST fallback
+      console.warn('Stream failed, falling back to REST:', err.message);
       try {
-        const res = await api.post('/chat/', {
-          message: content,
-          model: model === 'auto' ? 'auto' : model,
-          section: 'chat',
-          history,
-          mode: 'chat',
-          persona,
-        });
-        const reply0 = res.data?.reply || res.data?.message || 'Sorry, response nahi mil paya. Dobara try karo.';
+        const res = await api.post('/chat/', { message: content, model: model === 'auto' ? 'auto' : model, section: 'chat', history, mode: 'chat', persona });
+        const reply0 = res.data?.reply || res.data?.message || 'Response nahi mila.';
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === aiMsgId ? { ...m, content: reply0, isStreaming: false } : m
-          )
+          prev.map((m) => m.id === aiMsgId ? { ...m, content: reply0, isStreaming: false } : m)
         );
         setLastReply(reply0);
         const artifact = extractArtifact(reply0);
@@ -853,17 +755,14 @@ export default function ChatView({
         setMessages((prev) =>
           prev.map((m) =>
             m.id === aiMsgId
-              ? {
-                  ...m,
-                  content: `⚠️ **Error:** ${e2?.message || 'Network error'}\n\nBackend chal raha hai check karo (localhost:5000) aur dobara try karo.`,
-                  isStreaming: false,
-                }
+              ? { ...m, content: 'Main abhi respond nahi kar paya. Please thoda wait karke dobara try karo.', isStreaming: false }
               : m
           )
         );
       }
     } finally {
       setThinking(false);
+      setThinkingLabel('Thinking…');
     }
   }, [input, thinking, messages, model, setThinking, onOpenResumeWithData, onNavigate, attachment, persona]);
 
@@ -874,7 +773,6 @@ export default function ChatView({
     const lastUserContent = messages[lastIdx].content;
     setMessages((prev) => prev.slice(0, lastIdx + 1));
     setShowFollowUps(false);
-    setSuggestView(null);
     sendMessage(lastUserContent);
   };
 
@@ -884,62 +782,28 @@ export default function ChatView({
     setMessages((prev) => prev.slice(0, idx));
     setInput(msg.content);
     setShowFollowUps(false);
-    setSuggestView(null);
     setTimeout(() => inputRef.current && inputRef.current.focus(), 50);
-  };
-
-  const exportMarkdown = () => {
-    const md = messages
-      .map((m) => `${m.role === 'user' ? '**You:**' : '**AI-Dost:**'}\n\n${m.content}`)
-      .join('\n\n---\n\n');
-    const blob = new Blob([`# AI-Dost Chat Export\n\n${md}`], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `ai-dost-chat-${new Date().toISOString().slice(0, 10)}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const exportPdf = async () => {
-    try {
-      const md = messages
-        .map((m) => `${m.role === 'user' ? 'You:' : 'AI-Dost:'}\n${m.content}`)
-        .join('\n\n');
-      const res = await api.post('/pdf/generate', { title: 'AI-Dost Chat', content: md });
-      const filename = res.data?.filename;
-      if (filename) {
-        const host = process.env.NEXT_PUBLIC_EXPRESS_BACKEND_URL || 'http://localhost:5000';
-        window.open(`${host}/api/pdf/download/${encodeURIComponent(filename)}`, '_blank');
-      } else {
-        window.dispatchEvent(new CustomEvent('ai_dost_toast', { detail: { type: 'error', message: 'PDF bana nahi paya — dobara try karo.' } }));
-      }
-    } catch (e) {
-      window.dispatchEvent(new CustomEvent('ai_dost_toast', { detail: { type: 'error', message: `PDF export failed: ${e?.message || 'error'}` } }));
-    }
   };
 
   const handleModelChange = (e) => {
     const val = e.target.value;
     if (onModelChange) onModelChange(val);
-    try { localStorage.setItem('ai_dost_model', val); } catch (err) { /* noop */ }
+    try { localStorage.setItem('ai_dost_model', val); } catch (_) {}
   };
 
   const persistSessions = (list) => {
     setSessions(list);
-    try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(list)); } catch (e) { /* noop */ }
+    try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(list)); } catch (_) {}
   };
 
   const saveCurrentToStorage = () => {
-    try {
-      if (messages.length > 0) localStorage.setItem(msgKey(sessionId), JSON.stringify(messages));
-    } catch (e) { /* noop */ }
+    try { if (messages.length > 0) localStorage.setItem(msgKey(sessionId), JSON.stringify(messages)); } catch (_) {}
   };
 
   const createSession = () => {
     saveCurrentToStorage();
     const id = Date.now().toString(36);
-    const list = [{ id, title: 'Nayi baat', updatedAt: Date.now() }, ...sessions];
+    const list = [{ id, title: 'New conversation', updatedAt: Date.now() }, ...sessions];
     persistSessions(list.slice(0, 20));
     localStorage.setItem('ai_dost_session_id', id);
     setSessionId(id);
@@ -955,19 +819,17 @@ export default function ChatView({
     setSessionId(id);
     setMessages([]);
     setShowFollowUps(false);
-    setSuggestView(null);
-    setSessionsOpen(false);
     setActiveArtifact(null);
-    const saved = localStorage.getItem(msgKey(id));
     try {
+      const saved = localStorage.getItem(msgKey(id));
       const parsed = saved ? JSON.parse(saved) : null;
       if (Array.isArray(parsed) && parsed.length > 0) setMessages(parsed);
       else setMessages([WELCOME]);
-    } catch (e) { setMessages([WELCOME]); }
+    } catch (_) { setMessages([WELCOME]); }
   };
 
   const renameSession = (id) => {
-    const title = window.prompt('Session ka naya naam:', sessions.find((s) => s.id === id)?.title || '');
+    const title = window.prompt('Session ka naam:', sessions.find((s) => s.id === id)?.title || '');
     if (title && title.trim()) {
       persistSessions(sessions.map((s) => (s.id === id ? { ...s, title: title.trim() } : s)));
     }
@@ -975,13 +837,13 @@ export default function ChatView({
 
   const deleteSession = (id) => {
     if (!window.confirm('Ye session delete karna hai?')) return;
-    try { localStorage.removeItem(msgKey(id)); } catch (e) { /* noop */ }
+    try { localStorage.removeItem(msgKey(id)); } catch (_) {}
     const list = sessions.filter((s) => s.id !== id);
     persistSessions(list);
     if (id === sessionId) {
       localStorage.setItem('ai_dost_session_id', 'default');
       setSessionId('default');
-      setMessages([]);
+      setMessages([WELCOME]);
       setShowFollowUps(false);
       setActiveArtifact(null);
     }
@@ -1010,13 +872,13 @@ export default function ChatView({
         const text = await file.text();
         setAttachment({ name: file.name, type: 'text', text: text.slice(0, 15000) });
       }
-    } catch (err) { /* noop */ }
+    } catch (_) {}
     e.target.value = '';
   };
 
   const setPersonaAndSave = (id) => {
     setPersona(id);
-    try { localStorage.setItem(PERSONA_KEY, id); } catch (e) { /* noop */ }
+    try { localStorage.setItem(PERSONA_KEY, id); } catch (_) {}
   };
 
   const loadVariants = async () => {
@@ -1041,7 +903,7 @@ export default function ChatView({
         .slice(0, 3);
       if (items.length >= 2) setVariants({ items, msgIndex: messages.length - 1 });
       else setVariants({ items: [], msgIndex: -1 });
-    } catch (e) {
+    } catch (_) {
       setVariants({ items: [], msgIndex: -1 });
     } finally {
       setThinking(false);
@@ -1061,249 +923,143 @@ export default function ChatView({
     }
   };
 
+  const currentSessionName = sessions.find((s) => s.id === sessionId)?.title || 'New conversation';
+  const displayMessages = messages.filter((m) => m.id !== 'welcome');
+  const isEmpty = displayMessages.length === 0;
+
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="h-full flex flex-row overflow-hidden bg-canvas-base">
-      {/* Left / Main Chat Panel */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden">
-        {/* Docked Sticky Sub-Header Bar */}
-        <div className="shrink-0 px-4 md:px-8 py-2 bg-canvas-subtle/80 border-b border-border z-20">
-          <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setSessionsOpen(!sessionsOpen)}
-                  title="Sessions"
-                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated border border-border text-txt-primary cursor-pointer transition-fast shadow-xs focus-ring"
-                >
-                  <span className="truncate max-w-[140px] sm:max-w-[200px]">{sessions.find((s) => s.id === sessionId)?.title || 'Default session'}</span>
-                  <span className="text-[10px] text-txt-muted">▾</span>
-                </button>
-                {sessionsOpen && (
-                  <div
-                    className="absolute top-full left-0 mt-1.5 w-64 rounded-lg overflow-hidden z-50 shadow-popover bg-canvas-surface border border-border-strong"
-                  >
-                    <div className="max-h-56 overflow-y-auto py-1 divide-y divide-border-subtle">
-                      {[{ id: 'default', title: 'Default session' }, ...sessions].map((s) => (
-                        <div
-                          key={s.id}
-                          className={`flex items-center gap-1.5 px-3 py-2 cursor-pointer transition-fast ${
-                            s.id === sessionId ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-white/5 text-txt-secondary'
-                          }`}
-                        >
-                          <span
-                            className="flex-1 truncate text-xs"
-                            onClick={() => switchSession(s.id)}
-                          >
-                            {s.title}
-                          </span>
-                          {s.id !== 'default' && (
-                            <div className="flex items-center gap-1">
-                              <button onClick={() => renameSession(s.id)} title="Rename" className="p-1 rounded-xs hover:bg-white/10 cursor-pointer text-[10px] text-txt-muted hover:text-txt-primary">✏️</button>
-                              <button onClick={() => deleteSession(s.id)} title="Delete" className="p-1 rounded-xs hover:bg-white/10 cursor-pointer text-[10px] text-txt-muted hover:text-status-error">🗑️</button>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
+      {/* Main chat panel */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+
+        {/* Session bar — minimal integrated dropdown */}
+        <SmartChatHeader
+          sessionName={currentSessionName}
+          sessions={sessions}
+          sessionId={sessionId}
+          onNewSession={createSession}
+          onSwitchSession={switchSession}
+          onRenameSession={renameSession}
+          onDeleteSession={deleteSession}
+        />
+
+        {/* Message stream */}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto py-6 px-4 md:px-6 flex flex-col">
+          <div className="max-w-3xl mx-auto w-full flex-1 flex flex-col justify-end">
+
+            {/* Empty state — inside the scroll container */}
+            {isEmpty && !thinking && (
+              <div className="flex-1 flex flex-col items-center justify-center min-h-[40vh] w-full max-w-2xl mx-auto px-4">
+                <div className="flex flex-col items-center text-center space-y-4 mb-8">
+                  <div className="w-12 h-12 flex items-center justify-center rounded-2xl bg-canvas-elevated border border-border shadow-sm mb-2">
+                    <AiDostMark size={24} />
                   </div>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={createSession}
-                title="New session"
-                className="w-7 h-7 rounded-md flex items-center justify-center cursor-pointer bg-canvas-surface hover:bg-canvas-elevated border border-border text-txt-secondary hover:text-txt-primary transition-fast text-xs focus-ring"
-              >
-                +
-              </button>
-            </div>
-
-            {/* Persona Tone Selector */}
-            <div className="flex items-center gap-1 bg-canvas-surface p-0.5 rounded-md border border-border">
-              {PERSONAS.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setPersonaAndSave(p.id)}
-                  className={`px-2 py-1 rounded-xs text-[11px] font-medium transition-fast cursor-pointer focus-ring ${
-                    persona === p.id
-                      ? 'bg-canvas-elevated text-accent border border-border shadow-xs'
-                      : 'text-txt-muted hover:text-txt-secondary border border-transparent'
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Message Stream */}
-        <div
-          ref={scrollRef}
-          className="flex-1 overflow-y-auto px-4 md:px-8 py-6"
-          style={{ scrollBehavior: 'smooth' }}
-        >
-          <div className="max-w-4xl mx-auto space-y-6">
-            {messages.map((msg, i) => (
-              <MessageBubble
-                key={msg.id || i}
-                msg={msg}
-                onOpenImage={setLightboxUrl}
-                onRegenerate={handleRegenerate}
-                onEdit={handleEditMessage}
-                isLast={i === messages.length - 1}
-                onVariants={loadVariants}
-                onNavigate={onNavigate}
-                onOpenArtifact={setActiveArtifact}
-              />
-            ))}
-
-            {/* Variants panel */}
-            {variants && variants.items.length > 0 && !thinking && (
-              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="pt-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest mb-2 text-slate-400">
-                  ✨ 3 Variants Available
-                </p>
-                <div className="space-y-2">
-                  {variants.items.map((v, i) => (
+                  <h1 className="text-2xl font-semibold text-paper-100 tracking-tight">Namaste 👋 Main AI-Dost hoon.</h1>
+                  <p className="text-base text-ink-muted">Kya karna hai?</p>
+                </div>
+                
+                <div className="flex flex-wrap items-center justify-center gap-2 max-w-lg">
+                  {['Build something', 'Research something', 'Create something'].map((prompt, i) => (
                     <button
                       key={i}
-                      onClick={() => applyVariant(v)}
-                      className="w-full text-left px-3.5 py-2.5 rounded-xl text-xs transition-all cursor-pointer hover:bg-white/10 bg-white/5 border border-white/10 text-slate-200"
+                      onClick={() => sendMessage(prompt)}
+                      className="px-4 py-2 rounded-full text-[13px] font-medium bg-canvas-surface border border-border text-paper-200 hover:bg-canvas-elevated hover:text-paper-100 transition-colors cursor-pointer"
                     >
-                      <span className="font-bold mr-1.5 text-purple-400">Option {i + 1}:</span>
-                      {v.slice(0, 240)}
+                      {prompt}
                     </button>
                   ))}
                 </div>
-              </motion.div>
+              </div>
             )}
 
-            <AnimatePresence>
-              {thinking && <DeepAnalyzing key="thinking" />}
-            </AnimatePresence>
+            <div className="space-y-6">
+              {/* Restore history prompt */}
+              {isEmpty && backendHistory && backendHistory.length > 0 && (
+                <div className="flex justify-center mb-6">
+                  <button
+                    type="button"
+                    onClick={loadBackendHistory}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-canvas-surface border border-border text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated transition-fast cursor-pointer"
+                  >
+                    🕐 Load previous conversation ({backendHistory.length} messages)
+                  </button>
+                </div>
+              )}
 
-            {/* Follow-up suggestions */}
-            <AnimatePresence>
-              {showFollowUps && lastReply && !thinking && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="pt-3 border-t border-white/5"
-                >
-                  <p className="text-[11px] font-semibold text-slate-400 mb-2 flex items-center gap-1.5">
-                    <Lightbulb className="w-3.5 h-3.5 text-yellow-400" />
-                    Suggested follow-ups
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {FOLLOW_UPS.map((q) => (
+              {displayMessages.map((msg, index) => (
+                <MessageBubble
+                  key={msg.id || index}
+                  msg={msg}
+                  isLast={index === displayMessages.length - 1}
+                  onRegenerate={handleRegenerate}
+                  onOpenImage={(url) => setLightboxUrl(url)}
+                  onVariants={loadVariants}
+                  onNavigate={onNavigate}
+                  onOpenArtifact={setActiveArtifact}
+                  onEdit={handleEditMessage}
+                />
+              ))}
+
+              {/* Variants panel */}
+              {variants && variants.items.length > 0 && !thinking && (
+                <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-2">
+                  <p className="text-xs text-ink-muted">3 alternative responses:</p>
+                  <div className="space-y-1.5">
+                    {variants.items.map((v, i) => (
                       <button
-                        key={q}
-                        onClick={() => sendMessage(q)}
-                        className="px-3.5 py-1.5 rounded-full text-xs font-medium transition-all cursor-pointer hover:scale-[1.02] bg-blue-500/10 border border-blue-400/25 text-blue-300 hover:bg-blue-500/20"
+                        key={i}
+                        onClick={() => applyVariant(v)}
+                        className="w-full text-left px-3.5 py-2.5 rounded-xl text-xs transition-fast cursor-pointer hover:bg-canvas-elevated bg-canvas-surface border border-border text-paper-200"
                       >
-                        {q}
+                        <span className="font-semibold mr-1.5 text-accent">Option {i + 1}:</span>
+                        {v.slice(0, 240)}
                       </button>
                     ))}
                   </div>
                 </motion.div>
               )}
-            </AnimatePresence>
 
-            {/* Project View Suggestions */}
-            <AnimatePresence>
-              {suggestView === 'project' && !thinking && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="pt-2"
-                >
-                  <p className="text-[11px] font-semibold text-slate-400 mb-2">
-                    ⚡ Chaho to poora project Copilot IDE me open karo
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      onClick={() => onNavigate && onNavigate('copilot')}
-                      className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-blue-600/20 border border-blue-500/40 text-blue-300 hover:bg-blue-600/30 transition-all cursor-pointer"
-                    >
-                      <span>⚡ Copilot IDE me open karo</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => onNavigate && onNavigate('agent')}
-                      className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-purple-600/20 border border-purple-500/40 text-purple-300 hover:bg-purple-600/30 transition-all cursor-pointer"
-                    >
-                      <span>🤖 Autonomous Agent se banao</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+              {/* Thinking indicator */}
+              <AnimatePresence>
+                {thinking && (
+                  <ThinkingDot key="thinking" label={thinkingLabel} />
+                )}
+              </AnimatePresence>
+
+
+            </div>
           </div>
         </div>
 
-        {/* Quick Prompts */}
-        {messages.length <= 2 && !thinking && (
-          <div className="px-4 md:px-8 pb-2">
-            <div className="max-w-4xl mx-auto">
-              {backendHistory && backendHistory.length > 0 && (
-                <button
-                  type="button"
-                  onClick={loadBackendHistory}
-                  className="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated border border-border text-txt-secondary hover:text-txt-primary transition-fast cursor-pointer focus-ring"
-                >
-                  <HistoryIcon className="w-3.5 h-3.5" /> Previous conversation history ({backendHistory.length} saved)
-                </button>
-              )}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
-                {QUICK_PROMPTS.map(({ icon: Icon, label, prompt }) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => sendMessage(prompt)}
-                    className="flex items-center gap-2 px-3 py-2 rounded-md text-xs transition-fast cursor-pointer bg-canvas-surface hover:bg-canvas-elevated border border-border text-txt-secondary hover:text-txt-primary text-left focus-ring"
-                  >
-                    <Icon className="w-3.5 h-3.5 text-accent shrink-0" />
-                    <span className="truncate">{label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Input Area */}
-        <div className="px-4 md:px-8 pb-4 pt-2 bg-canvas-base border-t border-border-subtle">
-          <div className="max-w-4xl mx-auto">
+        {/* Composer */}
+        <div className="px-4 md:px-6 pb-4 pt-2 bg-canvas-base border-t border-border-subtle shrink-0">
+          <div className="max-w-3xl mx-auto">
+            {/* Attachment preview */}
             {attachment && (
-              <div className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-md text-xs bg-canvas-surface border border-border">
+              <div className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-lg text-xs bg-canvas-surface border border-border">
                 <Paperclip className="w-3.5 h-3.5 text-accent" />
-                <span className="truncate text-txt-primary">{attachment.name}</span>
+                <span className="truncate flex-1 text-paper-100">{attachment.name}</span>
                 <button
                   type="button"
                   onClick={() => setAttachment(null)}
-                  className="ml-auto px-1.5 py-0.5 rounded-xs text-[10px] text-txt-muted hover:text-txt-primary cursor-pointer hover:bg-canvas-elevated"
+                  className="px-1.5 py-0.5 rounded text-[10px] text-ink-muted hover:text-paper-100 cursor-pointer hover:bg-canvas-elevated"
                 >
-                  ✕ remove
+                  ✕
                 </button>
               </div>
             )}
-            <div
-              className="relative rounded-xl bg-canvas-surface border border-border focus-within:border-border-focus focus-within:shadow-md transition-fast"
-            >
+
+            {/* Input box */}
+            <div className="relative rounded-xl bg-canvas-surface border border-border focus-within:border-accent/40 focus-within:shadow-sm transition-fast">
               <textarea
                 ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                rows={Math.min(5, Math.max(1, input.split('\n').length))}
-                placeholder="Ask AI-Dost anything, generate code, or orchestrate agent... (Enter = send, Shift+Enter = newline)"
-                className="w-full bg-transparent resize-none text-sm focus:outline-none placeholder:text-txt-muted text-txt-primary leading-relaxed px-4 pt-3 pb-2 font-sans"
+                rows={Math.min(4, Math.max(1, input.split('\n').length))}
+                placeholder="Ask AI-Dost anything…"
+                className="w-full bg-transparent resize-none text-sm focus:outline-none placeholder:text-ink-muted text-paper-100 leading-relaxed px-4 pt-3.5 pb-2 font-sans"
               />
               <input
                 ref={fileInputRef}
@@ -1312,34 +1068,26 @@ export default function ChatView({
                 className="hidden"
                 onChange={handleFileSelect}
               />
-              <div className="flex items-center justify-between px-3 pb-2.5 pt-1 border-t border-border-subtle select-none">
-                <div className="flex items-center gap-1.5">
-                  <select
-                    value={model}
-                    onChange={handleModelChange}
-                    title="Select model"
-                    className="px-2 py-1 rounded-sm text-xs font-medium bg-canvas-elevated border border-border text-txt-secondary cursor-pointer focus:outline-none"
-                  >
-                    {MODEL_OPTIONS.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </select>
+
+              {/* Toolbar */}
+              <div className="flex items-center justify-between px-3 pb-2.5 pt-1 select-none">
+                <div className="flex items-center gap-1">
+                  {/* Attach */}
                   <button
                     type="button"
                     onClick={() => fileInputRef.current && fileInputRef.current.click()}
                     title="Attach file"
-                    className="p-1.5 rounded-sm hover:bg-canvas-elevated text-txt-muted hover:text-txt-primary transition-fast cursor-pointer focus-ring"
+                    className="p-1.5 rounded-lg hover:bg-canvas-elevated text-ink-muted hover:text-paper-200 transition-fast cursor-pointer focus-ring"
                   >
                     <Paperclip className="w-4 h-4" />
                   </button>
+                  {/* Voice */}
                   {onOpenVoice && (
                     <button
                       type="button"
                       onClick={onOpenVoice}
                       title="Voice input"
-                      className="p-1.5 rounded-sm hover:bg-canvas-elevated text-txt-muted hover:text-accent transition-fast cursor-pointer focus-ring"
+                      className="p-1.5 rounded-lg hover:bg-canvas-elevated text-ink-muted hover:text-accent transition-fast cursor-pointer focus-ring"
                     >
                       <Mic className="w-4 h-4" />
                     </button>
@@ -1347,48 +1095,35 @@ export default function ChatView({
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-txt-muted hidden sm:inline">
-                    <kbd className="font-mono">Enter</kbd> to send
-                  </span>
+                  {/* Model selector */}
+                  <select
+                    value={model}
+                    onChange={handleModelChange}
+                    title="Select model"
+                    className="px-2 py-1 rounded-lg text-[11px] font-medium bg-canvas-elevated border border-border text-ink-muted cursor-pointer focus:outline-none transition-fast"
+                  >
+                    {MODEL_OPTIONS.map((m) => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                  </select>
+                  {/* Send */}
                   <button
                     type="button"
                     onClick={() => sendMessage()}
                     disabled={!input.trim() || thinking}
-                    title="Send message"
-                    className="flex items-center justify-center w-8 h-8 rounded-md bg-accent text-white hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-fast cursor-pointer shadow-xs focus-ring"
+                    title="Send (Enter)"
+                    className="flex items-center justify-center w-8 h-8 rounded-lg bg-accent text-black hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed transition-fast cursor-pointer shadow-sm focus-ring"
                   >
                     <Send className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
             </div>
-            <div className="flex items-center justify-between gap-3 mt-2 px-1 text-[11px] text-txt-muted">
-              <span>AI-Dost • Live Artifacts Canvas & Code Execution Active</span>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={exportMarkdown}
-                  title="Export Markdown"
-                  className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[11px] text-txt-muted hover:text-txt-primary border border-border hover:bg-canvas-surface transition-fast cursor-pointer"
-                >
-                  <FileDown className="w-3 h-3" /> .md
-                </button>
-                <button
-                  type="button"
-                  onClick={exportPdf}
-                  title="Export PDF"
-                  className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[11px] text-txt-muted hover:text-txt-primary border border-border hover:bg-canvas-surface transition-fast cursor-pointer"
-                >
-                  <Download className="w-3 h-3" /> PDF
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       </div>
 
-
-      {/* Right / Claude-Style Live Artifacts Canvas (Split Screen) */}
+      {/* Artifact canvas (split screen) */}
       <AnimatePresence>
         {activeArtifact && (
           <ChatArtifactsCanvas

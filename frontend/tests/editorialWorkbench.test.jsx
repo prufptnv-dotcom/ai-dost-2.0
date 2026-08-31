@@ -36,15 +36,15 @@ describe('Phase 3 Rebuild — Editorial Workbench Design Architecture', () => {
         />
       );
 
-      expect(screen.getByTitle('Chat')).toBeInTheDocument();
-      expect(screen.getByTitle('Agent')).toBeInTheDocument();
-      expect(screen.getByTitle('IDE')).toBeInTheDocument();
+      expect(screen.getByLabelText(/AI-Dost home/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/New chat/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/Search chats/i)).toBeInTheDocument();
 
-      const agentBtn = screen.getByTitle('Agent');
-      fireEvent.click(agentBtn);
-      expect(onSelect).toHaveBeenCalledWith('agent');
+      const settingsBtn = screen.getByLabelText(/Settings/i);
+      fireEvent.click(settingsBtn);
+      expect(onSelect).toHaveBeenCalledWith('settings');
 
-      const newBtn = screen.getByTitle('New Conversation / Task');
+      const newBtn = screen.getByLabelText(/New chat/i);
       fireEvent.click(newBtn);
       expect(onNew).toHaveBeenCalledTimes(1);
     });

@@ -1,51 +1,64 @@
 :root {
-  /* ─── Editorial Workbench — Ink & Paper Palette (Dark Default) ─── */
-  --ink-950: #11100f;
-  --ink-900: #171614;
-  --ink-850: #1e1c1a;
-  --ink-800: #262320;
-  --ink-700: #3b3834;
-  --ink-500: #77716a;
+  /* ─── Dark Bento & Cyber/Operational Palette (Void Black 60% / Card Black 30% / Lime+Rust 10%) ─── */
+  --bg-void: #0a0a0b;
+  --bg-card: #151519;
+  --bg-card-elevated: #1e1e24;
+  --bg-card-hover: #23232a;
 
-  --paper-100: #f4f0e8;
-  --paper-200: #ded8cc;
-  --paper-300: #b7afa2;
-  --paper-400: #8c8477;
+  --ink-950: #0a0a0b;
+  --ink-900: #121216;
+  --ink-850: #18181d;
+  --ink-800: #222228;
+  --ink-700: #32323c;
+  --ink-500: #71717a;
 
-  /* ─── Brand Terracotta Accent ─── */
-  --accent-primary: #d45b3f;
-  --accent-primary-strong: #b8452f;
-  --accent-subtle: rgba(212, 91, 63, 0.12);
-  --accent-border: rgba(212, 91, 63, 0.28);
+  --paper-100: #ffffff;
+  --paper-200: #e4e4e7;
+  --paper-300: #a1a1aa;
+  --paper-400: #71717a;
 
-  /* ─── Muted Signal / Status Colors ─── */
-  --signal-success: #5c8b6b;
-  --signal-success-subtle: rgba(92, 139, 107, 0.12);
-  --signal-warning: #b78945;
-  --signal-warning-subtle: rgba(183, 137, 69, 0.12);
-  --signal-error: #b9574e;
-  --signal-error-subtle: rgba(185, 87, 78, 0.12);
-  --signal-info: #5d7895;
-  --signal-info-subtle: rgba(93, 120, 149, 0.12);
+  /* ─── Bioluminescent Lime (Primary Accent 10%) ─── */
+  --primary-lime: #d9ff5a;
+  --primary-lime-glow: rgba(217, 255, 90, 0.18);
+  --accent-primary: #d9ff5a;
+  --accent-primary-strong: #c4ea48;
+  --accent-subtle: rgba(217, 255, 90, 0.12);
+  --accent-border: rgba(217, 255, 90, 0.28);
 
-  /* ─── Semantic Aliases (Dark) ─── */
-  --color-canvas-base: var(--ink-950);
-  --color-canvas-subtle: var(--ink-900);
-  --color-canvas-surface: var(--ink-850);
-  --color-canvas-elevated: var(--ink-800);
-  --color-canvas-overlay: var(--ink-700);
+  /* ─── Cyber Rust Orange (Secondary Accent / Deploy / Alerts) ─── */
+  --secondary-rust: #ff4d12;
+  --secondary-rust-glow: rgba(255, 77, 18, 0.22);
+  --signal-error: #ff4d12;
+  --signal-error-subtle: rgba(255, 77, 18, 0.14);
 
-  --color-border-subtle: rgba(244, 240, 232, 0.05);
-  --color-border-default: rgba(244, 240, 232, 0.09);
-  --color-border-strong: rgba(244, 240, 232, 0.16);
-  --color-border-focus: var(--accent-primary);
+  /* ─── Vivid Operational Signals ─── */
+  --signal-success: #d9ff5a;
+  --signal-success-subtle: rgba(217, 255, 90, 0.14);
+  --signal-warning: #fbbf24;
+  --signal-warning-subtle: rgba(251, 191, 36, 0.14);
+  --signal-info: #38bdf8;
+  --signal-info-subtle: rgba(56, 189, 248, 0.14);
+  --signal-purple: #c084fc;
+  --signal-purple-subtle: rgba(192, 132, 252, 0.14);
 
-  --color-text-primary: var(--paper-100);
-  --color-text-secondary: var(--paper-200);
-  --color-text-muted: var(--paper-300);
-  --color-text-disabled: var(--ink-500);
+  /* ─── Semantic Aliases (Dark Bento) ─── */
+  --color-canvas-base: #0a0a0b;
+  --color-canvas-subtle: #121216;
+  --color-canvas-surface: #18181d;
+  --color-canvas-elevated: #222228;
+  --color-canvas-overlay: #2a2a32;
 
-  --color-accent: var(--accent-primary);
+  --color-border-subtle: rgba(255, 255, 255, 0.06);
+  --color-border-default: rgba(255, 255, 255, 0.09);
+  --color-border-strong: rgba(255, 255, 255, 0.18);
+  --color-border-focus: var(--primary-lime);
+
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #e4e4e7;
+  --color-text-muted: #a1a1aa;
+  --color-text-disabled: #52525b;
+
+  --color-accent: var(--primary-lime);
   --color-accent-hover: var(--accent-primary-strong);
   --color-accent-subtle: var(--accent-subtle);
   --color-accent-border: var(--accent-border);
@@ -59,21 +72,23 @@
   --color-status-info: var(--signal-info);
   --color-status-info-subtle: var(--signal-info-subtle);
 
-  /* ─── Geometry (Restrained Architectural Scale) ─── */
-  --radius-xs: 2px;
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 10px;
+  /* ─── Bento Geometry & Elevation Scale ─── */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
   --radius-full: 9999px;
 
-  /* ─── Physical Elevation Shadows (No Glows) ─── */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.35);
-  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--color-border-subtle);
-  --shadow-lg: 0 8px 24px -4px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--color-border-default);
-  --shadow-modal: 0 16px 40px -8px rgba(0, 0, 0, 0.8), 0 0 0 1px var(--color-border-strong);
+  /* ─── Bento Glass Shadows & Bioluminescent Glows ─── */
+  --shadow-sm: 0 2px 8px -2px rgba(0, 0, 0, 0.6);
+  --shadow-md: 0 8px 24px -6px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--color-border-subtle);
+  --shadow-lg: 0 12px 32px -4px rgba(0, 0, 0, 0.8), 0 0 0 1px var(--color-border-default);
+  --shadow-lime: 0 0 20px rgba(217, 255, 90, 0.16);
+  --shadow-rust: 0 0 20px rgba(255, 77, 18, 0.20);
+  --shadow-modal: 0 20px 50px -10px rgba(0, 0, 0, 0.9), 0 0 0 1px var(--color-border-strong);
 
-  /* ─── Motion Timings & Restrained Curves ─── */
+  /* ─── Motion Timings & Curves ─── */
   --motion-fast: 120ms;
   --motion-normal: 200ms;
   --motion-slow: 300ms;
@@ -82,26 +97,26 @@
 
 /* Light Theme Variables */
 body.light-theme, [data-theme="light"] {
-  --color-canvas-base: #fbfaf7;
-  --color-canvas-subtle: #f3f0e9;
+  --color-canvas-base: #f4f4f5;
+  --color-canvas-subtle: #e4e4e7;
   --color-canvas-surface: #ffffff;
   --color-canvas-elevated: #ffffff;
-  --color-canvas-overlay: #e6e0d6;
+  --color-canvas-overlay: #d4d4d8;
 
-  --color-border-subtle: rgba(23, 22, 20, 0.05);
-  --color-border-default: rgba(23, 22, 20, 0.10);
-  --color-border-strong: rgba(23, 22, 20, 0.18);
-  --color-border-focus: #c44e35;
+  --color-border-subtle: rgba(10, 10, 11, 0.06);
+  --color-border-default: rgba(10, 10, 11, 0.12);
+  --color-border-strong: rgba(10, 10, 11, 0.20);
+  --color-border-focus: #4d7c0f;
 
-  --color-text-primary: #171614;
-  --color-text-secondary: #3b3834;
-  --color-text-muted: #77716a;
-  --color-text-disabled: #b7afa2;
+  --color-text-primary: #09090b;
+  --color-text-secondary: #27272a;
+  --color-text-muted: #71717a;
+  --color-text-disabled: #a1a1aa;
 
-  --color-accent: #c44e35;
-  --color-accent-hover: #a83d27;
-  --color-accent-subtle: rgba(196, 78, 53, 0.08);
-  --color-accent-border: rgba(196, 78, 53, 0.22);
+  --color-accent: #65a30d;
+  --color-accent-hover: #4d7c0f;
+  --color-accent-subtle: rgba(101, 163, 13, 0.12);
+  --color-accent-border: rgba(101, 163, 13, 0.25);
 
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
   --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.06), 0 0 0 1px var(--color-border-default);
