@@ -187,3 +187,35 @@ code, pre, .font-mono {
   font-family: var(--font-mono);
   font-size: 0.8125rem;
 }
+
+/* Smart Workspace — adaptive navigation and visual hierarchy */
+.aidost-sidebar {
+  transition: width var(--motion-normal) var(--motion-ease);
+}
+.aidost-app button,
+.aidost-app input,
+.aidost-app textarea,
+.aidost-app select {
+  -webkit-tap-highlight-color: transparent;
+}
+.aidost-app :where(button:not([disabled])) {
+  touch-action: manipulation;
+}
+@media (max-width: 900px) {
+  .aidost-sidebar { width: 68px; }
+  .aidost-sidebar button span.flex-1,
+  .aidost-sidebar button kbd,
+  .aidost-sidebar > div:first-child button > span + span,
+  .aidost-sidebar > div:last-child > div:first-child,
+  .aidost-sidebar > div:last-child button:not(:last-child) { display: none; }
+  .aidost-sidebar nav section > div:first-child { display: none; }
+  .aidost-sidebar nav { padding-left: 8px; padding-right: 8px; }
+  .aidost-sidebar nav section { margin-bottom: 12px; }
+  .aidost-sidebar nav section > div:last-child button { justify-content: center; padding-left: 0; padding-right: 0; }
+  .aidost-sidebar nav section > div:last-child button > span.w-7 { margin: 0; }
+}
+@media (max-width: 520px) {
+  .aidost-sidebar { width: 58px; }
+  .aidost-sidebar > div:first-child { padding-left: 10px; padding-right: 10px; }
+  .aidost-sidebar > div:first-child button > span:first-child { width: 34px; height: 34px; }
+}
