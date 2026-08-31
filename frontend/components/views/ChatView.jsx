@@ -304,8 +304,8 @@ function MessageBubble({
         >
           {isStreaming && msg.content.length === 0 ? (
             <div className="flex items-center gap-2 py-1">
-              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-              <span className="text-xs text-slate-300">AI-Dost response stream kar raha hai...</span>
+              <span className="w-2 h-2 rounded-full bg-accent animate-ping" />
+              <span className="text-xs text-paper-300">AI-Dost response stream kar raha hai...</span>
             </div>
           ) : isStreaming ? (
             <div>
@@ -314,7 +314,7 @@ function MessageBubble({
                 className="prose-chat"
                 dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
               />
-              <span className="inline-block w-2 h-4 ml-1 bg-cyan-400 animate-pulse align-middle" />
+              <span className="inline-block w-2 h-4 ml-1 bg-accent animate-pulse align-middle" />
             </div>
           ) : (
             <div
@@ -326,14 +326,14 @@ function MessageBubble({
 
           {/* Claude-Style Live Artifact Preview Trigger */}
           {detectedArtifact && (
-            <div className="mt-3 pt-2.5 border-t border-white/10 flex items-center justify-between gap-2">
+            <div className="mt-3 pt-2.5 border-t border-border-subtle flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <LayoutTemplate className="w-4 h-4 text-purple-400 animate-pulse" />
-                <span className="text-xs font-semibold text-purple-300">Interactive Canvas Ready</span>
+                <LayoutTemplate className="w-4 h-4 text-accent animate-pulse" />
+                <span className="text-xs font-semibold text-accent">Interactive Canvas Ready</span>
               </div>
               <button
                 onClick={() => onOpenArtifact && onOpenArtifact(detectedArtifact)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-purple-600/30 hover:bg-purple-600/40 border border-purple-500/50 text-purple-200 transition-all cursor-pointer shadow-lg hover:scale-[1.02]"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-accent-subtle hover:bg-purple-600/40 border border-accent-border text-paper-200 transition-all cursor-pointer shadow-md hover:scale-[1.02]"
               >
                 <Eye className="w-3.5 h-3.5" />
                 <span>Live Canvas Kholo</span>
@@ -343,10 +343,10 @@ function MessageBubble({
 
           {/* Quick Action Navigation Chip */}
           {msg.navView && (
-            <div className="mt-3 pt-2.5 border-t border-white/10">
+            <div className="mt-3 pt-2.5 border-t border-border-subtle">
               <button
                 onClick={() => onNavigate && onNavigate(msg.navView)}
-                className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-400/40 hover:bg-blue-500/30 transition-all cursor-pointer shadow-lg"
+                className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-accent-subtle text-paper-200 border border-accent-border hover:bg-blue-500/30 transition-all cursor-pointer shadow-md"
               >
                 <span>👉 {msg.navLabel || msg.navView} me chalein</span>
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -358,7 +358,7 @@ function MessageBubble({
           {msg.attachments && msg.attachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-2">
               {msg.attachments.map((n, i) => (
-                <span key={i} className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg bg-blue-500/15 border border-blue-400/30 text-blue-300">
+                <span key={i} className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg bg-blue-500/15 border border-accent-border text-paper-200">
                   <Paperclip className="w-2.5 h-2.5" /> {n}
                 </span>
               ))}
@@ -367,7 +367,7 @@ function MessageBubble({
 
           {/* Search sources with Favicons */}
           {!isStreaming && msg.sources && msg.sources.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-2.5 pt-2.5 border-t border-white/10">
+            <div className="flex flex-wrap gap-1.5 mt-2.5 pt-2.5 border-t border-border-subtle">
               {msg.sources.map((s, i) => {
                 let domain = '';
                 try { domain = new URL(s.url).hostname; } catch (_) {}
@@ -377,10 +377,10 @@ function MessageBubble({
                     href={s.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-[10px] px-2.5 py-1.5 rounded-xl flex items-center gap-2 max-w-[240px] truncate bg-blue-500/10 border border-blue-400/30 text-blue-300 hover:bg-blue-500/20 transition-colors shadow-sm"
+                    className="text-[10px] px-2.5 py-1.5 rounded-lg flex items-center gap-2 max-w-[240px] truncate bg-accent-subtle border border-accent-border text-paper-200 hover:bg-accent-subtle transition-colors shadow-sm"
                     title={s.url}
                   >
-                    <Globe className="w-3 h-3 text-blue-400 shrink-0" />
+                    <Globe className="w-3 h-3 text-accent shrink-0" />
                     <span className="truncate">[{i + 1}] {s.title || domain}</span>
                     <ExternalLink className="w-2.5 h-2.5 shrink-0 opacity-70" />
                   </a>
@@ -401,7 +401,7 @@ function MessageBubble({
 
         {/* Action Toolbar */}
         {!isUser && !isStreaming && (
-          <div className="flex items-center gap-1 mt-1.5 px-1 bg-white/5 rounded-lg border border-white/5 py-0.5">
+          <div className="flex items-center gap-1 mt-1.5 px-1 bg-canvas-surface/70 rounded-lg border border-border-subtle py-0.5">
             {[
               { icon: Copy, fn: copyText, title: 'Copy' },
               { icon: Volume2, fn: speak, title: 'Read aloud' },
@@ -416,9 +416,9 @@ function MessageBubble({
                 key={i}
                 onClick={fn}
                 title={title}
-                className="w-6 h-6 rounded-md flex items-center justify-center transition-colors cursor-pointer hover:bg-white/15 text-slate-400 hover:text-slate-200"
+                className="w-6 h-6 rounded-md flex items-center justify-center transition-colors cursor-pointer hover:bg-white/15 text-ink-muted hover:text-paper-200"
               >
-                {title === 'Copy' && copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Icon className="w-3 h-3" />}
+                {title === 'Copy' && copied ? <Check className="w-3 h-3 text-status-success" /> : <Icon className="w-3 h-3" />}
               </button>
             ))}
           </div>
@@ -428,7 +428,7 @@ function MessageBubble({
             <button
               onClick={() => onEdit && onEdit(msg)}
               title="Edit message"
-              className="w-6 h-6 rounded-md flex items-center justify-center transition-colors cursor-pointer hover:bg-white/10 text-slate-400"
+              className="w-6 h-6 rounded-md flex items-center justify-center transition-colors cursor-pointer hover:bg-canvas-elevated text-ink-muted"
             >
               <Pencil className="w-3 h-3" />
             </button>
@@ -456,7 +456,7 @@ function DeepAnalyzing() {
   );
 }
 
-export default function ChatView({
+/* Smart Chat Visual System */\nexport default function ChatView({
   model = 'auto',
   thinking: thinkingProp,
   setIsThinking: setIsThinkingProp,
@@ -1088,7 +1088,7 @@ export default function ChatView({
                         <div
                           key={s.id}
                           className={`flex items-center gap-1.5 px-3 py-2 cursor-pointer transition-fast ${
-                            s.id === sessionId ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-white/5 text-txt-secondary'
+                            s.id === sessionId ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-canvas-surface/70 text-txt-secondary'
                           }`}
                         >
                           <span
@@ -1099,8 +1099,8 @@ export default function ChatView({
                           </span>
                           {s.id !== 'default' && (
                             <div className="flex items-center gap-1">
-                              <button onClick={() => renameSession(s.id)} title="Rename" className="p-1 rounded-xs hover:bg-white/10 cursor-pointer text-[10px] text-txt-muted hover:text-txt-primary">✏️</button>
-                              <button onClick={() => deleteSession(s.id)} title="Delete" className="p-1 rounded-xs hover:bg-white/10 cursor-pointer text-[10px] text-txt-muted hover:text-status-error">🗑️</button>
+                              <button onClick={() => renameSession(s.id)} title="Rename" className="p-1 rounded-xs hover:bg-canvas-elevated cursor-pointer text-[10px] text-txt-muted hover:text-txt-primary">✏️</button>
+                              <button onClick={() => deleteSession(s.id)} title="Delete" className="p-1 rounded-xs hover:bg-canvas-elevated cursor-pointer text-[10px] text-txt-muted hover:text-status-error">🗑️</button>
                             </div>
                           )}
                         </div>
@@ -1163,7 +1163,7 @@ export default function ChatView({
             {/* Variants panel */}
             {variants && variants.items.length > 0 && !thinking && (
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="pt-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest mb-2 text-slate-400">
+                <p className="text-[10px] font-bold uppercase tracking-widest mb-2 text-ink-muted">
                   ✨ 3 Variants Available
                 </p>
                 <div className="space-y-2">
@@ -1171,9 +1171,9 @@ export default function ChatView({
                     <button
                       key={i}
                       onClick={() => applyVariant(v)}
-                      className="w-full text-left px-3.5 py-2.5 rounded-xl text-xs transition-all cursor-pointer hover:bg-white/10 bg-white/5 border border-white/10 text-slate-200"
+                      className="w-full text-left px-3.5 py-2.5 rounded-lg text-xs transition-all cursor-pointer hover:bg-canvas-elevated bg-canvas-surface/70 border border-border-subtle text-paper-200"
                     >
-                      <span className="font-bold mr-1.5 text-purple-400">Option {i + 1}:</span>
+                      <span className="font-bold mr-1.5 text-accent">Option {i + 1}:</span>
                       {v.slice(0, 240)}
                     </button>
                   ))}
@@ -1192,10 +1192,10 @@ export default function ChatView({
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0 }}
-                  className="pt-3 border-t border-white/5"
+                  className="pt-3 border-t border-border-subtle"
                 >
-                  <p className="text-[11px] font-semibold text-slate-400 mb-2 flex items-center gap-1.5">
-                    <Lightbulb className="w-3.5 h-3.5 text-yellow-400" />
+                  <p className="text-[11px] font-semibold text-ink-muted mb-2 flex items-center gap-1.5">
+                    <Lightbulb className="w-3.5 h-3.5 text-status-warning" />
                     Suggested follow-ups
                   </p>
                   <div className="flex flex-wrap gap-2">
@@ -1203,7 +1203,7 @@ export default function ChatView({
                       <button
                         key={q}
                         onClick={() => sendMessage(q)}
-                        className="px-3.5 py-1.5 rounded-full text-xs font-medium transition-all cursor-pointer hover:scale-[1.02] bg-blue-500/10 border border-blue-400/25 text-blue-300 hover:bg-blue-500/20"
+                        className="px-3.5 py-1.5 rounded-full text-xs font-medium transition-all cursor-pointer hover:scale-[1.02] bg-accent-subtle border border-blue-400/25 text-paper-200 hover:bg-accent-subtle"
                       >
                         {q}
                       </button>
@@ -1222,20 +1222,20 @@ export default function ChatView({
                   exit={{ opacity: 0 }}
                   className="pt-2"
                 >
-                  <p className="text-[11px] font-semibold text-slate-400 mb-2">
+                  <p className="text-[11px] font-semibold text-ink-muted mb-2">
                     ⚡ Chaho to poora project Copilot IDE me open karo
                   </p>
                   <div className="flex flex-wrap gap-2">
                     <button
                       onClick={() => onNavigate && onNavigate('copilot')}
-                      className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-blue-600/20 border border-blue-500/40 text-blue-300 hover:bg-blue-600/30 transition-all cursor-pointer"
+                      className="flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold bg-blue-600/20 border border-accent-border text-paper-200 hover:bg-blue-600/30 transition-all cursor-pointer"
                     >
                       <span>⚡ Copilot IDE me open karo</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => onNavigate && onNavigate('agent')}
-                      className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-purple-600/20 border border-purple-500/40 text-purple-300 hover:bg-purple-600/30 transition-all cursor-pointer"
+                      className="flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold bg-accent-subtle border border-accent-border text-accent hover:bg-accent-subtle transition-all cursor-pointer"
                     >
                       <span>🤖 Autonomous Agent se banao</span>
                       <ArrowRight className="w-3.5 h-3.5" />
@@ -1294,7 +1294,7 @@ export default function ChatView({
               </div>
             )}
             <div
-              className="relative rounded-xl bg-canvas-surface border border-border focus-within:border-border-focus focus-within:shadow-md transition-fast"
+              className="relative rounded-lg bg-canvas-surface border border-border focus-within:border-border-focus focus-within:shadow-md transition-fast"
             >
               <textarea
                 ref={inputRef}
@@ -1398,11 +1398,3 @@ export default function ChatView({
           />
         )}
       </AnimatePresence>
-
-      {/* Image lightbox */}
-      {lightboxUrl && (
-        <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
-      )}
-    </div>
-  );
-}
