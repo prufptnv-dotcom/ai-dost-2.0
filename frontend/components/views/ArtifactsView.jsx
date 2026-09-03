@@ -6,6 +6,7 @@ import {
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { EmptyState } from '../ui/EmptyState';
+import { SkeletonTableRow } from '../ui/Skeleton';
 
 export default function ArtifactsView({ onToast }) {
   const [artifacts, setArtifacts] = useState([]);
@@ -75,8 +76,10 @@ export default function ArtifactsView({ onToast }) {
 
         {/* Editorial Table / List */}
         {loading ? (
-          <div className="p-8 text-center text-xs text-ink-muted bg-canvas-surface border border-border rounded-sm">
-            Loading shelf artifacts...
+          <div className="rounded-sm border border-border bg-canvas-surface overflow-hidden divide-y divide-border-subtle shadow-sm">
+            <SkeletonTableRow />
+            <SkeletonTableRow />
+            <SkeletonTableRow />
           </div>
         ) : artifacts.length === 0 ? (
           <EmptyState

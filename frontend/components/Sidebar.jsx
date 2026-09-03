@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   MessageSquare, Bot, Code2, FolderOpen, Mic, Compass,
   Image as ImageIcon, FileText, History, Settings, Plus,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, Layers
 } from 'lucide-react';
 import BrandLogo from './ui/BrandLogo';
 
@@ -23,6 +23,7 @@ const NAV_GROUPS = [
     title: 'Projects & Artifacts',
     items: [
       { id: 'projects', label: 'Projects', icon: FolderOpen, badge: null },
+      { id: 'research', label: 'Research', icon: Compass, badge: 'New' },
       { id: 'images', label: 'Images', icon: ImageIcon, badge: null },
       { id: 'resume', label: 'Resume', icon: FileText, badge: null },
     ],
@@ -31,7 +32,7 @@ const NAV_GROUPS = [
     title: 'Tools & System',
     items: [
       { id: 'voice', label: 'Voice', icon: Mic, badge: 'Live' },
-      { id: 'mcp', label: 'MCP Connectors', icon: Compass, badge: null },
+      { id: 'mcp', label: 'MCP Connectors', icon: Layers, badge: null },
       { id: 'history', label: 'History', icon: History, badge: null },
       { id: 'settings', label: 'Settings', icon: Settings, badge: null },
     ],

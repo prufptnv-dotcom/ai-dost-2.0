@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
+import { Modal } from '../ui/Modal';
 
 const MODEL_OPTIONS = [
   { value: 'auto', label: 'Auto Multi-Model Cascade (Gemini → Groq → OpenRouter)' },
@@ -27,6 +28,7 @@ export default function SettingsView({ onToast, onModelChange }) {
   const [model, setModel] = useState('auto');
   const [autosave, setAutosave] = useState(true);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -56,13 +58,13 @@ export default function SettingsView({ onToast, onModelChange }) {
     if (onToast) onToast('Settings saved locally', 'success');
   };
 
-  const resetAll = () => {
-    if (!window.confirm('Reset all custom API keys and model preferences?')) return;
+  const confirmResetAll = () => {
     ['GEMINI_API_KEY', 'GROQ_API_KEY', 'OLLAMA_MODEL', 'TAVILY_API_KEY', 'ai_dost_model'].forEach((k) =>
       localStorage.removeItem(k)
     );
     setKeys({ GEMINI_API_KEY: '', GROQ_API_KEY: '', OLLAMA_MODEL: 'qwen2.5-coder:7b', TAVILY_API_KEY: '' });
     setModel('auto');
+    setShowResetConfirm(false);
     if (onToast) onToast('Settings reset to defaults', 'success');
   };
 
@@ -85,7 +87,7 @@ export default function SettingsView({ onToast, onModelChange }) {
               variant="secondary"
               size="sm"
               icon={RotateCcw}
-              onClick={resetAll}
+              onClick={() => setShowResetConfirm(true)}
             >
               Reset
             </Button>
@@ -214,6 +216,38 @@ export default function SettingsView({ onToast, onModelChange }) {
           </div>
         </div>
       </div>
+
+      {/* Reset Confirmation Modal */}
+      <Modal
+        isOpen={showResetConfirm}
+        onClose={() => setShowResetConfirm(false)}
+        title="Reset All Settings"
+        subtitle="This action will restore default workspace configurations."
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-ink-muted leading-relaxed">
+            Are you sure you want to reset all custom API keys (Gemini, Groq, Tavily) and inference model preferences? Any keys stored in local storage will be cleared.
+          </p>
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowResetConfirm(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              icon={RotateCcw}
+              onClick={confirmResetAll}
+            >
+              Reset to Defaults
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

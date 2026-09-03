@@ -244,6 +244,7 @@ function SpecWizard({ BACKEND, onToast, onSpecComplete, initialIntent, initialAn
   const [specId, setSpecId] = useState(null);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [stepData, setStepData] = useState({});
+  const [stepInfo, setStepInfo] = useState(null);
   const [answers, setAnswers] = useState(initialAnswers || {});
   const [spec, setSpec] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -266,7 +267,8 @@ function SpecWizard({ BACKEND, onToast, onSpecComplete, initialIntent, initialAn
       if (!res.ok) throw new Error(data.error || 'Failed to start spec');
       setSpecId(data.specId);
       setSpec(data.spec);
-      setCurrentStepIndex(data.step?.stepNumber - 1 || 0);
+      setStepInfo(data.step || null);
+      setCurrentStepIndex(data.step?.stepNumber ? data.step.stepNumber - 1 : 0);
       setStepData(data.step?.fields?.reduce((acc, f) => ({ ...acc, [f.key]: f.value }), {}) || {});
       setPhase('wizard');
     } catch (e) {
@@ -278,8 +280,8 @@ function SpecWizard({ BACKEND, onToast, onSpecComplete, initialIntent, initialAn
   }, [BACKEND, initialAnswers]);
 
   useEffect(() => {
-    if (initialIntent && phase === 'loading') {
-      startWizard(initialIntent);
+    if (phase === 'loading') {
+      startWizard(initialIntent || 'Modern Full-Stack Web Application');
     }
   }, [initialIntent, phase, startWizard]);
 
@@ -306,8 +308,9 @@ function SpecWizard({ BACKEND, onToast, onSpecComplete, initialIntent, initialAn
         setSpec(data.spec);
         setPhase('review');
       } else {
-        setCurrentStepIndex(data.step.stepNumber - 1);
-        setStepData(data.step.fields.reduce((acc, f) => ({ ...acc, [f.key]: f.value }), {}));
+        if (data.step) setStepInfo(data.step);
+        setCurrentStepIndex(data.step?.stepNumber ? data.step.stepNumber - 1 : currentStepIndex + 1);
+        setStepData(data.step?.fields ? data.step.fields.reduce((acc, f) => ({ ...acc, [f.key]: f.value }), {}) : {});
       }
     } catch (e) {
       setError(e.message);
@@ -473,30 +476,30 @@ function SpecWizard({ BACKEND, onToast, onSpecComplete, initialIntent, initialAn
       </div>
 
       <div className="flex-1 overflow-y-auto max-w-3xl mx-auto px-6 py-6 space-y-5 w-full" ref={scrollRef}>
-        {currentStepDef && currentStep && (
+        {(stepInfo || currentStepDef) && (
           <div className="space-y-5">
             <div className="rounded-2xl p-4" style={{ background: 'rgba(75,139,252,0.06)', border: '1px solid rgba(75,139,252,0.25)' }}>
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4" style={{ color: 'var(--color-primary)' }} />
-                <span className="text-xs font-bold" style={{ color: 'var(--color-text-primary)' }}>Step {currentStepIndex + 1} of {SPEC_STEPS.length}: {currentStepDef.title}</span>
+                <span className="text-xs font-bold" style={{ color: 'var(--color-text-primary)' }}>Step {currentStepIndex + 1} of {SPEC_STEPS.length}: {stepInfo?.title || currentStepDef?.title}</span>
               </div>
               <p className="text-[11px] mt-1.5 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                {currentStepDef.id === 'overview' && 'Tell us about your project — AI will suggest smart defaults.'}
-                {currentStepDef.id === 'features' && 'Pick the features you need. AI suggests based on your project type.'}
-                {currentStepDef.id === 'tech' && 'Choose your stack. AI recommends based on features.'}
-                {currentStepDef.id === 'design' && 'Define the look & feel. AI suggests colors/pages for your category.'}
-                {currentStepDef.id === 'constraints' && 'Optional: budget, timeline, team — helps AI optimize.'}
+                {(stepInfo?.id || currentStepDef?.id) === 'overview' && 'Tell us about your project — AI will suggest smart defaults.'}
+                {(stepInfo?.id || currentStepDef?.id) === 'features' && 'Pick the features you need. AI suggests based on your project type.'}
+                {(stepInfo?.id || currentStepDef?.id) === 'tech' && 'Choose your stack. AI recommends based on features.'}
+                {(stepInfo?.id || currentStepDef?.id) === 'design' && 'Define the look & feel. AI suggests colors/pages for your category.'}
+                {(stepInfo?.id || currentStepDef?.id) === 'constraints' && 'Optional: budget, timeline, team — helps AI optimize.'}
               </p>
             </div>
 
             <div className="space-y-4">
-              {currentStepDef.fields.map((field) => (
+              {(stepInfo?.fields || currentStepDef?.fields || []).map((field) => (
                 <Field
                   key={field.key}
                   field={field}
                   value={stepData[field.key] ?? field.default ?? ''}
                   onChange={handleFieldChange}
-                  suggestions={currentStep?.suggestions?.fields?.[field.key]}
+                  suggestions={Array.isArray(field.suggestions) ? field.suggestions : field.suggestions ? [field.suggestions] : []}
                   disabled={loading}
                 />
               ))}

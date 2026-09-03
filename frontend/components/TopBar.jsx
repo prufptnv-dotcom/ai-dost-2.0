@@ -37,9 +37,11 @@ export default function TopBar({
   const modelMenuRef = useRef(null);
 
   useEffect(() => {
-    const light = localStorage.getItem('ai_dost_light_theme') === '1';
+    const light = localStorage.getItem('ai_dost_theme') === 'light' || localStorage.getItem('theme') === 'light' || localStorage.getItem('ai_dost_light_theme') === '1';
     setIsLight(light);
     document.body.classList.toggle('light-theme', light);
+    document.documentElement.classList.toggle('light-theme', light);
+    document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
   }, []);
 
   useEffect(() => {
@@ -55,8 +57,12 @@ export default function TopBar({
   const toggleTheme = () => {
     const next = !isLight;
     setIsLight(next);
+    localStorage.setItem('ai_dost_theme', next ? 'light' : 'dark');
+    localStorage.setItem('theme', next ? 'light' : 'dark');
     localStorage.setItem('ai_dost_light_theme', next ? '1' : '0');
     document.body.classList.toggle('light-theme', next);
+    document.documentElement.classList.toggle('light-theme', next);
+    document.documentElement.setAttribute('data-theme', next ? 'light' : 'dark');
   };
 
   const currentModel = MODEL_OPTIONS.find((m) => m.value === model) || MODEL_OPTIONS[0];

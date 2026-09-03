@@ -19,11 +19,26 @@ const STYLES = [
   { id: 'oil', label: 'Oil Painting', suffix: ', oil painting, renaissance style, textured brushstrokes' },
 ];
 
+const ASPECT_RATIOS = [
+  { id: '1:1', label: '1:1 Square', width: 1024, height: 1024 },
+  { id: '16:9', label: '16:9 Cinema', width: 1280, height: 720 },
+  { id: '9:16', label: '9:16 Mobile', width: 720, height: 1280 },
+  { id: '4:3', label: '4:3 Classic', width: 1024, height: 768 },
+];
+
+const SUGGESTED_PROMPTS = [
+  'Cyberpunk high-tech city street at night in rain',
+  'Minimalist 3D isometric home office with lush plants',
+  'Majestic mountain peak during golden hour sunset',
+  'Futuristic AI assistant hologram in modern studio',
+];
+
 const SEED_VARIANTS = 2;
 
 export default function ImageView({ onToast }) {
   const [prompt, setPrompt] = useState('');
   const [style, setStyle] = useState(STYLES[0]);
+  const [aspectRatio, setAspectRatio] = useState(ASPECT_RATIOS[0]);
   const [images, setImages] = useState([]);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -67,7 +82,11 @@ export default function ImageView({ onToast }) {
     const newImages = [];
     try {
       for (let i = 0; i < SEED_VARIANTS; i++) {
-        const res = await api.post('/image/generate', { prompt: fullPrompt });
+        const res = await api.post('/image/generate', {
+          prompt: fullPrompt,
+          width: aspectRatio.width,
+          height: aspectRatio.height,
+        });
         const url = res.data?.imageUrl;
         if (url) newImages.push({ url, prompt: base, style: style.id, seed: Date.now() + i });
         setProgress(Math.round(((i + 1) / SEED_VARIANTS) * 100));
@@ -134,6 +153,25 @@ export default function ImageView({ onToast }) {
           ))}
         </div>
 
+        {/* Aspect Ratio selector chips */}
+        <div className="flex items-center gap-2 mt-2.5 overflow-x-auto pb-1">
+          <span className="text-[10px] font-mono text-ink-muted uppercase tracking-wider shrink-0">Ratio:</span>
+          {ASPECT_RATIOS.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => setAspectRatio(r)}
+              className={`shrink-0 px-2 py-0.5 rounded-xs text-[11px] font-mono transition-fast cursor-pointer ${
+                aspectRatio.id === r.id
+                  ? 'bg-accent-primary/20 border border-accent-primary text-accent-primary font-semibold'
+                  : 'bg-canvas-surface border border-border text-paper-200 hover:text-paper-100'
+              }`}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+
         {/* Prompt Input Dock */}
         <div className="mt-3 flex items-center gap-2 rounded-xs p-1.5 bg-canvas-surface border border-border">
           <Wand2 className="w-4 h-4 ml-1.5 text-accent-primary shrink-0" />
@@ -172,11 +210,34 @@ export default function ImageView({ onToast }) {
       <div className="flex-1 overflow-y-auto" ref={scrollRef}>
         <div className="max-w-5xl mx-auto px-6 py-6">
           {images.length === 0 && history.length === 0 && !loading && (
-            <EmptyState
-              icon={ImageIcon}
-              title="No generated images"
-              description="Type a descriptive prompt above and select a style preset to create visual assets."
-            />
+            <div className="space-y-6">
+              <EmptyState
+                icon={ImageIcon}
+                title="No generated images"
+                description="Type a descriptive prompt above and select style and aspect ratio presets to create visual assets."
+              />
+
+              <div className="max-w-xl mx-auto">
+                <div className="text-xs font-medium text-ink-muted uppercase tracking-wider mb-2 text-center font-mono">
+                  ✨ Quick Inspiration Prompts
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {SUGGESTED_PROMPTS.map((p, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        setPrompt(p);
+                        generate(p);
+                      }}
+                      className="text-left p-2.5 rounded-xs border border-border bg-canvas-surface hover:border-accent-primary/50 text-xs text-paper-100 hover:text-accent-primary transition-colors cursor-pointer group shadow-2xs"
+                    >
+                      <span className="line-clamp-2">{p}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           )}
 
           {images.length > 0 && (

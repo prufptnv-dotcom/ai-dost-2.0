@@ -70,4 +70,23 @@ describe('ProjectsView', () => {
     fireEvent.click(screen.getByText('Bihar Portal'));
     expect(onOpenProject).toHaveBeenCalledWith('p1');
   });
+
+  it('opens confirmation modal and deletes project when confirmed', async () => {
+    api.delete.mockResolvedValue({ data: { success: true } });
+    render(<ProjectsView onOpenProject={() => {}} />);
+    await waitFor(() => expect(screen.getByText('Bihar Portal')).toBeInTheDocument());
+
+    const deleteButtons = screen.getAllByTitle('Delete project');
+    fireEvent.click(deleteButtons[0]);
+
+    expect(screen.getByRole('heading', { name: 'Delete Project' })).toBeInTheDocument();
+    expect(screen.getByText(/Are you sure you want to delete/i)).toBeInTheDocument();
+
+    const confirmBtn = screen.getByRole('button', { name: 'Delete Project' });
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(api.delete).toHaveBeenCalledWith('/memory/project/p1');
+    });
+  });
 });

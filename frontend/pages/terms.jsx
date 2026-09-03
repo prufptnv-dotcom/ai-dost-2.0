@@ -1,45 +1,96 @@
 import React from 'react';
-import Head from 'next/head';
-import Header from '../components/Header';
-import Footer from '../components/Footer';
+import Link from 'next/link';
+import { PublicLayout } from '../components/public/PublicLayout';
+import { Scale, FileText, AlertCircle } from 'lucide-react';
 
-const Terms = () => {
+export default function TermsPage() {
   return (
-    <div className="min-h-screen bg-bg-default text-text-primary flex flex-col justify-between pt-24">
-      <Head>
-        <title>Terms and Conditions - Ai-Dost</title>
-        <meta name="description" content="Legal terms governing the use of Ai-Dost platform" />
-      </Head>
-      
-      <Header />
-      
-      <main className="container mx-auto px-6 py-12 flex-1 max-w-4xl space-y-8 z-10">
-        <h1 className="text-3xl font-bold text-primary">Terms and Conditions</h1>
-        
-        <div className="space-y-4 text-text-secondary">
-          <h2 className="text-xl font-semibold text-text-primary">1. Introduction</h2>
-          <p>Welcome to Ai-Dost! Please read these terms carefully before using our platform.</p>
-          
-          <h2 className="text-xl font-semibold text-text-primary">2. User Responsibilities</h2>
-          <p>You are responsible for all activities that occur under your account.</p>
-          
-          <h2 className="text-xl font-semibold text-text-primary">3. Intellectual Property</h2>
-          <p>All content and technology remains the property of Ai-Dost.</p>
-          
-          <h2 className="text-xl font-semibold text-text-primary">4. Disclaimer</h2>
-          <p>Our platform is provided &quot;as is&quot; without warranties of any kind.</p>
-          
-          <h2 className="text-xl font-semibold text-text-primary">5. Termination</h2>
-          <p>We reserve the right to terminate accounts that violate these terms.</p>
-          
-          <h2 className="text-xl font-semibold text-text-primary">6. Changes to Terms</h2>
-          <p>We may update these terms periodically without prior notice.</p>
-        </div>
-      </main>
-      
-      <Footer />
-    </div>
-  );
-};
+    <PublicLayout
+      title="Terms of Service — AI-Dost Autonomous AI Workspace"
+      description="Terms of service and software licensing for AI-Dost: open-source licensing, output ownership, acceptable use, and disclaimer of warranties."
+    >
+      <section className="relative pt-20 pb-16 md:pt-28 md:pb-20 border-b border-border bg-canvas-subtle overflow-hidden">
+        {/* Google Gemini Dual Ambient Celestial Orbs */}
+        <div className="absolute -top-24 left-1/4 w-[500px] h-[300px] bg-gradient-to-tr from-[#4285f4]/20 via-[#9b72cb]/18 to-transparent blur-[120px] pointer-events-none rounded-full" />
+        <div className="absolute top-10 right-1/4 w-[450px] h-[300px] bg-gradient-to-bl from-[#d96570]/15 via-[#1ba1e2]/15 to-transparent blur-[120px] pointer-events-none rounded-full" />
 
-export default Terms;
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-4 relative z-10">
+          <div className="gemini-shimmer-badge text-[11px] font-mono text-[#4893fc]">
+            <Scale className="w-3.5 h-3.5 gemini-sparkle-icon" />
+            <span>Software Agreement</span>
+          </div>
+          <h1 className="text-3xl sm:text-5xl font-bold font-display tracking-tight text-paper-100">
+            Terms of <span className="gemini-gradient-text">Service</span>
+          </h1>
+          <p className="text-sm sm:text-base text-ink-muted max-w-2xl mx-auto leading-relaxed">
+            Please review the terms governing the use of AI-Dost autonomous software, licensing rights, output ownership, and operational boundaries.
+          </p>
+        </div>
+      </section>
+
+      <section className="py-16 md:py-24">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 font-sans text-xs text-paper-200 leading-relaxed">
+          {/* Disclaimer Banner */}
+          <div className="gemini-glow-card p-5 border border-amber-500/20 flex items-start gap-3">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <span className="font-bold text-paper-100 font-display">Legal Scaffolding Notice</span>
+              <p className="text-[11px] text-ink-muted">
+                This document serves as standard open-source product scaffolding for AI-Dost v2.0. Specific commercial deployments or enterprise distributions should seek independent legal counsel.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-3 pb-6 border-b border-border-subtle">
+            <h2 className="text-base font-bold font-display text-paper-100">1. Software License & Acceptance</h2>
+            <p>
+              By cloning, installing, executing, or accessing AI-Dost, you agree to be bound by these terms and the underlying open-source licenses governing the software (MIT License). If you do not agree to these terms, do not install or use the software.
+            </p>
+          </div>
+
+          <div className="space-y-3 pb-6 border-b border-border-subtle">
+            <h2 className="text-base font-bold font-display text-paper-100">2. Ownership of AI Outputs</h2>
+            <p>
+              As between you and the AI-Dost maintainers, <strong>you retain all rights, title, and ownership</strong> in any code, documents, text, images, or software applications generated by AI-Dost in response to your prompts and workspace interactions.
+            </p>
+            <p className="text-ink-muted">
+              AI-Dost does not claim copyright or intellectual property rights over code synthesized within your local workspaces.
+            </p>
+          </div>
+
+          <div className="space-y-3 pb-6 border-b border-border-subtle">
+            <h2 className="text-base font-bold font-display text-paper-100">3. Acceptable Use & Prohibited Conduct</h2>
+            <p>
+              You agree not to use AI-Dost to develop, execute, or distribute:
+            </p>
+            <ul className="list-disc pl-5 space-y-1 text-ink-muted">
+              <li>Malicious software, exploit payloads, rootkits, or ransomware.</li>
+              <li>Unauthorized vulnerability probes or denial-of-service attacks against third-party systems.</li>
+              <li>Deceptive, fraudulent, or impersonating material.</li>
+              <li>Any automated activities that violate third-party model terms of service (e.g. Google Generative AI or Groq policies).</li>
+            </ul>
+          </div>
+
+          <div className="space-y-3 pb-6 border-b border-border-subtle">
+            <h2 className="text-base font-bold font-display text-paper-100">4. Disclaimer of Warranties (&ldquo;As Is&rdquo;)</h2>
+            <p className="uppercase text-[11px] font-mono text-ink-muted leading-normal">
+              AI-Dost is provided &ldquo;as is&rdquo; and &ldquo;as available&rdquo;, without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and non-infringement. In no event shall the authors or copyright holders be liable for any claim, damages, or other liability arising from the use of this software.
+            </p>
+          </div>
+
+          <div className="space-y-3 pb-6 border-b border-border-subtle">
+            <h2 className="text-base font-bold font-display text-paper-100">5. Autonomous Execution Responsibility</h2>
+            <p>
+              AI-Dost features autonomous agent capabilities that can execute shell commands, install npm/pip packages, and create or delete files inside designated project workspaces. While the system implements path traversal guards and capability policies, <strong>you are responsible for reviewing autonomous plans</strong> and monitoring terminal operations conducted on your workstation.
+            </p>
+          </div>
+
+          <div className="space-y-2 text-[11px] font-mono text-ink-muted">
+            <p>Last revised: September 2026 • AI-Dost Version 2.0.0-rc.1</p>
+            <p>For questions or licensing inquiries, visit <Link href="/support" className="text-accent-primary hover:underline">Support</Link>.</p>
+          </div>
+        </div>
+      </section>
+    </PublicLayout>
+  );
+}

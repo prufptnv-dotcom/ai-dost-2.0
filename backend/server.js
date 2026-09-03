@@ -248,7 +248,8 @@ const figmaRoutes   = require('./routes/figma');
 const previewRoutes = require('./routes/preview');
 const terminalRoutes = require('./routes/terminal');
 const sandboxRoutes = require('./sandbox/routes');
-const deployRoutes = require('./routes/deploy');
+const deployRoutes  = require('./routes/deploy');
+const researchRoutes = require('./routes/research');
 
 app.use('/api/chat',     chatRoutes);
 app.use('/api/test',     testRoutes);
@@ -256,12 +257,13 @@ app.use('/api/image',    imageRoutes);
 app.use('/api/pdf',      pdfRoutes);
 app.use('/api/learning', learningRoutes);
 app.use('/api/git',      gitRoutes);
-app.use('/api/agent', agentRoutes);
-app.use('/api/figma', figmaRoutes);
-app.use('/api/preview', previewRoutes);
+app.use('/api/agent',    agentRoutes);
+app.use('/api/figma',    figmaRoutes);
+app.use('/api/preview',  previewRoutes);
 app.use('/api/terminal', terminalRoutes);
 app.use('/api/sandbox',  sandboxRoutes);
 app.use('/api/deploy',   deployRoutes);
+app.use('/api/research', researchRoutes);
 
 // Troubleshooting aliases (documented in AGENTS.md) — same data as /api/agent/quota-status
 app.get('/api/quota-status', (_req, res) => res.redirect('/api/agent/quota-status'));
@@ -278,6 +280,7 @@ app.use('/api/v1/agent',    agentRoutes);
 app.use('/api/v1/terminal', terminalRoutes);
 app.use('/api/v1/sandbox',  sandboxRoutes);
 app.use('/api/v1/deploy',   deployRoutes);
+app.use('/api/v1/research', researchRoutes);
 
 // ── AI Assistant Endpoints (mounted at /api/v1/ai) ──────────────────────────
 // This allows frontend calls to /ai/code-suggestions and /ai/lsp-diagnostics
@@ -903,7 +906,7 @@ function getChatHistory(req, res) {
                 success: true,
                 session_id: sessionId,
                 messages: msgs.map(m => ({
-                    id: m.id,
+                    id: m.id.startsWith(`${sessionId}_`) ? m.id.slice(sessionId.length + 1) : m.id,
                     role: m.role,
                     content: m.content,
                     timestamp: m.created_at
@@ -972,8 +975,9 @@ function saveChatHistory(req, res) {
             const m = msgs[i];
             if (m && m.role && typeof m.content === 'string') {
                 ins.run(sid, m.role, m.content);
+                const uniqueMsgId = `${sid}_${m.id || Date.now()}_${i}`;
                 messageDao.create({
-                    id: m.id || 'msg_' + Date.now() + '_' + Math.floor(Math.random()*10000),
+                    id: uniqueMsgId,
                     conversationId: sid,
                     role: m.role,
                     content: m.content

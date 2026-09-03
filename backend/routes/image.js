@@ -15,8 +15,10 @@ const GEMINI_KEY = process.env.GEMINI_API_KEY;
 
 // Stable URL (no seed) — Pollinations cache hit hota hai repeat requests pe instant.
 // Seed lagane se har request fresh 60-90s render force karta tha → 500s under load.
-function pollinationsUrl(prompt) {
-    return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=768&nologo=true`;
+function pollinationsUrl(prompt, width = 1024, height = 768) {
+    const w = parseInt(width, 10) || 1024;
+    const h = parseInt(height, 10) || 768;
+    return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&nologo=true`;
 }
 
 async function tryDownload(url, attempts = 3, waitMs = 8000, timeoutMs = 30000) {
@@ -73,12 +75,12 @@ async function geminiImage(prompt) {
 }
 
 router.post('/generate', async (req, res) => {
-    const { prompt } = req.body;
+    const { prompt, width, height } = req.body;
     if (!prompt || !prompt.trim()) {
         return res.status(400).json({ success: false, error: 'Prompt required' });
     }
     const p = prompt.trim();
-    const url = pollinationsUrl(p);
+    const url = pollinationsUrl(p, width, height);
     const base = `${req.protocol}://${req.get('host')}`;
 
     const task = queue.then(async () => {

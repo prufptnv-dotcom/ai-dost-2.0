@@ -42,6 +42,7 @@ test_mangal_bold.pdf
 
 # Logs
 *.log
+artifacts/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

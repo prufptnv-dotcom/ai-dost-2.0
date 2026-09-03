@@ -118,6 +118,14 @@ const nextConfig = {
         destination: `${BACKEND_URL}/api/image/:path*`
       },
       {
+        source: '/api/research',
+        destination: `${BACKEND_URL}/api/research`
+      },
+      {
+        source: '/api/research/:path*',
+        destination: `${BACKEND_URL}/api/research/:path*`
+      },
+      {
         source: '/api/pdf',
         destination: `${BACKEND_URL}/api/pdf`
       },

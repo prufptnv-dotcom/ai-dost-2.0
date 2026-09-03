@@ -9,6 +9,7 @@ import AppShell from '../components/layout/AppShell';
 import ProjectsView from '../components/views/ProjectsView';
 import ArtifactsView from '../components/views/ArtifactsView';
 import VoiceView from '../components/views/VoiceView';
+import ResearchView from '../components/views/ResearchView';
 import ImageView from '../components/views/ImageView';
 import ResumeView from '../components/views/ResumeView';
 import HistoryView from '../components/views/HistoryView';
@@ -62,6 +63,7 @@ export default function Dashboard() {
   const [toasts, setToasts] = useState([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
+  const [paletteIndex, setPaletteIndex] = useState(0);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDesc, setNewProjectDesc] = useState('');
@@ -72,9 +74,12 @@ export default function Dashboard() {
 
   // Load preferences
   useEffect(() => {
-    const savedTheme = localStorage.getItem('ai_dost_theme') || 'dark';
+    const savedTheme = localStorage.getItem('ai_dost_theme') || localStorage.getItem('theme') || 'dark';
     setTheme(savedTheme);
-    document.body.classList.toggle('light-theme', savedTheme === 'light');
+    const isLight = savedTheme === 'light';
+    document.body.classList.toggle('light-theme', isLight);
+    document.documentElement.classList.toggle('light-theme', isLight);
+    document.documentElement.setAttribute('data-theme', savedTheme);
     setModel(localStorage.getItem('ai_dost_model') || 'auto');
   }, []);
 
@@ -95,11 +100,21 @@ export default function Dashboard() {
     })();
   }, []);
 
+  useEffect(() => {
+    if (router.query?.view && typeof router.query.view === 'string') {
+      setView(router.query.view);
+    }
+  }, [router.query?.view]);
+
   const handleToggleTheme = useCallback(() => {
     setTheme((prev) => {
       const next = prev === 'dark' ? 'light' : 'dark';
       localStorage.setItem('ai_dost_theme', next);
-      document.body.classList.toggle('light-theme', next === 'light');
+      localStorage.setItem('theme', next);
+      const isLight = next === 'light';
+      document.body.classList.toggle('light-theme', isLight);
+      document.documentElement.classList.toggle('light-theme', isLight);
+      document.documentElement.setAttribute('data-theme', next);
       return next;
     });
   }, []);
@@ -152,8 +167,13 @@ export default function Dashboard() {
   const handleOpenPalette = useCallback(() => {
     setPaletteOpen(true);
     setPaletteQuery('');
+    setPaletteIndex(0);
     setTimeout(() => paletteInputRef.current?.focus(), 60);
   }, []);
+
+  useEffect(() => {
+    setPaletteIndex(0);
+  }, [paletteQuery]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -261,6 +281,9 @@ export default function Dashboard() {
           {view === 'artifacts' && (
             <ArtifactsView onToast={showToast} />
           )}
+          {view === 'research' && (
+            <ResearchView onToast={showToast} onNavigate={go} />
+          )}
           {view === 'voice' && (
             <VoiceView
               onToast={showToast}
@@ -336,34 +359,57 @@ export default function Dashboard() {
                   value={paletteQuery}
                   onChange={(e) => setPaletteQuery(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && filteredActions.length > 0) runPaletteAction(filteredActions[0].id);
-                    if (e.key === 'Escape') setPaletteOpen(false);
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setPaletteIndex((prev) => (filteredActions.length > 0 ? (prev + 1) % filteredActions.length : 0));
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setPaletteIndex((prev) => (filteredActions.length > 0 ? (prev - 1 + filteredActions.length) % filteredActions.length : 0));
+                    } else if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (filteredActions[paletteIndex]) runPaletteAction(filteredActions[paletteIndex].id);
+                    } else if (e.key === 'Escape') {
+                      setPaletteOpen(false);
+                    }
                   }}
                   placeholder="Type a command or jump to workspace view..."
+                  role="combobox"
+                  aria-expanded={paletteOpen}
+                  aria-controls="palette-actions-list"
                   className="flex-1 bg-transparent text-sm text-paper-100 placeholder:text-ink-muted focus:outline-none font-sans"
                 />
                 <kbd className="text-[9px] font-mono px-1.5 py-0.5 rounded-xs bg-canvas-elevated text-ink-muted">
                   ESC
                 </kbd>
               </div>
-              <div className="max-h-72 overflow-y-auto py-1 divide-y divide-border-subtle">
+              <div id="palette-actions-list" role="listbox" aria-label="Commands" className="max-h-72 overflow-y-auto py-1 divide-y divide-border-subtle">
                 {filteredActions.length === 0 && (
                   <div className="px-4 py-6 text-center text-xs text-ink-muted">No commands found</div>
                 )}
-                {filteredActions.map((a, i) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    onClick={() => runPaletteAction(a.id)}
-                    className="w-full flex items-center justify-between gap-3 px-3.5 py-2 text-left hover:bg-canvas-elevated transition-fast cursor-pointer"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <a.icon className="w-4 h-4 text-ink-muted" />
-                      <span className="text-xs text-paper-100">{a.label}</span>
-                    </div>
-                    <kbd className="text-[10px] font-mono text-ink-muted">{a.hint}</kbd>
-                  </button>
-                ))}
+                {filteredActions.map((a, i) => {
+                  const isSelected = paletteIndex === i;
+                  return (
+                    <button
+                      key={a.id}
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      onMouseEnter={() => setPaletteIndex(i)}
+                      onClick={() => runPaletteAction(a.id)}
+                      className={`w-full flex items-center justify-between gap-3 px-3.5 py-2 text-left transition-fast cursor-pointer ${
+                        isSelected
+                          ? 'bg-canvas-elevated text-accent-primary border-l-2 border-accent-primary'
+                          : 'hover:bg-canvas-elevated text-paper-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <a.icon className={`w-4 h-4 ${isSelected ? 'text-accent-primary' : 'text-ink-muted'}`} />
+                        <span className={`text-xs ${isSelected ? 'text-white font-medium' : 'text-paper-100'}`}>{a.label}</span>
+                      </div>
+                      <kbd className="text-[10px] font-mono text-ink-muted">{a.hint}</kbd>
+                    </button>
+                  );
+                })}
               </div>
             </motion.div>
           </>

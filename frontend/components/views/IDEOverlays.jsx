@@ -30,7 +30,7 @@ export function PromptModal({ modal, onClose, onSubmit }) {
     >
       <div
         className="w-96 rounded-xl p-4 shadow-2xl animate-fadeIn"
-        style={{ background: '#1c1f28', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}
+        style={{ background: 'var(--color-canvas-surface)', border: '1px solid var(--color-border-default)', boxShadow: 'var(--shadow-modal)' }}
       >
         <div className="flex items-center gap-2 mb-3">
           {modal.icon}
@@ -49,13 +49,13 @@ export function PromptModal({ modal, onClose, onSubmit }) {
           }}
           placeholder={modal.placeholder}
           className="w-full h-9 px-3 rounded-lg text-xs focus:outline-none"
-          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(75,139,252,0.4)', color: 'var(--color-text-primary)' }}
+          style={{ background: 'var(--color-canvas-subtle)', border: '1px solid var(--color-border-default)', color: 'var(--color-text-primary)' }}
         />
         <div className="flex justify-end gap-2 mt-3">
           <button
             onClick={onClose}
             className="px-3 py-1.5 rounded-md text-[11px] cursor-pointer hover:opacity-80 transition-opacity"
-            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}
+            style={{ background: 'var(--color-canvas-subtle)', border: '1px solid var(--color-border-default)', color: 'var(--color-text-muted)' }}
           >
             Cancel
           </button>
@@ -100,9 +100,9 @@ export function QuickOpen({ files, onPick, onClose }) {
     <div className="fixed inset-0 z-[95] flex items-start justify-center pt-[13vh] bg-black/50 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div
         className="w-[520px] rounded-xl overflow-hidden shadow-2xl animate-fadeIn"
-        style={{ background: '#1c1f28', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}
+        style={{ background: 'var(--color-canvas-surface)', border: '1px solid var(--color-border-default)', boxShadow: 'var(--shadow-modal)' }}
       >
-        <div className="flex items-center gap-2 px-3 py-2.5 border-b" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+        <div className="flex items-center gap-2 px-3 py-2.5 border-b" style={{ borderColor: 'var(--color-border-subtle)' }}>
           <Search className="w-3.5 h-3.5 shrink-0 stroke-[1.5]" style={{ color: 'var(--color-text-muted)' }} />
           <input
             ref={inputRef}
@@ -118,7 +118,7 @@ export function QuickOpen({ files, onPick, onClose }) {
             className="flex-1 text-xs focus:outline-none bg-transparent"
             style={{ color: 'var(--color-text-primary)' }}
           />
-          <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--color-text-muted)' }}>
+          <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: 'var(--color-canvas-subtle)', color: 'var(--color-text-muted)' }}>
             ↑↓ Enter Esc
           </span>
         </div>
@@ -135,8 +135,8 @@ export function QuickOpen({ files, onPick, onClose }) {
               onClick={() => onPick(f)}
               className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[11px] cursor-pointer"
               style={{
-                background: i === idx ? 'rgba(75,139,252,0.18)' : 'transparent',
-                color: i === idx ? '#fff' : 'var(--color-text-secondary)',
+                background: i === idx ? 'var(--color-accent-subtle)' : 'transparent',
+                color: i === idx ? 'var(--color-accent)' : 'var(--color-text-secondary)',
               }}
             >
               <File className="w-3.5 h-3.5 shrink-0 stroke-[1.5]" style={{ color: 'var(--color-primary)' }} />
@@ -171,9 +171,9 @@ export function CommandPalette({ commands, onRun, onClose }) {
     <div className="fixed inset-0 z-[95] flex items-start justify-center pt-[13vh] bg-black/50 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div
         className="w-[520px] rounded-xl overflow-hidden shadow-2xl animate-fadeIn"
-        style={{ background: '#1c1f28', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}
+        style={{ background: 'var(--color-canvas-surface)', border: '1px solid var(--color-border-default)', boxShadow: 'var(--shadow-modal)' }}
       >
-        <div className="flex items-center gap-2 px-3 py-2.5 border-b" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+        <div className="flex items-center gap-2 px-3 py-2.5 border-b" style={{ borderColor: 'var(--color-border-subtle)' }}>
           <CommandIcon className="w-3.5 h-3.5 shrink-0 stroke-[1.5]" style={{ color: 'var(--color-text-muted)' }} />
           <input
             ref={inputRef}
@@ -203,14 +203,14 @@ export function CommandPalette({ commands, onRun, onClose }) {
               onClick={() => onRun(c)}
               className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[11px] cursor-pointer"
               style={{
-                background: i === idx ? 'rgba(75,139,252,0.18)' : 'transparent',
-                color: i === idx ? '#fff' : 'var(--color-text-secondary)',
+                background: i === idx ? 'var(--color-accent-subtle)' : 'transparent',
+                color: i === idx ? 'var(--color-accent)' : 'var(--color-text-secondary)',
               }}
             >
               {c.icon || <FilePlus2 className="w-3.5 h-3.5 shrink-0 stroke-[1.5]" style={{ color: 'var(--color-primary)' }} />}
               <span className="truncate">{c.label}</span>
               {c.key && (
-                <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded shrink-0" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--color-text-muted)' }}>
+                <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded shrink-0" style={{ background: 'var(--color-canvas-subtle)', color: 'var(--color-text-muted)' }}>
                   {c.key}
                 </span>
               )}
@@ -274,9 +274,9 @@ export function SearchOverlay({ q, onQueryChange, caseSensitive, onCaseChange, r
     >
       <div
         className="w-[640px] max-w-[92vw] rounded-xl overflow-hidden shadow-2xl animate-fadeIn"
-        style={{ background: '#1c1f28', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}
+        style={{ background: 'var(--color-canvas-surface)', border: '1px solid var(--color-border-default)', boxShadow: 'var(--shadow-modal)' }}
       >
-        <div className="flex items-center gap-2 px-3 py-2.5 border-b" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+        <div className="flex items-center gap-2 px-3 py-2.5 border-b" style={{ borderColor: 'var(--color-border-subtle)' }}>
           <FileSearch className="w-3.5 h-3.5 shrink-0 stroke-[1.5]" style={{ color: 'var(--color-text-muted)' }} />
           <input
             ref={inputRef}
@@ -293,14 +293,14 @@ export function SearchOverlay({ q, onQueryChange, caseSensitive, onCaseChange, r
             title="Case sensitive (Aa)"
             className="px-2 py-1 rounded text-[9px] font-bold cursor-pointer transition-all"
             style={{
-              background: caseSensitive ? 'rgba(75,139,252,0.25)' : 'rgba(255,255,255,0.06)',
-              border: caseSensitive ? '1px solid rgba(75,139,252,0.5)' : '1px solid transparent',
-              color: caseSensitive ? 'var(--color-primary)' : 'var(--color-text-muted)',
+              background: caseSensitive ? 'var(--color-accent-subtle)' : 'var(--color-canvas-subtle)',
+              border: caseSensitive ? '1px solid var(--color-accent-border)' : '1px solid transparent',
+              color: caseSensitive ? 'var(--color-accent)' : 'var(--color-text-muted)',
             }}
           >
             <CaseSensitive className="w-3.5 h-3.5 inline stroke-[1.5]" /> Aa
           </button>
-          <span className="text-[9px] px-1.5 py-0.5 rounded shrink-0" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--color-text-muted)' }}>
+          <span className="text-[9px] px-1.5 py-0.5 rounded shrink-0" style={{ background: 'var(--color-canvas-subtle)', color: 'var(--color-text-muted)' }}>
             Esc
           </span>
         </div>
@@ -336,7 +336,7 @@ export function SearchOverlay({ q, onQueryChange, caseSensitive, onCaseChange, r
             </button>
           ))}
         </div>
-        <div className="px-3 py-1.5 border-t text-[9px]" style={{ borderColor: 'rgba(255,255,255,0.06)', color: 'var(--color-text-muted)' }}>
+        <div className="px-3 py-1.5 border-t text-[9px]" style={{ borderColor: 'var(--color-border-subtle)', color: 'var(--color-text-muted)' }}>
           {results.length} results • result click karo = file us line pe khulegi
         </div>
       </div>

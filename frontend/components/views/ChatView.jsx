@@ -4,7 +4,7 @@ import {
   Send, Copy, Volume2, RefreshCw, ThumbsUp, ThumbsDown,
   Sparkles, FileText, Mic, Paperclip, Check,
   Globe, Pencil, ExternalLink, ArrowRight,
-  Eye, LayoutTemplate,
+  Eye, LayoutTemplate, Square, ArrowDown,
 } from 'lucide-react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -95,7 +95,7 @@ function extractArtifact(content) {
 
 
 
-function ParsedMarkdown({ content, isStreaming, onNavigate }) {
+function ParsedMarkdown({ content, isStreaming, onNavigate, onPreviewArtifact }) {
   if (!content) return null;
   const parts = content.split(/(```[\s\S]*?(?:```|$))/g);
   return (
@@ -120,8 +120,9 @@ function ParsedMarkdown({ content, isStreaming, onNavigate }) {
               key={i}
               code={code}
               language={langLine || 'text'}
-              canRun={/^(python|py|javascript|js|node)$/i.test(langLine)}
-              canPreview={/^(html|react|jsx|tsx)$/i.test(langLine)}
+              canRun={true}
+              canPreview={true}
+              onPreviewArtifact={onPreviewArtifact}
               onOpenIDE={() => {
                 if (onNavigate) {
                   try {
@@ -159,6 +160,8 @@ function MessageBubble({
 }) {
   const [copied, setCopied] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+  const audioRef = useRef(null);
   const isUser = msg.role === 'user';
   const isStreaming = !!msg.isStreaming;
   const images = isUser ? [] : extractImages(msg.content);
@@ -172,9 +175,25 @@ function MessageBubble({
     } catch (e) { /* noop */ }
   };
 
+  const stopSpeaking = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    setSpeaking(false);
+  };
+
   const speak = async () => {
+    if (speaking) {
+      stopSpeaking();
+      return;
+    }
     const text = msg.content.replace(/[*#`>\[\]]/g, '').slice(0, 1500);
     if (!text.trim()) return;
+    setSpeaking(true);
     try {
       const ttsRes = await fetch(`${api.defaults.baseURL}/agent/ai/tts`, {
         method: 'POST',
@@ -182,12 +201,12 @@ function MessageBubble({
         body: JSON.stringify({ text, voice: 'en-IN-PrabhatNeural' }),
       });
       if (ttsRes.ok) {
-        setSpeaking(true);
         const blob = await ttsRes.blob();
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
-        audio.onended = () => { setSpeaking(false); URL.revokeObjectURL(url); };
-        audio.onerror = () => { setSpeaking(false); URL.revokeObjectURL(url); };
+        audioRef.current = audio;
+        audio.onended = () => { setSpeaking(false); audioRef.current = null; URL.revokeObjectURL(url); };
+        audio.onerror = () => { setSpeaking(false); audioRef.current = null; URL.revokeObjectURL(url); };
         await audio.play();
         return;
       }
@@ -195,8 +214,12 @@ function MessageBubble({
     try {
       const utter = new SpeechSynthesisUtterance(text);
       utter.lang = 'hi-IN';
+      utter.onend = () => setSpeaking(false);
+      utter.onerror = () => setSpeaking(false);
       window.speechSynthesis.speak(utter);
-    } catch (_) { /* noop */ }
+    } catch (_) {
+      setSpeaking(false);
+    }
   };
 
   return (
@@ -230,7 +253,7 @@ function MessageBubble({
               {isUser ? (
                 <div className="whitespace-pre-wrap">{msg.content}</div>
               ) : (
-                <ParsedMarkdown content={msg.content} isStreaming={isStreaming} onNavigate={onNavigate} />
+                <ParsedMarkdown content={msg.content} isStreaming={isStreaming} onNavigate={onNavigate} onPreviewArtifact={onOpenArtifact} />
               )}
               {isStreaming && (
                 <span className="inline-block w-2 h-4 ml-0.5 bg-accent animate-pulse align-middle rounded-sm" />
@@ -312,23 +335,61 @@ function MessageBubble({
 
         {/* Action toolbar — AI messages only */}
         {!isUser && !isStreaming && (
-          <div className="chat-response-actions">
-            <button type="button" onClick={copyText} aria-label="Copy response" title="Copy">
-              {copied ? <Check size={14} /> : <Copy size={14} />}
+          <div className="chat-response-actions" role="toolbar" aria-label="Message actions">
+            <button
+              type="button"
+              onClick={copyText}
+              aria-label={copied ? 'Copied to clipboard' : 'Copy response'}
+              title={copied ? 'Copied!' : 'Copy'}
+              className={`transition-colors ${copied ? 'text-accent' : ''}`}
+            >
+              {copied ? <Check size={14} className="text-accent" /> : <Copy size={14} />}
             </button>
-            <button type="button" onClick={speak} aria-label="Read response aloud" title={speaking ? 'Stop reading' : 'Read aloud'}>
-              <Volume2 size={14} />
+            <button
+              type="button"
+              onClick={speak}
+              aria-label={speaking ? 'Stop reading response' : 'Read response aloud'}
+              title={speaking ? 'Stop reading' : 'Read aloud'}
+              className={`transition-colors ${speaking ? 'text-accent' : ''}`}
+            >
+              {speaking ? <Square size={12} className="fill-current text-accent" /> : <Volume2 size={14} />}
             </button>
             {isLast && onRegenerate && (
-              <button type="button" onClick={onRegenerate} aria-label="Try again" title="Try again">
-                <RefreshCw size={14} />
+              <button
+                type="button"
+                onClick={onRegenerate}
+                aria-label="Try again"
+                title="Try again"
+                className="transition-colors hover:rotate-180 duration-300"
+              >
+                <RefreshCw size={13} />
               </button>
             )}
-            <button type="button" onClick={() => api.post('/learning/feedback', { type: 'positive', message: msg.content }).catch(() => {})} aria-label="Good response" title="Good response">
-              <ThumbsUp size={14} />
+            <button
+              type="button"
+              onClick={() => {
+                const next = feedback === 'positive' ? null : 'positive';
+                setFeedback(next);
+                if (next) api.post('/learning/feedback', { type: 'positive', message: msg.content }).catch(() => {});
+              }}
+              aria-label="Good response"
+              title="Good response"
+              className={`transition-colors ${feedback === 'positive' ? 'text-accent' : ''}`}
+            >
+              <ThumbsUp size={14} className={feedback === 'positive' ? 'fill-accent/20 text-accent' : ''} />
             </button>
-            <button type="button" onClick={() => api.post('/learning/feedback', { type: 'negative', message: msg.content }).catch(() => {})} aria-label="Bad response" title="Bad response">
-              <ThumbsDown size={14} />
+            <button
+              type="button"
+              onClick={() => {
+                const next = feedback === 'negative' ? null : 'negative';
+                setFeedback(next);
+                if (next) api.post('/learning/feedback', { type: 'negative', message: msg.content }).catch(() => {});
+              }}
+              aria-label="Bad response"
+              title="Bad response"
+              className={`transition-colors ${feedback === 'negative' ? 'text-red-400' : ''}`}
+            >
+              <ThumbsDown size={14} className={feedback === 'negative' ? 'fill-red-500/20 text-red-400' : ''} />
             </button>
           </div>
         )}
@@ -337,11 +398,13 @@ function MessageBubble({
         {isUser && !isStreaming && (
           <div className="chat-response-actions" style={{ marginTop: '4px' }}>
             <button
+              type="button"
               onClick={() => onEdit && onEdit(msg)}
               title="Edit message"
               aria-label="Edit message"
+              className="transition-colors hover:text-accent"
             >
-              <Pencil size={14} />
+              <Pencil size={13} />
             </button>
           </div>
         )}
@@ -392,7 +455,11 @@ export default function ChatView({
   const [sessionId, setSessionId] = useState('default');
   const [activeArtifact, setActiveArtifact] = useState(null);
   const [thinkingElapsed, setThinkingElapsed] = useState(0);
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const scrollRef = useRef(null);
+  const messagesEndRef = useRef(null);
+  const userSentMessageRef = useRef(false);
+  const userScrolledUpRef = useRef(false);
   const inputRef = useRef(null);
   const newChatCount = useRef(0);
   const fileInputRef = useRef(null);
@@ -438,7 +505,7 @@ export default function ChatView({
   useEffect(() => {
     api.get(`/chat/history?session_id=${sessionId}`)
       .then((res) => {
-        const rows = Array.isArray(res.data) ? res.data : (res.data?.history || []);
+        const rows = Array.isArray(res.data) ? res.data : (res.data?.history || res.data?.messages || []);
         if (rows.length > 0) setBackendHistory(rows);
       })
       .catch(() => {});
@@ -448,10 +515,11 @@ export default function ChatView({
     if (!backendHistory || backendHistory.length === 0) return;
     const restored = [];
     for (const row of backendHistory) {
-      const userMsg = row.user_message || row.prompt;
-      const reply = row.response;
+      const userMsg = row.user_message || row.prompt || (row.role === 'user' ? row.content : null);
+      const reply = row.response || (row.role === 'assistant' ? row.content : null);
       if (userMsg) restored.push({ id: Date.now() + restored.length, role: 'user', content: userMsg });
-      if (reply) restored.push({ id: Date.now() + restored.length, role: 'assistant', content: reply.slice(0, 3000) });
+      else if (reply) restored.push({ id: Date.now() + restored.length, role: 'assistant', content: reply.slice(0, 3000) });
+      else if (row.role && row.content) restored.push({ id: Date.now() + restored.length, role: row.role, content: row.content });
     }
     if (restored.length > 0) {
       setMessages(restored);
@@ -485,16 +553,37 @@ export default function ChatView({
     }
   }, [onNewChatSignal]);
 
-  // Smart Auto-scroll
-  useEffect(() => {
+  const scrollToBottom = useCallback((behavior = 'smooth') => {
+    if (typeof window === 'undefined') return;
+    window.requestAnimationFrame(() => {
+      if (messagesEndRef.current) {
+        messagesEndRef.current.scrollIntoView({ behavior, block: 'end' });
+      } else if (scrollRef.current) {
+        scrollRef.current.scrollTo({
+          top: scrollRef.current.scrollHeight,
+          behavior,
+        });
+      }
+    });
+  }, []);
+
+  const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    // Only scroll if we're near the bottom
-    if (distFromBottom < 120) {
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    userScrolledUpRef.current = distFromBottom >= 120;
+    setShowJumpToBottom(distFromBottom > 160);
+  }, []);
+
+  // Auto-scroll on new messages or variants: only if user sent message or user is reading near bottom (< 120px)
+  useEffect(() => {
+    const el = scrollRef.current;
+    const distFromBottom = el ? el.scrollHeight - el.scrollTop - el.clientHeight : 0;
+    if (userSentMessageRef.current || distFromBottom < 120) {
+      userSentMessageRef.current = false;
+      scrollToBottom(messages.length <= 2 ? 'auto' : 'smooth');
     }
-  }, [messages, thinking]);
+  }, [messages, variants, scrollToBottom]);
 
   // Artifact → Copilot IDE bridge
   const handleOpenArtifactInCopilot = (art) => {
@@ -523,9 +612,37 @@ export default function ChatView({
       timestamp: new Date().toISOString(),
       attachments: attachment ? [attachment.name] : undefined,
     };
+    userSentMessageRef.current = true;
+    userScrolledUpRef.current = false;
     setMessages((prev) => [...prev, userMsg]);
+
+    // Auto-title session if untitled or new
+    setSessions((prev) => {
+      const titleSnippet = content.length > 32 ? content.slice(0, 32) + '…' : content;
+      const exists = prev.some((s) => s.id === sessionId);
+      let updated;
+      if (!exists) {
+        updated = [{ id: sessionId, title: titleSnippet, name: titleSnippet, updatedAt: Date.now() }, ...prev];
+      } else {
+        updated = prev.map((s) => {
+          if (s.id === sessionId && (!s.title || s.title === 'New conversation' || s.title === 'default' || !s.name)) {
+            return { ...s, title: titleSnippet, name: titleSnippet, updatedAt: Date.now() };
+          }
+          return s;
+        });
+      }
+      try {
+        localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated.slice(0, 30)));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('ai_dost_sessions_updated'));
+        }
+      } catch (_) {}
+      return updated;
+    });
+
     setThinking(true);
     setThinkingLabel('Thinking…');
+    setTimeout(() => scrollToBottom('smooth'), 20);
 
     // ── File / image / PDF analysis ──
     if (attachment) {
@@ -764,7 +881,7 @@ export default function ChatView({
       setThinking(false);
       setThinkingLabel('Thinking…');
     }
-  }, [input, thinking, messages, model, setThinking, onOpenResumeWithData, onNavigate, attachment, persona]);
+  }, [input, thinking, messages, model, setThinking, onOpenResumeWithData, onNavigate, attachment, persona, scrollToBottom, sessionId]);
 
   const handleRegenerate = () => {
     if (thinking) return;
@@ -793,12 +910,17 @@ export default function ChatView({
 
   const persistSessions = (list) => {
     setSessions(list);
-    try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(list)); } catch (_) {}
+    try {
+      localStorage.setItem(SESSIONS_KEY, JSON.stringify(list));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('ai_dost_sessions_updated'));
+      }
+    } catch (_) {}
   };
 
-  const saveCurrentToStorage = () => {
+  const saveCurrentToStorage = useCallback(() => {
     try { if (messages.length > 0) localStorage.setItem(msgKey(sessionId), JSON.stringify(messages)); } catch (_) {}
-  };
+  }, [messages, sessionId]);
 
   const createSession = () => {
     saveCurrentToStorage();
@@ -813,7 +935,7 @@ export default function ChatView({
     setActiveArtifact(null);
   };
 
-  const switchSession = (id) => {
+  const switchSession = useCallback((id) => {
     saveCurrentToStorage();
     localStorage.setItem('ai_dost_session_id', id);
     setSessionId(id);
@@ -826,7 +948,17 @@ export default function ChatView({
       if (Array.isArray(parsed) && parsed.length > 0) setMessages(parsed);
       else setMessages([WELCOME]);
     } catch (_) { setMessages([WELCOME]); }
-  };
+  }, [saveCurrentToStorage]);
+
+  useEffect(() => {
+    const handleCustomSwitch = (e) => {
+      if (e.detail && typeof e.detail === 'string' && e.detail !== sessionId) {
+        switchSession(e.detail);
+      }
+    };
+    window.addEventListener('ai_dost_switch_session', handleCustomSwitch);
+    return () => window.removeEventListener('ai_dost_switch_session', handleCustomSwitch);
+  }, [sessionId, switchSession]);
 
   const renameSession = (id) => {
     const title = window.prompt('Session ka naam:', sessions.find((s) => s.id === id)?.title || '');
@@ -931,7 +1063,7 @@ export default function ChatView({
   return (
     <div className="h-full flex flex-row overflow-hidden bg-canvas-base">
       {/* Main chat panel */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+      <div className="relative flex-1 flex flex-col h-full overflow-hidden min-w-0">
 
         {/* Session bar — minimal integrated dropdown */}
         <SmartChatHeader
@@ -945,31 +1077,25 @@ export default function ChatView({
         />
 
         {/* Message stream */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto py-6 px-4 md:px-6 flex flex-col">
-          <div className="max-w-3xl mx-auto w-full flex-1 flex flex-col justify-end">
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto py-6 px-4 md:px-6 flex flex-col"
+        >
+          <div className="max-w-3xl mx-auto w-full flex-1 flex flex-col">
 
-            {/* Empty state — inside the scroll container */}
+            {/* First chat / empty state */}
             {isEmpty && !thinking && (
-              <div className="flex-1 flex flex-col items-center justify-center min-h-[40vh] w-full max-w-2xl mx-auto px-4">
-                <div className="flex flex-col items-center text-center space-y-4 mb-8">
-                  <div className="w-12 h-12 flex items-center justify-center rounded-2xl bg-canvas-elevated border border-border shadow-sm mb-2">
-                    <AiDostMark size={24} />
-                  </div>
-                  <h1 className="text-2xl font-semibold text-paper-100 tracking-tight">Namaste 👋 Main AI-Dost hoon.</h1>
-                  <p className="text-base text-ink-muted">Kya karna hai?</p>
+              <div className="flex-1 flex flex-col items-center justify-center min-h-[46vh] w-full max-w-2xl mx-auto px-4 text-center select-none">
+                <div className="w-11 h-11 flex items-center justify-center rounded-2xl bg-canvas-surface border border-border shadow-xs mb-5 transition-transform hover:scale-105 duration-200">
+                  <AiDostMark size={24} />
                 </div>
-                
-                <div className="flex flex-wrap items-center justify-center gap-2 max-w-lg">
-                  {['Build something', 'Research something', 'Create something'].map((prompt, i) => (
-                    <button
-                      key={i}
-                      onClick={() => sendMessage(prompt)}
-                      className="px-4 py-2 rounded-full text-[13px] font-medium bg-canvas-surface border border-border text-paper-200 hover:bg-canvas-elevated hover:text-paper-100 transition-colors cursor-pointer"
-                    >
-                      {prompt}
-                    </button>
-                  ))}
-                </div>
+                <h1 className="text-2xl sm:text-3xl font-semibold text-paper-100 tracking-tight mb-2.5">
+                  Hey. What are we working on today?
+                </h1>
+                <p className="text-sm sm:text-base text-ink-muted max-w-md mx-auto leading-relaxed">
+                  Ask me anything, or give me something to build, research, analyze, or create.
+                </p>
               </div>
             )}
 
@@ -1027,10 +1153,34 @@ export default function ChatView({
                 )}
               </AnimatePresence>
 
-
+              {/* Bottom scroll anchor */}
+              <div ref={messagesEndRef} className="h-4 shrink-0" aria-hidden="true" />
             </div>
           </div>
         </div>
+
+        {/* Floating Jump to latest pill */}
+        <AnimatePresence>
+          {showJumpToBottom && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              transition={{ duration: 0.15 }}
+              className="absolute bottom-28 left-1/2 -translate-x-1/2 z-20 pointer-events-auto"
+            >
+              <button
+                type="button"
+                onClick={() => scrollToBottom('smooth')}
+                className="jump-to-bottom-btn"
+                aria-label="Jump to latest message"
+              >
+                <ArrowDown size={13} className="text-accent" />
+                <span>Jump to latest</span>
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Composer */}
         <div className="px-4 md:px-6 pb-4 pt-2 bg-canvas-base border-t border-border-subtle shrink-0">
@@ -1044,6 +1194,7 @@ export default function ChatView({
                   type="button"
                   onClick={() => setAttachment(null)}
                   className="px-1.5 py-0.5 rounded text-[10px] text-ink-muted hover:text-paper-100 cursor-pointer hover:bg-canvas-elevated"
+                  aria-label="Remove attachment"
                 >
                   ✕
                 </button>
@@ -1057,8 +1208,9 @@ export default function ChatView({
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                rows={Math.min(4, Math.max(1, input.split('\n').length))}
+                rows={Math.min(5, Math.max(1, input.split('\n').length))}
                 placeholder="Ask AI-Dost anything…"
+                aria-label="Ask AI-Dost anything"
                 className="w-full bg-transparent resize-none text-sm focus:outline-none placeholder:text-ink-muted text-paper-100 leading-relaxed px-4 pt-3.5 pb-2 font-sans"
               />
               <input
@@ -1077,6 +1229,7 @@ export default function ChatView({
                     type="button"
                     onClick={() => fileInputRef.current && fileInputRef.current.click()}
                     title="Attach file"
+                    aria-label="Attach file"
                     className="p-1.5 rounded-lg hover:bg-canvas-elevated text-ink-muted hover:text-paper-200 transition-fast cursor-pointer focus-ring"
                   >
                     <Paperclip className="w-4 h-4" />
@@ -1087,6 +1240,7 @@ export default function ChatView({
                       type="button"
                       onClick={onOpenVoice}
                       title="Voice input"
+                      aria-label="Voice input"
                       className="p-1.5 rounded-lg hover:bg-canvas-elevated text-ink-muted hover:text-accent transition-fast cursor-pointer focus-ring"
                     >
                       <Mic className="w-4 h-4" />
@@ -1100,6 +1254,7 @@ export default function ChatView({
                     value={model}
                     onChange={handleModelChange}
                     title="Select model"
+                    aria-label="Select model"
                     className="px-2 py-1 rounded-lg text-[11px] font-medium bg-canvas-elevated border border-border text-ink-muted cursor-pointer focus:outline-none transition-fast"
                   >
                     {MODEL_OPTIONS.map((m) => (
@@ -1112,7 +1267,12 @@ export default function ChatView({
                     onClick={() => sendMessage()}
                     disabled={!input.trim() || thinking}
                     title="Send (Enter)"
-                    className="flex items-center justify-center w-8 h-8 rounded-lg bg-accent text-black hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed transition-fast cursor-pointer shadow-sm focus-ring"
+                    aria-label="Send message"
+                    className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-150 cursor-pointer focus-ring ${
+                      input.trim() && !thinking
+                        ? 'bg-accent text-black hover:bg-accent/90 shadow-sm active:scale-95'
+                        : 'bg-canvas-elevated text-ink-muted opacity-40 cursor-not-allowed'
+                    }`}
                   >
                     <Send className="w-3.5 h-3.5" />
                   </button>

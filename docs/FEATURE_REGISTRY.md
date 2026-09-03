@@ -102,3 +102,46 @@ This document catalogs active, planned, and deprecated features along with their
 - **Architecture & Security Audit**: `docs/PHASE_4_1_PRODUCTION_ARCHITECTURE_AUDIT.md` — Threat modeling, attack defense validation, defect classification (0 P0, 0 P1).
 - **Deployment Runbook**: `docs/PHASE_4_2_DEPLOYMENT_RUNBOOK.md` — Complete production startup, health monitoring, disaster recovery, and offline backup procedures.
 
+## [Architecture Freeze] Core Architecture & Runtime Strategy
+- **Core Architecture Freeze**: `docs/AI_DOST_CORE_ARCHITECTURE.md` — Product principle ("Simple UI Outside, Autonomous System Inside"), modular capability architecture (12 modules), autonomy pipeline (8 stages), data authority rules, security boundaries (10/10 verified), failure philosophy.
+- **Runtime Profiles**: `docs/RUNTIME_PROFILES.md` — LIGHT (mobile/PWA client), STANDARD (desktop, SQLite, local), SCALE (PostgreSQL, distributed workers, object storage). Contract compatibility matrix and resource-aware execution profiles.
+- **Database Driver ADR**: `docs/DATABASE_DRIVER_ARCHITECTURE_DECISION.md` — Evaluated better-sqlite3, sqlite3, node:sqlite, sql.js. Decision: KEEP better-sqlite3 (environment fix, not code fix). Migration path documented.
+- **Autonomous Execution Contract**: `docs/AUTONOMOUS_EXECUTION_CONTRACT.md` — Full execution pipeline, state machine, role-capability matrix, delegation rules, checkpoint/resume, repair cycles, handoff contracts, workspace isolation.
+- **Scaling Boundaries**: `docs/SYSTEM_SCALING_BOUNDARIES.md` — LOCAL/STANDARD/SCALE tiers. Current abstraction readiness matrix. 7 blocking abstractions identified for future SCALE tier. Migration priority order documented.
+
+## [Phase F1] Frontend Interaction Foundations
+- **Command Palette Arrow Navigation**: `frontend/pages/dashboard.jsx` — Complete keyboard accessibility (`ArrowUp`/`ArrowDown`/`Enter`/`Escape`) with active index wrap-around, hover synchronization, and ARIA combobox semantics.
+- **Accessible Destructive Confirmations**: `ProjectsView.jsx`, `HistoryView.jsx`, `SettingsView.jsx` — Replaced blocking native `window.confirm()` popups with accessible, non-blocking `Modal` dialogs styled with semantic tokens.
+- **Theme-Adaptive IDE Surfaces**: `frontend/components/views/IDEOverlays.jsx`, `frontend/components/views/CopilotIDE.jsx` — Refactored hardcoded dark hex values and zinc styling to semantic CSS variables, enabling seamless Light/Dark mode transitions.
+- **Typography Optimization**: `frontend/styles/globals.css` — Removed external Google Fonts network dependency; 100% self-hosted local font rendering with zero FOUT.
+- **Mobile Touch Targets**: `frontend/styles/chat-ux.css` — Standardized 44×44px minimum touch target dimensions for mobile navigation and chat action triggers.
+- **Global Offline State Indicator**: `frontend/components/layout/AppShell.jsx` — Ambient connectivity status banner alerting users when offline while preserving local cached workflows.
+- **Behavioral Test Suite**: `frontend/tests/phaseF1Foundations.test.jsx` — 5 unit tests validating offline indicators, modal confirmations, and tokenized styles. All 21 frontend suites (105 tests) passing.
+
+## [Phase W1] Public Website & Documentation Ecosystem
+- **Public Shared Shell**: `frontend/components/public/PublicNavbar.jsx`, `PublicFooter.jsx`, `PublicLayout.jsx` — Dedicated marketing navbar and 4-column footer decoupled from internal app navigation, featuring persistent theme switching and WCAG skip links.
+- **Production Landing Page**: `frontend/pages/index.js` — Canonical narrative ("Tell AI-Dost what you need. Let it figure out the work."), interactive multi-scenario execution demo, 6 outcome capabilities, 8-stage pipeline stepper, and differentiation matrix.
+- **Product Overview**: `frontend/pages/product.jsx` — 5 architectural layers and core engineering values breakdown.
+- **Outcome Capabilities Catalog**: `frontend/pages/capabilities.jsx` — Outcome-oriented capability groupings: Build & Code, Research & Synthesize, Create Documents & Media, and Verify & Self-Heal.
+- **Visual Execution Pipeline**: `frontend/pages/how-it-works.jsx` — Visual 8-stage lifecycle (Intent through Delivery) and 4-role authority matrix (Supervisor, Researcher, Coder, Verifier).
+- **Security & Governance**: `frontend/pages/security.jsx` — Grounded technical safeguards mapped to code implementations, with honest disclosures disclaiming uncertified compliance badges.
+- **Transparent Privacy**: `frontend/pages/privacy.jsx` — Local SQLite data residency, zero telemetry, and user deletion rights.
+- **Legal & Platform Policy**: `frontend/pages/terms.jsx`, `frontend/pages/policy.jsx` — Open-source licensing (MIT), user output ownership, and responsible AI safety boundaries.
+- **Company Story & History**: `frontend/pages/about.jsx`, `frontend/pages/changelog.jsx`, `frontend/pages/support.jsx` — Authentic project mission, verified release history (v2.0.0-rc.1 back to beta), and developer support hub.
+- **Documentation Hub & Topic Guides**: `frontend/pages/docs/index.jsx`, `getting-started.jsx`, `concepts.jsx`, `agent.jsx`, `tools.jsx`, `projects.jsx`, `security.jsx`, `troubleshooting.jsx` — 7-part pedagogical blueprint (What, Why, When, How, Example, Limitations, Common Mistakes) with persistent sidebar navigation.
+- **Public Suite Verification**: `frontend/tests/publicWebsite.test.jsx` — 11 automated test specs verifying public navigation, footer, trust pages, and documentation tracks. All 22 frontend suites (116 tests) passing.
+
+## [Phase F2] Chat UI Final 10/10 Polish
+- **Calm Editorial First Chat State**: `frontend/components/views/ChatView.jsx` — Restrained opening ("Hey. What are we working on today?") removing intrusive cards and feature chips.
+- **Light Theme Typography & Contrast Engine**: `frontend/styles/globals.css` — High-contrast semantic mapping for headings, bold elements, tables, and blockquotes across light and dark themes.
+- **Developer Code Blocks**: `frontend/components/chat/CodeBlock.jsx` — Clean lowercase language headers, accessible copy action with checkmark confirmation, and monospace styling.
+- **Contextual Action Toolbar**: `frontend/components/views/ChatView.jsx` — Hover/focus reveals Copy, Read Aloud with live stop interruption, Try again, and persistent Thumbs Up/Down feedback.
+- **User Message Edit**: `frontend/components/views/ChatView.jsx` — Hover pencil triggers composer prepopulation, cursor adjustment, and focus.
+- **Smart Reading Scroll Engine & Jump Pill**: `frontend/styles/chat-ux.css`, `ChatView.jsx` — Scroll preservation while AI generates; floating "↓ Jump to latest" button when user scrolls away from bottom.
+- **Polished Composer**: `frontend/components/views/ChatView.jsx` — Auto-grow input, radiant send state, accessible keyboard bindings (`Enter`/`Shift+Enter`), and compact tool controls.
+- **Responsive Mobile Navigation**: `frontend/components/chat/SmartChatHeader.jsx`, `frontend/components/layout/AppShell.jsx` — Unified single top header with drawer trigger for mobile viewports.
+- **Automated Verification**: Headless Playwright browser audit matrix (`screenshots/01-08`), 116 frontend tests passing, 0 ESLint warnings, 68 backend tests passing.
+
+
+
+

@@ -4,6 +4,7 @@ import {
   Sparkles, Check, Plus, Trash2, ChevronRight, X, Printer,
   Briefcase, GraduationCap, Award, User, RefreshCw
 } from 'lucide-react';
+import api from '../../services/api';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { EmptyState } from '../ui/EmptyState';
@@ -55,6 +56,7 @@ const TEMPLATES = [
   { id: 'professional', label: 'Editorial Classic', desc: 'Serif headings, high-density print grid' },
   { id: 'modern', label: 'Technical Modern', desc: 'Monospace metadata, clean divider rules' },
   { id: 'minimal', label: 'Minimalist Clean', desc: 'Pure black & paper typography' },
+  { id: 'creative', label: 'Creative Portfolio', desc: 'Modern gradient header & vibrant badges' },
 ];
 
 export default function ResumeView({ onToast, onClose }) {
@@ -63,8 +65,10 @@ export default function ResumeView({ onToast, onClose }) {
   const [selectedTemplate, setSelectedTemplate] = useState('professional');
   const [showPreview, setShowPreview] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [promptInput, setPromptInput] = useState('');
   const [downloadUrl, setDownloadUrl] = useState(null);
+  const iframeRef = useRef(null);
 
   // Undo / Redo
   const [history, setHistory] = useState([DEFAULT_RESUME]);
@@ -167,6 +171,43 @@ export default function ResumeView({ onToast, onClose }) {
   };
 
   // Export HTML document & Archive to Artifact Shelf
+  // Real PDF Compilation via /api/pdf/generate
+  const handleDownloadPdf = async () => {
+    setIsDownloadingPdf(true);
+    try {
+      const mdContent = `# ${resumeData.fullName}\n\n**${resumeData.title}**\n\n${resumeData.contact.email} | ${resumeData.contact.phone} | ${resumeData.contact.location} | ${resumeData.contact.website}\n\n## Professional Summary\n${resumeData.summary}\n\n## Experience\n${resumeData.experience.map(exp => `### ${exp.role} — ${exp.company} (${exp.duration})\n${(exp.bullets || []).map(b => `- ${b}`).join('\n')}`).join('\n\n')}\n\n## Education\n${resumeData.education.map(edu => `- **${edu.degree}**, ${edu.institution} (${edu.year})`).join('\n')}\n\n## Skills\n${resumeData.skills.join(', ')}`;
+
+      const res = await api.post('/pdf/generate', {
+        title: `${resumeData.fullName} Resume`,
+        content: mdContent
+      });
+
+      if (res.data?.success && res.data?.downloadUrl) {
+        const link = document.createElement('a');
+        link.href = res.data.downloadUrl;
+        link.download = res.data.filename || `${(resumeData.fullName || 'Resume').replace(/\s+/g, '_')}.pdf`;
+        link.click();
+        if (onToast) onToast('PDF compiled & downloaded successfully!', 'success');
+      } else {
+        if (iframeRef.current?.contentWindow) {
+          iframeRef.current.contentWindow.print();
+        } else {
+          window.print();
+        }
+      }
+    } catch (e) {
+      if (iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.print();
+      } else {
+        window.print();
+      }
+      if (onToast) onToast('Opened browser PDF print dialog', 'info');
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
+
+  // Export HTML document & Archive to Artifact Shelf
   const exportDocument = useCallback(() => {
     const docHtml = generatePreviewHtml(resumeData, selectedTemplate);
     const blob = new Blob([docHtml], { type: 'text/html' });
@@ -196,38 +237,74 @@ export default function ResumeView({ onToast, onClose }) {
     if (onToast) onToast('Resume exported & archived to Artifact Shelf', 'success');
   }, [resumeData, selectedTemplate, onToast]);
 
-  const generatePreviewHtml = (data, tpl) => {
+  const generatePreviewHtml = (data, tpl = 'professional') => {
+    let fontCss = `font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;`;
+    let headerStyle = ``;
+    let titleColor = `#1e3a8a`;
+    let sectionTitleStyle = `font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #1e3a8a; border-bottom: 2px solid #2563eb; padding-bottom: 0.25rem; margin: 1.4rem 0 0.8rem 0;`;
+    let skillBadgeStyle = `font-size: 0.75rem; background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 500;`;
+    let bulletColor = `#2563eb`;
+
+    if (tpl === 'modern') {
+      fontCss = `font-family: 'Inter', -apple-system, sans-serif;`;
+      titleColor = `#0284c7`;
+      sectionTitleStyle = `font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #0284c7; border-bottom: 1px solid #e0f2fe; padding-bottom: 0.3rem; margin: 1.3rem 0 0.75rem 0; font-family: monospace;`;
+      skillBadgeStyle = `font-size: 0.72rem; font-family: monospace; background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; padding: 0.15rem 0.45rem; border-radius: 3px;`;
+      bulletColor = `#0284c7`;
+    } else if (tpl === 'minimal') {
+      fontCss = `font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;`;
+      titleColor = `#18181b`;
+      sectionTitleStyle = `font-size: 0.8rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: #18181b; border-bottom: 1px solid #18181b; padding-bottom: 0.2rem; margin: 1.3rem 0 0.75rem 0;`;
+      skillBadgeStyle = `font-size: 0.72rem; background: #f4f4f5; color: #27272a; border: 1px solid #e4e4e7; padding: 0.15rem 0.45rem; border-radius: 2px;`;
+      bulletColor = `#18181b`;
+    } else if (tpl === 'creative') {
+      fontCss = `font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;`;
+      headerStyle = `background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: #ffffff; padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem;`;
+      titleColor = `#4f46e5`;
+      sectionTitleStyle = `font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #4f46e5; border-bottom: 2px solid #e0e7ff; padding-bottom: 0.25rem; margin: 1.3rem 0 0.75rem 0;`;
+      skillBadgeStyle = `font-size: 0.75rem; background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; padding: 0.2rem 0.5rem; border-radius: 6px; font-weight: 600;`;
+      bulletColor = `#6366f1`;
+    }
+
     return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>${data.fullName || 'Resume'} - Curriculum Vitae</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #ffffff; color: #11100f; line-height: 1.45; padding: 2rem; max-width: 800px; margin: 0 auto; }
-    h1 { font-size: 1.75rem; margin: 0 0 0.25rem 0; color: #11100f; }
-    .title { font-size: 1rem; color: #d45b3f; font-weight: 500; margin-bottom: 0.5rem; }
-    .contact { font-size: 0.8rem; color: #57534e; margin-bottom: 1.5rem; border-bottom: 1px solid #e7e5e4; padding-bottom: 0.75rem; font-family: monospace; }
-    .section-title { font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #11100f; border-bottom: 1px solid #11100f; padding-bottom: 0.25rem; margin: 1.25rem 0 0.75rem 0; }
-    .item-header { display: flex; justify-content: space-between; font-size: 0.9rem; font-weight: 600; }
-    .item-sub { font-size: 0.8rem; color: #78716c; margin-bottom: 0.35rem; }
-    ul { margin: 0 0 0.75rem 1.25rem; padding: 0; font-size: 0.85rem; }
+    @media print {
+      @page { size: A4; margin: 12mm; }
+      body { padding: 0 !important; max-width: 100% !important; }
+    }
+    * { box-sizing: border-box; }
+    body { ${fontCss} background: #ffffff; color: #11100f; line-height: 1.45; padding: 2rem; max-width: 800px; margin: 0 auto; }
+    h1 { font-size: 1.75rem; margin: 0 0 0.25rem 0; color: ${tpl === 'creative' ? '#ffffff' : '#0f172a'}; font-weight: 800; }
+    .title { font-size: 1rem; color: ${tpl === 'creative' ? '#e0e7ff' : titleColor}; font-weight: 600; margin-bottom: 0.5rem; }
+    .contact { font-size: 0.8rem; color: ${tpl === 'creative' ? '#c7d2fe' : '#64748b'}; margin-bottom: 1rem; border-bottom: ${tpl === 'creative' ? 'none' : '1px solid #e2e8f0'}; padding-bottom: 0.6rem; font-family: monospace; }
+    .section-title { ${sectionTitleStyle} }
+    .item-header { display: flex; justify-content: space-between; font-size: 0.88rem; font-weight: 600; color: #0f172a; }
+    .item-sub { font-size: 0.8rem; color: #64748b; margin-bottom: 0.35rem; }
+    ul { margin: 0 0 0.75rem 1.25rem; padding: 0; font-size: 0.83rem; }
     li { margin-bottom: 0.25rem; }
+    li::marker { color: ${bulletColor}; }
     .skills-grid { display: flex; flex-wrap: wrap; gap: 0.35rem; }
-    .skill-badge { font-size: 0.75rem; background: #f5f5f4; border: 1px solid #e7e5e4; padding: 0.15rem 0.5rem; border-radius: 2px; }
+    .skill-badge { ${skillBadgeStyle} }
   </style>
 </head>
 <body>
-  <h1>${data.fullName}</h1>
-  <div class="title">${data.title}</div>
-  <div class="contact">${data.contact.email} • ${data.contact.phone} • ${data.contact.location} • ${data.contact.website}</div>
+  <div style="${headerStyle}">
+    <h1>${data.fullName}</h1>
+    <div class="title">${data.title}</div>
+    <div class="contact">${data.contact.email} • ${data.contact.phone} • ${data.contact.location} • ${data.contact.website}</div>
+  </div>
 
   <div class="section-title">Professional Summary</div>
-  <p style="font-size: 0.85rem; margin: 0 0 1rem 0;">${data.summary}</p>
+  <p style="font-size: 0.85rem; margin: 0 0 1rem 0; color: #334155;">${data.summary}</p>
 
   <div class="section-title">Experience</div>
   ${data.experience.map((exp) => `
-    <div style="margin-bottom: 0.75rem;">
-      <div class="item-header"><span>${exp.company}</span><span>${exp.duration}</span></div>
+    <div style="margin-bottom: 0.85rem;">
+      <div class="item-header"><span>${exp.company}</span><span style="font-size: 0.78rem; font-weight: 500; color: #64748b;">${exp.duration}</span></div>
       <div class="item-sub">${exp.role}</div>
       <ul>
         ${(exp.bullets || []).map((b) => `<li>${b}</li>`).join('')}
@@ -237,8 +314,8 @@ export default function ResumeView({ onToast, onClose }) {
 
   <div class="section-title">Education</div>
   ${data.education.map((edu) => `
-    <div style="margin-bottom: 0.5rem;">
-      <div class="item-header"><span>${edu.institution}</span><span>${edu.year}</span></div>
+    <div style="margin-bottom: 0.6rem;">
+      <div class="item-header"><span>${edu.institution}</span><span style="font-size: 0.78rem; font-weight: 500; color: #64748b;">${edu.year}</span></div>
       <div class="item-sub">${edu.degree}</div>
     </div>
   `).join('')}
@@ -293,7 +370,7 @@ export default function ResumeView({ onToast, onClose }) {
           <select
             value={selectedTemplate}
             onChange={(e) => setSelectedTemplate(e.target.value)}
-            className="px-2 py-1 rounded-xs bg-canvas-surface border border-border text-paper-100 text-xs font-sans focus:outline-none"
+            className="px-2 py-1 rounded-xs bg-canvas-surface border border-border text-paper-100 text-xs font-sans focus:outline-none cursor-pointer"
           >
             {TEMPLATES.map((t) => (
               <option key={t.id} value={t.id}>
@@ -312,10 +389,36 @@ export default function ResumeView({ onToast, onClose }) {
           </Button>
 
           <Button
+            variant="secondary"
+            size="sm"
+            icon={Printer}
+            onClick={() => {
+              if (iframeRef.current?.contentWindow) {
+                iframeRef.current.contentWindow.print();
+              } else {
+                window.print();
+              }
+            }}
+            title="Print or Save to PDF via Browser"
+          >
+            Print
+          </Button>
+
+          <Button
             variant="primary"
             size="sm"
             icon={Download}
+            onClick={handleDownloadPdf}
+            disabled={isDownloadingPdf}
+          >
+            {isDownloadingPdf ? 'Compiling PDF...' : 'Download PDF'}
+          </Button>
+
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={exportDocument}
+            title="Export as standalone HTML file"
           >
             Export Document
           </Button>
@@ -519,53 +622,22 @@ export default function ResumeView({ onToast, onClose }) {
 
         {/* Print-Like Live Document Preview */}
         {showPreview && (
-          <div className="w-96 lg:w-[480px] border-l border-border bg-[#181614] p-4 flex flex-col flex-shrink-0 hidden sm:flex overflow-y-auto">
+          <div className="w-96 lg:w-[480px] xl:w-[540px] border-l border-border bg-canvas-subtle p-4 flex flex-col flex-shrink-0 hidden sm:flex overflow-hidden">
             <div className="text-[10px] font-mono uppercase tracking-wider text-ink-muted mb-2 flex items-center justify-between">
-              <span>Paper Preview</span>
-              <span>100% Scale</span>
+              <span className="flex items-center gap-1.5 font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-signal-success animate-pulse" />
+                Live {selectedTemplate.toUpperCase()} Preview
+              </span>
+              <span>100% Scale · A4</span>
             </div>
 
-            <div className="flex-1 bg-white text-[#11100f] rounded-xs shadow-md p-6 font-sans text-xs overflow-y-auto leading-relaxed select-text">
-              <h2 className="text-lg font-bold text-[#11100f] mb-0.5">{resumeData.fullName}</h2>
-              <div className="text-xs text-[#d45b3f] font-medium mb-1">{resumeData.title}</div>
-              <div className="text-[10px] font-mono text-[#57534e] pb-2 mb-3 border-b border-neutral-200">
-                {resumeData.contact.email} • {resumeData.contact.phone} • {resumeData.contact.location}
-              </div>
-
-              <div className="font-bold uppercase text-[10px] tracking-wider border-b border-neutral-300 pb-0.5 mb-1.5">
-                Summary
-              </div>
-              <p className="text-[11px] text-neutral-700 mb-3">{resumeData.summary}</p>
-
-              <div className="font-bold uppercase text-[10px] tracking-wider border-b border-neutral-300 pb-0.5 mb-1.5">
-                Experience
-              </div>
-              {resumeData.experience.map((exp, i) => (
-                <div key={i} className="mb-2">
-                  <div className="flex justify-between font-semibold text-[11px]">
-                    <span>{exp.company}</span>
-                    <span className="text-[10px] text-neutral-500">{exp.duration}</span>
-                  </div>
-                  <div className="text-[10px] text-neutral-600 italic mb-1">{exp.role}</div>
-                  <ul className="list-disc list-inside text-[10px] text-neutral-700 pl-1 space-y-0.5">
-                    {(exp.bullets || []).map((b, bi) => (
-                      <li key={bi}>{b}</li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-
-              <div className="font-bold uppercase text-[10px] tracking-wider border-b border-neutral-300 pb-0.5 mb-1.5">
-                Skills
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {resumeData.skills.map((s) => (
-                  <span key={s} className="text-[9px] bg-neutral-100 border border-neutral-300 px-1 py-0.5 rounded-xs">
-                    {s}
-                  </span>
-                ))}
-              </div>
-            </div>
+            <iframe
+              ref={iframeRef}
+              srcDoc={generatePreviewHtml(resumeData, selectedTemplate)}
+              title="Resume Document Preview"
+              className="flex-1 w-full rounded-xs shadow-surface-card border border-border bg-white"
+              sandbox="allow-same-origin allow-modals"
+            />
           </div>
         )}
       </div>

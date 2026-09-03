@@ -11,6 +11,7 @@ import { ActivityTimeline } from '../agent/ActivityTimeline';
 import { WorkspaceChangesPanel } from '../agent/WorkspaceChangesPanel';
 import { KanbanBoard } from '../agent/KanbanBoard';
 import SpecWizard from '../agent/SpecWizard';
+import { CrewPanel } from '../agent/CrewPanel';
 import { Badge } from '../ui/Badge';
 import { Tabs } from '../ui/Tabs';
 import { EmptyState } from '../ui/EmptyState';
@@ -379,11 +380,10 @@ export default function AgentView({ onToast, onOpenFile }) {
         )}
 
         {tab === 'crew' && (
-          <div className="max-w-3xl mx-auto p-4 rounded-lg bg-canvas-surface border border-border">
-            <div className="text-xs text-txt-secondary">
-              Multi-Agent CrewAI interface is active. Ready to run research, coder, and reviewer cascades.
-            </div>
-          </div>
+          <CrewPanel
+            BACKEND={BACKEND}
+            onToast={showToast}
+          />
         )}
       </div>
 

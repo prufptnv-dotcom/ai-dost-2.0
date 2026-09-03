@@ -7,6 +7,8 @@ import api from '../../services/api';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { EmptyState } from '../ui/EmptyState';
+import { Modal } from '../ui/Modal';
+import { SkeletonTableRow } from '../ui/Skeleton';
 
 export default function ProjectsView({ onOpenProject, onToast }) {
   const [projects, setProjects] = useState([]);
@@ -15,6 +17,8 @@ export default function ProjectsView({ onOpenProject, onToast }) {
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
   const [creating, setCreating] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const showToast = useMemo(() => onToast || ((m, t) => {
     if (typeof window !== 'undefined') {
@@ -61,15 +65,23 @@ export default function ProjectsView({ onOpenProject, onToast }) {
     }
   };
 
-  const remove = async (project, e) => {
+  const promptRemove = (project, e) => {
     e.stopPropagation();
-    if (!window.confirm(`Delete project "${project.project_name}"?`)) return;
+    setProjectToDelete(project);
+  };
+
+  const confirmRemove = async () => {
+    if (!projectToDelete || deleting) return;
+    setDeleting(true);
     try {
-      await api.delete(`/memory/project/${project.project_id}`);
+      await api.delete(`/memory/project/${projectToDelete.project_id}`);
       showToast('Project deleted', 'success');
-      load();
+      setProjectToDelete(null);
+      await load();
     } catch (err) {
       showToast(err?.message || 'Delete failed', 'error');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -110,8 +122,11 @@ export default function ProjectsView({ onOpenProject, onToast }) {
 
         {/* Editorial Table / List */}
         {loading ? (
-          <div className="p-8 text-center text-xs text-ink-muted bg-canvas-surface border border-border rounded-sm">
-            Loading projects...
+          <div className="rounded-sm border border-border bg-canvas-surface overflow-hidden divide-y divide-border-subtle shadow-sm">
+            <SkeletonTableRow />
+            <SkeletonTableRow />
+            <SkeletonTableRow />
+            <SkeletonTableRow />
           </div>
         ) : projects.length === 0 ? (
           <EmptyState
@@ -162,7 +177,7 @@ export default function ProjectsView({ onOpenProject, onToast }) {
                   <div className="col-span-3 sm:col-span-2 flex items-center justify-end gap-1.5">
                     <button
                       type="button"
-                      onClick={(e) => remove(p, e)}
+                      onClick={(e) => promptRemove(p, e)}
                       className="p-1 rounded-xs text-ink-muted hover:text-signal-error hover:bg-canvas-base transition-fast cursor-pointer focus-ring"
                       title="Delete project"
                     >
@@ -223,6 +238,39 @@ export default function ProjectsView({ onOpenProject, onToast }) {
           </div>
         </div>
       )}
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={Boolean(projectToDelete)}
+        onClose={() => setProjectToDelete(null)}
+        title="Delete Project"
+        subtitle="This action cannot be undone."
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-ink-muted leading-relaxed">
+            Are you sure you want to delete <strong className="text-paper-100 font-semibold">{projectToDelete?.project_name}</strong>? All local configuration and project records will be permanently removed.
+          </p>
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setProjectToDelete(null)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              icon={Trash2}
+              onClick={confirmRemove}
+              disabled={deleting}
+            >
+              {deleting ? 'Deleting...' : 'Delete Project'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

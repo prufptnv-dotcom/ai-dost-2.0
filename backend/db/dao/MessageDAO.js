@@ -15,7 +15,7 @@ class MessageDAO {
     const attachStr = typeof attachments === 'string' ? attachments : JSON.stringify(attachments);
 
     this.db.prepare(`
-      INSERT INTO messages (id, conversation_id, role, content, model, tokens_used, latency_ms, attachments, created_at)
+      INSERT OR REPLACE INTO messages (id, conversation_id, role, content, model, tokens_used, latency_ms, attachments, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     `).run(id, conversationId, role, content, model, tokensUsed, latencyMs, attachStr);
 

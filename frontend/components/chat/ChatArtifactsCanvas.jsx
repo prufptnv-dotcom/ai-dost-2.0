@@ -4,6 +4,7 @@ import {
   Eye, Code2, Download, ExternalLink, RefreshCw, X,
   Smartphone, Tablet, Monitor, Sparkles, Copy, Check, ArrowUpRight
 } from 'lucide-react';
+import { compileLiveHtml } from '../../lib/compileLiveHtml';
 
 export default function ChatArtifactsCanvas({
   artifact,
@@ -35,31 +36,9 @@ export default function ChatArtifactsCanvas({
     URL.revokeObjectURL(url);
   };
 
-  // Compile standalone HTML for iframe rendering
+  // Compile standalone HTML for iframe rendering with live animation support
   const getCompiledHtml = () => {
-    if (language === 'html') {
-      if (code.includes('<html') || code.includes('<!DOCTYPE')) return code;
-      return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 16px; min-height: 100vh; box-sizing: border-box; }
-  </style>
-</head>
-<body>
-  ${code}
-</body>
-</html>`;
-    }
-
-    if (language === 'svg') {
-      return `<!DOCTYPE html><html><body style="margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0f172a;">${code}</body></html>`;
-    }
-
-    return `<!DOCTYPE html><html><body style="background:#0f172a;color:#f8fafc;padding:20px;font-family:monospace;"><pre>${code.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre></body></html>`;
+    return compileLiveHtml(code, language);
   };
 
   const deviceWidth = {

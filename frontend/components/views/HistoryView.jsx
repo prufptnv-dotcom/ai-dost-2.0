@@ -7,6 +7,8 @@ import api from '../../services/api';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { EmptyState } from '../ui/EmptyState';
+import { Modal } from '../ui/Modal';
+import { SkeletonCard } from '../ui/Skeleton';
 
 function timeAgo(ts) {
   if (!ts) return '';
@@ -27,6 +29,8 @@ export default function HistoryView({ onToast, onOpenSession }) {
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const showToast = useMemo(() => onToast || ((m, t) => {
     if (typeof window !== 'undefined') {
@@ -62,15 +66,19 @@ export default function HistoryView({ onToast, onOpenSession }) {
     load();
   }, [load]);
 
-  const clearHistory = async () => {
-    if (!window.confirm('Delete all recorded chat sessions?')) return;
+  const confirmClearHistory = async () => {
+    if (clearing) return;
+    setClearing(true);
     try {
       await api.delete('/chat/history', { params: { session_id: 'default' } });
       setSessions([]);
       setExpanded(null);
+      setShowClearConfirm(false);
       showToast('History cleared', 'success');
     } catch (e) {
       showToast('Delete failed', 'error');
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -109,7 +117,7 @@ export default function HistoryView({ onToast, onOpenSession }) {
                 variant="danger"
                 size="sm"
                 icon={Trash2}
-                onClick={clearHistory}
+                onClick={() => setShowClearConfirm(true)}
               >
                 Clear History
               </Button>
@@ -139,8 +147,10 @@ export default function HistoryView({ onToast, onOpenSession }) {
 
         {/* History List */}
         {loading ? (
-          <div className="p-8 text-center text-xs text-ink-muted bg-canvas-surface border border-border rounded-sm">
-            Loading conversation records...
+          <div className="space-y-3">
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
           </div>
         ) : filteredSessions.length === 0 ? (
           <EmptyState
@@ -217,6 +227,39 @@ export default function HistoryView({ onToast, onOpenSession }) {
           </div>
         )}
       </div>
+      {/* Clear History Confirmation Modal */}
+      <Modal
+        isOpen={showClearConfirm}
+        onClose={() => setShowClearConfirm(false)}
+        title="Clear All History"
+        subtitle="This action will remove all saved chat sessions."
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-ink-muted leading-relaxed">
+            Are you sure you want to delete all recorded conversation history? Your chat sessions stored in local SQLite will be permanently cleared.
+          </p>
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowClearConfirm(false)}
+              disabled={clearing}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              icon={Trash2}
+              onClick={confirmClearHistory}
+              disabled={clearing}
+            >
+              {clearing ? 'Clearing...' : 'Clear All History'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

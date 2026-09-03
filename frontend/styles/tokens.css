@@ -17,29 +17,48 @@
   --paper-300: #a1a1aa;
   --paper-400: #71717a;
 
-  /* ─── Bioluminescent Lime (Primary Accent 10%) ─── */
-  --primary-lime: #d9ff5a;
-  --primary-lime-glow: rgba(217, 255, 90, 0.18);
-  --accent-primary: #d9ff5a;
-  --accent-primary-strong: #c4ea48;
-  --accent-subtle: rgba(217, 255, 90, 0.12);
-  --accent-border: rgba(217, 255, 90, 0.28);
+  /* ─── Google Gemini Signature Palette & Celestial Gradients ─── */
+  --gemini-blue: #1ba1e2;
+  --gemini-blue-core: #4285f4;
+  --gemini-indigo: #4893fc;
+  --gemini-purple: #9b72cb;
+  --gemini-violet: #7c3aed;
+  --gemini-lilac: #bd99fe;
+  --gemini-rose: #d96570;
+  --gemini-coral: #ff7582;
+  --gemini-yellow: #fbbc04;
 
-  /* ─── Cyber Rust Orange (Secondary Accent / Deploy / Alerts) ─── */
-  --secondary-rust: #ff4d12;
-  --secondary-rust-glow: rgba(255, 77, 18, 0.22);
+  --gemini-gradient: linear-gradient(90deg, #1ba1e2 0%, #4285f4 25%, #9b72cb 50%, #d96570 75%, #ff7582 100%);
+  --gemini-gradient-subtle: linear-gradient(135deg, rgba(66, 133, 244, 0.15) 0%, rgba(155, 114, 203, 0.12) 50%, rgba(217, 101, 112, 0.1) 100%);
+  --gemini-gradient-text: linear-gradient(74deg, #4285f4 0%, #9b72cb 25%, #d96570 50%, #1ba1e2 75%, #4285f4 100%);
+  --gemini-gradient-card: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.01) 100%);
+  --gemini-gradient-border: linear-gradient(135deg, rgba(66, 133, 244, 0.5) 0%, rgba(155, 114, 203, 0.4) 50%, rgba(217, 101, 112, 0.3) 100%);
+  --gemini-glow-blue: rgba(66, 133, 244, 0.25);
+  --gemini-glow-purple: rgba(155, 114, 203, 0.25);
+
+  /* ─── Primary Accent (Gemini Celestial Radiant) ─── */
+  --primary-lime: #4893fc;
+  --primary-lime-glow: rgba(72, 147, 252, 0.22);
+  --accent-primary: #4893fc;
+  --accent-primary-strong: #3b82f6;
+  --accent-subtle: rgba(72, 147, 252, 0.12);
+  --accent-border: rgba(72, 147, 252, 0.3);
+
+  /* ─── Cyber Rust Orange / Coral (Secondary Accent / Deploy / Alerts) ─── */
+  --secondary-rust: #d96570;
+  --secondary-rust-glow: rgba(217, 101, 112, 0.22);
   --signal-error: #ff4d12;
   --signal-error-subtle: rgba(255, 77, 18, 0.14);
 
   /* ─── Vivid Operational Signals ─── */
-  --signal-success: #d9ff5a;
-  --signal-success-subtle: rgba(217, 255, 90, 0.14);
+  --signal-success: #10b981;
+  --signal-success-subtle: rgba(16, 185, 129, 0.14);
   --signal-warning: #fbbf24;
   --signal-warning-subtle: rgba(251, 191, 36, 0.14);
   --signal-info: #38bdf8;
   --signal-info-subtle: rgba(56, 189, 248, 0.14);
-  --signal-purple: #c084fc;
-  --signal-purple-subtle: rgba(192, 132, 252, 0.14);
+  --signal-purple: #9b72cb;
+  --signal-purple-subtle: rgba(155, 114, 203, 0.14);
 
   /* ─── Semantic Aliases (Dark Bento) ─── */
   --color-canvas-base: #0a0a0b;
@@ -95,33 +114,64 @@
   --motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Light Theme Variables */
-body.light-theme, [data-theme="light"] {
-  --color-canvas-base: #f4f4f5;
-  --color-canvas-subtle: #e4e4e7;
+/* ─── Light Theme System Variables (Google Gemini Light Mode) ─── */
+body.light-theme, html.light-theme, .light-theme, [data-theme="light"] {
+  /* Surfaces & Canvas */
+  --color-canvas-base: #f8fafd;
+  --color-canvas-subtle: #f0f4f9;
   --color-canvas-surface: #ffffff;
   --color-canvas-elevated: #ffffff;
-  --color-canvas-overlay: #d4d4d8;
+  --color-canvas-overlay: rgba(255, 255, 255, 0.95);
 
-  --color-border-subtle: rgba(10, 10, 11, 0.06);
-  --color-border-default: rgba(10, 10, 11, 0.12);
-  --color-border-strong: rgba(10, 10, 11, 0.20);
-  --color-border-focus: #4d7c0f;
+  --bg-void: #f8fafd;
+  --bg-card: #ffffff;
+  --bg-card-elevated: #ffffff;
+  --bg-card-hover: #f1f5f9;
 
-  --color-text-primary: #09090b;
-  --color-text-secondary: #27272a;
-  --color-text-muted: #71717a;
-  --color-text-disabled: #a1a1aa;
+  /* Typography / Paper Palette (Dark ink on light canvas) */
+  --paper-100: #111827;
+  --paper-200: #374151;
+  --paper-300: #4b5563;
+  --paper-400: #6b7280;
 
-  --color-accent: #65a30d;
-  --color-accent-hover: #4d7c0f;
-  --color-accent-subtle: rgba(101, 163, 13, 0.12);
-  --color-accent-border: rgba(101, 163, 13, 0.25);
+  --color-text-primary: #111827;
+  --color-text-secondary: #374151;
+  --color-text-muted: #5f6368;
+  --color-text-disabled: #9ca3af;
 
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.06), 0 0 0 1px var(--color-border-default);
-  --shadow-lg: 0 8px 24px -4px rgba(0, 0, 0, 0.10), 0 0 0 1px var(--color-border-strong);
-  --shadow-modal: 0 16px 40px -8px rgba(0, 0, 0, 0.15), 0 0 0 1px var(--color-border-strong);
+  /* Inks (Inverted for light mode) */
+  --ink-950: #ffffff;
+  --ink-900: #f8fafd;
+  --ink-850: #f0f4f9;
+  --ink-800: #e2e8f0;
+  --ink-700: #cbd5e1;
+  --ink-500: #5f6368;
+
+  /* Borders */
+  --color-border: rgba(0, 0, 0, 0.09);
+  --color-border-subtle: rgba(0, 0, 0, 0.05);
+  --color-border-default: rgba(0, 0, 0, 0.09);
+  --color-border-strong: rgba(0, 0, 0, 0.16);
+  --color-border-focus: #1a73e8;
+
+  /* Accent (Google Gemini Radiant Blue) */
+  --color-primary: #1a73e8;
+  --color-primary-hover: #1557b0;
+  --color-secondary: #0d904f;
+  --color-accent: #1a73e8;
+  --color-accent-hover: #1557b0;
+  --color-accent-subtle: rgba(26, 115, 232, 0.08);
+  --color-accent-border: rgba(26, 115, 232, 0.25);
+  --primary-lime: #1a73e8;
+  --primary-lime-glow: rgba(26, 115, 232, 0.18);
+  --accent-primary: #1a73e8;
+  --accent-primary-strong: #1557b0;
+
+  /* Shadows (Light Elevation) */
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 16px -2px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 10px 28px -4px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  --shadow-modal: 0 20px 48px -8px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(0, 0, 0, 0.08);
 }
 
 /* ─── Typography Utility Classes ─── */

@@ -17,12 +17,14 @@ export function AiDostMark({ size = 20, className = '', color = 'url(#aiDostBent
     >
       <defs>
         <linearGradient id="aiDostBentoLimeGrad" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#d9ff5a" />
-          <stop offset="100%" stopColor="#a3e635" />
+          <stop offset="0%" stopColor="#1ba1e2" />
+          <stop offset="35%" stopColor="#4893fc" />
+          <stop offset="70%" stopColor="#9b72cb" />
+          <stop offset="100%" stopColor="#d96570" />
         </linearGradient>
         <linearGradient id="aiDostCyberRustGrad" x1="0" y1="0" x2="4" y2="3" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#ff4d12" />
-          <stop offset="100%" stopColor="#ea580c" />
+          <stop offset="0%" stopColor="#ff7582" />
+          <stop offset="100%" stopColor="#d96570" />
         </linearGradient>
       </defs>
 

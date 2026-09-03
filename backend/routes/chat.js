@@ -979,10 +979,15 @@ router.post('/execute', async (req, res) => {
             });
         }
 
+        let cleanStderr = stderr || (err ? err.message : '');
+        if (cleanStderr && (cleanStderr.includes('document is not defined') || cleanStderr.includes('window is not defined') || cleanStderr.includes('HTMLElement is not defined'))) {
+            cleanStderr += '\n💡 Note: This snippet relies on browser DOM/Canvas APIs. Click "Open as Live Browser Animation" to run and view it interactively in real time.';
+        }
+
         res.json({
             success: !err,
             stdout: stdout || '',
-            stderr: stderr || (err ? err.message : ''),
+            stderr: cleanStderr,
             exitCode: err ? (err.code || 1) : 0,
             duration
         });

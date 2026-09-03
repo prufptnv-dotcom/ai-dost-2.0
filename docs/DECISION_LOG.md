@@ -99,3 +99,65 @@
 - **Decision:** Perform full independent evidence audit across all 21 backend test suites (296 tests), all 19 frontend test suites (98 tests), live online SQLite disaster recovery, 10,000 files scale benchmark, and live health endpoint probes.
 - **Rationale:** Eliminate unverified claims and prove complete system reliability with exact reproduction evidence before production rollout.
 - **Result:** 394/394 automated tests passed (296 backend + 98 frontend), live backup/restore verified with 100% integrity across 8 relational tables, 10,000 files benchmark completed in 16ms (52.32MB RSS), health endpoints live, 0 P0/P1 defects. Formally certified PRODUCTION-READY.
+
+## [AF.1] Core Architecture Freeze — "Small Package, Big Impact"
+- **Decision:** Freeze the product principle as "Simple UI Outside, Autonomous System Inside" and freeze the full modular capability architecture (12 modules: Chat, Agent, IDE, Docs, Images, Resume, Voice, Workspace, Git, RAG, MCP, Telegram) without adding new user-facing features or UI elements.
+- **Rationale:** Prevents feature creep and ensures the system evolves around a stable autonomous core rather than accumulating disconnected surface features.
+- **Result:** `docs/AI_DOST_CORE_ARCHITECTURE.md` created. All 10 agent runtime modules, 15 DAOs, and 27 services audited. 10/10 security boundaries verified.
+
+## [AF.2] Runtime Profile Architecture — LIGHT / STANDARD / SCALE
+- **Decision:** Define three runtime profiles (LIGHT for mobile/low-resource, STANDARD for desktop, SCALE for server/distributed) sharing the same logical application contracts but differing in resource utilization.
+- **Rationale:** Ensures the architecture can evolve to mobile, multi-user, and cloud deployment without redesigning the autonomous core. Mobile treated as client-only; heavy backend stays on server.
+- **Result:** `docs/RUNTIME_PROFILES.md` created with contract compatibility matrix, resource-aware execution profiles, and gap analysis.
+
+## [AF.3] Database Driver — KEEP better-sqlite3
+- **Decision:** Keep `better-sqlite3` v13.0.3 as the database driver. The Windows native build blocker is an environment provisioning issue, not an architectural defect. Replacing with `sqlite3` does NOT solve the native build problem and would require rewriting 15 DAOs + 4 migrations. Node.js built-in `node:sqlite` is experimental. `sql.js` has performance risk.
+- **Rationale:** 394 tests pass with the current driver. All alternatives either share the same native build requirement or introduce stability/performance risk.
+- **Result:** `docs/DATABASE_DRIVER_ARCHITECTURE_DECISION.md` created with full evaluation of 4 alternatives, measured facts, and migration complexity analysis.
+
+## [AF.4] Autonomous Execution Contract
+- **Decision:** Freeze the 8-stage execution pipeline (Intent → Context → Plan → Execute → Observe → Verify → Repair → Deliver) and the role-capability matrix (SUPERVISOR: orchestration only; RESEARCHER: read-only; CODER: read+write+terminal; VERIFIER: read-only+test).
+- **Rationale:** Provides a stable contract that all future tool additions and capability expansions must comply with, preventing capability policy bypass.
+- **Result:** `docs/AUTONOMOUS_EXECUTION_CONTRACT.md` created with state machine, delegation rules, checkpoint/resume contract, repair cycle contract, and workspace isolation contract.
+
+## [AF.5] System Scaling Boundaries
+- **Decision:** Document LOCAL (single process + SQLite), STANDARD SERVER (single-node + optional PostgreSQL), and SCALE (PostgreSQL + object storage + queue + workers) as architectural targets. No distributed infrastructure to be implemented now.
+- **Rationale:** Ensures current abstractions (DAOs, ToolRegistry, CapabilityPolicy, ResultValidator) do not obstruct future scaling. Identified 7 blocking abstractions that must change for SCALE tier.
+- **Result:** `docs/SYSTEM_SCALING_BOUNDARIES.md` created with abstraction readiness matrix, blocking vs non-blocking analysis, and recommended migration priority order.
+
+## [F1.1] Phase F1 — Interaction Foundations & P1 Remediation
+- **Decision:** Surgically fix all 6 P1 major UX problems identified in the frontend gap audit without modifying the frozen Chat or backend architectures.
+- **Actions Taken:**
+  1. GAP-P1-01: Enabled ArrowUp/ArrowDown/Enter keyboard navigation in Command Palette with ARIA combobox semantics.
+  2. GAP-P1-02: Replaced blocking `window.confirm()` calls with accessible `Modal` dialogs across Projects, History, and Settings views.
+  3. GAP-P1-03: Tokenized IDE overlays and Copilot IDE cards using semantic CSS variables to enable light/dark mode adaptation.
+  4. GAP-P1-04: Removed external Google Fonts `@import` in favor of local self-hosted WOFF2 fonts to eliminate FOUT and blocking network requests.
+  5. GAP-P1-05: Enforced 44×44px minimum touch targets on mobile viewports for sidebar buttons and chat actions.
+  6. GAP-P1-06: Added ambient offline status banner to `AppShell` with `online`/`offline` event listeners.
+- **Result:** 0 open P1 issues. 21/21 test suites passing (105 tests). 0 lint errors. Build passing. Verified in `docs/PHASE_F1_INTERACTION_FOUNDATIONS_COMPLETE.md`.
+
+## [W1.1] Phase W1 — Public Website & Documentation Ecosystem
+- **Decision:** Upgrade the public web presence and documentation into a production-grade, trustworthy developer platform communicating "Simple Chat Outside. Autonomous System Inside." Decouple public marketing architecture from internal app workspace navigation.
+- **Actions Taken:**
+  1. Conducted benchmark research of 9 leading AI/developer platforms (`docs/PUBLIC_WEBSITE_RESEARCH.md`).
+  2. Defined canonical product positioning and terminology rules (`docs/PUBLIC_PRODUCT_POSITIONING.md`).
+  3. Mapped all public security claims to exact code implementations with transparent disclosures disclaiming uncertified compliance badges (`docs/PUBLIC_SECURITY_CONTENT.md`).
+  4. Established 10-track documentation hierarchy and 7-part pedagogical blueprint (`docs/DOCUMENTATION_INFORMATION_ARCHITECTURE.md`).
+  5. Created comprehensive public content matrix (`docs/PUBLIC_WEBSITE_CONTENT_MAP.md`).
+  6. Implemented dedicated public shell (`PublicNavbar`, `PublicFooter`, `PublicLayout`, `DocsLayout`).
+  7. Built production landing page (`/`), product overview (`/product`), outcome catalog (`/capabilities`), visual pipeline (`/how-it-works`), trust suite (`/security`, `/privacy`, `/terms`, `/policy`), company info (`/about`, `/changelog`, `/support`), and 8 documentation guide tracks (`/docs/*`).
+  8. Created public website test suite (`frontend/tests/publicWebsite.test.jsx`).
+- **Result:** All 22 test suites (116 tests) passing. 0 lint errors. 30/30 pages prerendered in Next.js build. Zero backend modifications. Chat architecture frozen. Documented in `docs/PHASE_W1_PUBLIC_WEBSITE_COMPLETE.md`.
+
+## [F2.1] Phase F2 — Chat UI Final 10/10 Polish
+- **Decision:** Execute comprehensive 10/10 visual, functional, and responsive polish on the existing conversational Chat interface without altering backend code, modifying database drivers, or converting chat into a crowded feature dashboard. "Simple Chat Outside. Autonomous System Inside."
+- **Actions Taken:**
+  1. Empty State Redesign: Replaced chatbot greeting with calm, editorial headline ("Hey. What are we working on today?") and removed generic action chips.
+  2. Light Theme Contrast Remediation: Replaced hardcoded `#ffffff` typography colors in `.prose-chat` with semantic CSS variables and explicit light-theme overrides, fixing invisible text.
+  3. Code Blocks Polish: Lowercase language tag, accessible Copy/Copied button with checkmark, and comfortable monospace styling.
+  4. Contextual AI Message Actions: One-click copy with checkmark feedback, read-aloud with instant audio interruption (Square stop button), seamless retry, and persistent thumbs up/down visual feedback.
+  5. User Message Inline Edit: Hover pencil icon to repopulate composer, adjust cursor, and focus input.
+  6. Smart Scrolling: Unlinked thinking state from auto-scroll triggers to preserve reading position; introduced floating "↓ Jump to latest" pill when scrolled up.
+  7. Composer Polish: Auto-growing textarea, radiant send button with disabled state when empty, and compact toolbar.
+  8. Responsive Mobile Optimization: Fixed duplicate stacked headers on mobile viewports; single unified header with sidebar drawer trigger.
+- **Result:** 10/10 visual audit verified via headless Playwright browser screenshots across desktop & mobile in both light and dark themes. 116/116 frontend tests passing, 0 ESLint warnings, 68/68 backend tests passing. Documented in `docs/PHASE_F2_CHAT_10_10_COMPLETE.md`.
