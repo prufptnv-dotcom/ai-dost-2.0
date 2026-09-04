@@ -37,7 +37,22 @@ export function compileLiveHtml(code = '', language = 'html') {
 
   // 1. Full HTML documents
   if (code.includes('<html') || code.includes('<!DOCTYPE') || code.includes('<!doctype')) {
-    return code;
+    let cleanCode = code;
+    // Strip unresolved relative stylesheet links and script tags that don't have absolute http/https/data URLs
+    // e.g. <link rel="stylesheet" href="style.css"> or <script src="script.js"></script>
+    // to prevent 404 console errors in browser
+    cleanCode = cleanCode
+      .replace(/<link\b[^>]*href=["'](?!(?:https?:|\/\/|data:))[^"']+\.css["'][^>]*>/gi, '')
+      .replace(/<script\b[^>]*src=["'](?!(?:https?:|\/\/|data:))[^"']+\.js["'][^>]*>\s*<\/script>/gi, '');
+
+    // If no background style is defined in the HTML document, ensure it defaults to dark instead of blinding white
+    if (!/background\s*:/i.test(cleanCode) && cleanCode.includes('</head>')) {
+      cleanCode = cleanCode.replace(
+        '</head>',
+        '<style>body{background:#090d16;color:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,sans-serif;margin:0;padding:16px;}</style></head>'
+      );
+    }
+    return cleanCode;
   }
 
   // 2. Pure SVG
@@ -70,6 +85,10 @@ export function compileLiveHtml(code = '', language = 'html') {
   // 3. HTML Snippet (or code containing HTML tags)
   const hasHtmlTags = /<(div|canvas|button|svg|style|section|span|p|h[1-6]|ul|ol|li)\b/i.test(code);
   if (lang === 'html' || lang === 'htm' || hasHtmlTags) {
+    let cleanSnippet = code
+      .replace(/<link\b[^>]*href=["'](?!(?:https?:|\/\/|data:))[^"']+\.css["'][^>]*>/gi, '')
+      .replace(/<script\b[^>]*src=["'](?!(?:https?:|\/\/|data:))[^"']+\.js["'][^>]*>\s*<\/script>/gi, '');
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -94,7 +113,7 @@ export function compileLiveHtml(code = '', language = 'html') {
   </style>
 </head>
 <body>
-  ${code}
+  ${cleanSnippet}
 </body>
 </html>`;
   }
@@ -172,6 +191,29 @@ export function compileLiveHtml(code = '', language = 'html') {
   <div id="root"></div>
 
   <script>
+    // Universal Canvas and Element Provisioning Guard
+    (function() {
+      const origGetElementById = document.getElementById.bind(document);
+      document.getElementById = function(id) {
+        let el = origGetElementById(id);
+        if (!el) {
+          if (id.toLowerCase().includes('canvas') || /canvas/i.test(id)) {
+            el = document.createElement('canvas');
+            el.id = id;
+            el.width = 600;
+            el.height = 600;
+            el.style = 'max-width: 100%; border-radius: 12px; box-shadow: 0 12px 35px rgba(0,0,0,0.6); display: block; margin: 0 auto; background: #0d111c;';
+            document.body.prepend(el);
+          } else {
+            el = document.createElement('div');
+            el.id = id;
+            document.body.appendChild(el);
+          }
+        }
+        return el;
+      };
+    })();
+
     window.onerror = function(msg, url, lineNo) {
       const banner = document.createElement('div');
       banner.style = 'background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #fca5a5; padding: 10px 14px; border-radius: 8px; font-family: monospace; font-size: 12px; margin-top: 14px; max-width: 90vw;';
@@ -196,3 +238,4 @@ export function compileLiveHtml(code = '', language = 'html') {
 <body><pre>${code.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre></body>
 </html>`;
 }
+

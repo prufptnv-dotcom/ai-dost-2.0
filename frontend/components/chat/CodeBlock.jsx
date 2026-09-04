@@ -292,7 +292,7 @@ export default function CodeBlock({
                 key={iframeKey}
                 srcDoc={compileLiveHtml(code, language)}
                 title="Live Code Animation"
-                sandbox="allow-scripts allow-modals allow-same-origin allow-forms"
+                sandbox="allow-scripts allow-modals allow-forms"
                 className="w-full h-full border-0 bg-[#090d16]"
               />
             </div>

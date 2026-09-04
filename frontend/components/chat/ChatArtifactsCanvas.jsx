@@ -171,7 +171,7 @@ export default function ChatArtifactsCanvas({
       <div className="flex-1 bg-[#06080e] overflow-hidden flex items-center justify-center p-2 relative">
         {tab === 'preview' ? (
           <div
-            className="h-full transition-all duration-300 rounded-xl overflow-hidden shadow-2xl border border-white/10 bg-white"
+            className="h-full transition-all duration-300 rounded-xl overflow-hidden shadow-2xl border border-white/10 bg-[#090d16]"
             style={{ width: deviceWidth }}
           >
             <iframe
@@ -179,8 +179,8 @@ export default function ChatArtifactsCanvas({
               ref={iframeRef}
               srcDoc={getCompiledHtml()}
               title={title}
-              sandbox="allow-scripts allow-modals allow-same-origin allow-forms"
-              className="w-full h-full border-0"
+              sandbox="allow-scripts allow-modals allow-forms"
+              className="w-full h-full border-0 bg-[#090d16]"
             />
           </div>
         ) : (

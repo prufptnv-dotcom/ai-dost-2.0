@@ -78,24 +78,98 @@ const extractImages = (content) => {
 };
 
 function extractArtifact(content) {
-  if (!content) return null;
-  const htmlMatch = content.match(/```(?:html|xml|svg)\s*\n([\s\S]*?)```/i);
-  if (htmlMatch) {
-    const code = htmlMatch[1].trim();
-    if (code.includes('<') && code.includes('>')) {
-      return {
-        title: code.includes('<svg') ? 'SVG Vector Graphic' : 'Interactive UI Artifact',
-        code,
-        language: code.includes('<svg') ? 'svg' : 'html',
-      };
+  if (!content || typeof content !== 'string') return null;
+
+  // Extract all fenced code blocks: { lang, code }
+  const codeBlockRegex = /```([a-zA-Z0-9_-]*)\s*\n([\s\S]*?)```/g;
+  const blocks = [];
+  let match;
+  while ((match = codeBlockRegex.exec(content)) !== null) {
+    const lang = (match[1] || '').toLowerCase().trim();
+    const code = match[2].trim();
+    if (code) {
+      blocks.push({ lang, code });
     }
   }
+
+  if (blocks.length === 0) return null;
+
+  // Find blocks by language / content
+  const htmlBlock = blocks.find(b =>
+    ['html', 'htm', 'xml', 'svg'].includes(b.lang) ||
+    (b.code.includes('<') && b.code.includes('</'))
+  );
+  const cssBlock = blocks.find(b =>
+    ['css', 'scss', 'less', 'style'].includes(b.lang) ||
+    (!htmlBlock && /^[.#a-zA-Z0-9_\-\s,>:+*]+\s*\{[\s\S]*\}/m.test(b.code))
+  );
+  const jsBlock = blocks.find(b =>
+    ['javascript', 'js', 'ts', 'jsx', 'script'].includes(b.lang) ||
+    (!htmlBlock && !cssBlock && /\b(function|const|let|var|document\.|window\.)\b/.test(b.code))
+  );
+
+  // If we have an HTML block:
+  if (htmlBlock) {
+    let combinedCode = htmlBlock.code;
+    const isSvg = htmlBlock.lang === 'svg' || (combinedCode.startsWith('<svg') && combinedCode.includes('</svg>'));
+
+    if (!isSvg) {
+      // 1. Inline CSS into HTML if present
+      if (cssBlock && cssBlock.code) {
+        if (/<link\b[^>]*href=["'][^"']*\.css["'][^>]*>/i.test(combinedCode)) {
+          combinedCode = combinedCode.replace(/<link\b[^>]*href=["'][^"']*\.css["'][^>]*>/gi, `<style>\n${cssBlock.code}\n</style>`);
+        } else if (combinedCode.includes('</head>')) {
+          combinedCode = combinedCode.replace('</head>', `<style>\n${cssBlock.code}\n</style>\n</head>`);
+        } else {
+          combinedCode = `<style>\n${cssBlock.code}\n</style>\n` + combinedCode;
+        }
+      }
+
+      // 2. Inline JavaScript into HTML if present
+      if (jsBlock && jsBlock.code) {
+        if (/<script\b[^>]*src=["'][^"']*\.js["'][^>]*>\s*<\/script>/i.test(combinedCode)) {
+          combinedCode = combinedCode.replace(/<script\b[^>]*src=["'][^"']*\.js["'][^>]*>\s*<\/script>/gi, `<script>\n${jsBlock.code}\n</script>`);
+        } else if (combinedCode.includes('</body>')) {
+          combinedCode = combinedCode.replace('</body>', `<script>\n${jsBlock.code}\n</script>\n</body>`);
+        } else {
+          combinedCode = combinedCode + `\n<script>\n${jsBlock.code}\n</script>`;
+        }
+      }
+
+      // 3. Clean up any remaining unresolved relative link/script tags that cause 404s
+      combinedCode = combinedCode
+        .replace(/<link\b[^>]*href=["'](?!(?:https?:|\/\/|data:))[^"']+\.css["'][^>]*>/gi, '')
+        .replace(/<script\b[^>]*src=["'](?!(?:https?:|\/\/|data:))[^"']+\.js["'][^>]*>\s*<\/script>/gi, '');
+    }
+
+    return {
+      title: isSvg ? 'SVG Vector Graphic' : 'Interactive UI Artifact',
+      code: combinedCode,
+      language: isSvg ? 'svg' : 'html',
+    };
+  }
+
+  // If no HTML block, but we have JS or CSS:
+  if (jsBlock) {
+    return {
+      title: 'JavaScript Live Animation',
+      code: jsBlock.code,
+      language: 'javascript',
+    };
+  }
+
+  if (cssBlock) {
+    return {
+      title: 'CSS Animation',
+      code: cssBlock.code,
+      language: 'css',
+    };
+  }
+
   return null;
 }
 
-
-
-function ParsedMarkdown({ content, isStreaming, onNavigate, onPreviewArtifact }) {
+function ParsedMarkdown({ content, isStreaming, onNavigate, onPreviewArtifact, detectedArtifact }) {
   if (!content) return null;
   const parts = content.split(/(```[\s\S]*?(?:```|$))/g);
   return (
@@ -122,7 +196,7 @@ function ParsedMarkdown({ content, isStreaming, onNavigate, onPreviewArtifact })
               language={langLine || 'text'}
               canRun={true}
               canPreview={true}
-              onPreviewArtifact={onPreviewArtifact}
+              onPreviewArtifact={detectedArtifact ? () => onPreviewArtifact(detectedArtifact) : onPreviewArtifact}
               onOpenIDE={() => {
                 if (onNavigate) {
                   try {
@@ -253,7 +327,7 @@ function MessageBubble({
               {isUser ? (
                 <div className="whitespace-pre-wrap">{msg.content}</div>
               ) : (
-                <ParsedMarkdown content={msg.content} isStreaming={isStreaming} onNavigate={onNavigate} onPreviewArtifact={onOpenArtifact} />
+                <ParsedMarkdown content={msg.content} isStreaming={isStreaming} onNavigate={onNavigate} onPreviewArtifact={onOpenArtifact} detectedArtifact={detectedArtifact} />
               )}
               {isStreaming && (
                 <span className="inline-block w-2 h-4 ml-0.5 bg-accent animate-pulse align-middle rounded-sm" />
@@ -633,12 +707,15 @@ export default function ChatView({
       }
       try {
         localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated.slice(0, 30)));
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('ai_dost_sessions_updated'));
-        }
       } catch (_) {}
       return updated;
     });
+
+    if (typeof window !== 'undefined') {
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('ai_dost_sessions_updated'));
+      }, 0);
+    }
 
     setThinking(true);
     setThinkingLabel('Thinking…');
