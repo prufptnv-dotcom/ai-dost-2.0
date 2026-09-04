@@ -371,5 +371,46 @@ test('POST /api/sandbox/create with local fallback -> 200 and lifecycle roundtri
   assert.equal(delStatus, 200);
 });
 
+// ── Verifier Endpoints (Milestone 4 / P0.3) ─────────────────────────────
+test('GET /api/verify/health -> 200 OK with capabilities', async () => {
+  const { status, body } = await req('GET', '/api/verify/health');
+  assert.equal(status, 200);
+  assert.equal(body.status, 'OK');
+  assert.equal(body.engine, 'ActionVerifier');
+  assert.ok(Array.isArray(body.capabilities));
+});
 
+test('POST /api/verify/code -> verifies syntax and passes clean code', async () => {
+  const { status, body } = await req('POST', '/api/verify/code', {
+    filePath: 'index.js',
+    code: 'const a = 10; const b = 20; console.log(a + b);'
+  });
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.equal(body.result.valid, true);
+  assert.equal(body.result.diagnostics.length, 0);
+});
 
+test('POST /api/verify/code -> detects syntax error and secret leak', async () => {
+  const { status, body } = await req('POST', '/api/verify/code', {
+    filePath: 'auth.js',
+    code: 'const token = "AIzaSyDummySecretTokenForTesting123456";\nconst bad = {;'
+  });
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.equal(body.result.valid, false);
+  assert.equal(body.result.secretLeaks.length > 0, true);
+});
+
+test('POST /api/verify/document -> verifies CSV document integrity', async () => {
+  const csvContent = Buffer.from('name,score,status\nAlice,100,pass\nBob,90,pass').toString('base64');
+  const { status, body } = await req('POST', '/api/verify/document', {
+    fileName: 'grades.csv',
+    contentBase64: csvContent,
+    fileType: 'csv'
+  });
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.equal(body.result.valid, true);
+  assert.equal(body.result.metadata.rowCount, 2);
+});

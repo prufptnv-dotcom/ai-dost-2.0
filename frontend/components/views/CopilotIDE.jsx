@@ -543,6 +543,8 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
   // Left Sidebar & Terminal Collapsible States
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [selectedCode, setSelectedCode] = useState('');
 
   // Copilot Agent Chat States
   const [copilotMessages, setCopilotMessages] = useState([]);
@@ -975,6 +977,14 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, () => {
       triggerInlineEdit();
+    });
+
+    editor.onDidChangeCursorSelection(() => {
+      try {
+        const sel = editor.getSelection();
+        const text = sel ? editor.getModel()?.getValueInRange(sel) || '' : '';
+        setSelectedCode(text);
+      } catch (_) {}
     });
 
     try {
@@ -1829,6 +1839,8 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                     showPreview={workspaceMode === 'preview'}
                     onToggleDiff={() => setDiffModalOpen(true)}
                     showDiff={diffModalOpen}
+                    onToggleInspector={() => setInspectorOpen(prev => !prev)}
+                    showInspector={inspectorOpen}
                     onAiAction={(action) => handleSend(`${action === 'explain' ? 'Explain how' : action === 'fix' ? 'Find and fix bugs in' : 'Refactor'} ${activePath}`)}
                   />
                 )}
@@ -1851,7 +1863,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                   )}
 
                   {/* Monaco Editor Container */}
-                  <div className="flex-1 min-h-0 relative bg-canvas-base">
+                  <div className="flex-1 min-w-0 min-h-0 relative bg-canvas-base">
                     {activePath ? (
                       <MonacoEditor
                         height="100%"
@@ -1883,6 +1895,19 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                       </div>
                     )}
                   </div>
+
+                  {/* AI Inspector & Action Verifier Panel */}
+                  {inspectorOpen && (
+                    <AiInspector
+                      activePath={activePath}
+                      activeContent={activeContent}
+                      selectedCode={selectedCode}
+                      isOpen={true}
+                      onClose={() => setInspectorOpen(false)}
+                      onRunAiTask={handleSend}
+                      className="w-80 flex-shrink-0 border-l border-border h-full"
+                    />
+                  )}
                 </div>
 
                 {/* Integrated Terminal Dock */}

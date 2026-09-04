@@ -15,6 +15,8 @@ export function EditorToolbar({
   showPreview = false,
   onToggleDiff,
   showDiff = false,
+  onToggleInspector,
+  showInspector = false,
   onAiAction,
   className = '',
 }) {
@@ -118,6 +120,24 @@ export function EditorToolbar({
           >
             <Eye className="w-3 h-3" />
             <span className="hidden sm:inline">Preview</span>
+          </button>
+        )}
+
+        {/* AI Quality & Verifier Inspector Toggle */}
+        {onToggleInspector && (
+          <button
+            type="button"
+            data-testid="toggle-inspector-btn"
+            onClick={onToggleInspector}
+            className={`flex items-center gap-1 px-2 py-0.5 rounded-xs text-[11px] font-sans border transition-fast cursor-pointer ${
+              showInspector
+                ? 'bg-canvas-elevated border-accent-primary text-accent-primary font-medium shadow-xs'
+                : 'border-border bg-canvas-surface text-ink-muted hover:text-paper-100'
+            }`}
+            title="Toggle AI Quality Inspector & Code Verifier"
+          >
+            <Sparkles className="w-3 h-3" />
+            <span className="hidden sm:inline">Inspector</span>
           </button>
         )}
 

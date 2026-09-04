@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FileExplorer } from '../components/ide/FileExplorer';
 import { WorkspaceTabs } from '../components/ide/WorkspaceTabs';
 import { EditorToolbar } from '../components/ide/EditorToolbar';
@@ -146,6 +146,26 @@ describe('Phase 3.6 — Copilot IDE & Monaco Editor Chrome Rebuild', () => {
       const explainFileBtn = screen.getByText('Explain File');
       fireEvent.click(explainFileBtn);
       expect(onRunTask).toHaveBeenCalledWith(expect.stringContaining('Explain the implementation'));
+    });
+
+    it('switches to Quality & Verification tab and displays verification suite', async () => {
+      render(
+        <AiInspector
+          activePath="src/auth/session.js"
+          activeContent="const x = 1;\nconsole.log(x);"
+          isOpen={true}
+        />
+      );
+
+      const qualityTab = screen.getByText(/Quality/i);
+      fireEvent.click(qualityTab);
+
+      expect(screen.getByText('Quality & Verification')).toBeInTheDocument();
+      expect(screen.getByText(/Syntax Parser/i)).toBeInTheDocument();
+      expect(screen.getByText('Secret Shield')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText(/Verify Code Quality|Verifying/i)).toBeInTheDocument();
+      });
     });
   });
 

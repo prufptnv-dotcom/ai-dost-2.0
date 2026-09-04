@@ -142,6 +142,25 @@ This document catalogs active, planned, and deprecated features along with their
 - **Responsive Mobile Navigation**: `frontend/components/chat/SmartChatHeader.jsx`, `frontend/components/layout/AppShell.jsx` — Unified single top header with drawer trigger for mobile viewports.
 - **Automated Verification**: Headless Playwright browser audit matrix (`screenshots/01-08`), 116 frontend tests passing, 0 ESLint warnings, 68 backend tests passing.
 
+## [Milestone 1 - P7] Project Workspace Graph & Entity Engine
+- **WorkspaceGraphService**: `backend/services/workspaceGraphService.js` managing context nodes (files, docs, research, endpoints, databases), dependencies, and topological query contracts.
+- **Graph REST API**: `backend/routes/workspaceGraph.js` mounted at `/api/projects/:projectId/graph` with node addition, edge connections, and cluster analytics.
+- **Interactive Graph Canvas**: `frontend/components/views/ProjectDetailView.jsx` featuring dynamic node layout, search filtering, node addition modal, and responsive light/dark themes.
 
+## [Milestone 2 - P8] Project Automations & Workflow Hub
+- **WorkflowEngine**: `backend/services/workflowEngine.js` supporting scheduled/triggered actions (`repo_health_check`, `test_watcher`, `auto_backup`, `sync_docs`).
+- **Automations REST API**: `backend/routes/workflows.js` mounted at `/api/workflows` with full CRUD, template presets, and execution run history.
+- **Automations View UI**: `frontend/components/views/AutomationsView.jsx` with template modals, trigger toggles, live run status, and run history viewer.
 
+## [Milestone 3 - P0.2] Docker Sandbox Isolation Hardening & Safe Execution Guard
+- **Resource Hardening**: `backend/sandbox/SandboxManager.js` capping memory (1GB max 2GB, swap capped), NanoCPUs (1.0 core), PidsLimit (100 anti-fork bomb), and no-new-privileges: true.
+- **Local Sandbox Fallback Guard**: Hardened local fallback environment with strict path traversal rejection (`_resolveSafe`), destructive command policy (`validateCommandPolicy`), host secret sanitization (`sanitizeEnvironment`), and process timeouts.
+- **Sandbox Telemetry API**: `backend/sandbox/routes.js` providing `/api/sandbox/health`, `/status`, and 1-click `/test` diagnostic probe.
+- **Settings Security Telemetry UI**: `frontend/components/views/SettingsView.jsx` featuring Sandbox & Security Isolation Card, resource quota grid, and live probe test trigger with latency tracking.
 
+## [Milestone 4 - P0.3] Automated Action Verifiers (Self-Verification Engine)
+- **Verifier Engine**: `backend/services/verifierService.js` validating code syntax (AST parsing, bracket balancing, string literal check for JS/TS/JSX/JSON/Python), secret leak shielding (API keys/tokens regex), dependency consistency (`package.json`), and document magic byte integrity (`%PDF-`, `PK\x03\x04`, CSV).
+- **Verifier REST API**: `backend/routes/verifier.js` mounted at `/api/verify` with `/health`, `/code`, `/document`, and `/action`.
+- **Inline Agent Guard**: `backend/routes/agent.js` integrated with verifier to automatically validate `write_file` and `apply_diff` actions.
+- **Copilot IDE AI Inspector**: `frontend/components/ide/AiInspector.jsx` featuring Quality & Verification score badge (100/100 Verified), 3 automated check items, 1-click verification trigger, and diagnostics list.
+- **Editor Toolbar Integration**: `frontend/components/ide/EditorToolbar.jsx` & `CopilotIDE.jsx` with inspector toggle button and flex-safe side-by-side rendering.

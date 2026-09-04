@@ -425,3 +425,78 @@ describe('specService', () => {
     assert.ok(plan.framework);
   });
 });
+
+// ── Verifier Service (Action & Integrity Verifiers) ─────────────────────
+describe('verifierService', () => {
+  const verifier = require('../services/verifierService');
+
+  test('verifyCode passes on valid JS code', () => {
+    const code = 'function add(a, b) { return a + b; }\nconsole.log(add(1, 2));';
+    const result = verifier.verifyCode('utils.js', code);
+    assert.equal(result.valid, true);
+    assert.equal(result.diagnostics.length, 0);
+  });
+
+  test('verifyCode catches JS syntax error with line number', () => {
+    const badCode = 'function broken() {\n  const x = {;\n}';
+    const result = verifier.verifyCode('broken.js', badCode);
+    assert.equal(result.valid, false);
+    assert.equal(result.diagnostics.length > 0, true);
+    assert.match(result.diagnostics[0].message, /(syntax|token|unexpected)/i);
+  });
+
+  test('verifyCode validates clean JSON and rejects malformed JSON', () => {
+    const validJson = JSON.stringify({ name: 'ai-dost', version: '2.0.0' }, null, 2);
+    const good = verifier.verifyCode('config.json', validJson);
+    assert.equal(good.valid, true);
+
+    const badJson = '{"name": "ai-dost", trailing: }';
+    const bad = verifier.verifyCode('config.json', badJson);
+    assert.equal(bad.valid, false);
+    assert.match(bad.diagnostics[0].message, /(JSON|double-quoted|syntax|token)/i);
+  });
+
+  test('verifyCode detects leaked API keys and secrets', () => {
+    const secretCode = 'const GEMINI_KEY = "AIzaSyD-123456789012345678901234567890";';
+    const result = verifier.verifyCode('keys.js', secretCode);
+    assert.equal(result.valid, false);
+    assert.equal(result.secretLeaks.length, 1);
+    assert.match(result.secretLeaks[0].type, /Google/i);
+  });
+
+  test('verifyDocument checks PDF and Office Open XML magic bytes', () => {
+    // Valid PDF header
+    const pdfBuf = Buffer.from('%PDF-1.5\n%EOF');
+    const pdfCheck = verifier.verifyDocument('report.pdf', pdfBuf, 'pdf');
+    assert.equal(pdfCheck.valid, true);
+
+    // Corrupt PDF
+    const corruptPdf = Buffer.from('NOT A PDF FILE');
+    const corruptCheck = verifier.verifyDocument('broken.pdf', corruptPdf, 'pdf');
+    assert.equal(corruptCheck.valid, false);
+
+    // Valid DOCX zip signature (PK\x03\x04)
+    const docxBuf = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]);
+    const docxCheck = verifier.verifyDocument('spec.docx', docxBuf, 'docx');
+    assert.equal(docxCheck.valid, true);
+
+    // Valid CSV
+    const csvBuf = Buffer.from('id,name,score\n1,Alpha,100\n2,Beta,95');
+    const csvCheck = verifier.verifyDocument('data.csv', csvBuf, 'csv');
+    assert.equal(csvCheck.valid, true);
+    assert.equal(csvCheck.metadata.rowCount, 2);
+  });
+
+  test('verifyAction checks write_file action payload', () => {
+    const action = {
+      action: 'write_file',
+      parameters: {
+        path: 'src/index.js',
+        content: 'const safe = 42;'
+      }
+    };
+    const check = verifier.verifyAction(action);
+    assert.equal(check.valid, true);
+  });
+});
+

@@ -30,6 +30,7 @@ const PythonEngine      = require('../services/pythonEngineService');
 const AgentOrchestrator = require('../agent/orchestrator');
 const PlannerService    = require('../services/plannerService');
 const SpecService       = require('../services/specService');
+const verifierService   = require('../services/verifierService');
 const { detectCategory, buildFullstackSystemPrompt, generateGoldenScaffold } = require('../agent/fullstackTrainer');
 const { saveProjectFile, deleteProjectFile, getProjectFiles } = require('../projectStore');
 
@@ -229,7 +230,14 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
           if (inMem) inMem.content = parameters.content || '';
           else projectFiles.push({ path: parameters.path, content: parameters.content || '' });
         }
-        return { success: true, message: `File written: ${parameters.path}`, changedFile: parameters.path, newContent: parameters.content || '' };
+        const vReport = verifierService.verifyCode(parameters.path, parameters.content || '');
+        return {
+          success: true,
+          message: `File written: ${parameters.path}${!vReport.verified ? ' (Warning: ' + (vReport.repairSuggestion || 'verification issue detected') + ')' : ''}`,
+          changedFile: parameters.path,
+          newContent: parameters.content || '',
+          verification: vReport
+        };
       } catch (e) {
         return { success: false, error: e.message };
       }
@@ -281,7 +289,14 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
           if (inMem) inMem.content = newContent;
           else projectFiles.push({ path: parameters.path, content: newContent });
         }
-        return { success: true, message: `Diff applied to ${parameters.path}`, changedFile: parameters.path, newContent };
+        const vReport = verifierService.verifyCode(parameters.path, newContent);
+        return {
+          success: true,
+          message: `Diff applied to ${parameters.path}${!vReport.verified ? ' (Warning: ' + (vReport.repairSuggestion || 'verification issue detected') + ')' : ''}`,
+          changedFile: parameters.path,
+          newContent,
+          verification: vReport
+        };
       } catch (e) {
         return { success: false, error: e.message };
       }

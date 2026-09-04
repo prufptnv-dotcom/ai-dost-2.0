@@ -150,6 +150,14 @@ const nextConfig = {
         destination: `${BACKEND_URL}/api/workflows/:path*`
       },
       {
+        source: '/api/verify',
+        destination: `${BACKEND_URL}/api/verify`
+      },
+      {
+        source: '/api/verify/:path*',
+        destination: `${BACKEND_URL}/api/verify/:path*`
+      },
+      {
         source: '/api/memory/:path*',
         destination: `${BACKEND_URL}/api/memory/:path*`
       },

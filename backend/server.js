@@ -275,8 +275,10 @@ app.use('/api/research', researchRoutes);
 
 const projectGraphRoutes = require('./routes/projectGraph');
 const workflowRoutes = require('./routes/workflows')(db);
+const verifierRoutes = require('./routes/verifier');
 app.use('/api/projects', projectGraphRoutes);
 app.use('/api/workflows', workflowRoutes);
+app.use('/api/verify', verifierRoutes);
 
 // ── Automation & Watcher Engine (Milestone 2 P8) ────────────────────
 const { getWorkflowEngine } = require('./services/workflowEngine');
@@ -301,6 +303,7 @@ app.use('/api/v1/deploy',   deployRoutes);
 app.use('/api/v1/research', researchRoutes);
 app.use('/api/v1/projects', projectGraphRoutes);
 app.use('/api/v1/workflows', workflowRoutes);
+app.use('/api/v1/verify',   verifierRoutes);
 
 // ── AI Assistant Endpoints (mounted at /api/v1/ai) ──────────────────────────
 // This allows frontend calls to /ai/code-suggestions and /ai/lsp-diagnostics
