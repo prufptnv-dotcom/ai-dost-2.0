@@ -49,14 +49,14 @@ This section reflects the **empirically verified, live status** of AI-Dost. Ever
 | **Resume Builder & CV Studio** | ✅ **COMPLETE** | 4 distinct typographic templates (`Editorial Classic`, `Technical Modern`, `Minimalist Clean`, `Creative Portfolio`), live A4 iframe preview, browser print, compiled PDF download. | `frontend/components/views/ResumeView.jsx`<br>`resume_audit/01_resume_dark.png`<br>`resume_audit/03_resume_creative_template.png`<br>`downloads/alex_morgan_resume_8efe7530.pdf` |
 | **P5: Image Studio** | ✅ **COMPLETE** | Aspect ratio presets (`1:1 Square`, `16:9 Cinema`, `9:16 Mobile`, `4:3 Classic`), 4 curated inspiration cards, Pollinations AI backend forwarding. | `frontend/components/views/ImageView.jsx`<br>`image_audit/01_image_studio_dark.png`<br>`image_audit/03_image_generating_state.png` |
 | **P6: Deep Research Agent Pipeline** | ✅ **COMPLETE** | Multi-source web queries, domain authority scoring (95/100 trust), consensus & contradiction detection, citations `[1]`, `[2]`, 1-click export to Word (`.docx`) and PDF. | `backend/services/researchService.js`<br>`frontend/components/views/ResearchView.jsx`<br>`research_audit/03_research_completed_with_sources.png`<br>`downloads/quantum_computing_breakthroughs_2026_res_1c2a7ecd.docx` |
-| **P7: Persistent Project Workspace Graph** | 🟡 **FOUNDATIONAL / NEXT** | Project switching in top bar persists SQLite project IDs. Next: universal graph linking chats, assets, research, and code in a single project schema. | `backend/server.js` (SQLite tables)<br>`frontend/pages/dashboard.jsx` |
-| **P8: Automated Workflows & Watchers** | 📋 **PLANNED** | Scheduled background tasks (cron triggers) and automated Telegram event notifications when agents finish. | Planned Milestone 3 |
-| **P0.2: Docker Sandbox Isolation** | 🟡 **LOCAL GUARD ACTIVE** | Safe path traversal rejection (`../` blocked) + Docker sandbox manager with local fallback. Next: full container hardening. | `backend/sandbox/` (68 backend tests passing) |
+| **P7: Persistent Project Workspace Graph** | ✅ **COMPLETE** | Full-stack project workspace graph connecting files, chats, generated office documents, research dossiers, context nodes & edges. Interactive Explorer with node CRUD, edge linking, and tabbed asset manager. | `backend/routes/projectGraph.js`<br>`backend/services/projectGraphService.js`<br>`frontend/components/views/ProjectsView.jsx`<br>`project_graph_audit/01_project_workspace_graph_dark.png` |
+| **P8: Automated Workflows & Watchers** | ✅ **COMPLETE** | Autonomous background schedulers and reactive event watchers with multi-channel Telegram notifications, starter templates, and execution audit history. | `backend/services/workflowEngine.js`<br>`backend/routes/workflows.js`<br>`frontend/components/views/AutomationsView.jsx`<br>`automation_audit/01_automations_hub_dark.png` |
+| **P0.2: Docker Sandbox Isolation** | 🟡 **LOCAL GUARD ACTIVE** | Safe path traversal rejection (`../` blocked) + Docker sandbox manager with local fallback. Next: full container hardening. | `backend/sandbox/` (71 backend tests passing) |
 
 ### Engineering Quality Baseline (100% Pass)
-- **Frontend Test Suite:** 116 / 116 passed across 22 test suites (`npm test -- --watchAll=false`).
+- **Frontend Test Suite:** 120 / 120 passed across 23 test suites (`npm test -- --watchAll=false`).
 - **Frontend Linter:** 0 errors, 0 warnings (`npm run lint`).
-- **Backend Test Suite:** 68 / 68 passed across 6 test suites (`node --test tests/unit.test.js tests/integration.test.js`).
+- **Backend Test Suite:** 71 / 71 passed across 6 test suites (`node --test tests/unit.test.js tests/integration.test.js`).
 
 ------------------------------------------------------------------------
 

@@ -6,6 +6,7 @@ const migration001 = require('./migrations/001_universal_schema');
 const migration002 = require('./migrations/002_agent_runtime');
 const migration003 = require('./migrations/003_agent_handoffs');
 const migration004 = require('./migrations/004_agent_handoff_results');
+const migration005 = require('./migrations/005_workflows_schema');
 const logger = require('../logger');
 
 let dbInstance = null;
@@ -32,7 +33,8 @@ function initDatabase(customPath = null) {
     migration001,
     { version: 2, name: '002_agent_runtime', up: migration002.up },
     migration003,
-    migration004
+    migration004,
+    migration005
   ]);
 
   // Run legacy data migrator (idempotent)

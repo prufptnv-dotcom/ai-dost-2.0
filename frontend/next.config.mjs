@@ -134,6 +134,26 @@ const nextConfig = {
         destination: `${BACKEND_URL}/api/pdf/:path*`
       },
       {
+        source: '/api/projects',
+        destination: `${BACKEND_URL}/api/projects`
+      },
+      {
+        source: '/api/projects/:path*',
+        destination: `${BACKEND_URL}/api/projects/:path*`
+      },
+      {
+        source: '/api/workflows',
+        destination: `${BACKEND_URL}/api/workflows`
+      },
+      {
+        source: '/api/workflows/:path*',
+        destination: `${BACKEND_URL}/api/workflows/:path*`
+      },
+      {
+        source: '/api/memory/:path*',
+        destination: `${BACKEND_URL}/api/memory/:path*`
+      },
+      {
         source: '/api/learning',
         destination: `${BACKEND_URL}/api/learning`
       },

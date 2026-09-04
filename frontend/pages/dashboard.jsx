@@ -3,7 +3,7 @@ import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   MessageSquare, FolderOpen, Code2, Bot, Mic, Image as ImageIcon,
-  FileText, History, Settings, CornerDownLeft, Sparkles, X, Loader2
+  FileText, History, Settings, CornerDownLeft, Sparkles, X, Loader2, Zap
 } from 'lucide-react';
 import AppShell from '../components/layout/AppShell';
 import ProjectsView from '../components/views/ProjectsView';
@@ -16,6 +16,7 @@ import HistoryView from '../components/views/HistoryView';
 import SettingsView from '../components/views/SettingsView';
 import McpPanel from '../components/McpPanel';
 import AgentView from '../components/views/AgentView';
+import AutomationsView from '../components/views/AutomationsView';
 import IDEErrorBoundary from '../components/views/IDEErrorBoundary';
 import { fetchProjects, createProject } from '../services/api';
 import { useMode } from '../context/ModeContext';
@@ -47,6 +48,7 @@ const PALETTE_ACTIONS = [
   { id: 'artifacts', label: 'Open Artifacts', hint: 'Ctrl+5', icon: FileText },
   { id: 'voice', label: 'Open Voice Assistant', hint: 'Ctrl+6', icon: Mic },
   { id: 'settings', label: 'Open Settings', hint: 'Ctrl+7', icon: Settings },
+  { id: 'automations', label: 'Open Automations & Watchers', hint: 'Ctrl+8', icon: Zap },
   { id: 'new-chat', label: 'Start New Conversation', hint: 'Ctrl+N', icon: Sparkles },
 ];
 
@@ -98,6 +100,16 @@ export default function Dashboard() {
         setProjects([]);
       }
     })();
+  }, []);
+
+  useEffect(() => {
+    const handleProjectChanged = (e) => {
+      if (e.detail) {
+        setActiveProject(e.detail);
+      }
+    };
+    window.addEventListener('ai_dost_project_changed', handleProjectChanged);
+    return () => window.removeEventListener('ai_dost_project_changed', handleProjectChanged);
   }, []);
 
   useEffect(() => {
@@ -276,6 +288,7 @@ export default function Dashboard() {
             <ProjectsView
               onOpenProject={(id) => router.push(`/project/${id}`)}
               onToast={showToast}
+              onNavigate={go}
             />
           )}
           {view === 'artifacts' && (
@@ -305,6 +318,9 @@ export default function Dashboard() {
               onToast={showToast}
               onModelChange={setModel}
             />
+          )}
+          {view === 'automations' && (
+            <AutomationsView onToast={showToast} onNavigate={go} />
           )}
           {view === 'mcp' && <McpPanel />}
         </motion.div>

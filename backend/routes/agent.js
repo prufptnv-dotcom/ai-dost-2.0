@@ -2080,6 +2080,11 @@ router.post('/run', async (req, res) => {
           steps,
           plan
         });
+        try {
+          const { getWorkflowEngine } = require('../services/workflowEngine');
+          const engine = getWorkflowEngine();
+          if (engine) engine.emitEvent('agent_run_completed', { projectId: projectId || 'default', message: toolResult.message });
+        } catch (_) {}
         try { res.end(); } catch (_) {}
         return;
       }
@@ -2236,6 +2241,11 @@ FILE: <filepath>
         steps.push(stepLog);
         send({ type: 'step', stepLog });
         send({ type: 'done', message: parsed.answer || '✅ All tasks completed!', steps, plan });
+        try {
+          const { getWorkflowEngine } = require('../services/workflowEngine');
+          const engine = getWorkflowEngine();
+          if (engine) engine.emitEvent('agent_run_completed', { projectId: projectId || 'default', message: parsed.answer });
+        } catch (_) {}
         res.end();
         return;
       }

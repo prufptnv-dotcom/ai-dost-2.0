@@ -76,6 +76,14 @@ function createTables() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+
+  // Ensure workflows & workflow_runs tables exist (Milestone 2 P8)
+  try {
+    const migration005 = require('./db/migrations/005_workflows_schema');
+    migration005.up(db);
+  } catch (err) {
+    logger.warn('Workflow schema migration notice:', err.message);
+  }
 }
 
 // Run on startup
@@ -265,6 +273,16 @@ app.use('/api/sandbox',  sandboxRoutes);
 app.use('/api/deploy',   deployRoutes);
 app.use('/api/research', researchRoutes);
 
+const projectGraphRoutes = require('./routes/projectGraph');
+const workflowRoutes = require('./routes/workflows')(db);
+app.use('/api/projects', projectGraphRoutes);
+app.use('/api/workflows', workflowRoutes);
+
+// ── Automation & Watcher Engine (Milestone 2 P8) ────────────────────
+const { getWorkflowEngine } = require('./services/workflowEngine');
+const workflowEngine = getWorkflowEngine(db);
+workflowEngine.start();
+
 // Troubleshooting aliases (documented in AGENTS.md) — same data as /api/agent/quota-status
 app.get('/api/quota-status', (_req, res) => res.redirect('/api/agent/quota-status'));
 app.get('/api/circuit-breaker', (_req, res) => res.redirect('/api/agent/quota-status'));
@@ -281,6 +299,8 @@ app.use('/api/v1/terminal', terminalRoutes);
 app.use('/api/v1/sandbox',  sandboxRoutes);
 app.use('/api/v1/deploy',   deployRoutes);
 app.use('/api/v1/research', researchRoutes);
+app.use('/api/v1/projects', projectGraphRoutes);
+app.use('/api/v1/workflows', workflowRoutes);
 
 // ── AI Assistant Endpoints (mounted at /api/v1/ai) ──────────────────────────
 // This allows frontend calls to /ai/code-suggestions and /ai/lsp-diagnostics

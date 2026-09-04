@@ -257,3 +257,65 @@ test('POST /api/v1/resume/auto-tailor missing resumeData or jobDescription -> 40
   assert.ok(body.error);
 });
 
+// ── Workflow Endpoints (Milestone 2 P8 Automations) ─────────────────────
+test('GET /api/workflows -> 200 with workflows array', async () => {
+  const { status, body } = await req('GET', '/api/workflows');
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.ok(Array.isArray(body.workflows));
+});
+
+test('POST /api/workflows missing name or actionType -> 400', async () => {
+  const { status, body } = await req('POST', '/api/workflows', { name: 'Test' });
+  assert.equal(status, 400);
+  assert.equal(body.success, false);
+});
+
+test('POST /api/workflows valid workflow -> 201 and lifecycle roundtrip', async () => {
+  // 1. Create
+  const { status: createStatus, body: createBody } = await req('POST', '/api/workflows', {
+    name: 'CI Integration Test Watcher',
+    description: 'Automated test watcher',
+    triggerType: 'schedule',
+    triggerConfig: { intervalMinutes: 60 },
+    actionType: 'repo_health_check',
+    actionConfig: { checks: ['git_status'] },
+    notifyChannels: ['in_app']
+  });
+  assert.equal(createStatus, 201);
+  assert.equal(createBody.success, true);
+  assert.ok(createBody.workflow?.id);
+
+  const wfId = createBody.workflow.id;
+
+  // 2. Get details
+  const { status: getStatus, body: getBody } = await req('GET', `/api/workflows/${wfId}`);
+  assert.equal(getStatus, 200);
+  assert.equal(getBody.workflow.name, 'CI Integration Test Watcher');
+  assert.ok(Array.isArray(getBody.runs));
+
+  // 3. Update status to paused
+  const { status: updateStatus, body: updateBody } = await req('PUT', `/api/workflows/${wfId}`, {
+    status: 'paused'
+  });
+  assert.equal(updateStatus, 200);
+  assert.equal(updateBody.workflow.status, 'paused');
+
+  // 4. Manual execution
+  const { status: runStatus, body: runBody } = await req('POST', `/api/workflows/${wfId}/run`);
+  assert.equal(runStatus, 200);
+  assert.equal(runBody.success, true);
+  assert.equal(runBody.run.status, 'success');
+
+  // 5. Recent runs
+  const { status: recentStatus, body: recentBody } = await req('GET', '/api/workflows/recent-runs');
+  assert.equal(recentStatus, 200);
+  assert.ok(Array.isArray(recentBody.runs));
+  assert.ok(recentBody.runs.some(r => r.workflow_id === wfId));
+
+  // 6. Delete
+  const { status: delStatus } = await req('DELETE', `/api/workflows/${wfId}`);
+  assert.equal(delStatus, 200);
+});
+
+
