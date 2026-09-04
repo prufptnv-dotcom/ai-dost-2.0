@@ -21,6 +21,7 @@ const CATEGORIES = {
   FITNESS_GYM: 'fitness_gym',
   PORTFOLIO: 'portfolio',
   FASTAPI: 'fastapi',
+  CREATIVE_CANVAS_ART: 'creative_canvas_art',
   GENERAL: 'general'
 };
 
@@ -110,6 +111,11 @@ function detectCategory(prompt = '') {
     return CATEGORIES.FASTAPI;
   }
 
+  // 17. Creative Canvas & Visual Art / Deities / Particle Animation
+  if (/\b(animation|canvas art|krishna|shiva|deity|visual art|particle system|glow animation|creative code|interactive canvas|svg animation|canvas animation)\b/i.test(p)) {
+    return CATEGORIES.CREATIVE_CANVAS_ART;
+  }
+
   return CATEGORIES.GENERAL;
 }
 
@@ -117,10 +123,18 @@ function detectCategory(prompt = '') {
  * Build optimized full-stack system prompt for LLM scaffolding
  */
 function buildFullstackSystemPrompt(prompt, category) {
+  let domainDirectives = '';
+  if (category === CATEGORIES.CREATIVE_CANVAS_ART) {
+    domainDirectives = `
+CREATIVE CANVAS & VISUAL ART MANDATE:
+- NEVER output crude stick figures, simple circles, or elementary lines for deities, characters, or art.
+- Use multi-segment Bezier/quadratic curves (bezierCurveTo, quadraticCurveTo) for organic silhouettes, glowing neon bloom (shadowBlur: 25-50px, shadowColor, globalCompositeOperation: 'lighter'), sacred iconography (for Lord Krishna: radiant forehead Tilak, glowing peacock feather with gradient eye, spinning Sudarshan Chakra on index finger with light rays and sparks, flowing celestial drapes, stardust particle field), and a smooth requestAnimationFrame loop with high-DPI scaling.
+`;
+  }
   return `You are a Principal Full-Stack Software Engineer building a complete, high-quality application.
 User Requirement: "${prompt}"
 Domain: ${category.toUpperCase()}
-
+${domainDirectives}
 STRICT RULES:
 1. Return code using this markdown format for each file:
 

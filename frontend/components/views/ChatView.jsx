@@ -363,6 +363,18 @@ function MessageBubble({
             </div>
           )}
 
+          {/* Attached image preview */}
+          {msg.imageAttachment && (
+            <div className="mt-2.5 rounded-xl overflow-hidden border border-border max-w-xs shadow-sm bg-black/40">
+              <img
+                src={msg.imageAttachment.startsWith('data:') ? msg.imageAttachment : `data:${msg.imageMime || 'image/png'};base64,${msg.imageAttachment}`}
+                alt="Attached reference"
+                className="max-h-52 w-auto object-contain rounded-lg cursor-pointer hover:opacity-95 transition-opacity"
+                onClick={() => onOpenImage && onOpenImage(msg.imageAttachment.startsWith('data:') ? msg.imageAttachment : `data:${msg.imageMime || 'image/png'};base64,${msg.imageAttachment}`)}
+              />
+            </div>
+          )}
+
           {/* Attachments */}
           {msg.attachments && msg.attachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-2">
@@ -685,6 +697,8 @@ export default function ChatView({
       content,
       timestamp: new Date().toISOString(),
       attachments: attachment ? [attachment.name] : undefined,
+      imageAttachment: attachment?.type === 'image' ? attachment.base64 : undefined,
+      imageMime: attachment?.type === 'image' ? (attachment.mime || 'image/png') : undefined,
     };
     userSentMessageRef.current = true;
     userScrolledUpRef.current = false;
@@ -732,6 +746,8 @@ export default function ChatView({
         const reply = res.data?.reply || 'File padh nahi paya — dobara try karo.';
         setMessages((prev) => [...prev, { id: Date.now() + 1, role: 'assistant', content: reply, timestamp: new Date().toISOString() }]);
         setLastReply(reply);
+        const art = extractArtifact(reply);
+        if (art) setActiveArtifact(art);
         setShowFollowUps(true);
         setAttachment(null);
         setThinking(false);
@@ -1085,6 +1101,40 @@ export default function ChatView({
     e.target.value = '';
   };
 
+  const handlePaste = (e) => {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result;
+            const mime = file.type || 'image/png';
+            const base64 = String(dataUrl).split(',')[1];
+            setAttachment({
+              name: file.name && file.name !== 'image.png' ? file.name : `pasted-image-${Date.now().toString().slice(-4)}.png`,
+              type: 'image',
+              mime,
+              base64,
+            });
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('ai_dost_toast', {
+                detail: { type: 'success', message: 'Image pasted from clipboard 📋' }
+              }));
+            }
+          };
+          reader.readAsDataURL(file);
+          return;
+        }
+      }
+    }
+  };
+
   const setPersonaAndSave = (id) => {
     setPersona(id);
     try { localStorage.setItem(PERSONA_KEY, id); } catch (_) {}
@@ -1264,14 +1314,26 @@ export default function ChatView({
           <div className="max-w-3xl mx-auto">
             {/* Attachment preview */}
             {attachment && (
-              <div className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-lg text-xs bg-canvas-surface border border-border">
-                <Paperclip className="w-3.5 h-3.5 text-accent" />
-                <span className="truncate flex-1 text-paper-100">{attachment.name}</span>
+              <div className="flex items-center gap-2.5 mb-2 px-3 py-1.5 rounded-lg text-xs bg-canvas-surface border border-border">
+                {attachment.type === 'image' && attachment.base64 ? (
+                  <img
+                    src={`data:${attachment.mime || 'image/png'};base64,${attachment.base64}`}
+                    alt="Attachment"
+                    className="w-7 h-7 rounded object-cover border border-border shrink-0"
+                  />
+                ) : (
+                  <Paperclip className="w-3.5 h-3.5 text-accent" />
+                )}
+                <span className="truncate flex-1 text-paper-100 font-medium">{attachment.name}</span>
+                <span className="text-[10px] text-ink-muted uppercase font-mono px-1.5 py-0.5 rounded bg-canvas-elevated">
+                  {attachment.type}
+                </span>
                 <button
                   type="button"
                   onClick={() => setAttachment(null)}
-                  className="px-1.5 py-0.5 rounded text-[10px] text-ink-muted hover:text-paper-100 cursor-pointer hover:bg-canvas-elevated"
+                  className="p-1 rounded text-ink-muted hover:text-paper-100 cursor-pointer hover:bg-canvas-elevated transition-fast"
                   aria-label="Remove attachment"
+                  title="Remove attachment"
                 >
                   ✕
                 </button>
@@ -1285,8 +1347,9 @@ export default function ChatView({
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
                 rows={Math.min(5, Math.max(1, input.split('\n').length))}
-                placeholder="Ask AI-Dost anything…"
+                placeholder="Ask AI-Dost anything, or paste an image (Ctrl+V)…"
                 aria-label="Ask AI-Dost anything"
                 className="w-full bg-transparent resize-none text-sm focus:outline-none placeholder:text-ink-muted text-paper-100 leading-relaxed px-4 pt-3.5 pb-2 font-sans"
               />

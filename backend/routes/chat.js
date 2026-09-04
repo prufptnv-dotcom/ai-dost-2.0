@@ -627,6 +627,34 @@ router.post('/search', async (req, res) => {
     }
 });
 
+// ── Creative Canvas & Visual Art System Directive ───────────────────────────
+const CREATIVE_CANVAS_SYSTEM_PROMPT = `You are AI-Dost, an elite Senior Software Engineer, Creative Canvas/SVG Technologist, and Autonomous AI Assistant.
+Key Directives & Mandates:
+1. Tone & Responsibility: Be confident, proactive, and authoritative. Answer in natural, clean Hinglish/Hindi/English matching the user's language. Never make excuses, never write broken words, and never ask the user to manually debug or wire files together.
+2. Multimodal Intents:
+   - IMAGE REQUEST: If user asks for an image, drawing, or picture (e.g. "image banao"), respond ONLY with: [GENERATE_IMAGE: detailed English description].
+   - PDF / REPORT: If user asks for a PDF or document, wrap in [GENERATE_PDF: Title] content [/GENERATE_PDF].
+3. HIGH-FIDELITY CREATIVE CODING & ANIMATION RULES (STRICT AUTONOMOUS MANDATE):
+   When asked for an animation, visual artwork, character/deity silhouette (e.g. Lord Krishna, Shiva, celestial art), game, or interactive canvas:
+   - NEVER USE CRUDE PRIMITIVES: Never draw crude stick figures, elementary circles, or basic polygon outlines! Elementary stick figures are strictly prohibited.
+   - 100% SELF-CONTAINED ARTIFACT: Provide a SINGLE, COMPLETE, 100% SELF-CONTAINED HTML block wrapped in \`\`\`html ... \`\`\` with CSS in <style> and JavaScript in <script> placed at the end of <body>. ZERO external CSS/JS dependencies.
+   - ARTISTIC CANVAS ANATOMY & SILHOUETTE:
+     * Use multi-segment Bezier and quadratic curves (ctx.bezierCurveTo(), ctx.quadraticCurveTo()) to sculpt organic silhouettes, flowing silks/robes, muscular anatomy, divine postures, and delicate facial profiles.
+     * Use layered gradients (ctx.createRadialGradient(), ctx.createLinearGradient()) for depth, volumetric form, and celestial auras.
+   - NEON GLOW & BLOOM EFFECT:
+     * Multi-pass rendering: Set ctx.shadowBlur = 25 to 50, ctx.shadowColor = accentColor (e.g. '#00f0ff' electric cyan, '#ffd700' divine gold, '#ffffff'), and ctx.globalCompositeOperation = 'lighter' for luminous cosmic energy.
+   - ICONOGRAPHY & ATTRIBUTES:
+     * When rendering divine, mythological, or specific subjects (such as Lord Krishna): include all sacred iconography with extreme precision:
+       • Glowing peacock feather (mor pankh) with concentric cyan, violet, and emerald gradients on the crown.
+       • Radiant forehead Tilak shining with intense white-gold brilliance.
+       • Raised index finger with rotating glowing Sudarshan Chakra featuring spinning spokes, solar flares, and particle sparks.
+       • Golden glowing ornaments/malas rendered with shimmering pearls or metallic highlights.
+       • Flowing luminous stole/drapes in waves across shoulders and waist.
+       • Celestial stardust and ambient floating energy orbs in the deep cosmic background.
+   - HIGH-DPI & ANIMATION LOOP:
+     * High-DPI canvas scaling using window.devicePixelRatio and auto-resize listeners.
+     * Smooth requestAnimationFrame(loop) using delta time for breathing aura, spinning chakra, and floating stardust.`;
+
 // ── File/image/PDF analysis (Gemini vision + pdf-parse) ──────────────────────
 const pdfParse = require('pdf-parse');
 
@@ -652,36 +680,47 @@ router.post('/analyze', async (req, res) => {
 
     try {
         const API_KEY = process.env.GEMINI_API_KEY;
-        const userText = message || 'Is file ka analysis do — Hinglish me, important points ke saath.';
+        const userText = message || (imageBase64 ? 'Is image ko analyze karo aur iska accurate, high-fidelity visual animation/HTML code banao.' : 'Is file ka analysis do — Hinglish me, important points ke saath.');
         let parts = [];
         if (contextText) parts.push({ text: `FILE CONTENT:\n${contextText.slice(0, 20000)}\n\nUSER: ${userText}` });
         else parts.push({ text: userText });
-        if (imageBase64 && imageMime) {
+        if (imageBase64) {
             parts = [
                 { inlineData: { mimeType: imageMime || 'image/png', data: imageBase64 } },
                 { text: userText }
             ];
         }
 
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 40000);
-        const r = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${API_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contents: [{ role: 'user', parts }] }),
-                signal: controller.signal
+        const geminiModels = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite'];
+        for (const gModel of geminiModels) {
+            try {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 40000);
+                const r = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/${gModel}:generateContent?key=${API_KEY}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ role: 'user', parts }],
+                            systemInstruction: { parts: [{ text: CREATIVE_CANVAS_SYSTEM_PROMPT }] }
+                        }),
+                        signal: controller.signal
+                    }
+                );
+                clearTimeout(timer);
+                if (r.ok) {
+                    const data = await r.json();
+                    const reply = (data?.candidates?.[0]?.content?.parts || [])
+                        .map((p) => p.text).filter(Boolean).join('\n');
+                    if (reply && reply.length > 10) {
+                        return res.json({ success: true, reply, provider: imageBase64 ? `gemini-vision (${gModel})` : `gemini-file (${gModel})` });
+                    }
+                }
+            } catch (errModel) {
+                logger.warn(`[Analyze] Gemini model ${gModel} failed:`, errModel.message);
             }
-        );
-        clearTimeout(timer);
-        const data = await r.json();
-        const reply = (data?.candidates?.[0]?.content?.parts || [])
-            .map((p) => p.text).filter(Boolean).join('\n');
-        if (reply && reply.length > 10) {
-            return res.json({ success: true, reply, provider: imageBase64 ? 'gemini-vision' : 'gemini-file' });
         }
-        logger.warn('[Analyze] Gemini empty:', JSON.stringify(data?.error || {}).slice(0, 200));
     } catch (e) {
         logger.warn('[Analyze] Gemini failed:', e.message);
     }
@@ -755,6 +794,7 @@ router.post('/stream', async (req, res) => {
                     body: JSON.stringify({
                         model: localModelName,
                         messages: [
+                            { role: 'system', content: CREATIVE_CANVAS_SYSTEM_PROMPT },
                             ...cleanHistory,
                             { role: 'user', content: groqMsg }
                         ],
@@ -801,13 +841,13 @@ router.post('/stream', async (req, res) => {
                         body: JSON.stringify({
                             model: 'openai/gpt-oss-120b',
                             messages: [
-                                { role: 'system', content: 'You are AI-Dost, an ultra-intelligent and friendly AI developer assistant. Answer in Hinglish/English naturally.' },
+                                { role: 'system', content: CREATIVE_CANVAS_SYSTEM_PROMPT },
                                 ...cleanHistory,
                                 { role: 'user', content: groqMsg }
                             ],
                             stream: true,
                             temperature: 0.2,
-                            max_tokens: 2048
+                            max_tokens: 4096
                         }),
                         signal: AbortSignal.timeout(20000)
                     });
@@ -863,6 +903,7 @@ router.post('/stream', async (req, res) => {
                                         ...cleanHistory.map(h => ({ role: h.role === 'assistant' ? 'model' : 'user', parts: [{ text: h.content }] })),
                                         { role: 'user', parts: [{ text: processedMessage }] }
                                     ],
+                                    systemInstruction: { parts: [{ text: CREATIVE_CANVAS_SYSTEM_PROMPT }] },
                                     generationConfig: { temperature: 0.3 }
                                 }),
                                 signal: AbortSignal.timeout(25000)

@@ -500,3 +500,23 @@ describe('verifierService', () => {
   });
 });
 
+// ── Fullstack Trainer Creative Canvas Art ────────────────────────────────
+describe('fullstackTrainer creative canvas art', () => {
+  const { detectCategory, buildFullstackSystemPrompt, CATEGORIES } = require('../agent/fullstackTrainer');
+
+  test('detects creative_canvas_art for animation, deity, or visual art keywords', () => {
+    assert.equal(detectCategory('krishna ji ka animation banao'), CATEGORIES.CREATIVE_CANVAS_ART);
+    assert.equal(detectCategory('Lord Krishna glowing canvas art'), CATEGORIES.CREATIVE_CANVAS_ART);
+    assert.equal(detectCategory('neon particle animation with canvas'), CATEGORIES.CREATIVE_CANVAS_ART);
+    assert.equal(detectCategory('interactive svg animation'), CATEGORIES.CREATIVE_CANVAS_ART);
+  });
+
+  test('buildFullstackSystemPrompt injects creative canvas directives', () => {
+    const prompt = buildFullstackSystemPrompt('krishna ji animation', CATEGORIES.CREATIVE_CANVAS_ART);
+    assert.ok(prompt.includes('CREATIVE CANVAS & VISUAL ART MANDATE'));
+    assert.ok(prompt.includes('NEVER output crude stick figures'));
+    assert.ok(prompt.includes('bezierCurveTo'));
+  });
+});
+
+
