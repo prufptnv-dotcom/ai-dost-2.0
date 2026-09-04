@@ -1,7 +1,7 @@
 const { test, describe, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert');
 const MemoryService = require('../services/memoryService');
-const Database = require('better-sqlite3');
+const { DatabaseSync: Database } = require('node:sqlite');
 const MigrationRunner = require('../db/migrationRunner');
 const migration001 = require('../db/migrations/001_universal_schema');
 const { migrateLegacyMemory } = require('../db/legacyMemoryMigrator');

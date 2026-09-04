@@ -12,7 +12,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const logger = require('./logger');
-const Database = require('better-sqlite3');
+const { DatabaseSync: Database } = require('node:sqlite');
 const { Server } = require('socket.io');
 const dns = require('dns');
 const crypto = require('crypto');
@@ -29,7 +29,7 @@ const dbPath = path.join(__dirname, 'data', 'app.db');
 const db = new Database(dbPath);
 
 // Enable WAL mode for better concurrent performance
-db.pragma('journal_mode = WAL');
+db.exec('PRAGMA journal_mode = WAL');
 
 // Define tables (idempotent — safe to run on every start)
 function createTables() {
@@ -208,7 +208,7 @@ function getProjectFiles(projectId) {
 
 // Close DB on process exit
 process.on('beforeExit', () => {
-  db.close();
+  try { db.close(); } catch(e){}
 });
 
 // HTTP request logging middleware

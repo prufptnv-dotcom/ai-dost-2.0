@@ -1,4 +1,4 @@
-const Database = require('better-sqlite3');
+const { DatabaseSync: Database } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
 const MigrationRunner = require('./migrationRunner');
@@ -23,9 +23,9 @@ function initDatabase(customPath = null) {
   dbInstance = new Database(dbPath);
 
   // Configure SQLite invariants
-  dbInstance.pragma('journal_mode = WAL');
-  dbInstance.pragma('foreign_keys = ON');
-  dbInstance.pragma('busy_timeout = 5000');
+  dbInstance.exec('PRAGMA journal_mode = WAL');
+  dbInstance.exec('PRAGMA foreign_keys = ON');
+  dbInstance.exec('PRAGMA busy_timeout = 5000');
 
   // Run versioned migrations
   const runner = new MigrationRunner(dbInstance);
@@ -58,7 +58,7 @@ function getDatabase() {
 
 function closeDatabase() {
   if (dbInstance) {
-    dbInstance.close();
+    try { dbInstance.close(); } catch(e){}
     dbInstance = null;
   }
 }

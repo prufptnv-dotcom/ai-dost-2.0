@@ -1,12 +1,46 @@
 import { useState, useEffect, useRef } from 'react';
 import { FilePlus2, FolderPlus, Pencil, Search, CornerDownLeft, Command as CommandIcon, File, FolderTree, FileSearch, CaseSensitive, Loader2 } from 'lucide-react';
 
+export function useFocusTrap(ref, isActive) {
+  useEffect(() => {
+    if (!isActive || !ref.current) return;
+    const focusableElements = ref.current.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    const handleTabKey = (e) => {
+      if (e.key !== 'Tab') return;
+      if (focusableElements.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      if (e.shiftKey) {
+        if (document.activeElement === firstElement) {
+          lastElement?.focus();
+          e.preventDefault();
+        }
+      } else {
+        if (document.activeElement === lastElement) {
+          firstElement?.focus();
+          e.preventDefault();
+        }
+      }
+    };
+    ref.current.addEventListener('keydown', handleTabKey);
+    return () => ref.current?.removeEventListener('keydown', handleTabKey);
+  }, [isActive, ref]);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PromptModal — window.prompt replacement (VS Code-style input dialog)
 // ─────────────────────────────────────────────────────────────────────────────
 export function PromptModal({ modal, onClose, onSubmit }) {
   const [value, setValue] = useState(modal?.initial || '');
   const inputRef = useRef(null);
+  const containerRef = useRef(null);
+  useFocusTrap(containerRef, !!modal);
 
   useEffect(() => {
     if (modal) {
@@ -27,8 +61,11 @@ export function PromptModal({ modal, onClose, onSubmit }) {
     <div
       className="fixed inset-0 z-[95] flex items-start justify-center pt-[15vh] bg-black/50 backdrop-blur-sm"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      role="dialog"
+      aria-modal="true"
     >
       <div
+        ref={containerRef}
         className="w-96 rounded-xl p-4 shadow-2xl animate-fadeIn"
         style={{ background: 'var(--color-canvas-surface)', border: '1px solid var(--color-border-default)', boxShadow: 'var(--shadow-modal)' }}
       >
@@ -80,6 +117,8 @@ export function QuickOpen({ files, onPick, onClose }) {
   const [q, setQ] = useState('');
   const [idx, setIdx] = useState(0);
   const inputRef = useRef(null);
+  const containerRef = useRef(null);
+  useFocusTrap(containerRef, true);
 
   useEffect(() => {
     setTimeout(() => inputRef.current?.focus(), 50);
@@ -97,8 +136,14 @@ export function QuickOpen({ files, onPick, onClose }) {
   if (!ql && idx >= results.length) setIdx(0);
 
   return (
-    <div className="fixed inset-0 z-[95] flex items-start justify-center pt-[13vh] bg-black/50 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div 
+      className="fixed inset-0 z-[95] flex items-start justify-center pt-[13vh] bg-black/50 backdrop-blur-sm" 
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      role="dialog"
+      aria-modal="true"
+    >
       <div
+        ref={containerRef}
         className="w-[520px] rounded-xl overflow-hidden shadow-2xl animate-fadeIn"
         style={{ background: 'var(--color-canvas-surface)', border: '1px solid var(--color-border-default)', boxShadow: 'var(--shadow-modal)' }}
       >
@@ -109,20 +154,38 @@ export function QuickOpen({ files, onPick, onClose }) {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'ArrowDown') { e.preventDefault(); setIdx(i => Math.min(i + 1, results.length - 1)); }
-              else if (e.key === 'ArrowUp') { e.preventDefault(); setIdx(i => Math.max(i - 1, 0)); }
+              if (e.key === 'ArrowDown') { 
+                e.preventDefault(); 
+                setIdx(i => {
+                  const newIdx = Math.min(i + 1, results.length - 1);
+                  setTimeout(() => document.getElementById(`quickopen-item-${newIdx}`)?.scrollIntoView({ block: 'nearest' }), 0);
+                  return newIdx;
+                });
+              }
+              else if (e.key === 'ArrowUp') { 
+                e.preventDefault(); 
+                setIdx(i => {
+                  const newIdx = Math.max(i - 1, 0);
+                  setTimeout(() => document.getElementById(`quickopen-item-${newIdx}`)?.scrollIntoView({ block: 'nearest' }), 0);
+                  return newIdx;
+                });
+              }
               else if (e.key === 'Enter' && results[idx]) { onPick(results[idx]); }
               else if (e.key === 'Escape') onClose();
             }}
             placeholder="File dhundho (fuzzy)..."
             className="flex-1 text-xs focus:outline-none bg-transparent"
             style={{ color: 'var(--color-text-primary)' }}
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="quickopen-listbox"
+            aria-activedescendant={`quickopen-item-${idx}`}
           />
           <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: 'var(--color-canvas-subtle)', color: 'var(--color-text-muted)' }}>
             ↑↓ Enter Esc
           </span>
         </div>
-        <div className="max-h-80 overflow-y-auto py-1">
+        <div className="max-h-80 overflow-y-auto py-1" role="listbox" id="quickopen-listbox">
           {results.length === 0 && (
             <div className="px-3 py-4 text-center text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
               Koi file match nahi hui
@@ -131,6 +194,9 @@ export function QuickOpen({ files, onPick, onClose }) {
           {results.map((f, i) => (
             <button
               key={f.path}
+              id={`quickopen-item-${i}`}
+              role="option"
+              aria-selected={i === idx}
               onMouseEnter={() => setIdx(i)}
               onClick={() => onPick(f)}
               className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[11px] cursor-pointer"
@@ -157,6 +223,8 @@ export function CommandPalette({ commands, onRun, onClose }) {
   const [q, setQ] = useState('');
   const [idx, setIdx] = useState(0);
   const inputRef = useRef(null);
+  const containerRef = useRef(null);
+  useFocusTrap(containerRef, true);
 
   useEffect(() => {
     setTimeout(() => inputRef.current?.focus(), 50);
@@ -168,8 +236,14 @@ export function CommandPalette({ commands, onRun, onClose }) {
   useEffect(() => { setIdx(0); }, [q]);
 
   return (
-    <div className="fixed inset-0 z-[95] flex items-start justify-center pt-[13vh] bg-black/50 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div 
+      className="fixed inset-0 z-[95] flex items-start justify-center pt-[13vh] bg-black/50 backdrop-blur-sm" 
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      role="dialog"
+      aria-modal="true"
+    >
       <div
+        ref={containerRef}
         className="w-[520px] rounded-xl overflow-hidden shadow-2xl animate-fadeIn"
         style={{ background: 'var(--color-canvas-surface)', border: '1px solid var(--color-border-default)', boxShadow: 'var(--shadow-modal)' }}
       >
@@ -180,17 +254,35 @@ export function CommandPalette({ commands, onRun, onClose }) {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'ArrowDown') { e.preventDefault(); setIdx(i => Math.min(i + 1, results.length - 1)); }
-              else if (e.key === 'ArrowUp') { e.preventDefault(); setIdx(i => Math.max(i - 1, 0)); }
+              if (e.key === 'ArrowDown') { 
+                e.preventDefault(); 
+                setIdx(i => {
+                  const newIdx = Math.min(i + 1, results.length - 1);
+                  setTimeout(() => document.getElementById(`cmd-item-${newIdx}`)?.scrollIntoView({ block: 'nearest' }), 0);
+                  return newIdx;
+                });
+              }
+              else if (e.key === 'ArrowUp') { 
+                e.preventDefault(); 
+                setIdx(i => {
+                  const newIdx = Math.max(i - 1, 0);
+                  setTimeout(() => document.getElementById(`cmd-item-${newIdx}`)?.scrollIntoView({ block: 'nearest' }), 0);
+                  return newIdx;
+                });
+              }
               else if (e.key === 'Enter' && results[idx]) { onRun(results[idx]); }
               else if (e.key === 'Escape') onClose();
             }}
             placeholder="Command dhundho..."
             className="flex-1 text-xs focus:outline-none bg-transparent"
             style={{ color: 'var(--color-text-primary)' }}
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="cmd-listbox"
+            aria-activedescendant={`cmd-item-${idx}`}
           />
         </div>
-        <div className="max-h-80 overflow-y-auto py-1">
+        <div className="max-h-80 overflow-y-auto py-1" role="listbox" id="cmd-listbox">
           {results.length === 0 && (
             <div className="px-3 py-4 text-center text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
               Koi command match nahi hui
@@ -199,6 +291,9 @@ export function CommandPalette({ commands, onRun, onClose }) {
           {results.map((c, i) => (
             <button
               key={c.label}
+              id={`cmd-item-${i}`}
+              role="option"
+              aria-selected={i === idx}
               onMouseEnter={() => setIdx(i)}
               onClick={() => onRun(c)}
               className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[11px] cursor-pointer"
@@ -237,6 +332,8 @@ export const MODAL_ICONS = {
 // ─────────────────────────────────────────────────────────────────────────────
 export function SearchOverlay({ q, onQueryChange, caseSensitive, onCaseChange, results, searching, onPick, onClose }) {
   const inputRef = useRef(null);
+  const containerRef = useRef(null);
+  useFocusTrap(containerRef, true);
   const ql = q.trim().toLowerCase();
 
   useEffect(() => {
@@ -271,8 +368,11 @@ export function SearchOverlay({ q, onQueryChange, caseSensitive, onCaseChange, r
     <div
       className="fixed inset-0 z-[95] flex items-start justify-center pt-[10vh] bg-black/50 backdrop-blur-sm"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      role="dialog"
+      aria-modal="true"
     >
       <div
+        ref={containerRef}
         className="w-[640px] max-w-[92vw] rounded-xl overflow-hidden shadow-2xl animate-fadeIn"
         style={{ background: 'var(--color-canvas-surface)', border: '1px solid var(--color-border-default)', boxShadow: 'var(--shadow-modal)' }}
       >

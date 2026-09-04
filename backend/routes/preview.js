@@ -8,8 +8,8 @@ const devServerManager = require('../sandbox/devServerManager');
 const workspaceManager = require('../services/workspaceManager');
 const logger = require('../logger');
 
-const { Database } = (() => {
-  try { return require('better-sqlite3'); } catch(_) { return {}; }
+const { DatabaseSync: Database } = (() => {
+  try { return require('node:sqlite'); } catch(_) { return {}; }
 })();
 const DB_PATH = path.join(__dirname, '..', 'data', 'app.db');
 

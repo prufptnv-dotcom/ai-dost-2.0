@@ -2295,7 +2295,7 @@ FILE: <filepath>
             // Also sync to SQLite workspace_files so post-run refresh doesn't lose files
             try {
               const ChatModel = require('../models/Chat');
-              const dbInstance = ChatModel.db || require('better-sqlite3')(path.join(__dirname, '..', 'data', 'chat.db'));
+              const dbInstance = ChatModel.db || new (require('node:sqlite').DatabaseSync)(path.join(__dirname, '..', 'data', 'chat.db'));
               const upsert = dbInstance.prepare('INSERT INTO workspace_files (project_id, file_path, content) VALUES (?, ?, ?) ON CONFLICT(project_id, file_path) DO UPDATE SET content = excluded.content');
               upsert.run(projectId || 'default', changedPath, fileContent);
             } catch (_dbErr) { /* SQLite sync optional */ }
@@ -2973,14 +2973,14 @@ router.post('/revert-file', (req, res) => {
       fs.writeFileSync(diskPath, beforeContent, 'utf-8');
       try {
         const ChatModel = require('../models/Chat');
-        const dbInstance = ChatModel.db || require('better-sqlite3')(path.join(__dirname, '..', 'data', 'chat.db'));
+        const dbInstance = ChatModel.db || new (require('node:sqlite').DatabaseSync)(path.join(__dirname, '..', 'data', 'chat.db'));
         dbInstance.prepare('INSERT INTO workspace_files (project_id, file_path, content) VALUES (?, ?, ?) ON CONFLICT(project_id, file_path) DO UPDATE SET content = excluded.content').run(projectId || 'default', targetPath, beforeContent);
       } catch (_) {}
     } else {
       if (fs.existsSync(diskPath)) fs.unlinkSync(diskPath);
       try {
         const ChatModel = require('../models/Chat');
-        const dbInstance = ChatModel.db || require('better-sqlite3')(path.join(__dirname, '..', 'data', 'chat.db'));
+        const dbInstance = ChatModel.db || new (require('node:sqlite').DatabaseSync)(path.join(__dirname, '..', 'data', 'chat.db'));
         dbInstance.prepare('DELETE FROM workspace_files WHERE project_id = ? AND file_path = ?').run(projectId || 'default', targetPath);
       } catch (_) {}
     }
@@ -3007,7 +3007,7 @@ router.post('/revert-all', (req, res) => {
       fs.writeFileSync(diskPath, content, 'utf-8');
       try {
         const ChatModel = require('../models/Chat');
-        const dbInstance = ChatModel.db || require('better-sqlite3')(path.join(__dirname, '..', 'data', 'chat.db'));
+        const dbInstance = ChatModel.db || new (require('node:sqlite').DatabaseSync)(path.join(__dirname, '..', 'data', 'chat.db'));
         dbInstance.prepare('INSERT INTO workspace_files (project_id, file_path, content) VALUES (?, ?, ?) ON CONFLICT(project_id, file_path) DO UPDATE SET content = excluded.content').run(projectId || 'default', filePath, content);
       } catch (_) {}
       restored++;
@@ -3018,7 +3018,7 @@ router.post('/revert-all', (req, res) => {
         if (fs.existsSync(diskPath)) fs.unlinkSync(diskPath);
         try {
           const ChatModel = require('../models/Chat');
-          const dbInstance = ChatModel.db || require('better-sqlite3')(path.join(__dirname, '..', 'data', 'chat.db'));
+          const dbInstance = ChatModel.db || new (require('node:sqlite').DatabaseSync)(path.join(__dirname, '..', 'data', 'chat.db'));
           dbInstance.prepare('DELETE FROM workspace_files WHERE project_id = ? AND file_path = ?').run(projectId || 'default', filePath);
         } catch (_) {}
         removed++;
@@ -3045,7 +3045,7 @@ router.post('/rollback', (req, res) => {
       fs.writeFileSync(diskPath, f.content ?? '', 'utf-8');
       try {
         const ChatModel = require('../models/Chat');
-        const dbInstance = ChatModel.db || require('better-sqlite3')(path.join(__dirname, '..', 'data', 'chat.db'));
+        const dbInstance = ChatModel.db || new (require('node:sqlite').DatabaseSync)(path.join(__dirname, '..', 'data', 'chat.db'));
         dbInstance.prepare('INSERT INTO workspace_files (project_id, file_path, content) VALUES (?, ?, ?) ON CONFLICT(project_id, file_path) DO UPDATE SET content = excluded.content').run(projectId || 'default', f.path, f.content ?? '');
       } catch (_) {}
     }

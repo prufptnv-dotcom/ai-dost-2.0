@@ -1733,6 +1733,16 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
                 : 'max-w-none w-full'
       }`}
     >
+      {/* Screen Reader ARIA Live Region for Chat Status */}
+      <div 
+        aria-live="polite" 
+        aria-atomic="true" 
+        className="sr-only" 
+        style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}
+      >
+        {isGeneratingImage ? "AI is generating an image..." : isThinking ? "AI is thinking..." : isTyping ? "AI is typing..." : ""}
+      </div>
+
       {/* Show Resizer Handles ONLY in General Chat Mode */}
       {mode === 'chat' && (
         <>

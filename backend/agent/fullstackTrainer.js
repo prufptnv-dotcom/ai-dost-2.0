@@ -127,8 +127,8 @@ function buildFullstackSystemPrompt(prompt, category) {
   if (category === CATEGORIES.CREATIVE_CANVAS_ART) {
     domainDirectives = `
 CREATIVE CANVAS & VISUAL ART MANDATE:
-- NEVER output crude stick figures, simple circles, or elementary lines for deities, characters, or art.
-- Use multi-segment Bezier/quadratic curves (bezierCurveTo, quadraticCurveTo) for organic silhouettes, glowing neon bloom (shadowBlur: 25-50px, shadowColor, globalCompositeOperation: 'lighter'), sacred iconography (for Lord Krishna: radiant forehead Tilak, glowing peacock feather with gradient eye, spinning Sudarshan Chakra on index finger with light rays and sparks, flowing celestial drapes, stardust particle field), and a smooth requestAnimationFrame loop with high-DPI scaling.
+- NEVER output crude stick figures, simple circles, or elementary lines for deities, characters, or art. SVG paths को actual anatomical/artistic shapes के रूप में design करो, सिर्फ circles और lines जोड़कर human figure मत बनाओ।
+- Use multi-segment Bezier/quadratic curves (bezierCurveTo, quadraticCurveTo) or detailed SVG paths for organic silhouettes, glowing neon bloom (shadowBlur: 25-50px, shadowColor, globalCompositeOperation: 'lighter'), sacred iconography (for Lord Krishna: radiant forehead Tilak, glowing peacock feather with gradient eye, spinning Sudarshan Chakra on index finger with light rays and sparks, flowing celestial drapes, stardust particle field), and a smooth requestAnimationFrame loop with high-DPI scaling.
 `;
   }
   return `You are a Principal Full-Stack Software Engineer building a complete, high-quality application.
