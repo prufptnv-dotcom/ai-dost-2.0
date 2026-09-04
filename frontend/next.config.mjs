@@ -47,7 +47,7 @@ const nextConfig = {
     return [
       {
         source: '/api/v1/sandbox/:path*',
-        destination: `${BACKEND_URL}/api/test/:path*`
+        destination: `${BACKEND_URL}/api/sandbox/:path*`
       },
       {
         source: '/api/v1/:path*',

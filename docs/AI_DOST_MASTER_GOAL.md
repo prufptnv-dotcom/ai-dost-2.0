@@ -51,12 +51,12 @@ This section reflects the **empirically verified, live status** of AI-Dost. Ever
 | **P6: Deep Research Agent Pipeline** | ✅ **COMPLETE** | Multi-source web queries, domain authority scoring (95/100 trust), consensus & contradiction detection, citations `[1]`, `[2]`, 1-click export to Word (`.docx`) and PDF. | `backend/services/researchService.js`<br>`frontend/components/views/ResearchView.jsx`<br>`research_audit/03_research_completed_with_sources.png`<br>`downloads/quantum_computing_breakthroughs_2026_res_1c2a7ecd.docx` |
 | **P7: Persistent Project Workspace Graph** | ✅ **COMPLETE** | Full-stack project workspace graph connecting files, chats, generated office documents, research dossiers, context nodes & edges. Interactive Explorer with node CRUD, edge linking, and tabbed asset manager. | `backend/routes/projectGraph.js`<br>`backend/services/projectGraphService.js`<br>`frontend/components/views/ProjectsView.jsx`<br>`project_graph_audit/01_project_workspace_graph_dark.png` |
 | **P8: Automated Workflows & Watchers** | ✅ **COMPLETE** | Autonomous background schedulers and reactive event watchers with multi-channel Telegram notifications, starter templates, and execution audit history. | `backend/services/workflowEngine.js`<br>`backend/routes/workflows.js`<br>`frontend/components/views/AutomationsView.jsx`<br>`automation_audit/01_automations_hub_dark.png` |
-| **P0.2: Docker Sandbox Isolation** | 🟡 **LOCAL GUARD ACTIVE** | Safe path traversal rejection (`../` blocked) + Docker sandbox manager with local fallback. Next: full container hardening. | `backend/sandbox/` (71 backend tests passing) |
+| **P0.2: Docker Sandbox Isolation** | ✅ **COMPLETE** | Hardened container constraints (1GB RAM cap, MemorySwap disabled, 1.0 CPU, PidsLimit 100 anti-fork-bomb, SecurityOpt no-new-privileges) + seamless Local Hardened Sandbox fallback with `_resolveSafe` traversal guard, command policy filtering, and 1-click self-test diagnostic telemetry. | `backend/sandbox/`<br>`frontend/components/views/SettingsView.jsx`<br>`sandbox_audit/01_sandbox_security_card_dark.png`<br>`sandbox_audit/02_sandbox_probe_passed_dark.png` |
 
 ### Engineering Quality Baseline (100% Pass)
-- **Frontend Test Suite:** 120 / 120 passed across 23 test suites (`npm test -- --watchAll=false`).
+- **Frontend Test Suite:** 121 / 121 passed across 23 test suites (`npm test -- --watchAll=false`).
 - **Frontend Linter:** 0 errors, 0 warnings (`npm run lint`).
-- **Backend Test Suite:** 71 / 71 passed across 6 test suites (`node --test tests/unit.test.js tests/integration.test.js`).
+- **Backend Test Suite:** 79 / 79 passed across 6 test suites (`node --test tests/unit.test.js tests/integration.test.js`).
 
 ------------------------------------------------------------------------
 
@@ -327,9 +327,9 @@ The current focus is **Platform Convergence & Cross-Module Context Unification**
 - [x] **Cross-Module Import Bridge (P3)** (Chat code blocks open directly into Copilot active tabs)
 
 ### Active Work in Progress:
-- [ ] **P7: Persistent Project Workspace Graph** (Universal schema linking files, chats, tasks, images, and research under a single persistent project ID)
-- [ ] **P8: Automated Workflows & Background Watchers** (Scheduled recurring tasks & Telegram event notifications)
-- [ ] **P0.2: Docker Sandbox Hardening** (Isolated container execution with safe local fallbacks)
+- [x] **P7: Persistent Project Workspace Graph** (Universal schema linking files, chats, tasks, images, and research under a single persistent project ID)
+- [x] **P8: Automated Workflows & Background Watchers** (Scheduled recurring tasks & Telegram event notifications)
+- [x] **P0.2: Docker Sandbox Isolation Hardening & Execution Guard** (Hardened container quotas, anti-fork limits, safe local fallback, command policy, and diagnostic health telemetry)
 
 ------------------------------------------------------------------------
 

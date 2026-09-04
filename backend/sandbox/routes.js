@@ -16,6 +16,35 @@ function sandboxError(res, err) {
   res.status(status).json({ success: false, error: msg });
 }
 
+// Global Sandbox Health & Isolation telemetry
+router.get('/health', async (req, res) => {
+  try {
+    const status = await sandboxManager.getHealthStatus();
+    res.json({ success: true, ...status });
+  } catch (err) {
+    sandboxError(res, err);
+  }
+});
+
+router.get('/status', async (req, res) => {
+  try {
+    const status = await sandboxManager.getHealthStatus();
+    res.json({ success: true, ...status });
+  } catch (err) {
+    sandboxError(res, err);
+  }
+});
+
+// Self-test diagnostic probe: creates test sandbox, runs probe, cleans up
+router.post('/test', async (req, res) => {
+  try {
+    const result = await sandboxManager.runSelfTest();
+    res.json(result);
+  } catch (err) {
+    sandboxError(res, err);
+  }
+});
+
 router.post('/create', async (req, res) => {
   try {
     const { projectId, options, ports } = req.body;
@@ -30,13 +59,19 @@ router.post('/create', async (req, res) => {
     const sessionId = crypto.randomUUID();
     activeSessions.set(sessionId, { sandboxId: sandbox.id, projectId, createdAt: Date.now() });
 
-    const inspect = await sandbox.container.inspect();
     const exposedPorts = {};
-    if (inspect.NetworkSettings.Ports) {
-      for (const [port, bindings] of Object.entries(inspect.NetworkSettings.Ports)) {
-        if (bindings && bindings.length > 0) {
-          exposedPorts[port] = bindings[0].HostPort;
+    if (sandbox.container) {
+      const inspect = await sandbox.container.inspect();
+      if (inspect.NetworkSettings && inspect.NetworkSettings.Ports) {
+        for (const [port, bindings] of Object.entries(inspect.NetworkSettings.Ports)) {
+          if (bindings && bindings.length > 0) {
+            exposedPorts[port] = bindings[0].HostPort;
+          }
         }
+      }
+    } else {
+      for (const [containerPort, hostPort] of sandbox.ports) {
+        exposedPorts[`${containerPort}/tcp`] = String(hostPort);
       }
     }
 
@@ -46,6 +81,7 @@ router.post('/create', async (req, res) => {
         id: sandbox.id,
         projectId: sandbox.projectId,
         path: sandbox.path,
+        isolation: sandbox.isolation || (sandbox.isLocal ? 'local-fallback' : 'docker'),
         createdAt: sandbox.createdAt,
         sessionId,
         exposedPorts
@@ -67,6 +103,7 @@ router.get('/:sandboxId', async (req, res) => {
         id: sandbox.id,
         projectId: sandbox.projectId,
         path: sandbox.path,
+        isolation: sandbox.isolation || (sandbox.isLocal ? 'local-fallback' : 'docker'),
         createdAt: sandbox.createdAt,
         lastActivity: sandbox.lastActivity,
         ports: Object.fromEntries(sandbox.ports)
@@ -225,6 +262,7 @@ router.get('/project/:projectId', async (req, res) => {
       sandboxes: sandboxes.map(s => ({
         id: s.id,
         projectId: s.projectId,
+        isolation: s.isolation || (s.isLocal ? 'local-fallback' : 'docker'),
         createdAt: s.createdAt,
         lastActivity: s.lastActivity,
         ports: Object.fromEntries(s.ports)

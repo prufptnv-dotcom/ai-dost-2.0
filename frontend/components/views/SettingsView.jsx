@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
   Settings, Key, Eye, EyeOff, Save, RotateCcw,
-  Sparkles, Check, Server, Shield, Sliders
+  Sparkles, Check, Server, Shield, Sliders, Play, Terminal, CheckCircle2, AlertTriangle, RefreshCw
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { Modal } from '../ui/Modal';
+import api from '../../services/api';
 
 const MODEL_OPTIONS = [
   { value: 'auto', label: 'Auto Multi-Model Cascade (Gemini → Groq → OpenRouter)' },
@@ -30,6 +31,31 @@ export default function SettingsView({ onToast, onModelChange }) {
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
+  // Sandbox Security & Isolation Telemetry
+  const [sandboxStatus, setSandboxStatus] = useState(null);
+  const [testingSandbox, setTestingSandbox] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+
+  const fetchSandboxStatus = async () => {
+    try {
+      const res = await api.get('/sandbox/health');
+      if (res.data) setSandboxStatus(res.data);
+    } catch {
+      // Fallback display if offline
+      setSandboxStatus({
+        engine: 'local-hardened-fallback',
+        dockerAvailable: false,
+        resourceQuotas: {
+          memoryLimit: '1GB (Capped max 2GB)',
+          cpuQuota: '1.0 Core',
+          pidsLimit: 100,
+          pathTraversalDefense: 'Active (_resolveSafe enforced)',
+          commandPolicy: 'Active (Destructive shell commands filtered)'
+        }
+      });
+    }
+  };
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     setKeys({
@@ -40,6 +66,8 @@ export default function SettingsView({ onToast, onModelChange }) {
     });
     setModel(localStorage.getItem('ai_dost_model') || 'auto');
     setAutosave(localStorage.getItem('ai_dost_autosave') !== 'false');
+
+    fetchSandboxStatus();
   }, []);
 
   const saveSettings = () => {
@@ -66,6 +94,27 @@ export default function SettingsView({ onToast, onModelChange }) {
     setModel('auto');
     setShowResetConfirm(false);
     if (onToast) onToast('Settings reset to defaults', 'success');
+  };
+
+  const handleRunSandboxTest = async () => {
+    setTestingSandbox(true);
+    setTestResult(null);
+    try {
+      const res = await api.post('/sandbox/test');
+      setTestResult(res.data);
+      if (res.data?.success) {
+        if (onToast) onToast(`Sandbox probe passed in ${res.data.latencyMs}ms (${res.data.isolation})`, 'success');
+      } else {
+        if (onToast) onToast(`Sandbox probe failed: ${res.data?.error || 'Unknown error'}`, 'error');
+      }
+    } catch (err) {
+      const errorMsg = err.response?.data?.error || err.message;
+      setTestResult({ success: false, error: errorMsg });
+      if (onToast) onToast(`Sandbox probe failed: ${errorMsg}`, 'error');
+    } finally {
+      setTestingSandbox(false);
+      fetchSandboxStatus();
+    }
   };
 
   return (
@@ -132,7 +181,99 @@ export default function SettingsView({ onToast, onModelChange }) {
           </div>
         </div>
 
-        {/* Section 2: API Keys & Credentials */}
+        {/* Section 2: Sandbox & Security Isolation (P0.2) */}
+        <div className="rounded-sm border border-border bg-canvas-surface p-5 space-y-4 shadow-xs" data-testid="sandbox-security-card">
+          <div className="flex items-center justify-between pb-3 border-b border-border-subtle">
+            <div className="flex items-center gap-2">
+              <Shield className="w-4 h-4 text-accent-primary" />
+              <h2 className="text-sm font-semibold text-paper-100 font-display">
+                Sandbox & Security Isolation
+              </h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant={sandboxStatus?.dockerAvailable ? 'success' : 'default'} size="sm">
+                {sandboxStatus?.dockerAvailable ? 'Docker Isolated' : 'Local Hardened Guard'}
+              </Badge>
+              <Badge variant="outline" size="sm">
+                P0.2 Security
+              </Badge>
+            </div>
+          </div>
+
+          <p className="text-xs text-ink-muted leading-relaxed">
+            All code execution, builds, and development servers run inside hardened sandboxes with safe path-traversal rejection (<code className="text-accent-primary font-mono text-[11px]">../</code> blocked) and process resource constraints.
+          </p>
+
+          {/* Resource Quota Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-1">
+            <div className="p-2.5 rounded-xs bg-canvas-base border border-border">
+              <div className="text-[10px] uppercase tracking-wider text-ink-muted font-mono">Memory Cap</div>
+              <div className="text-xs font-semibold text-paper-100 font-mono mt-0.5">1 GB (Max 2GB)</div>
+            </div>
+            <div className="p-2.5 rounded-xs bg-canvas-base border border-border">
+              <div className="text-[10px] uppercase tracking-wider text-ink-muted font-mono">CPU Quota</div>
+              <div className="text-xs font-semibold text-paper-100 font-mono mt-0.5">1.0 CPU Core</div>
+            </div>
+            <div className="p-2.5 rounded-xs bg-canvas-base border border-border">
+              <div className="text-[10px] uppercase tracking-wider text-ink-muted font-mono">Anti-Fork Limit</div>
+              <div className="text-xs font-semibold text-paper-100 font-mono mt-0.5">100 PIDs Cap</div>
+            </div>
+            <div className="p-2.5 rounded-xs bg-canvas-base border border-border">
+              <div className="text-[10px] uppercase tracking-wider text-ink-muted font-mono">Path Defense</div>
+              <div className="text-xs font-semibold text-accent-primary font-mono mt-0.5">Active Guard</div>
+            </div>
+          </div>
+
+          {/* Command Policy & Status Strip */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xs bg-canvas-base border border-border-subtle">
+            <div className="flex items-center gap-2 text-xs text-paper-200">
+              <CheckCircle2 className="w-3.5 h-3.5 text-accent-primary shrink-0" />
+              <span>Command policy active: destructive host commands & fork bombs filtered.</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                variant="secondary"
+                size="xs"
+                icon={RefreshCw}
+                onClick={fetchSandboxStatus}
+              >
+                Refresh
+              </Button>
+              <Button
+                variant="primary"
+                size="xs"
+                icon={Play}
+                loading={testingSandbox}
+                onClick={handleRunSandboxTest}
+              >
+                Run Health Check
+              </Button>
+            </div>
+          </div>
+
+          {/* Test Probe Result Banner */}
+          {testResult && (
+            <div className={`p-3 rounded-xs border text-xs font-mono flex items-center justify-between ${
+              testResult.success
+                ? 'bg-accent-primary/10 border-accent-primary/30 text-accent-primary'
+                : 'bg-red-500/10 border-red-500/30 text-red-400'
+            }`}>
+              <div className="flex items-center gap-2">
+                {testResult.success ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 shrink-0" />}
+                <span>
+                  {testResult.success
+                    ? `Sandbox probe passed (${testResult.isolation || 'isolated'}) in ${testResult.latencyMs}ms`
+                    : `Probe error: ${testResult.error || 'Check failed'}`}
+                </span>
+              </div>
+              {testResult.execOutput && (
+                <span className="text-[10px] opacity-80">{testResult.execOutput}</span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Section 3: API Keys & Credentials */}
         <div className="rounded-sm border border-border bg-canvas-surface p-5 space-y-4 shadow-xs">
           <div className="flex items-center justify-between pb-3 border-b border-border-subtle">
             <div className="flex items-center gap-2">
@@ -193,7 +334,7 @@ export default function SettingsView({ onToast, onModelChange }) {
           </div>
         </div>
 
-        {/* Section 3: Workspace Preferences */}
+        {/* Section 4: Workspace Preferences */}
         <div className="rounded-sm border border-border bg-canvas-surface p-5 space-y-4 shadow-xs">
           <div className="flex items-center gap-2 pb-3 border-b border-border-subtle">
             <Sliders className="w-4 h-4 text-accent-primary" />

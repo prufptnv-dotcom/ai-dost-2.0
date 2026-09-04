@@ -65,6 +65,45 @@ describe('Phase 3.7 — Secondary Product Surfaces Rebuild', () => {
       fireEvent.click(saveBtn);
       expect(onToast).toHaveBeenCalledWith('Settings saved locally', 'success');
     });
+
+    it('renders sandbox security card and triggers diagnostic health check', async () => {
+      api.get.mockResolvedValueOnce({
+        data: {
+          dockerAvailable: false,
+          engine: 'local-hardened-fallback',
+          resourceQuotas: {
+            memoryLimit: '1GB (Capped max 2GB)',
+            cpuQuota: '1.0 Core',
+            pidsLimit: 100,
+            pathTraversalDefense: 'Active (_resolveSafe enforced)',
+            commandPolicy: 'Active (Destructive shell commands filtered)'
+          }
+        }
+      });
+      api.post.mockResolvedValueOnce({
+        data: {
+          success: true,
+          isolation: 'local-fallback',
+          latencyMs: 38,
+          probe: 'passed'
+        }
+      });
+
+      const onToast = jest.fn();
+      render(<SettingsView onToast={onToast} />);
+
+      expect(screen.getByText(/Sandbox & Security Isolation/i)).toBeInTheDocument();
+      expect(screen.getByText(/Memory Cap/i)).toBeInTheDocument();
+      expect(screen.getByText(/Anti-Fork Limit/i)).toBeInTheDocument();
+
+      const testBtn = screen.getByText('Run Health Check');
+      fireEvent.click(testBtn);
+
+      await waitFor(() => {
+        expect(api.post).toHaveBeenCalledWith('/sandbox/test');
+        expect(onToast).toHaveBeenCalledWith(expect.stringContaining('Sandbox probe passed'), 'success');
+      });
+    });
   });
 
   describe('VoiceView', () => {

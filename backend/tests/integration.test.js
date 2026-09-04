@@ -318,4 +318,58 @@ test('POST /api/workflows valid workflow -> 201 and lifecycle roundtrip', async 
   assert.equal(delStatus, 200);
 });
 
+// ── Sandbox Hardening, Health & Self-Test (P0.2) ─────────────────────────
+test('GET /api/sandbox/health -> 200 with engine and resource quotas', async () => {
+  const { status, body } = await req('GET', '/api/sandbox/health');
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.ok(body.engine);
+  assert.ok(body.resourceQuotas);
+  assert.equal(body.resourceQuotas.pidsLimit, 100);
+});
+
+test('POST /api/sandbox/test -> 200 with probe success', async () => {
+  const { status, body } = await req('POST', '/api/sandbox/test');
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.equal(body.probe, 'passed');
+  assert.ok(typeof body.latencyMs === 'number');
+});
+
+test('POST /api/sandbox/create with local fallback -> 200 and lifecycle roundtrip', async () => {
+  const { status, body } = await req('POST', '/api/sandbox/create', {
+    projectId: 'ci-sandbox-test',
+    options: { allowFallback: true }
+  });
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.ok(body.sandbox?.id);
+  const sbId = body.sandbox.id;
+
+  // File write
+  const { status: writeStatus } = await req('POST', `/api/sandbox/${sbId}/files/write`, {
+    filePath: 'test.js',
+    content: 'console.log("hello sandbox");'
+  });
+  assert.equal(writeStatus, 200);
+
+  // File read
+  const { status: readStatus, body: readBody } = await req('GET', `/api/sandbox/${sbId}/files/read?path=test.js`);
+  assert.equal(readStatus, 200);
+  assert.equal(readBody.content, 'console.log("hello sandbox");');
+
+  // Command exec
+  const { status: execStatus, body: execBody } = await req('POST', `/api/sandbox/${sbId}/exec`, {
+    command: 'node test.js'
+  });
+  assert.equal(execStatus, 200);
+  assert.equal(execBody.success, true);
+  assert.match(execBody.result.stdout, /hello sandbox/);
+
+  // Destroy
+  const { status: delStatus } = await req('DELETE', `/api/sandbox/${sbId}`);
+  assert.equal(delStatus, 200);
+});
+
+
 

@@ -264,6 +264,48 @@ describe('sandboxManager path safety', () => {
     const out = sandboxManager._resolveSafe('C:\\sandbox\\proj-123', 'sub\\dir\\file.txt');
     assert.ok(out.endsWith('sub\\dir\\file.txt'));
   });
+
+  test('parseMemory caps memory at 2GB and computes units', () => {
+    assert.equal(sandboxManager.parseMemory('512m'), 512 * 1024 * 1024);
+    assert.equal(sandboxManager.parseMemory('1g'), 1024 * 1024 * 1024);
+    assert.equal(sandboxManager.parseMemory('8g'), 2 * 1024 * 1024 * 1024);
+  });
+
+  test('validateCommandPolicy blocks destructive commands', () => {
+    assert.equal(sandboxManager.validateCommandPolicy('rm -rf /').allowed, false);
+    assert.equal(sandboxManager.validateCommandPolicy('format c:').allowed, false);
+    assert.equal(sandboxManager.validateCommandPolicy('powershell Remove-Item -Recurse C:\\').allowed, false);
+    assert.equal(sandboxManager.validateCommandPolicy('npm test').allowed, true);
+    assert.equal(sandboxManager.validateCommandPolicy('node index.js').allowed, true);
+  });
+
+  test('sanitizeEnvironment filters secret credentials', () => {
+    const origKey = process.env.AWS_SECRET_ACCESS_KEY;
+    process.env.AWS_SECRET_ACCESS_KEY = 'secret123';
+    try {
+      const clean = sandboxManager.sanitizeEnvironment({ CUSTOM_FLAG: '1' });
+      assert.equal(clean.AWS_SECRET_ACCESS_KEY, undefined);
+      assert.equal(clean.CUSTOM_FLAG, '1');
+      assert.ok(clean.NODE_ENV);
+    } finally {
+      if (origKey) process.env.AWS_SECRET_ACCESS_KEY = origKey;
+      else delete process.env.AWS_SECRET_ACCESS_KEY;
+    }
+  });
+
+  test('getHealthStatus returns engine and resource quotas', async () => {
+    const status = await sandboxManager.getHealthStatus();
+    assert.ok(status.engine);
+    assert.ok(status.resourceQuotas);
+    assert.equal(status.resourceQuotas.pidsLimit, 100);
+  });
+
+  test('runSelfTest completes diagnostic probe cleanly', async () => {
+    const result = await sandboxManager.runSelfTest();
+    assert.equal(result.success, true);
+    assert.equal(result.probe, 'passed');
+    assert.ok(typeof result.latencyMs === 'number');
+  });
 });
 
 // ── Spec Wizard Service ──────────────────────────────────────────────────
