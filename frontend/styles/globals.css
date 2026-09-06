@@ -112,6 +112,52 @@ body.light-theme, html.light-theme, .light-theme, [data-theme="light"] {
   --foreground: #111827;
 }
 
+body.hacker-theme, html.hacker-theme, .hacker-theme, [data-theme="hacker"] {
+  --color-primary: #00ff41;
+  --color-primary-hover: #00ff41;
+  --color-secondary: #008f11;
+  --color-accent: #00ff41;
+
+  --color-bg-default: #0a0f0d;
+  --color-bg-hover: #0e1511;
+  --color-bg-card: #0d120f;
+  --color-bg-input: #0d120f;
+  --color-bg-elevated: #111a15;
+
+  --color-border: rgba(0, 255, 65, 0.2);
+  --color-border-subtle: rgba(0, 255, 65, 0.1);
+
+  --color-text-primary: #00ff41;
+  --color-text-secondary: #008f11;
+  --color-text-muted: #00600b;
+
+  --background: #0a0f0d;
+  --foreground: #00ff41;
+}
+
+body.ocean-theme, html.ocean-theme, .ocean-theme, [data-theme="ocean"] {
+  --color-primary: #38bdf8;
+  --color-primary-hover: #7dd3fc;
+  --color-secondary: #2dd4bf;
+  --color-accent: #38bdf8;
+
+  --color-bg-default: #0f172a;
+  --color-bg-hover: #1e293b;
+  --color-bg-card: #1e293b;
+  --color-bg-input: #1e293b;
+  --color-bg-elevated: #334155;
+
+  --color-border: rgba(56, 189, 248, 0.2);
+  --color-border-subtle: rgba(56, 189, 248, 0.1);
+
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #94a3b8;
+
+  --background: #0f172a;
+  --foreground: #f8fafc;
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
 }

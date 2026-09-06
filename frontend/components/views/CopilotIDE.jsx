@@ -16,6 +16,7 @@ import { LANG_BY_EXT, TreeView, fileTreeFromFiles } from './CopilotTree';
 import { PromptModal, QuickOpen, CommandPalette, SearchOverlay, MODAL_ICONS } from './IDEOverlays';
 import DiffReviewModal from './DiffReviewModal';
 import ProjectWizardModal from './ProjectWizardModal';
+import DeployModal from './DeployModal';
 import TaskStepItem from './TaskStepItem';
 import VisualDebugger from './VisualDebugger';
 import { FileExplorer } from '../ide/FileExplorer';
@@ -589,6 +590,7 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
   const [previewSourceMode, setPreviewSourceMode] = useState('live'); // 'live' | 'mock'
   const [devServerStatus, setDevServerStatus] = useState({ running: false, state: 'STOPPED', url: null });
   const [devServerLoading, setDevServerLoading] = useState(false);
+  const [deployModalOpen, setDeployModalOpen] = useState(false);
 
   // Modals & Overlays
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -2109,6 +2111,13 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
                   >
                     <ExternalLink size={12} className="text-accent" /> Open in Tab
                   </button>
+
+                  <button
+                    onClick={() => setDeployModalOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/50 shadow-md shadow-indigo-600/20 transition-all cursor-pointer ml-2"
+                  >
+                    <Zap size={12} className="fill-white" /> Deploy Live
+                  </button>
                 </div>
               </div>
 
@@ -2196,6 +2205,14 @@ export default function CopilotIDE({ projectId = 'copilot-workspace', projectNam
         initialPrompt={wizardInitialPrompt}
         onClose={() => setWizardOpen(false)}
         onBuildProject={handleWizardBuild}
+      />
+
+      {/* 1-Click Deploy Modal */}
+      <DeployModal
+        isOpen={deployModalOpen}
+        onClose={() => setDeployModalOpen(false)}
+        projectId={projectId}
+        onToast={showToast}
       />
 
       {/* Diff Review Modal */}

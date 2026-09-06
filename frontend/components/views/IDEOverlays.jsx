@@ -28,8 +28,9 @@ export function useFocusTrap(ref, isActive) {
         }
       }
     };
-    ref.current.addEventListener('keydown', handleTabKey);
-    return () => ref.current?.removeEventListener('keydown', handleTabKey);
+    const node = ref.current;
+    node.addEventListener('keydown', handleTabKey);
+    return () => node?.removeEventListener('keydown', handleTabKey);
   }, [isActive, ref]);
 }
 

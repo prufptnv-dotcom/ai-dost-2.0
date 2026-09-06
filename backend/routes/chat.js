@@ -155,8 +155,14 @@ function buildCleanHistory(history, maxMessages = 20, maxTotalChars = 24000) {
 router.post('/', async (req, res) => {
     const startTime = Date.now();
     try {
-        const { message, model, section, fileContent, history, mode, customKeys, uploadedDocs, persona } = req.body;
+        let { message, model, section, fileContent, history, mode, customKeys, uploadedDocs, persona } = req.body;
         
+        // Privacy Mode Interceptor
+        if (req.headers['x-privacy-mode'] === 'true') {
+            logger.info("🛡️ Privacy Mode Active: Forcing local model execution.");
+            model = 'local:' + (process.env.OLLAMA_MODEL || 'qwen2.5-coder:7b');
+        }
+
         if (!message || !message.trim()) {
             return res.status(400).json({
                 success: false,

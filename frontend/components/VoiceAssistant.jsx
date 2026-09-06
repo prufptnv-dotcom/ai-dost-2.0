@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mic, MicOff, Volume2, VolumeX, X, Loader2, Sparkles, Waves, Activity, RotateCcw } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
+import api from '../services/api';
 
 const Waveform = ({ waveformData, isSpeaking }) => (
   <div className="flex items-end justify-center gap-1 h-32" role="img" aria-label="Audio waveform visualization">
@@ -208,7 +209,12 @@ export default function VoiceAssistant({
       const decoded = await audioContextRef.current.decodeAudioData(audioBuffer);
       const source = audioContextRef.current.createBufferSource();
       source.buffer = decoded;
-      source.connect(audioContextRef.current.destination);
+      if (analyserRef.current) {
+        source.connect(analyserRef.current);
+        analyserRef.current.connect(audioContextRef.current.destination);
+      } else {
+        source.connect(audioContextRef.current.destination);
+      }
       source.start(0);
       setIsSpeaking(true);
       source.onended = () => setIsSpeaking(false);
@@ -307,7 +313,9 @@ export default function VoiceAssistant({
     setError(null);
     setTranscript('');
 
-    if (geminiApiKey && !useGeminiLive) {
+    const isPrivacyMode = localStorage.getItem('ai_dost_privacy_mode') === 'true';
+
+    if (geminiApiKey && !useGeminiLive && !isPrivacyMode) {
       const connected = await connectGeminiLive();
       if (!connected) return;
     } else if (recognitionRef.current) {
@@ -325,7 +333,7 @@ export default function VoiceAssistant({
     }
   }, [geminiApiKey, useGeminiLive, connectGeminiLive, initAudioContext]);
 
-  const handleSpeak = useCallback((text) => {
+  const handleSpeak = useCallback(async (text) => {
     if (!text) return;
     if (useGeminiLive && geminiWsRef.current?.readyState === WebSocket.OPEN) {
       // Send text to Gemini Live for TTS
@@ -337,39 +345,63 @@ export default function VoiceAssistant({
       }));
       setIsSpeaking(true);
     } else {
-      // Fallback to browser speechSynthesis
-      onSpeak(text);
+      // Edge TTS Fallback
+      try {
+        setIsSpeaking(true);
+        const cleanText = text.replace(/[*#`>\[\]]/g, '').slice(0, 1500);
+        const ttsRes = await fetch(`${api.defaults.baseURL || '/api'}/agent/ai/tts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: cleanText, voice: 'hi-IN-SwaraNeural' }),
+        });
+        if (ttsRes.ok) {
+          const blob = await ttsRes.blob();
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          audio.onended = () => { setIsSpeaking(false); URL.revokeObjectURL(url); };
+          audio.onerror = () => { setIsSpeaking(false); URL.revokeObjectURL(url); };
+          
+          if (!audioContextRef.current) await initAudioContext();
+          if (analyserRef.current) {
+            const source = audioContextRef.current.createMediaElementSource(audio);
+            source.connect(analyserRef.current);
+            analyserRef.current.connect(audioContextRef.current.destination);
+          }
+          await audio.play();
+        } else {
+          onSpeak(text);
+          setIsSpeaking(false);
+        }
+      } catch (e) {
+        onSpeak(text);
+        setIsSpeaking(false);
+      }
     }
-  }, [useGeminiLive, onSpeak]);
+  }, [useGeminiLive, onSpeak, initAudioContext]);
 
   // Voice command handler
-  const handleVoiceCommand = useCallback((command) => {
-    const lowerCmd = command.toLowerCase().trim();
+  const handleVoiceCommand = useCallback(async (command) => {
+    const text = command.trim();
+    if (!text) return null;
     
-    // Resume generation command
-    if (lowerCmd.includes('resume') && lowerCmd.includes('generate')) {
-      const resumeText = lowerCmd.replace(/resume.*generate/i, '').trim() || 'Generate a professional resume';
-      onSpeak(`Generating resume: ${resumeText}`);
-      // Trigger resume generation - would need callback from parent
-      showToast({ type: 'info', message: 'Resume generation triggered via voice' });
-      return 'resume_generate';
-    }
+    setStatus('processing');
+    setTranscript(text);
     
-    // Code editor commands
-    if (lowerCmd.includes('new project') || lowerCmd.includes('create project')) {
-      showToast({ type: 'info', message: 'Project creation via voice - use the Agent mode' });
-      return 'create_project';
-    }
-    
-    // General AI chat command
-    if (lowerCmd.includes('ask ai') || lowerCmd['ask ai']) {
-      showToast({ type: 'info', message: 'AI chat activated via voice' });
+    try {
+      const res = await api.post('/chat', { message: text, model: 'auto' });
+      const answer = res.data?.reply || res.data?.message || 'Done';
+      onTranscript(answer);
+      handleSpeak(answer);
       return 'ai_chat';
+    } catch (e) {
+      const err = 'Inference failed: ' + (e.message || 'Network error');
+      setError(err);
+      handleSpeak(err);
+      return null;
+    } finally {
+      setStatus('idle');
     }
-    
-    showToast({ type: 'warning', message: `Command not recognized: "${command}"` });
-    return null;
-  }, [onSpeak, showToast]);
+  }, [handleSpeak, onTranscript]);
 
   // Voice command listener
   useEffect(() => {

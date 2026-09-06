@@ -3,9 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   MessageSquare, Bot, Code2, FolderOpen, Mic, Compass,
   Image as ImageIcon, FileText, History, Settings, Plus,
-  ChevronLeft, ChevronRight, Layers, Zap
+  ChevronLeft, ChevronRight, Layers, Zap, BarChart3, Shield, ShieldOff
 } from 'lucide-react';
 import BrandLogo from './ui/BrandLogo';
+import { useMode } from '../context/ModeContext';
 
 const SIDEBAR_WIDTH_COLLAPSED = 72;
 const SIDEBAR_WIDTH_EXPANDED = 260;
@@ -17,6 +18,7 @@ const NAV_GROUPS = [
       { id: 'chat', label: 'Chat', icon: MessageSquare, badge: null },
       { id: 'agent', label: 'Agent', icon: Bot, badge: 'Beta' },
       { id: 'copilot', label: 'Copilot IDE', icon: Code2, badge: 'New' },
+      { id: 'analytics', label: 'Data Analytics', icon: BarChart3, badge: 'New' },
     ],
   },
   {
@@ -49,6 +51,8 @@ export default function Sidebar({
   onNewProject,
   onNewChat,
 }) {
+  const { isPrivacyMode, togglePrivacyMode } = useMode();
+
   const handleNewChat = () => {
     if (onNewChat) onNewChat();
     else if (onItemClick) onItemClick('chat');
@@ -225,6 +229,29 @@ export default function Sidebar({
           >
             <Settings className="w-4 h-4 text-txt-muted" />
             {isOpen && <span className="truncate">Preferences</span>}
+          </button>
+          
+          <button
+            type="button"
+            onClick={togglePrivacyMode}
+            className={`flex items-center gap-2.5 w-full rounded-md transition-fast cursor-pointer focus-ring mt-1 ${
+              isPrivacyMode 
+                ? 'text-emerald-500 hover:bg-emerald-500/10' 
+                : 'text-txt-secondary hover:text-txt-primary hover:bg-canvas-surface'
+            } ${isOpen ? 'px-2.5 py-1.5 text-xs' : 'justify-center p-2'}`}
+            title={isPrivacyMode ? "Privacy Mode Active (Local Only)" : "Enable Privacy Mode"}
+            aria-label="Toggle Privacy Mode"
+          >
+            {isPrivacyMode ? (
+              <Shield className="w-4 h-4" />
+            ) : (
+              <ShieldOff className="w-4 h-4 text-txt-muted" />
+            )}
+            {isOpen && (
+              <span className="truncate">
+                {isPrivacyMode ? 'Privacy: Local' : 'Privacy: Cloud'}
+              </span>
+            )}
           </button>
         </div>
       </motion.aside>

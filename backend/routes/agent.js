@@ -558,7 +558,7 @@ const prompt = parameters.prompt || '';
           
           let parsedData = null;
           try {
-            const scaffoldResult = await callScaffoldLLM(systemPrompt);
+            const scaffoldResult = await callScaffoldLLM(systemPrompt, null, req.headers);
             if (scaffoldResult && Array.isArray(scaffoldResult.files) && scaffoldResult.files.length >= 2) {
               parsedData = scaffoldResult;
             } else if (typeof scaffoldResult === 'string') {
@@ -1067,7 +1067,8 @@ function extractFiles(resp) {
 }
 
 // ── Scaffolding LLM (mini-cascade for generate_project_from_prompt) ──────────
-async function callScaffoldLLM(scaffoldPrompt, customKeys = null) {
+async function callScaffoldLLM(scaffoldPrompt, customKeys = null, reqHeaders = {}) {
+  const isPrivacyMode = reqHeaders['x-privacy-mode'] === 'true';
   const isErrorResp = (r) => !r || typeof r !== 'string' ||
     r.includes('API key set nahi') || r.includes('API error') ||
     r.includes('service me error') || r.includes('Rate limit') ||
@@ -1095,17 +1096,21 @@ async function callScaffoldLLM(scaffoldPrompt, customKeys = null) {
     return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
   };
 
-  for (const provider of providers) {
-    try {
-      const resp = await withProviderTimeout(provider.fn(), 18000);
-      if (isErrorResp(resp)) continue;
-      const files = extractFiles(resp);
-      if (files && files.length >= 1) {
-        logger.info(`[Agent] Live AI Model ${provider.name} generated/modified ${files.length} custom files`);
-        return resp;
+  if (isPrivacyMode) {
+    logger.info("🛡️ Privacy Mode Active: Skipping cloud providers in scaffold.");
+  } else {
+    for (const provider of providers) {
+      try {
+        const resp = await withProviderTimeout(provider.fn(), 18000);
+        if (isErrorResp(resp)) continue;
+        const files = extractFiles(resp);
+        if (files && files.length >= 1) {
+          logger.info(`[Agent] Live AI Model ${provider.name} generated/modified ${files.length} custom files`);
+          return resp;
+        }
+      } catch (e) {
+        logger.info(`[Agent] Live AI Model ${provider.name} failed (${e.message}), trying next in cascade...`);
       }
-    } catch (e) {
-      logger.info(`[Agent] Live AI Model ${provider.name} failed (${e.message}), trying next in cascade...`);
     }
   }
 
@@ -1835,7 +1840,7 @@ REQUIREMENTS:
     let files = [];
     try {
       const rawResponse = await Promise.race([
-        callScaffoldLLM(scaffoldPrompt),
+        callScaffoldLLM(scaffoldPrompt, null, req.headers),
         new Promise((_, reject) => setTimeout(() => reject(new Error('LLM Timeout')), 10000))
       ]);
       const stripped = String(rawResponse || '').replace(/```(?:json)?\s*/gi, '').trim();
@@ -2138,7 +2143,8 @@ FILE: <filepath>
 `;
 
         try {
-          const rawEditResp = await callScaffoldLLM(editPrompt);
+          logger.info(`[Agent] Healing LLM prompt sent...`);
+          const rawEditResp = await callScaffoldLLM(editPrompt, null, req.headers);
           const editedFiles = extractFiles(rawEditResp);
 
           if (editedFiles && editedFiles.length > 0) {

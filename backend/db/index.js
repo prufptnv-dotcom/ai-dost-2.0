@@ -7,6 +7,8 @@ const migration002 = require('./migrations/002_agent_runtime');
 const migration003 = require('./migrations/003_agent_handoffs');
 const migration004 = require('./migrations/004_agent_handoff_results');
 const migration005 = require('./migrations/005_workflows_schema');
+const migration006 = require('./migrations/006_skills_schema');
+const migration007 = require('./migrations/007_performance_indexes');
 const logger = require('../logger');
 
 let dbInstance = null;
@@ -22,8 +24,26 @@ function initDatabase(customPath = null) {
   const dbPath = customPath || path.join(dataDir, 'app.db');
   dbInstance = new Database(dbPath);
 
+  // Polyfill for better-sqlite3 db.transaction()
+  if (typeof dbInstance.transaction !== 'function') {
+    dbInstance.transaction = function(fn) {
+      return function(...args) {
+        dbInstance.exec('BEGIN');
+        try {
+          const result = fn(...args);
+          dbInstance.exec('COMMIT');
+          return result;
+        } catch (e) {
+          dbInstance.exec('ROLLBACK');
+          throw e;
+        }
+      };
+    };
+  }
+
   // Configure SQLite invariants
   dbInstance.exec('PRAGMA journal_mode = WAL');
+  dbInstance.exec('PRAGMA synchronous = NORMAL');
   dbInstance.exec('PRAGMA foreign_keys = ON');
   dbInstance.exec('PRAGMA busy_timeout = 5000');
 
@@ -34,7 +54,9 @@ function initDatabase(customPath = null) {
     { version: 2, name: '002_agent_runtime', up: migration002.up },
     migration003,
     migration004,
-    migration005
+    migration005,
+    { version: 6, name: '006_skills_schema', up: migration006.up },
+    migration007
   ]);
 
   // Run legacy data migrator (idempotent)

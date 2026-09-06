@@ -15,7 +15,7 @@ fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
 const BASE = `http://127.0.0.1:${process.env.PORT || 5000}`;
 
 // ── LLM content via full cascade (2 attempts) ──────────────────────────────
-async function llmContent(systemPrompt, userPrompt, timeoutMs = 60000) {
+async function llmContent(systemPrompt, userPrompt, reqHeaders = {}, timeoutMs = 60000) {
     // systemPrompt is the template with {TOPIC} placeholder; userPrompt is the actual topic
     const prompt = systemPrompt.replace('{TOPIC}', userPrompt);
     const body = {
@@ -27,9 +27,13 @@ async function llmContent(systemPrompt, userPrompt, timeoutMs = 60000) {
     for (let attempt = 1; attempt <= 2; attempt++) {
         const attemptTimeout = attempt === 1 ? Math.min(timeoutMs, 30000) : Math.min(timeoutMs / 2, 15000);
         try {
+            const fetchHeaders = { 'Content-Type': 'application/json' };
+            if (reqHeaders['x-privacy-mode']) {
+                fetchHeaders['x-privacy-mode'] = reqHeaders['x-privacy-mode'];
+            }
             const res = await fetch(`${BASE}/api/v1/chat`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: fetchHeaders,
                 body: JSON.stringify(body),
                 signal: AbortSignal.timeout(attemptTimeout),
             });
@@ -332,7 +336,7 @@ router.post('/generate', async (req, res) => {
         const safeTitle = (title || topic).trim().slice(0, 60);
         let content;
         try {
-            content = await llmContent(PROMPTS[t], topic);
+            content = await llmContent(PROMPTS[t], topic, req.headers);
             // Quality check: ensure content is actually about the topic
             const topicKeywords = topic.toLowerCase().split(/\s+/).filter(w => w.length > 3);
             const hasTopic = topicKeywords.some(kw => content.toLowerCase().includes(kw));

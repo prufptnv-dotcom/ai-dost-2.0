@@ -12,9 +12,10 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const logger = require('./logger');
-const { DatabaseSync: Database } = require('node:sqlite');
+const { initDatabase } = require('./db');
 const { Server } = require('socket.io');
-const dns = require('dns');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
 const crypto = require('crypto');
 
 // Windows pe IPv6 route kabhi-kabhi blackhole hota hai → Node fetch hang.
@@ -24,9 +25,7 @@ dns.setDefaultResultOrder('ipv4first');
 // Load .env file
 dotenv.config({ path: path.join(__dirname, '.env') });
 
-// ── SQLite Initialization ─────────────────────────────────────────────
-const dbPath = path.join(__dirname, 'data', 'app.db');
-const db = new Database(dbPath);
+const db = initDatabase();
 
 // Enable WAL mode for better concurrent performance
 db.exec('PRAGMA journal_mode = WAL');
@@ -135,7 +134,19 @@ function seedInitialProjects() {
 }
 seedInitialProjects();
 
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per window
+  message: 'Too many requests, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 const app = express();
+
+// Apply middlewares
+app.use(compression());
+app.use(apiLimiter);
 
 // Helper: save a project file to SQLite (and physical workspace)
 function saveProjectFile(projectId, filePath, content) {
@@ -258,6 +269,8 @@ const terminalRoutes = require('./routes/terminal');
 const sandboxRoutes = require('./sandbox/routes');
 const deployRoutes  = require('./routes/deploy');
 const researchRoutes = require('./routes/research');
+const skillsRoutes = require('./routes/skills');
+const analyticsRoutes = require('./routes/analytics');
 
 app.use('/api/chat',     chatRoutes);
 app.use('/api/test',     testRoutes);
@@ -272,6 +285,8 @@ app.use('/api/terminal', terminalRoutes);
 app.use('/api/sandbox',  sandboxRoutes);
 app.use('/api/deploy',   deployRoutes);
 app.use('/api/research', researchRoutes);
+app.use('/api/skills',   skillsRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 const projectGraphRoutes = require('./routes/projectGraph');
 const workflowRoutes = require('./routes/workflows')(db);
@@ -301,7 +316,9 @@ app.use('/api/v1/terminal', terminalRoutes);
 app.use('/api/v1/sandbox',  sandboxRoutes);
 app.use('/api/v1/deploy',   deployRoutes);
 app.use('/api/v1/research', researchRoutes);
+app.use('/api/v1/skills',   skillsRoutes);
 app.use('/api/v1/projects', projectGraphRoutes);
+app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/workflows', workflowRoutes);
 app.use('/api/v1/verify',   verifierRoutes);
 
@@ -992,24 +1009,29 @@ function saveChatHistory(req, res) {
     messageDao.deleteByConversation(sid);
     const del = db.prepare('DELETE FROM chat_history WHERE session_id = ?').run(sid);
 
-    const ins = db.prepare('INSERT INTO chat_history (session_id, role, content) VALUES (?, ?, ?)');
-    const tx = db.transaction((msgs) => {
-        for (let i = 0; i < msgs.length; i++) {
-            const m = msgs[i];
-            if (m && m.role && typeof m.content === 'string') {
-                ins.run(sid, m.role, m.content);
-                const uniqueMsgId = `${sid}_${m.id || Date.now()}_${i}`;
-                messageDao.create({
-                    id: uniqueMsgId,
-                    conversationId: sid,
-                    role: m.role,
-                    content: m.content
-                });
+    try {
+        const ins = db.prepare('INSERT INTO chat_history (session_id, role, content) VALUES (?, ?, ?)');
+        const tx = db.transaction((msgs) => {
+            for (let i = 0; i < msgs.length; i++) {
+                const m = msgs[i];
+                if (m && m.role && typeof m.content === 'string') {
+                    ins.run(sid, m.role, m.content);
+                    const uniqueMsgId = `${sid}_${m.id || Date.now()}_${i}`;
+                    messageDao.create({
+                        id: uniqueMsgId,
+                        conversationId: sid,
+                        role: m.role,
+                        content: m.content
+                    });
+                }
             }
-        }
-    });
-    tx(messages);
-    res.json({ success: true, saved: messages.length, cleared: del.changes });
+        });
+        tx(messages);
+        res.json({ success: true, saved: messages.length, cleared: del.changes });
+    } catch (e) {
+        console.error("saveChatHistory ERROR:", e);
+        res.status(500).json({ error: e.message });
+    }
 }
 
 app.get('/api/chat/history', getChatHistory);

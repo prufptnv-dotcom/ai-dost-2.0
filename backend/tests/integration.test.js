@@ -91,11 +91,12 @@ test('GET /api/chat/history -> 200 (session list, no LLM)', async () => {
 });
 
 test('POST /api/chat/save + GET round-trips messages (no LLM)', async () => {
-  const { status } = await req('POST', '/api/chat/save', {
+  const { status, body: saveBody } = await req('POST', '/api/chat/save', {
     session_id: 'test-session',
     messages: [{ role: 'user', content: 'integration test message' }],
   });
-  assert.equal(status, 200);
+  if (status !== 200) console.log("SAVE ERROR:", saveBody);
+  assert.equal(status, 200, JSON.stringify(saveBody));
   const { body } = await req('GET', '/api/chat/history?session_id=test-session');
   assert.ok(body.messages.some((m) => m.content === 'integration test message'));
 });

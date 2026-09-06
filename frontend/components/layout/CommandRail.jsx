@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Plus, Search, History, Settings, Moon, Sun, MessageSquare,
-  Pencil, Trash2, Share2, Check, X, PanelLeftClose
+  Pencil, Trash2, Share2, Check, X, PanelLeftClose, Terminal, Droplets, Puzzle
 } from 'lucide-react';
 import { AiDostMark } from '../brand/AiDostMark';
 
@@ -260,6 +260,15 @@ export function CommandRail({
       <div className="chat-sidebar-bottom">
         <button
           type="button"
+          onClick={() => onSelectView?.('skills')}
+          aria-label="Skills"
+          className="chat-sidebar-icon-button"
+          title="Skills Marketplace"
+        >
+          <Puzzle size={16} />
+        </button>
+        <button
+          type="button"
           onClick={() => onSelectView?.('history')}
           aria-label="History"
           className="chat-sidebar-icon-button"
@@ -279,11 +288,14 @@ export function CommandRail({
         <button
           type="button"
           onClick={onToggleTheme}
-          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          aria-label={`Current theme: ${theme}. Click to change theme.`}
           className="chat-sidebar-icon-button ml-auto"
-          title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+          title={`Theme: ${theme.charAt(0).toUpperCase() + theme.slice(1)}`}
         >
-          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          {theme === 'dark' && <Moon size={16} />}
+          {theme === 'light' && <Sun size={16} />}
+          {theme === 'hacker' && <Terminal size={16} />}
+          {theme === 'ocean' && <Droplets size={16} />}
         </button>
       </div>
     </aside>

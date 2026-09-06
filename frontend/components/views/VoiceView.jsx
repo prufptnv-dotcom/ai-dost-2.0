@@ -50,9 +50,27 @@ export default function VoiceView({ onClose, onTranscript, onToast }) {
     animRef.current = requestAnimationFrame(tick);
   }, []);
 
-  const speak = (text) => {
+  const speak = async (text) => {
     try {
       window.speechSynthesis?.cancel();
+      const cleanText = text.replace(/[*#`>\[\]]/g, '').slice(0, 1500);
+      const ttsRes = await fetch(`${api.defaults.baseURL || '/api'}/agent/ai/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: cleanText, voice: 'hi-IN-SwaraNeural' }),
+      });
+      if (ttsRes.ok) {
+        const blob = await ttsRes.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.onplay = () => { setSpeaking(true); speakRef.current = true; };
+        audio.onended = () => { setSpeaking(false); speakRef.current = false; URL.revokeObjectURL(url); };
+        audio.onerror = () => { setSpeaking(false); speakRef.current = false; URL.revokeObjectURL(url); };
+        await audio.play();
+        return;
+      }
+    } catch (_) {}
+    try {
       const utter = new SpeechSynthesisUtterance(text.replace(/[*#`]/g, ''));
       utter.lang = 'hi-IN';
       utter.rate = 1;

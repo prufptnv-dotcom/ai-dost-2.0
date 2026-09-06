@@ -17,6 +17,10 @@ api.interceptors.request.use(config => {
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    const isPrivacyMode = localStorage.getItem('ai_dost_privacy_mode');
+    if (isPrivacyMode === 'true') {
+      config.headers['X-Privacy-Mode'] = 'true';
+    }
     // No token → send request without Authorization header.
     // The server will return 401 and the UI can handle it gracefully.
   }

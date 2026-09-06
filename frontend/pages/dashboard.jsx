@@ -3,12 +3,13 @@ import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   MessageSquare, FolderOpen, Code2, Bot, Mic, Image as ImageIcon,
-  FileText, History, Settings, CornerDownLeft, Sparkles, X, Loader2, Zap
+  FileText, History, Settings, CornerDownLeft, Sparkles, X, Loader2, Zap, BarChart3
 } from 'lucide-react';
 import AppShell from '../components/layout/AppShell';
 import ProjectsView from '../components/views/ProjectsView';
 import ArtifactsView from '../components/views/ArtifactsView';
 import VoiceView from '../components/views/VoiceView';
+const VoiceAssistant = dynamic(() => import('../components/VoiceAssistant'), { ssr: false, loading: () => (<div>Loading...</div>) });
 import ResearchView from '../components/views/ResearchView';
 import ImageView from '../components/views/ImageView';
 import ResumeView from '../components/views/ResumeView';
@@ -17,7 +18,9 @@ import SettingsView from '../components/views/SettingsView';
 import McpPanel from '../components/McpPanel';
 import AgentView from '../components/views/AgentView';
 import AutomationsView from '../components/views/AutomationsView';
+import SkillsView from '../components/views/SkillsView';
 import IDEErrorBoundary from '../components/views/IDEErrorBoundary';
+import DataAnalyticsView from '../components/views/DataAnalyticsView';
 import { fetchProjects, createProject } from '../services/api';
 import { useMode } from '../context/ModeContext';
 import { useRouter } from 'next/router';
@@ -44,6 +47,7 @@ const PALETTE_ACTIONS = [
   { id: 'chat', label: 'Open Chat', hint: 'Ctrl+1', icon: MessageSquare },
   { id: 'agent', label: 'Open Agent Workbench', hint: 'Ctrl+2', icon: Bot },
   { id: 'copilot', label: 'Open Copilot IDE', hint: 'Ctrl+3', icon: Code2 },
+  { id: 'analytics', label: 'Open Data Analytics', hint: 'Ctrl+A', icon: BarChart3 },
   { id: 'projects', label: 'Open Projects', hint: 'Ctrl+4', icon: FolderOpen },
   { id: 'artifacts', label: 'Open Artifacts', hint: 'Ctrl+5', icon: FileText },
   { id: 'voice', label: 'Open Voice Assistant', hint: 'Ctrl+6', icon: Mic },
@@ -70,6 +74,7 @@ export default function Dashboard() {
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDesc, setNewProjectDesc] = useState('');
   const [creating, setCreating] = useState(false);
+  const [voiceAssistantOpen, setVoiceAssistantOpen] = useState(false);
 
   const paletteRef = useRef(null);
   const paletteInputRef = useRef(null);
@@ -78,9 +83,16 @@ export default function Dashboard() {
   useEffect(() => {
     const savedTheme = localStorage.getItem('ai_dost_theme') || localStorage.getItem('theme') || 'dark';
     setTheme(savedTheme);
-    const isLight = savedTheme === 'light';
-    document.body.classList.toggle('light-theme', isLight);
-    document.documentElement.classList.toggle('light-theme', isLight);
+    
+    // Remove all possible theme classes
+    document.body.classList.remove('light-theme', 'dark-theme', 'hacker-theme', 'ocean-theme');
+    document.documentElement.classList.remove('light-theme', 'dark-theme', 'hacker-theme', 'ocean-theme');
+    
+    // Add current theme class
+    if (savedTheme !== 'dark') {
+      document.body.classList.add(`${savedTheme}-theme`);
+      document.documentElement.classList.add(`${savedTheme}-theme`);
+    }
     document.documentElement.setAttribute('data-theme', savedTheme);
     setModel(localStorage.getItem('ai_dost_model') || 'auto');
   }, []);
@@ -120,12 +132,22 @@ export default function Dashboard() {
 
   const handleToggleTheme = useCallback(() => {
     setTheme((prev) => {
-      const next = prev === 'dark' ? 'light' : 'dark';
+      const themes = ['dark', 'light', 'hacker', 'ocean'];
+      const currentIndex = themes.indexOf(prev);
+      const next = themes[(currentIndex + 1) % themes.length];
+      
       localStorage.setItem('ai_dost_theme', next);
       localStorage.setItem('theme', next);
-      const isLight = next === 'light';
-      document.body.classList.toggle('light-theme', isLight);
-      document.documentElement.classList.toggle('light-theme', isLight);
+      
+      // Remove all possible theme classes
+      document.body.classList.remove('light-theme', 'dark-theme', 'hacker-theme', 'ocean-theme');
+      document.documentElement.classList.remove('light-theme', 'dark-theme', 'hacker-theme', 'ocean-theme');
+      
+      // Add current theme class
+      if (next !== 'dark') {
+        document.body.classList.add(`${next}-theme`);
+        document.documentElement.classList.add(`${next}-theme`);
+      }
       document.documentElement.setAttribute('data-theme', next);
       return next;
     });
@@ -190,19 +212,28 @@ export default function Dashboard() {
   // Global keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      const isMod = e.metaKey || e.ctrlKey;
+      if (isMod && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setPaletteOpen((p) => !p);
       }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
+      if (isMod && e.key.toLowerCase() === 'c' && !e.shiftKey) {
+        e.preventDefault();
+        setPaletteOpen((p) => !p);
+      }
+      if (isMod && e.shiftKey && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        setVoiceAssistantOpen((v) => !v);
+      }
+      if (isMod && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         handleNewChat();
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === '1') { e.preventDefault(); go('chat'); }
-      if ((e.metaKey || e.ctrlKey) && e.key === '2') { e.preventDefault(); go('agent'); }
-      if ((e.metaKey || e.ctrlKey) && e.key === '3') { e.preventDefault(); go('copilot'); }
-      if ((e.metaKey || e.ctrlKey) && e.key === '4') { e.preventDefault(); go('projects'); }
-      if ((e.metaKey || e.ctrlKey) && e.key === '5') { e.preventDefault(); go('artifacts'); }
+      if (isMod && e.key === '1') { e.preventDefault(); go('chat'); }
+      if (isMod && e.key === '2') { e.preventDefault(); go('agent'); }
+      if (isMod && e.key === '3') { e.preventDefault(); go('copilot'); }
+      if (isMod && e.key === '4') { e.preventDefault(); go('projects'); }
+      if (isMod && e.key === '5') { e.preventDefault(); go('artifacts'); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -284,6 +315,9 @@ export default function Dashboard() {
               />
             </IDEErrorBoundary>
           )}
+          {view === 'analytics' && (
+            <DataAnalyticsView onToast={showToast} />
+          )}
           {view === 'projects' && (
             <ProjectsView
               onOpenProject={(id) => router.push(`/project/${id}`)}
@@ -321,6 +355,9 @@ export default function Dashboard() {
           )}
           {view === 'automations' && (
             <AutomationsView onToast={showToast} onNavigate={go} />
+          )}
+          {view === 'skills' && (
+            <SkillsView onToast={showToast} />
           )}
           {view === 'mcp' && <McpPanel />}
         </motion.div>
@@ -394,7 +431,19 @@ export default function Dashboard() {
                   aria-controls="palette-actions-list"
                   className="flex-1 bg-transparent text-sm text-paper-100 placeholder:text-ink-muted focus:outline-none font-sans"
                 />
-                <kbd className="text-[9px] font-mono px-1.5 py-0.5 rounded-xs bg-canvas-elevated text-ink-muted">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPaletteOpen(false);
+                    setVoiceAssistantOpen(true);
+                  }}
+                  className="p-1.5 rounded-lg hover:bg-canvas-elevated text-ink-muted hover:text-accent transition-fast cursor-pointer flex items-center justify-center mr-1"
+                  aria-label="Voice Input (Ctrl+Shift+V)"
+                  title="Voice Input (Ctrl+Shift+V)"
+                >
+                  <Mic className="w-4 h-4" />
+                </button>
+                <kbd className="text-[9px] font-mono px-1.5 py-0.5 rounded-xs bg-canvas-elevated text-ink-muted hidden sm:inline-block">
                   ESC
                 </kbd>
               </div>
@@ -485,6 +534,14 @@ export default function Dashboard() {
           </>
         )}
       </AnimatePresence>
+      {/* Voice Assistant Modal */}
+      <VoiceAssistant
+        isOpen={voiceAssistantOpen}
+        onClose={() => setVoiceAssistantOpen(false)}
+        onTranscript={(text) => {
+          // Additional handling if needed
+        }}
+      />
     </AppShell>
   );
 }
