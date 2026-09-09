@@ -202,8 +202,15 @@ class DevServerManager extends EventEmitter {
     }
 
     // Host execution fallback
+    const wsDir = path.join(this._workspaceDir(targetId), projectPath);
+    try {
+      if (require('fs').existsSync(path.join(wsDir, 'node_modules'))) {
+        this.emitLog(targetId, '⚡ Existing node_modules found, skipping npm install', 'info');
+        return { success: true };
+      }
+    } catch (_) {}
+
     return new Promise((resolve) => {
-      const wsDir = path.join(this._workspaceDir(targetId), projectPath);
       const isWin = process.platform === 'win32';
       const npmCmd = isWin ? 'npm.cmd' : 'npm';
 
@@ -324,23 +331,46 @@ class DevServerManager extends EventEmitter {
       serverInfo.hostPort = hostPort;
       serverInfo.url = `http://127.0.0.1:${hostPort}`;
 
-      const wsDir = path.join(this._workspaceDir(projectId), projectPath);
+      const rawWsDir = path.join(this._workspaceDir(projectId), projectPath);
+      let wsDir = rawWsDir;
+      try {
+        wsDir = require('fs').realpathSync(rawWsDir);
+      } catch (_) {}
+
       const isWin = process.platform === 'win32';
-      const npmCmd = isWin ? 'npm.cmd' : 'npm';
+      const viteBin = path.join(wsDir, 'node_modules', 'vite', 'bin', 'vite.js');
+      const hasVite = require('fs').existsSync(viteBin);
 
       this.emitLog(targetId, `🚀 Starting local ${config.framework} dev server on port ${hostPort}...`, 'info');
 
-      const child = spawn(npmCmd, ['run', 'dev', '--', '--port', String(hostPort), '--host', '0.0.0.0'], {
-        cwd: wsDir,
-        shell: true,
-        env: {
-          ...process.env,
-          PORT: String(hostPort),
-          HOST: '0.0.0.0',
-          BROWSER: 'none',
-          NODE_ENV: 'development'
-        }
-      });
+      let child;
+      if (hasVite) {
+        child = spawn(process.execPath, [viteBin, '--port', String(hostPort), '--host', '0.0.0.0'], {
+          cwd: wsDir,
+          env: {
+            ...process.env,
+            CHOKIDAR_USEPOLLING: '1',
+            PORT: String(hostPort),
+            HOST: '0.0.0.0',
+            BROWSER: 'none',
+            NODE_ENV: 'development'
+          }
+        });
+      } else {
+        const npmCmd = isWin ? 'npm.cmd' : 'npm';
+        child = spawn(npmCmd, ['run', 'dev', '--', '--port', String(hostPort), '--host', '0.0.0.0'], {
+          cwd: wsDir,
+          shell: true,
+          env: {
+            ...process.env,
+            CHOKIDAR_USEPOLLING: '1',
+            PORT: String(hostPort),
+            HOST: '0.0.0.0',
+            BROWSER: 'none',
+            NODE_ENV: 'development'
+          }
+        });
+      }
 
       serverInfo.childProcess = child;
 

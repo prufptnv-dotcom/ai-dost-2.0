@@ -37,12 +37,12 @@
   --gemini-glow-purple: rgba(155, 114, 203, 0.25);
 
   /* ─── Primary Accent (Gemini Celestial Radiant) ─── */
-  --primary-lime: #4893fc;
-  --primary-lime-glow: rgba(72, 147, 252, 0.22);
-  --accent-primary: #4893fc;
-  --accent-primary-strong: #3b82f6;
-  --accent-subtle: rgba(72, 147, 252, 0.12);
-  --accent-border: rgba(72, 147, 252, 0.3);
+  --primary-lime: #d45b3f;
+  --primary-lime-glow: rgba(212, 91, 63, 0.2);
+  --accent-primary: #d45b3f;
+  --accent-primary-strong: #b8452f;
+  --accent-subtle: rgba(212, 91, 63, 0.12);
+  --accent-border: rgba(212, 91, 63, 0.32);
 
   /* ─── Cyber Rust Orange / Coral (Secondary Accent / Deploy / Alerts) ─── */
   --secondary-rust: #d96570;
@@ -55,10 +55,10 @@
   --signal-success-subtle: rgba(16, 185, 129, 0.14);
   --signal-warning: #fbbf24;
   --signal-warning-subtle: rgba(251, 191, 36, 0.14);
-  --signal-info: #38bdf8;
+  --signal-info: #63b8a4;
   --signal-info-subtle: rgba(56, 189, 248, 0.14);
-  --signal-purple: #9b72cb;
-  --signal-purple-subtle: rgba(155, 114, 203, 0.14);
+  --signal-purple: #b98b73;
+  --signal-purple-subtle: rgba(185, 139, 115, 0.14);
 
   /* ─── Semantic Aliases (Dark Bento) ─── */
   --color-canvas-base: #0a0a0b;

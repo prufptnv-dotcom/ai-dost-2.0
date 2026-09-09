@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const Tool = require('../runtime/Tool');
+const deterministicCodeGuard = require('../../services/DeterministicCodeGuard');
 
 class WriteFileTool extends Tool {
   constructor() {
@@ -18,6 +19,10 @@ class WriteFileTool extends Tool {
     
     // 1. Validate boundary via workspaceManager
     const resolvedPath = context.workspaceManager.resolvePath(context.projectId, relativePath, context.userId);
+    const guard = deterministicCodeGuard.guard(relativePath, content);
+    if (!guard.accepted) {
+      return { success: false, error: `Code rejected before persistence: ${guard.reason}`, diagnostics: guard.diagnostics };
+    }
     
     try {
       fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });

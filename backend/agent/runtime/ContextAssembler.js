@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const ContextCompressionStore = require('../../services/ContextCompressionStore');
 
 class ContextAssembler {
   /**
@@ -25,6 +26,7 @@ class ContextAssembler {
     this.contextNodeDao = deps.contextNodeDao;
     this.artifactDao = deps.artifactDao;
     this.conversationDao = deps.conversationDao;
+    this.compressionStore = deps.compressionStore || (deps.db ? new ContextCompressionStore(deps.db) : null);
   }
 
   /**
@@ -144,6 +146,18 @@ class ContextAssembler {
           }
 
           if (canonicalContent) {
+            const importanceScore = Math.max(1, Math.min(10, Math.round((Number(item.score) || 0.5) * 10)));
+            if (this.compressionStore) {
+              this.compressionStore.save({
+                projectId,
+                sourceId: item.source_entity_id,
+                sourceType: item.source_type,
+                content: canonicalContent,
+                importanceScore,
+                representation: importanceScore >= 7 ? 'full' : 'summary',
+                versionHash: item.version_hash
+              });
+            }
             rawItems.push({
               source_id: item.source_entity_id,
               source_type: item.source_type,
@@ -154,6 +168,7 @@ class ContextAssembler {
               content: canonicalContent,
               version_hash: item.version_hash,
               project_id: projectId
+              , importance_score: importanceScore
             });
           }
         }

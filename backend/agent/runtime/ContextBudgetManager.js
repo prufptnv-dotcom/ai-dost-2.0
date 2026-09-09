@@ -8,6 +8,9 @@ class ContextBudgetManager {
    */
   constructor(config = {}) {
     this.totalBudget = config.totalBudget || 100000;
+    this.pruningEnabled = config.pruningEnabled !== false;
+    this.fullContentImportance = config.fullContentImportance || 7;
+    this.summaryWordLimit = config.summaryWordLimit || 20;
     
     // Default configurable allocations
     this.allocation = {
@@ -71,9 +74,26 @@ class ContextBudgetManager {
     return relevance * freshness * authority * priority;
   }
 
+  importanceScore(raw, finalScore) {
+    const explicit = Number(raw.importance_score ?? raw.importanceScore);
+    if (Number.isFinite(explicit)) return Math.max(1, Math.min(10, Math.round(explicit)));
+    if (raw.is_mandatory) return 10;
+    return 10;
+  }
+
+  summarize(content) {
+    const words = String(content || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+    if (words.length <= this.summaryWordLimit) return words.join(' ');
+    return `${words.slice(0, this.summaryWordLimit).join(' ')}…`;
+  }
+
   normalizeItem(raw) {
-    const content = raw.content || '';
-    const tokens = raw.estimated_tokens || this.estimateTokens(content);
+    const originalContent = raw.content || '';
+    const preliminaryScore = this.scoreContext(raw);
+    const importance_score = this.importanceScore(raw, preliminaryScore);
+    const shouldSummarize = this.pruningEnabled && !raw.is_mandatory && importance_score < this.fullContentImportance;
+    const content = shouldSummarize ? this.summarize(originalContent) : originalContent;
+    const tokens = raw.estimated_tokens && !shouldSummarize ? raw.estimated_tokens : this.estimateTokens(content);
     
     const item = {
       source_id: raw.source_id || crypto.randomUUID(),
@@ -86,6 +106,8 @@ class ContextBudgetManager {
       is_stale: raw.is_stale || false,
       estimated_tokens: tokens,
       content: content,
+      representation: shouldSummarize ? 'summary' : 'full',
+      importance_score,
       version_hash: raw.version_hash || null,
       project_id: raw.project_id || null
     };
@@ -119,6 +141,7 @@ class ContextBudgetManager {
     
     // 2. Deduplicate
     items = this.deduplicate(items);
+    const prunedItemsCount = items.filter((item) => item.representation === 'summary').length;
     
     // 3. Separate Mandatory vs Optional
     const mandatory = [];
@@ -245,6 +268,8 @@ class ContextBudgetManager {
         estimated_total_tokens: totalTokens,
         selected_items_count: finalSelected.length,
         discarded_items_count: Math.max(0, discardedOptionalCount),
+        pruned_items_count: prunedItemsCount,
+        compression_enabled: this.pruningEnabled,
         total_budget: this.totalBudget,
         estimation_method: 'conservative_chars_per_token_v1'
       }

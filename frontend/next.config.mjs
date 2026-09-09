@@ -190,12 +190,36 @@ const nextConfig = {
         destination: `${BACKEND_URL}/api/terminal/:path*`
       },
       {
+        source: '/api/copilot',
+        destination: `${BACKEND_URL}/api/copilot`
+      },
+      {
+        source: '/api/copilot/:path*',
+        destination: `${BACKEND_URL}/api/copilot/:path*`
+      },
+      {
+        source: '/api/preview',
+        destination: `${BACKEND_URL}/api/preview`
+      },
+      {
         source: '/api/preview/:path*',
         destination: `${BACKEND_URL}/api/preview/:path*`
       },
       {
+        source: '/api/database',
+        destination: `${BACKEND_URL}/api/database`
+      },
+      {
+        source: '/api/database/:path*',
+        destination: `${BACKEND_URL}/api/database/:path*`
+      },
+      {
         source: '/health',
         destination: `${BACKEND_URL}/health`
+      },
+      {
+        source: '/src/:path*',
+        destination: `${BACKEND_URL}/src/:path*`
       },
     ];
   },

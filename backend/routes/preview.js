@@ -77,7 +77,7 @@ function findIndexHtml(dir) {
   try {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const e of entries) {
-      if (e.isDirectory() && !['node_modules', '.git', '.checkpoints'].includes(e.name)) {
+      if (e.isDirectory() && !['node_modules', '.git', '.checkpoints', 'Users'].includes(e.name) && !e.name.startsWith('.')) {
         const sub = findIndexHtml(path.join(dir, e.name));
         if (sub) return path.posix.join(e.name, sub);
       }
@@ -195,6 +195,203 @@ function renderFailedHtml(projectId, server) {
       <button class="btn-retry" onclick="fetch('/api/preview/${projectId}/dev/restart', {method:'POST'}).then(() => location.reload())">🔄 Restart Dev Server</button>
     </div>
   </div>
+</body>
+</html>`;
+}
+
+function renderOfflineHtml(projectId) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Live Preview — ${projectId}</title>
+  <style>
+    body { background: #090a0f; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+    .card { background: #11141f; border: 1px solid #27272a; border-radius: 16px; padding: 32px; max-width: 520px; width: 100%; box-shadow: 0 20px 40px rgba(0,0,0,0.5); text-align: center; }
+    .icon { font-size: 36px; margin-bottom: 12px; }
+    h2 { font-size: 18px; margin: 0 0 8px; color: #ffffff; }
+    p { font-size: 13px; color: #94a3b8; margin: 0 0 24px; line-height: 1.5; }
+    .btn-start { background: linear-gradient(135deg, #4f46e5, #7c3aed); color: white; padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3); }
+    .btn-start:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(99, 102, 241, 0.45); }
+    .note { margin-top: 16px; font-size: 11px; color: #64748b; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">⚡</div>
+    <h2>Live Dev Server Ready</h2>
+    <p>Project <b>${projectId}</b> can be launched in a live isolated development runtime with instant HMR and full proxy mode.</p>
+    <button class="btn-start" onclick="this.disabled=true;this.innerText='Booting Dev Server...';fetch('/api/preview/${projectId}/dev/start', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({projectPath: '.'})}).then(() => location.reload())">🚀 Start Dev Server</button>
+    <div class="note">Tip: You can also toggle preview to In-Browser mode in the top preview toolbar.</div>
+  </div>
+</body>
+</html>`;
+}
+
+// ── Standalone In-Browser React App Compiler (Zero 404 Fallback) ────────────
+function buildStandaloneReactHtml(projectId) {
+  const root = workspaceOf(projectId);
+  let appCode = '';
+  const appPaths = ['src/App.jsx', 'App.jsx', 'src/App.js', 'App.js', 'src/main.jsx', 'src/main.js'];
+  for (const p of appPaths) {
+    const fp = path.join(root, p);
+    if (fs.existsSync(fp)) {
+      try { appCode = fs.readFileSync(fp, 'utf8'); } catch (_) {}
+      if (appCode) break;
+    }
+  }
+
+  if (!appCode) {
+    const dbFiles = getAllFilesFromDb(projectId);
+    const row = dbFiles.find(f => appPaths.some(ap => f.path === ap || f.path.endsWith('/' + ap)));
+    if (row) appCode = row.content || '';
+  }
+
+  if (!appCode) return null;
+
+  // Read sub-components in src/components/*.jsx if any
+  let subComponentsCode = '';
+  try {
+    const compDir = path.join(root, 'src', 'components');
+    if (fs.existsSync(compDir)) {
+      fs.readdirSync(compDir).forEach(file => {
+        if (file.endsWith('.jsx') || file.endsWith('.js')) {
+          const c = fs.readFileSync(path.join(compDir, file), 'utf8');
+          subComponentsCode += '\n' + c
+            .replace(/import\s+[\s\S]*?from\s+['"].*?['"];?/g, '')
+            .replace(/import\s+['"].*?['"];?/g, '')
+            .replace(/export\s+default\s+function\s*(\w*)/g, (m, name) => name ? `function ${name}` : '')
+            .replace(/export\s+default\s+const\s+(\w+)\s*=/g, 'const $1 =')
+            .replace(/export\s+default\s+(\w+);?/g, '')
+            .replace(/export\s+(?:async\s+)?function\s+(\w+)/g, 'function $1')
+            .replace(/export\s+(?:const|let|var)\s+(\w+)/g, 'const $1')
+            .replace(/export\s+\{[\s\S]*?\};?/g, '');
+        }
+      });
+    }
+  } catch (_) {}
+
+  // Read CSS if any
+  let customCss = '';
+  const cssPaths = ['src/index.css', 'index.css', 'src/App.css', 'App.css', 'style.css'];
+  for (const p of cssPaths) {
+    const fp = path.join(root, p);
+    if (fs.existsSync(fp)) {
+      try { customCss += '\n' + fs.readFileSync(fp, 'utf8'); } catch (_) {}
+    }
+  }
+
+  const cleanedApp = appCode
+    .replace(/import\s+[\s\S]*?from\s+['"].*?['"];?/g, '')
+    .replace(/import\s+['"].*?['"];?/g, '')
+    .replace(/export\s+default\s+function\s*(\w*)/g, (m, name) => name ? `function ${name}` : 'function App')
+    .replace(/export\s+default\s+const\s+(\w+)\s*=/g, 'const $1 =')
+    .replace(/export\s+default\s+async\s+function\s*(\w*)/g, (m, name) => name ? `async function ${name}` : 'async function App')
+    .replace(/export\s+default\s+(\w+);?/g, '')
+    .replace(/export\s+(?:async\s+)?function\s+(\w+)/g, 'async function $1')
+    .replace(/export\s+(?:const|let|var)\s+(\w+)/g, 'const $1')
+    .replace(/export\s+\{[\s\S]*?\};?/g, '');
+  const allTags = new Set([
+    'TrendingUp','TrendingDown','DollarSign','Wallet','ArrowUpRight','ArrowDownRight','PieChart','Activity',
+    'PlusCircle','ArrowLeftRight','CheckCircle2','X','Search','Clock','BarChart3','AlertCircle','Coins',
+    'Sparkles','Play','Check','Copy','Sliders','Settings','RefreshCw','ExternalLink'
+  ]);
+  const combinedCode = (appCode || '') + '\n' + (subComponentsCode || '');
+  const tagMatches = combinedCode.matchAll(/<([A-Z][A-Za-z0-9_]*)/g);
+  for (const m of tagMatches) {
+    if (m[1]) allTags.add(m[1]);
+  }
+  const lucideMatches = combinedCode.matchAll(/import\s+\{([^}]+)\}\s+from\s+['"]lucide-react['"]/g);
+  for (const m of lucideMatches) {
+    if (m[1]) {
+      m[1].split(',').forEach(id => {
+        const parts = id.trim().split(/\s+as\s+/);
+        if (parts[0]) allTags.add(parts[0].trim());
+        if (parts[1]) allTags.add(parts[1].trim());
+      });
+    }
+  }
+
+  const declaredComponents = new Set();
+  const declMatches = combinedCode.matchAll(/(?:function|class|const|let|var)\s+([A-Z][A-Za-z0-9_]*)/g);
+  for (const m of declMatches) {
+    if (m[1]) declaredComponents.add(m[1]);
+  }
+
+  const missingComponents = Array.from(allTags)
+    .filter(name => !declaredComponents.has(name) && !['App', 'Main', 'Root', 'React', 'ReactDOM', 'Fragment', 'GlobalErrorBoundary'].includes(name));
+
+  const iconStubsJs = missingComponents
+    .map(name => `if (typeof window['${name}'] === 'undefined') {
+      window['${name}'] = function ${name}Stub(props) {
+        const s = props?.size || 16;
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-indigo-400 ' + (props?.className || ''),
+          style: { width: s, height: s, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }
+        }, '✦');
+      };
+    }`).join('\n');
+
+  const scopeBindings = missingComponents
+    .map(name => `var ${name} = window['${name}'];`).join('\n');
+
+  return `<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Preview — ${projectId}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #090d16; color: #f8fafc; margin: 0; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    ${customCss}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    ${iconStubsJs}
+  </script>
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo, useCallback, useContext, useReducer, createContext, Fragment } = React;
+    ${scopeBindings}
+
+    class GlobalErrorBoundary extends React.Component {
+      constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+      static getDerivedStateFromError(error) { return { hasError: true, error }; }
+      componentDidCatch(error, info) { console.error('Preview error:', error, info); }
+      render() {
+        if (this.state.hasError) {
+          return (
+            <div className="min-h-screen bg-[#0d111a] text-red-400 p-8 flex flex-col items-center justify-center">
+              <div className="p-6 max-w-lg w-full bg-red-950/40 border border-red-500/30 rounded-2xl shadow-2xl">
+                <h3 className="text-sm font-bold text-white mb-2">⚠️ Preview Runtime Warning</h3>
+                <pre className="text-xs bg-black/60 p-3 rounded-xl overflow-x-auto text-red-300 font-mono">{this.state.error?.message || 'Error rendering component'}</pre>
+              </div>
+            </div>
+          );
+        }
+        return this.props.children;
+      }
+    }
+
+    ${subComponentsCode}
+    ${cleanedApp}
+
+    const rootElement = document.getElementById('root');
+    if (rootElement) {
+      const root = ReactDOM.createRoot(rootElement);
+      const TargetComponent = typeof App !== 'undefined' ? App : (typeof Main !== 'undefined' ? Main : null);
+      if (TargetComponent) {
+        root.render(React.createElement(GlobalErrorBoundary, null, React.createElement(TargetComponent)));
+      }
+    }
+  </script>
 </body>
 </html>`;
 }
@@ -332,14 +529,23 @@ router.all('/:projectId', (req, res) => {
     }
   }
 
-  // 2. Static File Workspace Fallback
+  // 2. React Standalone In-Browser Runner (Zero 404 Fallback for React/Vite Projects)
+  const standaloneHtml = buildStandaloneReactHtml(projectId);
+  if (standaloneHtml) {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(standaloneHtml);
+  }
+
+  // 3. Static File Workspace Fallback (HTML/Vanilla JS)
   const root = workspaceOf(projectId);
   const indexRel = findIndexHtml(root);
   if (indexRel) {
-    return res.redirect(`/api/preview/${projectId}/${indexRel}`);
+    const base = req.baseUrl || '/api/preview';
+    return res.redirect(`${base}/${projectId}/${indexRel}`);
   }
 
-  // 3. SQLite Fallback
+  // 4. SQLite Fallback
   const dbFiles = getAllFilesFromDb(projectId);
   if (dbFiles.length > 0) {
     const htmlFile = dbFiles.find(f => f.path === 'index.html' || f.path.endsWith('/index.html'));
@@ -348,16 +554,10 @@ router.all('/:projectId', (req, res) => {
       res.setHeader('Cache-Control', 'no-store');
       return res.send(htmlFile.content || '');
     }
-    return res.json({ path: '/', entries: dbFiles.map(f => f.path), source: 'sqlite' });
   }
 
-  if (fs.existsSync(root)) {
-    const entries = fs.readdirSync(root, { withFileTypes: true })
-      .filter(e => e.name !== '.checkpoints' && e.name !== '.git' && e.name !== 'node_modules');
-    return res.json({ path: '/', entries: entries.map(e => e.name) });
-  }
-
-  res.status(404).json({ error: 'Workspace or live dev server not found' });
+  // 5. If dev server is stopped and no project files exist
+  return res.setHeader('Content-Type', 'text/html; charset=utf-8').send(renderOfflineHtml(projectId));
 });
 
 router.all('/:projectId/*', (req, res) => {
@@ -386,7 +586,17 @@ router.all('/:projectId/*', (req, res) => {
     }
   }
 
-  // 2. Static Workspace File
+  // 2. If index.html requested for a React app, serve standalone bundle
+  if (relPath === 'index.html') {
+    const standaloneHtml = buildStandaloneReactHtml(projectId);
+    if (standaloneHtml) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      return res.send(standaloneHtml);
+    }
+  }
+
+  // 3. Static Workspace File
   const root = workspaceOf(projectId);
   const fp = safeJoin(root, relPath);
   if (!fp) return res.status(400).json({ error: 'Invalid path (traversal blocked)' });
@@ -395,7 +605,7 @@ router.all('/:projectId/*', (req, res) => {
     const dbContent = getFileFromDb(projectId, relPath);
     if (dbContent !== null) {
       const ext = path.extname(relPath).toLowerCase();
-      res.setHeader('Content-Type', MIME[ext] || 'text/plain; charset=utf-8');
+      res.setHeader('Content-Type', (ext === '.jsx' || ext === '.js' || ext === '.mjs') ? 'text/javascript; charset=utf-8' : (MIME[ext] || 'text/plain; charset=utf-8'));
       res.setHeader('Cache-Control', 'no-store');
       return res.send(dbContent);
     }
@@ -403,7 +613,7 @@ router.all('/:projectId/*', (req, res) => {
   }
 
   const ext = path.extname(fp).toLowerCase();
-  res.setHeader('Content-Type', MIME[ext] || 'application/octet-stream');
+  res.setHeader('Content-Type', (ext === '.jsx' || ext === '.js' || ext === '.mjs') ? 'text/javascript; charset=utf-8' : (MIME[ext] || 'application/octet-stream'));
   res.setHeader('Cache-Control', 'no-store');
   res.sendFile(fp);
 });

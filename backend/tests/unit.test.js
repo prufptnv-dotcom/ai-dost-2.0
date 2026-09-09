@@ -519,4 +519,30 @@ describe('fullstackTrainer creative canvas art', () => {
   });
 });
 
+// ── Copilot IDE Normalization & Deduplication ────────────────────────────
+describe('copilot ide path normalization & deduplication', () => {
+  const projectStore = require('../projectStore');
+
+  test('normalizes mixed backslashes and leading slashes', () => {
+    const p1 = 'src\\components\\Button.jsx';
+    const p2 = './src//components/Button.jsx';
+    const p3 = '/src/components/Button.jsx';
+    
+    // Test normalization via projectStore saving and retrieval
+    const projId = 'test-dedup-proj-' + Date.now();
+    projectStore.saveProjectFile(projId, p1, 'const Btn = () => null;', 'javascript');
+    
+    const files = projectStore.getProjectFiles(projId);
+    assert.equal(files.length, 1);
+    assert.equal(files[0].path, 'src/components/Button.jsx');
+    
+    // Saving same file with mixed slash format should update existing, NOT create duplicate
+    projectStore.saveProjectFile(projId, p2, 'const Btn2 = () => null;', 'javascript');
+    const updatedFiles = projectStore.getProjectFiles(projId);
+    assert.equal(updatedFiles.length, 1);
+    assert.equal(updatedFiles[0].content, 'const Btn2 = () => null;');
+  });
+});
+
+
 

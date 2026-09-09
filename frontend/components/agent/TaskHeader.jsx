@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, Play, Square, Loader2, Clock, ShieldCheck, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Workflow, Play, Square, Loader2, Clock } from 'lucide-react';
 import { Badge, StatusIndicator } from '../ui/Badge';
 import { Button } from '../ui/Button';
 
@@ -31,13 +31,23 @@ export function TaskHeader({
   };
 
   const currentStatus = STATUS_MAP[status] || STATUS_MAP.idle;
+  const phaseText = {
+    idle: 'Ready for an instruction',
+    planning: 'Breaking the request into executable steps',
+    working: `Running ${activeRole.toLowerCase()} tools and updating the workspace`,
+    verifying: 'Checking output, tests, and runtime behavior',
+    repairing: 'Applying a targeted repair and checking it again',
+    waiting_for_user: 'Paused until you approve the next workspace change',
+    complete: 'Run finished with the latest workspace state recorded',
+    failed: 'Run stopped; review the activity log for the first failure',
+  }[status] || 'Ready for an instruction';
 
   return (
     <div className={`px-4 sm:px-6 py-3 bg-canvas-subtle border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3 select-none ${className}`}>
       {/* Objective & Status */}
       <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
         <div className="w-8 h-8 rounded-md bg-canvas-surface border border-border flex items-center justify-center text-accent flex-shrink-0 mt-0.5 sm:mt-0">
-          <Bot className="w-4 h-4" />
+          <Workflow className="w-4 h-4" />
         </div>
 
         <div className="min-w-0 flex-1">
@@ -51,6 +61,7 @@ export function TaskHeader({
             </Badge>
           </div>
           <div className="flex items-center gap-3 text-[11px] text-txt-muted mt-0.5">
+            <span className="truncate max-w-[38rem]">{phaseText}</span>
             <span>Role: <strong className="font-mono text-txt-secondary font-medium">{activeRole}</strong></span>
             {running && (
               <span className="flex items-center gap-1">

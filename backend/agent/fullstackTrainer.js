@@ -4,7 +4,16 @@
  * instant deterministic hydration, and domain-specialized full-stack templates.
  */
 
+const { getCalculatorBlueprint } = require('./blueprints/calculatorBlueprint');
+const { getCryptoTradingBlueprint } = require('./blueprints/cryptoTradingBlueprint');
+const { getDashboardBlueprint } = require('./blueprints/dashboardBlueprint');
+const { getKanbanBlueprint } = require('./blueprints/kanbanBlueprint');
+const { getChatSocialBlueprint } = require('./blueprints/chatSocialBlueprint');
+const { getAiStudioBlueprint } = require('./blueprints/aiStudioBlueprint');
+
 const CATEGORIES = {
+  CRYPTO_TRADING: 'crypto_trading',
+  CALCULATOR: 'calculator',
   AUTH_FULLSTACK: 'auth_fullstack',
   ECOMMERCE: 'ecommerce',
   DASHBOARD: 'dashboard',
@@ -31,6 +40,16 @@ const CATEGORIES = {
 function detectCategory(prompt = '') {
   const p = prompt.toLowerCase();
   
+  // 0. Crypto Trading, Portfolio Tracker & DEX
+  if (/\b(crypto|bitcoin|btc|eth|ethereum|solana|sol\b|coin|token|ticker|portfolio tracker|p&l|pnl|buy\/sell|trading|dex|exchange|swap|web3)\b/i.test(p)) {
+    return CATEGORIES.CRYPTO_TRADING;
+  }
+
+  // 1. Calculator / Math / Scientific Calculator / Calculation tool
+  if (/\b(calculator|calc\b|scientific calculator|math app|arithmetic|standard calculator|hisab|calculate|addition|multiplication|subtraction)\b/i.test(p)) {
+    return CATEGORIES.CALCULATOR;
+  }
+
   // 1. Movie / Cinema / Theatre / Seat Booking
   if (/\b(movie|cinema|film|theatre|theater|multiplex|popcorn|showtime|ticket booking|seat book)\b/i.test(p)) {
     return CATEGORIES.MOVIE_TICKET;
@@ -165,6 +184,10 @@ function generateGoldenScaffold(prompt, category) {
   const titleCase = prompt.slice(0, 40).replace(/(^\w|\s\w)/g, m => m.toUpperCase());
 
   switch (category) {
+    case CATEGORIES.CRYPTO_TRADING:
+      return getCryptoTradingBlueprint(safeName, titleCase, prompt);
+    case CATEGORIES.CALCULATOR:
+      return getCalculatorBlueprint(safeName, titleCase, prompt);
     case CATEGORIES.AUTH_FULLSTACK:
       return getAuthFullstackBlueprint(safeName, titleCase, prompt);
     case CATEGORIES.ECOMMERCE:

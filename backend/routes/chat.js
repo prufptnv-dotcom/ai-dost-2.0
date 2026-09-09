@@ -364,73 +364,73 @@ router.post('/', async (req, res) => {
     }
 });
 
-// Helper for cascading failover across AI models with better error handling
+// ═══════════════════════════════════════════════════════════════════════════
+// PARALLEL PROVIDER RACING — O(1) latency vs O(N) sequential fallback
+// Strategy: Race providers in tiers. First valid response wins.
+// Tier 1: 3 fastest providers race simultaneously  → target 2-5s
+// Tier 2: Next 4 providers race simultaneously     → target 5-10s  
+// Tier 3: Slower providers + Ollama               → target 10-60s
+// ═══════════════════════════════════════════════════════════════════════════
 async function executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys) {
-    const tiers = [
-        {
-            name: 'OpenAI (GPT-4o / GPT-4o-mini)',
-            fn: () => OpenAIService.chat(groqMsg, cleanHistory, customKeys?.openai, mode),
-            check: (r) => isValidResponse(r)
-        },
-        { 
-            name: 'Groq (Llama 3.3 70B)', 
-            fn: () => GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq),
-            check: (r) => isValidResponse(r)
-        },
-        { 
-            name: 'Cerebras (GPT-OSS 120B)', 
-            fn: () => CerebrasService.chat(groqMsg, cleanHistory, mode, customKeys?.cerebras),
-            check: (r) => isValidResponse(r)
-        },
-        { 
-            name: 'NVIDIA NIM (Llama 3.1 70B)', 
-            fn: () => NvidiaService.chat(groqMsg, cleanHistory, customKeys?.nvidia),
-            check: (r) => isValidResponse(r)
-        },
-        { 
-            name: 'Gemini Flash', 
-            fn: () => GeminiService.chat(message, cleanHistory, fileContent, mode, customKeys?.gemini),
-            check: (r) => isValidResponse(r)
-        },
-        { 
-            name: 'OpenRouter (GPT-OSS 20B free)', 
-            fn: () => OpenRouterService.chat(groqMsg, cleanHistory, customKeys?.openrouter),
-            check: (r) => isValidResponse(r)
-        },
-        { 
-            name: 'Together AI (Llama 3.1 8B)', 
-            fn: () => TogetherService.chat(groqMsg, cleanHistory, customKeys?.together),
-            check: (r) => isValidResponse(r)
-        },
-        { 
-            name: 'DeepSeek', 
-            fn: () => DeepSeekService.chat(groqMsg, cleanHistory, customKeys?.deepseek),
-            check: (r) => isValidResponse(r)
-        },
-        { 
-            name: 'Mistral', 
-            fn: () => MistralService.chat(groqMsg, cleanHistory, customKeys?.mistral),
-            check: (r) => isValidResponse(r)
-        }
-    ];
-
-    for (const tier of tiers) {
+    // Wrap each provider call: resolves with response if valid, rejects if not
+    const makeRacer = (name, fn) => new Promise(async (resolve, reject) => {
         try {
-            logger.info(`⚡ Trying ${tier.name}...`);
-            const res = await tier.fn();
-            if (tier.check(res)) {
-                logger.info(`✅ ${tier.name} succeeded`);
-                return res;
+            logger.info(`⚡ Racing ${name}...`);
+            const res = await fn();
+            if (isValidResponse(res)) {
+                logger.info(`✅ ${name} won the race`);
+                resolve({ response: res, winner: name });
+            } else {
+                reject(new Error(`${name}: invalid/rate-limited response`));
             }
-            logger.warn(`⚠️ ${tier.name} returned error/rate limit: ${res?.substring(0, 100)}`);
         } catch (e) {
-            logger.warn(`⚠️ ${tier.name} threw error:`, e.message);
+            reject(new Error(`${name}: ${e.message}`));
         }
+    });
+
+    // ── TIER 1: Top 3 fastest — race simultaneously ──────────────────────
+    try {
+        const tier1 = await Promise.any([
+            makeRacer('Groq',     () => GroqService.chat(groqMsg, cleanHistory, mode, customKeys?.groq)),
+            makeRacer('Gemini',   () => GeminiService.chat(message, cleanHistory, fileContent, mode, customKeys?.gemini)),
+            makeRacer('Cerebras', () => CerebrasService.chat(groqMsg, cleanHistory, mode, customKeys?.cerebras)),
+        ]);
+        logger.info(`🏆 Tier-1 winner: ${tier1.winner}`);
+        return tier1.response;
+    } catch (t1Err) {
+        logger.warn(`⚠️ Tier-1 all failed, escalating to Tier-2...`);
     }
 
-    // 4. Try Local Ollama (Offline Mode)
+    // ── TIER 2: Next batch — race simultaneously ──────────────────────────
     try {
-        logger.info("🦙 Tier: Executing Local Ollama API request...");
+        const tier2 = await Promise.any([
+            makeRacer('OpenAI',     () => OpenAIService.chat(groqMsg, cleanHistory, customKeys?.openai, mode)),
+            makeRacer('NVIDIA',     () => NvidiaService.chat(groqMsg, cleanHistory, customKeys?.nvidia)),
+            makeRacer('OpenRouter', () => OpenRouterService.chat(groqMsg, cleanHistory, customKeys?.openrouter)),
+            makeRacer('Together',   () => TogetherService.chat(groqMsg, cleanHistory, customKeys?.together)),
+        ]);
+        logger.info(`🏆 Tier-2 winner: ${tier2.winner}`);
+        return tier2.response;
+    } catch (t2Err) {
+        logger.warn(`⚠️ Tier-2 all failed, escalating to Tier-3...`);
+    }
+
+    // ── TIER 3: Last resort providers ─────────────────────────────────────
+    try {
+        const tier3 = await Promise.any([
+            makeRacer('DeepSeek',    () => DeepSeekService.chat(groqMsg, cleanHistory, customKeys?.deepseek)),
+            makeRacer('Mistral',     () => MistralService.chat(groqMsg, cleanHistory, customKeys?.mistral)),
+            makeRacer('HuggingFace', () => HuggingFaceService.chat(groqMsg)),
+        ]);
+        logger.info(`🏆 Tier-3 winner: ${tier3.winner}`);
+        return tier3.response;
+    } catch (t3Err) {
+        logger.warn(`⚠️ Tier-3 all failed, trying local Ollama...`);
+    }
+
+    // ── TIER 4: Local Ollama (offline fallback) ───────────────────────────
+    try {
+        logger.info("🦙 Trying local Ollama (offline fallback)...");
         const tagsRes = await fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(3000) });
         if (tagsRes.ok) {
             const tagsData = await tagsRes.json();
@@ -439,25 +439,26 @@ async function executeCascadingFailover(message, groqMsg, cleanHistory, fileCont
                 const genRes = await fetch('http://127.0.0.1:11434/api/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        model: models[0].name,
-                        prompt: message,
-                        stream: false
-                    }),
+                    body: JSON.stringify({ model: models[0].name, prompt: message, stream: false }),
                     signal: AbortSignal.timeout(60000)
                 });
                 if (genRes.ok) {
                     const genData = await genRes.json();
-                    if (genData.response) return genData.response;
+                    if (genData.response) {
+                        logger.info('✅ Ollama local fallback succeeded');
+                        return genData.response;
+                    }
                 }
             }
         }
     } catch (e) {
-        logger.warn("Tier (Ollama) threw error:", e.message);
+        logger.warn("Ollama fallback failed:", e.message);
     }
 
-    return "Ai-Dost: Direct API response unavailable right now due to provider rate limits. Please check Ollama locally (http://127.0.0.1:11434) or retry in a few seconds!";
+    return "Ai-Dost: Sabhi AI providers temporarily unavailable. Please check API keys in settings or start Ollama locally.";
 }
+
+
 
 // Auto select best AI model using Smart Natural Language Intent Detection
 async function autoSelectModel(message, section, fileContent, cleanHistory, mode, customKeys = null) {

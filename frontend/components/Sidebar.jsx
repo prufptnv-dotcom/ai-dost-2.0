@@ -51,7 +51,8 @@ export default function Sidebar({
   onNewProject,
   onNewChat,
 }) {
-  const { isPrivacyMode, togglePrivacyMode } = useMode();
+  const modeContext = useMode?.();
+  const { isPrivacyMode = false, togglePrivacyMode = () => {} } = modeContext || {}; // Fallback for missing provider
 
   const handleNewChat = () => {
     if (onNewChat) onNewChat();

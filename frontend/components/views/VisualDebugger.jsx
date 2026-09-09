@@ -1,6 +1,6 @@
-﻿import React, { useState } from 'react';
-import html2canvas from 'html2canvas';
-import { Eye, Sparkles, AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react';
+﻿import React, { useEffect, useState } from 'react';
+import { Eye, Wrench, AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react';
+import { analyzeDocument, formatVisualRepairPrompt, initVisualHealer } from '../../utils/visualHealer';
 
 /**
  * Capture visual DOM screenshot and analyze layout anomalies
@@ -15,40 +15,12 @@ export async function capturePreviewVisualState(iframeElement) {
       return { success: false, error: 'Preview document not accessible' };
     }
 
-    // 1. Capture Client-Side Screenshot Base64
-    let screenshotBase64 = null;
-    try {
-      const canvas = await html2canvas(iframeDoc.body, {
-        useCORS: true,
-        logging: false,
-        scale: 1
-      });
-      screenshotBase64 = canvas.toDataURL('image/png');
-    } catch (_) {}
-
-    // 2. Extract Layout Metrics & DOM Errors
-    const computedErrors = [];
-    const elements = iframeDoc.querySelectorAll('*');
-    
-    elements.forEach((el) => {
-      const rect = el.getBoundingClientRect();
-      const parentRect = el.parentElement ? el.parentElement.getBoundingClientRect() : null;
-      
-      // Detect horizontal layout overflow
-      if (parentRect && rect.right > parentRect.right + 4 && rect.width > 20) {
-        computedErrors.push({
-          tag: el.tagName.toLowerCase(),
-          className: (el.className || '').toString().slice(0, 50),
-          issue: 'Horizontal overflow / clipping detected'
-        });
-      }
-    });
+    const domReport = analyzeDocument(iframeDoc);
 
     return {
-      success: true,
-      screenshot: screenshotBase64,
-      layoutAnomalies: computedErrors.slice(0, 5),
-      domState: iframeDoc.body.innerHTML.slice(0, 1500)
+      ...domReport,
+      layoutAnomalies: domReport.findings || [],
+      domState: iframeDoc.body.innerHTML.slice(0, 1500),
     };
   } catch (err) {
     return { success: false, error: err.message };
@@ -59,6 +31,24 @@ export default function VisualDebugger({ iframeRef, onTriggerFix, isRepairing })
   const [analyzing, setAnalyzing] = useState(false);
   const [report, setReport] = useState(null);
 
+  useEffect(() => {
+    const iframe = iframeRef?.current;
+    if (!iframe) return undefined;
+    let cleanup;
+    const attach = () => {
+      cleanup?.();
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!iframeDoc?.body) return;
+      cleanup = initVisualHealer(iframeDoc, setReport);
+    };
+    if (iframe.contentDocument?.body) attach();
+    iframe.addEventListener('load', attach);
+    return () => {
+      iframe.removeEventListener('load', attach);
+      cleanup?.();
+    };
+  }, [iframeRef]);
+
   const handleInspect = async () => {
     setAnalyzing(true);
     const result = await capturePreviewVisualState(iframeRef?.current);
@@ -68,12 +58,7 @@ export default function VisualDebugger({ iframeRef, onTriggerFix, isRepairing })
 
   const handleFix = () => {
     if (!report || !onTriggerFix) return;
-    const prompt = `Fix visual and layout anomalies in preview: ${
-      report.layoutAnomalies && report.layoutAnomalies.length > 0 
-        ? JSON.stringify(report.layoutAnomalies) 
-        : 'Optimize responsive alignment, contrast, and spacing.'
-    }`;
-    onTriggerFix(prompt);
+    onTriggerFix(formatVisualRepairPrompt(report));
   };
 
   return (
@@ -81,7 +66,7 @@ export default function VisualDebugger({ iframeRef, onTriggerFix, isRepairing })
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5 text-neutral-200 font-medium">
           <Eye className="w-3.5 h-3.5 text-sky-400" />
-          <span>Visual QA Auto-Debugger</span>
+          <span>Zero-Token Visual QA</span>
         </div>
         <button
           onClick={handleInspect}
@@ -95,32 +80,32 @@ export default function VisualDebugger({ iframeRef, onTriggerFix, isRepairing })
 
       {report && (
         <div className="space-y-2 pt-1 border-t border-white/[0.06]">
-          {report.layoutAnomalies && report.layoutAnomalies.length > 0 ? (
+          {report.findings && report.findings.length > 0 ? (
             <div className="space-y-1">
               <div className="flex items-center gap-1 text-amber-400 text-[11px]">
                 <AlertCircle className="w-3 h-3" />
-                <span>{report.layoutAnomalies.length} layout anomalies detected:</span>
+                <span>{report.findings.length} DOM anomalies detected:</span>
               </div>
               <ul className="text-[10.5px] font-mono text-neutral-400 bg-[#0f1117] p-2 rounded border border-white/[0.04] space-y-1 max-h-24 overflow-y-auto">
-                {report.layoutAnomalies.map((a, i) => (
+                {report.findings.map((a, i) => (
                   <li key={i} className="truncate">
-                    <span className="text-sky-400">&lt;{a.tag}&gt;</span>: {a.issue}
+                    <span className="text-sky-400">{a.type}</span>: {a.message}
                   </li>
                 ))}
               </ul>
               <button
                 onClick={handleFix}
                 disabled={isRepairing}
-                className="w-full mt-2 px-3 py-1.5 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white rounded-lg font-medium flex items-center justify-center gap-1.5 shadow-glow-sm transition-all"
+                className="w-full mt-2 px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-md font-medium flex items-center justify-center gap-1.5 transition-colors"
               >
-                <Sparkles className="w-3 h-3" />
-                <span>{isRepairing ? 'Synthesizing Fix...' : 'Self-Heal Visual Bugs'}</span>
+                <Wrench className="w-3 h-3" />
+                <span>{isRepairing ? 'Repairing preview...' : 'Repair preview issues'}</span>
               </button>
             </div>
           ) : (
             <div className="flex items-center gap-1.5 text-emerald-400 text-[11px] py-1">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Layout clean — No visual clipping or overflow detected!</span>
+              <span>DOM clean — No deterministic layout issues detected.</span>
             </div>
           )}
         </div>

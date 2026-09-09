@@ -8,6 +8,7 @@ import {
   Eye, LayoutTemplate, Square, ArrowDown,
 } from 'lucide-react';
 import { marked } from 'marked';
+import { getPendingSuggestions } from '../../utils/visualHealer';
 import DOMPurify from 'dompurify';
 import api from '../../services/api';
 import { ImageCard, ImageLightbox } from './ImageLightbox';
@@ -21,6 +22,7 @@ import CodeBlock from '../chat/CodeBlock';
 const STORAGE_KEY = 'ai_dost_messages_chat';
 const SESSIONS_KEY = 'ai_dost_chat_sessions';
 const PERSONA_KEY = 'ai_dost_persona';
+const getMsgKey = (id) => (id === 'default' ? STORAGE_KEY : `ai_dost_messages_${id}`);
 
 const IMAGE_CREATE_INTENT =
   /\b(create|generate|make|draw|design)\b.*\b(image|photo|picture|logo|wallpaper|cartoon|anime|illustration|poster|meme|sketch|painting|drawing|art)\b|\b(image|photo|picture|logo|wallpaper|cartoon|anime|illustration|poster|meme|sketch|painting|drawing|art)\b.*\b(banao|bana|banake|make|create|generate|draw|design)\b/i;
@@ -151,20 +153,33 @@ function extractArtifact(content) {
   }
 
   // If no HTML block, but we have JS or CSS:
+  // ⚠️ IMPORTANT: Sirf INTERACTIVE/VISUAL code ko artifact banao.
+  // Explanation mein diye CSS/JS snippets (algorithm explain karte waqt) ko artifact MAT banao.
+  // Check: code actually interactive/animated/visual hai? (keywords + minimum size)
   if (jsBlock) {
-    return {
-      title: 'JavaScript Live Animation',
-      code: jsBlock.code,
-      language: 'javascript',
-    };
+    const isInteractiveJS =
+      jsBlock.code.length > 300 &&
+      /\b(document\.|canvas|animation|requestAnimationFrame|setInterval|addEventListener|createElement|getElementById|querySelector|render|draw|ctx\.|THREE\.|p5)\b/.test(jsBlock.code);
+    if (isInteractiveJS) {
+      return {
+        title: 'JavaScript Live Animation',
+        code: jsBlock.code,
+        language: 'javascript',
+      };
+    }
   }
 
   if (cssBlock) {
-    return {
-      title: 'CSS Animation',
-      code: cssBlock.code,
-      language: 'css',
-    };
+    const isVisualCSS =
+      cssBlock.code.length > 200 &&
+      /\b(@keyframes|animation|canvas|transition.*animation|\.animate|scroll-snap|parallax|particle)\b/.test(cssBlock.code);
+    if (isVisualCSS) {
+      return {
+        title: 'CSS Animation',
+        code: cssBlock.code,
+        language: 'css',
+      };
+    }
   }
 
   return null;
@@ -224,6 +239,7 @@ function ParsedMarkdown({ content, isStreaming, onNavigate, onPreviewArtifact, d
 }
 
 function MessageBubble({
+  // ...existing props
   msg,
   onOpenImage,
   onRegenerate,
@@ -233,6 +249,7 @@ function MessageBubble({
   onNavigate,
   onOpenArtifact,
 }) {
+  const [visualSuggestions, setVisualSuggestions] = useState([]);
   const [copied, setCopied] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [feedback, setFeedback] = useState(null);
@@ -241,6 +258,14 @@ function MessageBubble({
   const isStreaming = !!msg.isStreaming;
   const images = isUser ? [] : extractImages(msg.content);
   const detectedArtifact = !isUser && !isStreaming ? extractArtifact(msg.content) : null;
+
+  // Pull pending suggestions after assistant message renders
+  useEffect(() => {
+    if (!isUser && !isStreaming) {
+      const sugg = typeof getPendingSuggestions === 'function' ? getPendingSuggestions() : [];
+      if (sugg && sugg.length) setVisualSuggestions(sugg);
+    }
+  }, [msg.id, isUser, isStreaming]);
 
   const copyText = async () => {
     try {
@@ -502,15 +527,18 @@ function MessageBubble({
 
 // ─── Thinking Indicator ───────────────────────────────────────────────────────
 
-function ThinkingDot({ label = 'Thinking…' }) {
+function ThinkingDot({ label = 'Thinking…', elapsed = 0 }) {
   return (
     <div className="thinking-indicator" role="status" aria-live="polite">
-      <span className="thinking-dots">
+      <span className="thinking-signal" aria-hidden="true">
         <i />
         <i />
         <i />
       </span>
-      <span>{label}</span>
+      <span className="thinking-copy">
+        <strong>{label}</strong>
+        <small>{elapsed > 0 ? `${elapsed}s elapsed` : 'Preparing a response'}</small>
+      </span>
     </div>
   );
 }
@@ -527,7 +555,29 @@ export default function ChatView({
   onNavigate,
   onModelChange,
 }) {
-  const [messages, setMessages] = useState([]);
+  const [sessionId, setSessionId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        return localStorage.getItem('ai_dost_session_id') || 'default';
+      } catch (_) {}
+    }
+    return 'default';
+  });
+
+  const [messages, setMessages] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const sid = localStorage.getItem('ai_dost_session_id') || 'default';
+        const saved = localStorage.getItem(getMsgKey(sid));
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch (_) {}
+    }
+    return [WELCOME];
+  });
+
   const [input, setInput] = useState('');
   const [showFollowUps, setShowFollowUps] = useState(false);
   const [lastReply, setLastReply] = useState('');
@@ -539,7 +589,6 @@ export default function ChatView({
   const [attachment, setAttachment] = useState(null);
   const [persona, setPersona] = useState('hinglish');
   const [variants, setVariants] = useState(null);
-  const [sessionId, setSessionId] = useState('default');
   const [activeArtifact, setActiveArtifact] = useState(null);
   const [thinkingElapsed, setThinkingElapsed] = useState(0);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
@@ -551,7 +600,6 @@ export default function ChatView({
   const newChatCount = useRef(0);
   const fileInputRef = useRef(null);
 
-  const msgKey = (id) => (id === 'default' ? STORAGE_KEY : `ai_dost_messages_${id}`);
   const thinking = thinkingProp !== undefined ? thinkingProp : localThinking;
   const setThinking = typeof setIsThinkingProp === 'function' ? setIsThinkingProp : setLocalThinking;
 
@@ -567,33 +615,40 @@ export default function ChatView({
     return () => { if (interval) clearInterval(interval); };
   }, [thinking]);
 
-  // Load persisted chat
+  // Load persisted chat metadata
   useEffect(() => {
     try {
       const p = localStorage.getItem(PERSONA_KEY);
       if (p) setPersona(p);
       const s = JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]');
       if (Array.isArray(s) && s.length > 0) setSessions(s);
-      const sid = localStorage.getItem('ai_dost_session_id');
-      if (sid) setSessionId(sid);
     } catch (_) {}
-    try {
-      const saved = localStorage.getItem(msgKey(sessionId));
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) { setMessages(parsed); return; }
-      }
-    } catch (_) {}
-    setMessages([WELCOME]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load backend history on session change
+  // Load backend history on session change (and auto-restore if current messages are empty/welcome)
   useEffect(() => {
+    if (!sessionId) return;
     api.get(`/chat/history?session_id=${sessionId}`)
       .then((res) => {
-        const rows = Array.isArray(res.data) ? res.data : (res.data?.history || res.data?.messages || []);
-        if (rows.length > 0) setBackendHistory(rows);
+        const rows = Array.isArray(res.data) ? res.data : (res.data?.messages || res.data?.history || []);
+        if (rows.length > 0) {
+          setBackendHistory(rows);
+          setMessages((current) => {
+            const isEmptyOrWelcome = !current || current.length === 0 || (current.length === 1 && current[0].id === 'welcome');
+            if (isEmptyOrWelcome) {
+              const restored = [];
+              for (const row of rows) {
+                const userMsg = row.user_message || row.prompt || (row.role === 'user' ? row.content : null);
+                const reply = row.response || (row.role === 'assistant' ? row.content : null);
+                if (userMsg) restored.push({ id: Date.now() + restored.length, role: 'user', content: userMsg, timestamp: row.timestamp || row.created_at });
+                else if (reply) restored.push({ id: Date.now() + restored.length, role: 'assistant', content: reply, timestamp: row.timestamp || row.created_at });
+                else if (row.role && row.content) restored.push({ id: Date.now() + restored.length, role: row.role, content: row.content, timestamp: row.timestamp || row.created_at });
+              }
+              if (restored.length > 0) return restored;
+            }
+            return current;
+          });
+        }
       })
       .catch(() => {});
   }, [sessionId]);
@@ -604,9 +659,9 @@ export default function ChatView({
     for (const row of backendHistory) {
       const userMsg = row.user_message || row.prompt || (row.role === 'user' ? row.content : null);
       const reply = row.response || (row.role === 'assistant' ? row.content : null);
-      if (userMsg) restored.push({ id: Date.now() + restored.length, role: 'user', content: userMsg });
-      else if (reply) restored.push({ id: Date.now() + restored.length, role: 'assistant', content: reply.slice(0, 3000) });
-      else if (row.role && row.content) restored.push({ id: Date.now() + restored.length, role: row.role, content: row.content });
+      if (userMsg) restored.push({ id: Date.now() + restored.length, role: 'user', content: userMsg, timestamp: row.timestamp || row.created_at });
+      else if (reply) restored.push({ id: Date.now() + restored.length, role: 'assistant', content: reply, timestamp: row.timestamp || row.created_at });
+      else if (row.role && row.content) restored.push({ id: Date.now() + restored.length, role: row.role, content: row.content, timestamp: row.timestamp || row.created_at });
     }
     if (restored.length > 0) {
       setMessages(restored);
@@ -617,10 +672,13 @@ export default function ChatView({
     }
   };
 
-  // Persist messages
+  // Persist messages (never overwrite existing stored session if current is only [WELCOME])
   useEffect(() => {
     if (messages.length > 0) {
-      try { localStorage.setItem(msgKey(sessionId), JSON.stringify(messages)); } catch (_) {}
+      const isOnlyWelcome = messages.length === 1 && messages[0].id === 'welcome';
+      if (!isOnlyWelcome) {
+        try { localStorage.setItem(getMsgKey(sessionId), JSON.stringify(messages)); } catch (_) {}
+      }
     }
   }, [messages, sessionId]);
 
@@ -778,14 +836,22 @@ export default function ChatView({
       } catch (_) { /* fall through */ }
     }
 
-    // ── Document generation ──
-    const specificDoc = DOC_KEYWORDS
-      .filter((k) => k.type !== 'docx')
-      .map((k) => ({ type: k.type, pos: content.search(k.re) }))
-      .filter((m) => m.pos >= 0)
-      .sort((a, b) => a.pos - b.pos)[0];
+    // DOC_CREATE_INTENT: sirf FILE banana ke words match karo
+    // "generate kar raha hai" (describing AI doing something) → NO match
+    // "report banao", "PDF chahiye", "document likhdo" → match
+    // "generate karo/karna" (imperative to user's request) is OK, but "generate kar raha hai" is NOT
+    const DOC_CREATE_INTENT = /\b(banao|bana\s*do|bana\s*de|chahiye|taiyar\s*karo|likhdo|draft\s*karo|export|nikalo|bana\s*kar\s*do|create\s+(?:a|an|ek|mera|meri)?\s*(?:pdf|docx?|pptx?|csv|xlsx|file|doc|report|document|presentation)|generate\s+(?:a|an|ek|mera|meri)?\s*(?:pdf|docx?|pptx?|csv|xlsx|file|doc|report|document|presentation))\b/i;
+
+    const specificDoc = DOC_CREATE_INTENT.test(content)
+      ? DOC_KEYWORDS
+          .filter((k) => k.type !== 'docx')
+          .map((k) => ({ type: k.type, pos: content.search(k.re) }))
+          .filter((m) => m.pos >= 0)
+          .sort((a, b) => a.pos - b.pos)[0]
+      : null;
     const docxKeyword = DOC_KEYWORDS.find((k) => k.type === 'docx');
-    const docIntent = specificDoc || (content.search(docxKeyword.re) >= 0 ? docxKeyword : null);
+    const docIntent = specificDoc || (DOC_CREATE_INTENT.test(content) && content.search(docxKeyword.re) >= 0 ? docxKeyword : null);
+
     if (docIntent) {
       setThinkingLabel('Creating document…');
       try {
@@ -815,8 +881,23 @@ export default function ChatView({
       }
     }
 
-    // ── Resume ──
-    if (/(resume|cv|bio.?data|resume bana|cv bana)/i.test(content)) {
+    // ── Resume (sirf tab generate karo jab user clearly CV/resume document BANANA chahta ho) ──
+    //
+    // ✅ Trigger karo:  "mera resume banao", "cv chahiye", "create my resume", "resume draft karo"
+    // ❌ Trigger MAT karo:
+    //    "resume karwane ka"   → yahan resume = verb (to restart/continue), CV nahi
+    //    "resume kya hota hai" → question hai
+    //    "generate ... resume karwane" → generate alag context, resume alag context
+    //
+    // Strategy: "resume/cv" seedha creation word ke saath hona chahiye (adjacent, dono order mein)
+    //   Pattern A: (resume|cv) + (banao|chahiye|create|...) — "resume banao", "cv chahiye"
+    //   Pattern B: (banao|create|...) + optional_words(max 4) + (resume|cv) — "mujhe ek resume banao"
+    //   Exclude: "resume kar" / "resume karwane" / "resume karna" (verb meaning to continue)
+    const RESUME_DOC_CREATE =
+      /\b(resume|cv|bio.?data)\b(?!\s*k?ar)[\s\S]{0,40}?\b(banao|bana\s*do|bana\s*de|chahiye|taiyar|likhdo|draft|create|generate\s+(?:my|mera|meri|ek)|make|write)\b|\b(banao|bana\s*do|bana\s*de|chahiye|taiyar\s*karo|likhdo|draft\s*karo|create|generate\s+(?:my|mera|meri|ek)|make\s+(?:my|me\s+a)|write)\b[\s\S]{0,60}?\b(resume|cv|bio.?data)\b/i;
+
+    if (RESUME_DOC_CREATE.test(content)) {
+
       try {
         const data = await api.post('/resume/generate', { prompt: content });
         if (data.data && !data.data.error) {
@@ -1013,7 +1094,7 @@ export default function ChatView({
   };
 
   const saveCurrentToStorage = useCallback(() => {
-    try { if (messages.length > 0) localStorage.setItem(msgKey(sessionId), JSON.stringify(messages)); } catch (_) {}
+    try { if (messages.length > 0) localStorage.setItem(getMsgKey(sessionId), JSON.stringify(messages)); } catch (_) {}
   }, [messages, sessionId]);
 
   const createSession = () => {
@@ -1030,29 +1111,41 @@ export default function ChatView({
   };
 
   const switchSession = useCallback((id) => {
+    if (!id) return;
     saveCurrentToStorage();
-    localStorage.setItem('ai_dost_session_id', id);
+    try {
+      localStorage.setItem('ai_dost_session_id', id);
+    } catch (_) {}
     setSessionId(id);
-    setMessages([]);
     setShowFollowUps(false);
     setActiveArtifact(null);
+    setBackendHistory(null);
+
+    let loaded = false;
     try {
-      const saved = localStorage.getItem(msgKey(id));
+      const saved = localStorage.getItem(getMsgKey(id));
       const parsed = saved ? JSON.parse(saved) : null;
-      if (Array.isArray(parsed) && parsed.length > 0) setMessages(parsed);
-      else setMessages([WELCOME]);
-    } catch (_) { setMessages([WELCOME]); }
+      if (Array.isArray(parsed) && parsed.length > 0 && !(parsed.length === 1 && parsed[0].id === 'welcome')) {
+        setMessages(parsed);
+        loaded = true;
+      }
+    } catch (_) {}
+
+    if (!loaded) {
+      setMessages([WELCOME]);
+    }
   }, [saveCurrentToStorage]);
 
   useEffect(() => {
     const handleCustomSwitch = (e) => {
-      if (e.detail && typeof e.detail === 'string' && e.detail !== sessionId) {
-        switchSession(e.detail);
+      const targetId = e?.detail;
+      if (targetId && typeof targetId === 'string') {
+        switchSession(targetId);
       }
     };
     window.addEventListener('ai_dost_switch_session', handleCustomSwitch);
     return () => window.removeEventListener('ai_dost_switch_session', handleCustomSwitch);
-  }, [sessionId, switchSession]);
+  }, [switchSession]);
 
   const renameSession = (id) => {
     const title = window.prompt('Session ka naam:', sessions.find((s) => s.id === id)?.title || '');
@@ -1063,7 +1156,7 @@ export default function ChatView({
 
   const deleteSession = (id) => {
     if (!window.confirm('Ye session delete karna hai?')) return;
-    try { localStorage.removeItem(msgKey(id)); } catch (_) {}
+    try { localStorage.removeItem(getMsgKey(id)); } catch (_) {}
     const list = sessions.filter((s) => s.id !== id);
     persistSessions(list);
     if (id === sessionId) {
@@ -1277,7 +1370,7 @@ export default function ChatView({
               {/* Thinking indicator */}
               <AnimatePresence>
                 {thinking && (
-                  <ThinkingDot key="thinking" label={thinkingLabel} />
+                  <ThinkingDot key="thinking" label={thinkingLabel} elapsed={thinkingElapsed} />
                 )}
               </AnimatePresence>
 

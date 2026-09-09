@@ -1,4 +1,50 @@
 {
     "chat.sessionSync.enabled": true,
-    "chat.planAgent.defaultModel": "deepseek-r1:8b (ollama)"
+    "chat.planAgent.defaultModel": "deepseek-r1:8b (ollama)",
+    "chat.tools.terminal.autoApprove": {
+        "/^Set-Location 'c:\\\\Users\\\\vikash kumar\\\\Desktop\\\\ai-dost version 2\\.o\\\\frontend'; npx eslint utils/visualHealer\\.js components/views/VisualDebugger\\.jsx$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Set-Location 'c:\\\\Users\\\\vikash kumar\\\\Desktop\\\\ai-dost version 2\\.o\\\\frontend'; npx eslint components/views/CopilotIDE\\.jsx components/views/VisualDebugger\\.jsx$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Set-Location 'c:\\\\Users\\\\vikash kumar\\\\Desktop\\\\ai-dost version 2\\.o\\\\backend'; node --test tests/arbitratorAgent\\.test\\.js tests/taskScheduler\\.test\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Set-Location 'c:\\\\Users\\\\vikash kumar\\\\Desktop\\\\ai-dost version 2\\.o\\\\backend'; node --test tests/arbitratorAgent\\.test\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Set-Location 'c:\\\\Users\\\\vikash kumar\\\\Desktop\\\\ai-dost version 2\\.o\\\\backend'; node --check agent/arbitration/ArbitratorAgent\\.js; node --check agent/concurrency/TaskScheduler\\.js; node --check agent/orchestrator\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Set-Location 'c:\\\\Users\\\\vikash kumar\\\\Desktop\\\\ai-dost version 2\\.o\\\\backend'; node --test tests/arbitratorAgent\\.test\\.js tests/taskScheduler\\.test\\.js tests/agentRuntime\\.test\\.js tests/orchestratorIntegration\\.test\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Set-Location 'c:\\\\Users\\\\vikash kumar\\\\Desktop\\\\ai-dost version 2\\.o\\\\backend'; node --test tests/arbitratorAgent\\.test\\.js tests/taskScheduler\\.test\\.js tests/orchestratorIntegration\\.test\\.js; node --check agent/arbitration/ArbitratorAgent\\.js; node --check agent/concurrency/TaskScheduler\\.js; node --check agent/orchestrator\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Set-Location 'c:\\\\Users\\\\vikash kumar\\\\Desktop\\\\ai-dost version 2\\.o\\\\backend'; node --test tests/agentRuntime\\.test\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Set-Location 'c:\\\\Users\\\\vikash kumar\\\\Desktop\\\\ai-dost version 2\\.o\\\\backend'; node --test tests/agentRuntime\\.test\\.js tests/arbitratorAgent\\.test\\.js tests/taskScheduler\\.test\\.js tests/orchestratorIntegration\\.test\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Set-Location 'c:\\\\Users\\\\vikash kumar\\\\Desktop\\\\ai-dost version 2\\.o\\\\frontend'; npx eslint components/views/CopilotHistoryModal\\.jsx components/views/ChatView\\.jsx components/agent/TaskHeader\\.jsx components/ui/BrandLogo\\.jsx$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Set-Location 'c:\\\\Users\\\\vikash kumar\\\\Desktop\\\\ai-dost version 2\\.o\\\\frontend'; npm run dev$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
 }

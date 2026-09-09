@@ -3,14 +3,19 @@ import { ToastProvider } from "../context/ToastContext";
 import { SocketProvider } from "../context/SocketContext";
 import { ModeProvider } from "../context/ModeContext";
 
+
+
 import ErrorBoundary from "../components/ErrorBoundary";
+import VisualHealer from "../components/VisualHealer";
 
 export default function App({ Component, pageProps }) {
+
   return (
     <ErrorBoundary>
       <ToastProvider>
         <SocketProvider>
           <ModeProvider>
+            <VisualHealer />
             <Component {...pageProps} />
           </ModeProvider>
         </SocketProvider>

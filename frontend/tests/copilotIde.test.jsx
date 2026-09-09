@@ -1,11 +1,14 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { FileExplorer } from '../components/ide/FileExplorer';
+import { FileExplorer, normalizePath } from '../components/ide/FileExplorer';
 import { WorkspaceTabs } from '../components/ide/WorkspaceTabs';
 import { EditorToolbar } from '../components/ide/EditorToolbar';
 import { TerminalDock } from '../components/ide/TerminalDock';
 import { AiInspector } from '../components/ide/AiInspector';
 import { DiffReview } from '../components/ide/DiffReview';
+import { PackagesModal } from '../components/ide/PackagesModal';
+import { SecretsModal } from '../components/ide/SecretsModal';
+import CopilotHistoryModal from '../components/views/CopilotHistoryModal';
 
 describe('Phase 3.6 — Copilot IDE & Monaco Editor Chrome Rebuild', () => {
   describe('FileExplorer', () => {
@@ -194,4 +197,218 @@ describe('Phase 3.6 — Copilot IDE & Monaco Editor Chrome Rebuild', () => {
       expect(onAccept).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('PackagesModal (Replit Package Manager)', () => {
+    const mockPackageJson = JSON.stringify({
+      name: 'my-web-app',
+      dependencies: {
+        'react': '^19.0.0',
+        'axios': '^1.7.9'
+      },
+      devDependencies: {
+        'vite': '^5.0.0'
+      }
+    }, null, 2);
+
+    it('renders installed packages with version tags', () => {
+      render(
+        <PackagesModal
+          isOpen={true}
+          onClose={jest.fn()}
+          packageJsonContent={mockPackageJson}
+        />
+      );
+
+      expect(screen.getByText(/Replit Package Manager/i)).toBeInTheDocument();
+      expect(screen.getByText('Installed Dependencies (3)')).toBeInTheDocument();
+      expect(screen.getByText('react')).toBeInTheDocument();
+      expect(screen.getAllByText('axios')[0]).toBeInTheDocument();
+      expect(screen.getByText('vite')).toBeInTheDocument();
+    });
+
+    it('installs a package and updates package.json', async () => {
+      const onUpdate = jest.fn();
+      const onRun = jest.fn();
+
+      render(
+        <PackagesModal
+          isOpen={true}
+          onClose={jest.fn()}
+          packageJsonContent={mockPackageJson}
+          onUpdatePackageJson={onUpdate}
+          onRunCommand={onRun}
+        />
+      );
+
+      const searchInput = screen.getByPlaceholderText(/Search or enter npm package name/i);
+      fireEvent.change(searchInput, { target: { value: 'lodash' } });
+
+      const installBtn = screen.getByText('Install');
+      fireEvent.click(installBtn);
+
+      await waitFor(() => {
+        expect(onUpdate).toHaveBeenCalledWith(expect.stringContaining('lodash'));
+        expect(onRun).toHaveBeenCalledWith(expect.stringContaining('npm install lodash'));
+      });
+    });
+  });
+
+  describe('SecretsModal (Replit Environment Variables)', () => {
+    const mockEnv = 'VITE_API_URL="https://api.aidost.com"\n# Comment line\nDATABASE_KEY="secret_key_123"\n';
+
+    it('parses .env lines and masks secret values by default', () => {
+      render(
+        <SecretsModal
+          isOpen={true}
+          onClose={jest.fn()}
+          envContent={mockEnv}
+        />
+      );
+
+      expect(screen.getByText(/Replit Secrets & Environment Variables/i)).toBeInTheDocument();
+      expect(screen.getByText('VITE_API_URL')).toBeInTheDocument();
+      expect(screen.getByText('DATABASE_KEY')).toBeInTheDocument();
+
+      const passInputs = screen.getAllByDisplayValue(/secret_key_123|https:\/\/api.aidost.com/);
+      expect(passInputs[0]).toHaveAttribute('type', 'password');
+    });
+
+    it('adds a new secret and saves updated .env string', async () => {
+      const onSave = jest.fn();
+
+      render(
+        <SecretsModal
+          isOpen={true}
+          onClose={jest.fn()}
+          envContent={mockEnv}
+          onSaveEnv={onSave}
+        />
+      );
+
+      const keyInput = screen.getByPlaceholderText(/KEY/i);
+      const valInput = screen.getByPlaceholderText(/Value/i);
+      const addBtn = screen.getByText('Add');
+
+      fireEvent.change(keyInput, { target: { value: 'NEW_TOKEN' } });
+      fireEvent.change(valInput, { target: { value: 'xyz789' } });
+      fireEvent.click(addBtn);
+
+      expect(screen.getByText('NEW_TOKEN')).toBeInTheDocument();
+
+      const saveBtn = screen.getByText('Save Secrets');
+      fireEvent.click(saveBtn);
+
+      await waitFor(() => {
+        expect(onSave).toHaveBeenCalledWith(expect.stringContaining('NEW_TOKEN="xyz789"'));
+      });
+    });
+  });
+
+  describe('Path Normalization & File Tree Deduplication', () => {
+    it('normalizes backslashes, leading ./, and redundant slashes', () => {
+      expect(normalizePath('src\\App.jsx')).toBe('src/App.jsx');
+      expect(normalizePath('.\\src\\components\\Card.jsx')).toBe('src/components/Card.jsx');
+      expect(normalizePath('///src//utils///api.js')).toBe('src/utils/api.js');
+      expect(normalizePath('')).toBe('');
+    });
+
+    it('deduplicates duplicate paths and renders unified file count', () => {
+      const duplicateFiles = [
+        { path: 'src/App.jsx', content: '// root' },
+        { path: 'src\\App.jsx', content: '// windows clone' },
+        { path: './src/App.jsx', content: '// relative clone' },
+        { path: 'package.json', content: '{}' },
+      ];
+
+      render(<FileExplorer files={duplicateFiles} activePath="src/App.jsx" />);
+      // Should deduplicate to exactly 2 files: src/App.jsx and package.json
+      expect(screen.getByText('(2)')).toBeInTheDocument();
+      expect(screen.getAllByText('App.jsx')).toHaveLength(1);
+    });
+  });
+
+  describe('CopilotHistoryModal (Session History Management)', () => {
+    const mockSessions = [
+      {
+        id: 'session-1',
+        title: 'Fullstack Hospital Booking',
+        promptSummary: 'Build doctor booking portal',
+        updatedAt: Date.now() - 10000,
+        files: [{ path: 'src/App.jsx' }, { path: 'server.js' }],
+        messages: [{ role: 'user', content: 'hello' }, { role: 'assistant', content: 'hi' }]
+      },
+      {
+        id: 'session-2',
+        title: 'Crypto Analytics Dashboard',
+        promptSummary: 'Design realtime crypto chart',
+        updatedAt: Date.now() - 100000,
+        files: [{ path: 'src/Chart.jsx' }],
+        messages: [{ role: 'user', content: 'crypto' }]
+      }
+    ];
+
+    it('renders session cards with metadata and supports session selection', () => {
+      const onSelect = jest.fn();
+      const onClose = jest.fn();
+
+      render(
+        <CopilotHistoryModal
+          isOpen={true}
+          onClose={onClose}
+          sessions={mockSessions}
+          activeSessionId="session-1"
+          onSelectSession={onSelect}
+        />
+      );
+
+      expect(screen.getByText('Copilot IDE History')).toBeInTheDocument();
+      expect(screen.getByText('Fullstack Hospital Booking')).toBeInTheDocument();
+      expect(screen.getByText('Crypto Analytics Dashboard')).toBeInTheDocument();
+      expect(screen.getByText('Active')).toBeInTheDocument();
+
+      // Click Open on session-2
+      const openButtons = screen.getAllByText('Open');
+      fireEvent.click(openButtons[0]);
+      expect(onSelect).toHaveBeenCalledWith('session-2');
+      expect(onClose).toHaveBeenCalled();
+    });
+
+    it('filters sessions using search query', () => {
+      render(
+        <CopilotHistoryModal
+          isOpen={true}
+          onClose={jest.fn()}
+          sessions={mockSessions}
+          activeSessionId="session-1"
+        />
+      );
+
+      const searchInput = screen.getByPlaceholderText(/Search past sessions/i);
+      fireEvent.change(searchInput, { target: { value: 'Crypto' } });
+
+      expect(screen.getByText('Crypto Analytics Dashboard')).toBeInTheDocument();
+      expect(screen.queryByText('Fullstack Hospital Booking')).not.toBeInTheDocument();
+    });
+
+    it('triggers onNewSession when clicking New Session button', () => {
+      const onNew = jest.fn();
+      const onClose = jest.fn();
+
+      render(
+        <CopilotHistoryModal
+          isOpen={true}
+          onClose={onClose}
+          sessions={mockSessions}
+          activeSessionId="session-1"
+          onNewSession={onNew}
+        />
+      );
+
+      const newBtn = screen.getByText('New Session');
+      fireEvent.click(newBtn);
+      expect(onNew).toHaveBeenCalledTimes(1);
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+  });
 });
+

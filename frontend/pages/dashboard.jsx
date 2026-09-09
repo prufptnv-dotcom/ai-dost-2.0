@@ -346,7 +346,24 @@ export default function Dashboard() {
               onClose={() => go('chat')}
             />
           )}
-          {view === 'history' && <HistoryView onToast={showToast} />}
+          {view === 'history' && (
+            <HistoryView
+              onToast={showToast}
+              onOpenSession={(sessId) => {
+                if (typeof window !== 'undefined') {
+                  try {
+                    localStorage.setItem('ai_dost_session_id', sessId);
+                  } catch (_) {}
+                }
+                go('chat');
+                setTimeout(() => {
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('ai_dost_switch_session', { detail: sessId }));
+                  }
+                }, 50);
+              }}
+            />
+          )}
           {view === 'settings' && (
             <SettingsView
               onToast={showToast}

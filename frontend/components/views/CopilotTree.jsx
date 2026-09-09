@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { 
   ChevronRight, 
   ChevronDown, 
@@ -52,15 +52,24 @@ export const colorForFile = (path) => {
 
 export function fileTreeFromFiles(files) {
   const tree = {};
+  const seen = new Set();
   for (const f of files || []) {
-    const parts = f.path.split('/');
+    const raw = (f.path || f.name || '');
+    const cleanPath = raw.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '').replace(/\/+/g, '/').trim();
+    if (!cleanPath || seen.has(cleanPath)) continue;
+    seen.add(cleanPath);
+
+    const parts = cleanPath.split('/').filter(Boolean);
     let node = tree;
     for (let i = 0; i < parts.length - 1; i++) {
       const dir = parts[i];
       if (!node[dir]) node[dir] = {};
       node = node[dir];
     }
-    node[parts[parts.length - 1]] = { __file: true, path: f.path, content: f.content || '' };
+    const filename = parts[parts.length - 1];
+    if (filename) {
+      node[filename] = { __file: true, path: cleanPath, content: f.content || '' };
+    }
   }
   return tree;
 }

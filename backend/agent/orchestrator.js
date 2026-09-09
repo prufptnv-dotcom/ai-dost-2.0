@@ -17,11 +17,13 @@ const HuggingFaceService = require('../services/huggingfaceService');
 const OpenRouterService = require('../services/openrouterService');
 const DependencyGraph = require('./dependency/DependencyGraph');
 const TaskScheduler = require('./concurrency/TaskScheduler');
+const ArbitratorAgent = require('./arbitration/ArbitratorAgent');
 const CodebaseIndexer = require('./codebaseIndexer');
 const ContextRetriever = require('./contextRetriever');
 const visualVerifier = require('./verification/VisualVerifier');
 const devServerManager = require('../sandbox/devServerManager');
 const logger = require('../logger');
+const deterministicCodeGuard = require('../services/DeterministicCodeGuard');
 
 class AgentOrchestrator {
 
@@ -50,6 +52,8 @@ class AgentOrchestrator {
     this.diagnosticManager = new (require('./diagnostics/DiagnosticManager'))();
     this.dependencyGraph = new DependencyGraph();
     this.taskScheduler = new TaskScheduler();
+    this.arbitrator = options.arbitrator || ArbitratorAgent.shared;
+    this.agentId = options.agentId || `orchestrator-${process.pid}`;
     this.codebaseIndexer = options.codebaseIndexer || new CodebaseIndexer();
     this.contextRetriever = options.contextRetriever || new ContextRetriever({ 
       codebaseIndexer: this.codebaseIndexer,
@@ -227,6 +231,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         try {
           const filePath = this.resolveSafePath(this.projectPath, parameters.path);
           if (!filePath) return { success: false, error: 'Access denied: Invalid or unsafe path' };
+          const guard = deterministicCodeGuard.guard(parameters.path, parameters.content || '');
+          if (!guard.accepted) return { success: false, error: `Code rejected before persistence: ${guard.reason}`, diagnostics: guard.diagnostics };
           
           if (!fs.existsSync(filePath)) {
             const inMem = projectFiles.find(f => f.path === parameters.path);
@@ -288,6 +294,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           }
           
           const newContent = diffResult.newContent;
+          const guard = deterministicCodeGuard.guard(parameters.path, newContent);
+          if (!guard.accepted) return { success: false, error: `Code rejected before persistence: ${guard.reason}`, diagnostics: guard.diagnostics };
           fs.mkdirSync(require('path').dirname(filePath), { recursive: true });
           fs.writeFileSync(filePath, newContent, 'utf-8');
           
@@ -1746,6 +1754,10 @@ p { color: #64748b; }`,
                 }
                 
                 return { action, parameters, result: res, targetFilePath, afterHash: targetFilePath ? this.getFileHash(targetFilePath) : null };
+            }, {
+              arbitrator: this.arbitrator,
+              workspacePath: targetWorkspace,
+              agentId: this.agentId,
             });
 
             for (let i = 0; i < parsedList.length; i++) {

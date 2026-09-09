@@ -5,21 +5,34 @@ function getDb() {
   return getDatabase();
 }
 
+function normalizePath(p) {
+  return String(p || '')
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
+    .replace(/^\/+/, '')
+    .replace(/\/+/g, '/')
+    .trim();
+}
+
 // Upsert a project file so CopilotIDE's /memory/project/:id refresh sees it
 function saveProjectFile(projectId, filePath, content) {
   if (!projectId || !filePath) return false;
   try {
+    const cleanPath = normalizePath(filePath);
+    if (!cleanPath) return false;
     const d = getDb();
     d.prepare('INSERT OR IGNORE INTO projects (id, name, description, created_at, status) VALUES (?, ?, ?, datetime(\'now\'), \'Active\')')
       .run(projectId, projectId === 'default' ? 'Copilot Workspace' : projectId, 'Autonomous AI Copilot Workspace');
 
-    const existing = d.prepare('SELECT id FROM workspace_files WHERE project_id = ? AND path = ?').get(projectId, filePath);
+    const existing = d.prepare('SELECT id FROM workspace_files WHERE project_id = ? AND (path = ? OR path = ? OR path = ? COLLATE NOCASE)').get(
+      projectId, cleanPath, cleanPath.replace(/\//g, '\\'), `./${cleanPath}`
+    );
     if (existing) {
-      d.prepare('UPDATE workspace_files SET content = ?, last_modified = datetime(\'now\') WHERE id = ?')
-        .run(content, existing.id);
+      d.prepare('UPDATE workspace_files SET path = ?, content = ?, last_modified = datetime(\'now\') WHERE id = ?')
+        .run(cleanPath, content, existing.id);
     } else {
       d.prepare('INSERT INTO workspace_files (project_id, path, content) VALUES (?, ?, ?)')
-        .run(projectId, filePath, content);
+        .run(projectId, cleanPath, content);
     }
     return true;
   } catch (e) {

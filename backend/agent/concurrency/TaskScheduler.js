@@ -1,12 +1,14 @@
 const path = require('path');
 const lockManager = require('./LockManager');
+const ArbitratorAgent = require('../arbitration/ArbitratorAgent');
 
 class TaskScheduler {
     constructor() {
         this.metrics = { sequentialTime: 0, parallelTime: 0, toolCalls: 0 };
+        this.arbitrator = new ArbitratorAgent();
     }
 
-    async schedule(tasks, executorFn) {
+    async schedule(tasks, executorFn, options = {}) {
         if (!tasks || tasks.length === 0) return [];
         this.metrics.toolCalls += tasks.length;
         const start = Date.now();
@@ -76,7 +78,24 @@ class TaskScheduler {
 
             const acquiredLocks = [];
             const defaultTimeout = parseInt(process.env.LOCK_TIMEOUT_MS, 10) || 30000;
+            const writeFiles = node.produces;
+            const arbitrator = options.arbitrator || this.arbitrator;
+            const arbitration = writeFiles.length > 0 && options.workspacePath
+                ? arbitrator.beginOperation({
+                    workspacePath: options.workspacePath,
+                    agentId: options.agentId || 'scheduler',
+                    files: writeFiles,
+                    versionVector: node.task.parameters?.versionVector || node.task.parameters?.version_vector,
+                })
+                : null;
+
+            if (arbitration?.conflict) {
+                results[node.index] = { success: false, error: arbitration.conflict.reason, arbitration: arbitration.conflict };
+                planAborted = true;
+                return;
+            }
             
+            let timeoutHandle;
             try {
                 // Acquire locks for produced files
                 for (const file of node.produces) {
@@ -84,10 +103,22 @@ class TaskScheduler {
                     acquiredLocks.push({ file, token });
                 }
 
-                const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('Task timeout')), defaultTimeout));
+                const timeoutPromise = new Promise((_, rej) => {
+                    timeoutHandle = setTimeout(() => rej(new Error('Task timeout')), defaultTimeout);
+                });
                 const execPromise = executorFn(node.task.action, node.task.parameters);
                 
                 results[node.index] = await Promise.race([execPromise, timeoutPromise]);
+
+                if (arbitration && results[node.index]?.success !== false) {
+                    const decision = arbitrator.commitOperation(arbitration, results[node.index]);
+                    if (!decision.success) {
+                        results[node.index] = { success: false, error: decision.reason, arbitration: decision };
+                        planAborted = true;
+                    } else {
+                        results[node.index].arbitration = decision;
+                    }
+                }
                 
                 // If the task failed (returned success: false), abort plan (if specified)
                 if (results[node.index]?.success === false) {
@@ -97,6 +128,7 @@ class TaskScheduler {
                 planAborted = true;
                 results[node.index] = { success: false, error: err.message };
             } finally {
+                if (timeoutHandle) clearTimeout(timeoutHandle);
                 for (const { file, token } of acquiredLocks) {
                     lockManager.release(file, token);
                 }

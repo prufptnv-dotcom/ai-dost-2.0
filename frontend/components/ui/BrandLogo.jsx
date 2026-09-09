@@ -13,7 +13,7 @@ export default function BrandLogo({
   showText = false,
   className = '',
   textClassName = '',
-  accent = '#3b82f6'
+  accent = '#d45b3f'
 }) {
   const pixelSize = typeof size === 'number' ? size : (SIZE_MAP[size] || 24);
 

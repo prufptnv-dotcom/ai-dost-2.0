@@ -38,11 +38,26 @@ export default function HistoryView({ onToast, onOpenSession }) {
     }
   }), [onToast]);
 
+  const handleOpenSessionInChat = (sessId, e) => {
+    if (e) e.stopPropagation();
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('ai_dost_session_id', sessId);
+        window.dispatchEvent(new CustomEvent('ai_dost_switch_session', { detail: sessId }));
+      } catch (_) {}
+    }
+    if (onOpenSession) {
+      onOpenSession(sessId);
+    } else if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('ai_dost_nav', { detail: 'chat' }));
+    }
+  };
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get('/chat/history', { params: { session_id: 'default', limit: 100 } });
-      const rows = Array.isArray(res.data) ? res.data : (res.data?.history || []);
+      const res = await api.get('/chat/history', { params: { limit: 100 } });
+      const rows = Array.isArray(res.data) ? res.data : (res.data?.messages || res.data?.history || []);
       const grouped = {};
       for (const row of rows) {
         const sess = row.session_id || 'default';
@@ -51,6 +66,34 @@ export default function HistoryView({ onToast, onOpenSession }) {
         const t = new Date(row.timestamp || row.created_at || 0).getTime();
         if (t > grouped[sess].updatedAt) grouped[sess].updatedAt = t;
       }
+
+      // Merge local client sessions from localStorage
+      if (typeof window !== 'undefined') {
+        try {
+          const localSessions = JSON.parse(localStorage.getItem('ai_dost_chat_sessions') || '[]');
+          if (Array.isArray(localSessions)) {
+            for (const s of localSessions) {
+              const sid = s.id;
+              if (!sid) continue;
+              const msgsRaw = localStorage.getItem(`ai_dost_messages_${sid}`);
+              const msgs = msgsRaw ? JSON.parse(msgsRaw) : [];
+              if (Array.isArray(msgs) && msgs.length > 0) {
+                if (!grouped[sid]) {
+                  grouped[sid] = {
+                    session: sid,
+                    title: s.title || s.name,
+                    messages: msgs,
+                    updatedAt: s.updatedAt || Date.now()
+                  };
+                } else if (!grouped[sid].title) {
+                  grouped[sid].title = s.title || s.name;
+                }
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
       const list = Object.values(grouped).sort((a, b) => b.updatedAt - a.updatedAt);
       setSessions(list);
       if (list.length > 0) setExpanded(list[0].session);
@@ -189,8 +232,19 @@ export default function HistoryView({ onToast, onOpenSession }) {
                       </div>
                     </div>
 
-                    <div className="text-[11px] font-mono text-ink-muted flex-shrink-0">
-                      {timeAgo(s.updatedAt)}
+                    <div className="flex items-center gap-2.5 flex-shrink-0">
+                      <div className="text-[11px] font-mono text-ink-muted hidden sm:block">
+                        {timeAgo(s.updatedAt)}
+                      </div>
+                      <Button
+                        variant="primary"
+                        size="xs"
+                        icon={ArrowRight}
+                        onClick={(e) => handleOpenSessionInChat(s.session, e)}
+                        title="Open this conversation in Chat"
+                      >
+                        Open in Chat
+                      </Button>
                     </div>
                   </div>
 

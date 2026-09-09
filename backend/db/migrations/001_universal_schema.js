@@ -74,6 +74,41 @@ module.exports = {
       CREATE INDEX IF NOT EXISTS idx_workspaces_project_id ON workspaces(project_id);
     `);
 
+    // Canonical file mirror used by legacy preview and workspace services.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS workspace_files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        content TEXT,
+        last_modified TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(project_id, path),
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_workspace_files_project_id ON workspace_files(project_id);
+      CREATE INDEX IF NOT EXISTS idx_workspace_files_path ON workspace_files(path);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS chat_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_chat_history_session_id ON chat_history(session_id);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS resumes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        prompt TEXT,
+        json_data TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+
     // 4. Conversations table
     db.exec(`
       CREATE TABLE IF NOT EXISTS conversations (

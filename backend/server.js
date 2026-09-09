@@ -11,6 +11,7 @@ const dotenv = require('dotenv');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const dns = require('dns');
 const logger = require('./logger');
 const { initDatabase } = require('./db');
 const { Server } = require('socket.io');
@@ -136,10 +137,18 @@ seedInitialProjects();
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per window
+  max: process.env.NODE_ENV === 'production' ? 1000 : 50000, // Generous limit for local development & previews
   message: 'Too many requests, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => {
+    // Skip preview routes, dev server polling, health checks, and local requests
+    const p = req.path || '';
+    if (p.startsWith('/api/preview') || p.startsWith('/api/v1/preview') || p === '/health') return true;
+    const ip = req.ip || '';
+    if (ip === '127.0.0.1' || ip === '::1' || ip.includes('127.0.0.1')) return true;
+    return false;
+  }
 });
 
 const app = express();
@@ -148,20 +157,83 @@ const app = express();
 app.use(compression());
 app.use(apiLimiter);
 
+// ═══════════════════════════════════════════════════════════════════════════
+// REQUEST CONCURRENCY QUEUE — Prevents event loop saturation under high load
+// Without Redis/BullMQ, this lightweight semaphore queues concurrent AI calls.
+// MAX_CONCURRENT_AI (default 20): simultaneous AI requests processed at once.
+// Requests beyond limit are queued in-memory with FIFO ordering.
+// ═══════════════════════════════════════════════════════════════════════════
+const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT_AI || '20', 10);
+let activeRequests = 0;
+const waitQueue = [];
+
+function acquireSlot() {
+  return new Promise((resolve) => {
+    if (activeRequests < MAX_CONCURRENT) {
+      activeRequests++;
+      resolve();
+    } else {
+      waitQueue.push(resolve);
+    }
+  });
+}
+
+function releaseSlot() {
+  if (waitQueue.length > 0) {
+    const next = waitQueue.shift();
+    next(); // Give slot to next waiter
+  } else {
+    activeRequests--;
+  }
+}
+
+// Apply queue only to AI-heavy endpoints (not health checks / static)
+app.use(['/api/chat', '/api/v1/chat', '/api/agent/run'], async (req, res, next) => {
+  const queuePos = waitQueue.length;
+  if (queuePos > 0) {
+    res.setHeader('X-Queue-Position', queuePos);
+    logger.info(`⏳ Request queued (position ${queuePos}, active: ${activeRequests})`);
+  }
+  await acquireSlot();
+  res.on('finish', releaseSlot);
+  res.on('close', releaseSlot);
+  next();
+});
+
+
+
+// Helper: Normalize file path to prevent duplicate files and cross-platform issues
+function normalizeBackendPath(p) {
+  return String(p || '')
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
+    .replace(/^\/+/, '')
+    .replace(/\/+/g, '/')
+    .trim();
+}
+
 // Helper: save a project file to SQLite (and physical workspace)
 function saveProjectFile(projectId, filePath, content) {
   try {
-    const fullPath = workspaceManager.resolvePath(projectId, filePath);
+    const cleanPath = normalizeBackendPath(filePath);
+    if (!cleanPath) return false;
+
+    const fullPath = workspaceManager.resolvePath(projectId, cleanPath);
     fs.mkdirSync(require('path').dirname(fullPath), { recursive: true });
     fs.writeFileSync(fullPath, content, 'utf8');
 
-    const existing = db.prepare('SELECT id FROM workspace_files WHERE project_id = ? AND path = ?').get(projectId, filePath);
+    const existing = db.prepare('SELECT id FROM workspace_files WHERE project_id = ? AND (path = ? OR path = ? OR path = ? COLLATE NOCASE)').get(
+      projectId,
+      cleanPath,
+      cleanPath.replace(/\//g, '\\'),
+      `./${cleanPath}`
+    );
     if (existing) {
-      db.prepare('UPDATE workspace_files SET content = ?, last_modified = datetime(\'now\') WHERE id = ?')
-        .run(content, existing.id);
+      db.prepare('UPDATE workspace_files SET path = ?, content = ?, last_modified = datetime(\'now\') WHERE id = ?')
+        .run(cleanPath, content, existing.id);
     } else {
       db.prepare('INSERT INTO workspace_files (project_id, path, content) VALUES (?, ?, ?)')
-        .run(projectId, filePath, content);
+        .run(projectId, cleanPath, content);
     }
     return true;
   } catch (e) {
@@ -172,7 +244,7 @@ function saveProjectFile(projectId, filePath, content) {
 
 // Helper: create a folder in the agent workspace + persist a .gitkeep marker so the UI tree sees it
 function createProjectFolder(projectId, folderPath) {
-  const safe = String(folderPath || '').replace(/^\/+||\/+$/g, '');
+  const safe = normalizeBackendPath(folderPath);
   if (!safe || safe.includes('..')) return false;
   try {
     const dir = workspaceManager.resolvePath(projectId, safe);
@@ -195,9 +267,17 @@ function getProjectFiles(projectId) {
     function walk(dir, base) {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
-        if (entry.name === 'node_modules' || entry.name === '.git') continue;
+        if (
+          entry.name === 'node_modules' || 
+          entry.name === '.git' || 
+          entry.name === '.checkpoints' || 
+          entry.name === 'Users' || 
+          entry.name === 'package-lock.json' ||
+          entry.name.startsWith('.') ||
+          entry.name.endsWith('.map')
+        ) continue;
         const full = require('path').join(dir, entry.name);
-        const rel = base ? `${base}/${entry.name}` : entry.name;
+        const rel = (base ? `${base}/${entry.name}` : entry.name).replace(/\\/g, '/');
         if (entry.isDirectory()) {
           walk(full, rel);
         } else {
@@ -206,6 +286,22 @@ function getProjectFiles(projectId) {
       }
     }
     walk(wsRoot, '');
+
+    // Eliminate duplicate nested project directories created by scaffolding
+    const allKeys = Object.keys(result);
+    const topDirs = Array.from(new Set(allKeys.filter(k => k.includes('/')).map(k => k.split('/')[0])));
+    const duplicateKeys = new Set();
+    for (const d of topDirs) {
+      if (
+        (result[`${d}/package.json`] && result['package.json']) ||
+        (result[`${d}/src/App.jsx`] && result['src/App.jsx']) ||
+        (result[`${d}/index.html`] && result['index.html'])
+      ) {
+        allKeys.filter(k => k.startsWith(`${d}/`)).forEach(k => duplicateKeys.add(k));
+      }
+    }
+    duplicateKeys.forEach(k => delete result[k]);
+
     return result;
   } catch (e) {
     logger.warn(`[Server] getProjectFiles physical read failed for ${projectId}, falling back to legacy DB.`, e);
@@ -255,6 +351,35 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // Serve generated documents from frontend/public/downloads
 app.use('/downloads', express.static(path.join(__dirname, '../frontend/public/downloads')));
 
+// Live preview asset fallback handler: Resolves /src/* requests from preview apps with 0 404s
+app.use('/src', (req, res) => {
+  const rel = req.path || '';
+  const tmpDir = os.tmpdir();
+  let candidate = null;
+  try {
+    const entries = fs.readdirSync(tmpDir).filter(n => n.startsWith('agent-ws-'));
+    entries.sort((a, b) => fs.statSync(path.join(tmpDir, b)).mtimeMs - fs.statSync(path.join(tmpDir, a)).mtimeMs);
+    for (const e of entries) {
+      const target = path.join(tmpDir, e, 'src', rel.replace(/^\/+/, ''));
+      if (fs.existsSync(target) && fs.statSync(target).isFile()) {
+        candidate = target;
+        break;
+      }
+    }
+  } catch (_) {}
+
+  if (candidate) {
+    const ext = path.extname(candidate).toLowerCase();
+    const mime = (ext === '.jsx' || ext === '.js' || ext === '.ts' || ext === '.tsx' || ext === '.mjs')
+      ? 'text/javascript; charset=utf-8'
+      : (ext === '.css' ? 'text/css; charset=utf-8' : 'text/plain');
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.sendFile(candidate);
+  }
+  res.status(404).send('Resource not found in active workspaces');
+});
+
 // Routes
 const chatRoutes    = require('./routes/chat');
 const testRoutes    = require('./routes/test');
@@ -271,6 +396,7 @@ const deployRoutes  = require('./routes/deploy');
 const researchRoutes = require('./routes/research');
 const skillsRoutes = require('./routes/skills');
 const analyticsRoutes = require('./routes/analytics');
+const databaseRoutes  = require('./routes/database');
 
 app.use('/api/chat',     chatRoutes);
 app.use('/api/test',     testRoutes);
@@ -287,6 +413,7 @@ app.use('/api/deploy',   deployRoutes);
 app.use('/api/research', researchRoutes);
 app.use('/api/skills',   skillsRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/database', databaseRoutes);
 
 const projectGraphRoutes = require('./routes/projectGraph');
 const workflowRoutes = require('./routes/workflows')(db);
@@ -318,9 +445,12 @@ app.use('/api/v1/deploy',   deployRoutes);
 app.use('/api/v1/research', researchRoutes);
 app.use('/api/v1/skills',   skillsRoutes);
 app.use('/api/v1/projects', projectGraphRoutes);
+app.use('/api/v1/preview',  previewRoutes);
+app.use('/api/v1/figma',    figmaRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/workflows', workflowRoutes);
 app.use('/api/v1/verify',   verifierRoutes);
+app.use('/api/v1/database', databaseRoutes);
 
 // ── AI Assistant Endpoints (mounted at /api/v1/ai) ──────────────────────────
 // This allows frontend calls to /ai/code-suggestions and /ai/lsp-diagnostics
@@ -674,6 +804,82 @@ app.use('/api/document', documentRoutes);
 app.use('/api/eval', evalRoutes);
 app.use('/api/v1/document', documentRoutes);
 
+// ── Dedicated Copilot IDE Session History (SQLite-backed) ──────────────────
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS copilot_sessions (
+      id TEXT PRIMARY KEY,
+      title TEXT,
+      prompt_summary TEXT,
+      created_at INTEGER,
+      updated_at INTEGER,
+      session_data TEXT
+    )
+  `);
+} catch (e) {
+  logger.warn('[Server] copilot_sessions table init note:', e.message || e);
+}
+
+app.get(['/api/copilot/sessions', '/api/v1/copilot/sessions'], (req, res) => {
+  try {
+    const rows = db.prepare('SELECT id, title, prompt_summary, created_at, updated_at, session_data FROM copilot_sessions ORDER BY updated_at DESC').all();
+    const sessions = rows.map(r => {
+      try {
+        const parsed = JSON.parse(r.session_data || '{}');
+        return {
+          ...parsed,
+          id: r.id,
+          title: r.title,
+          promptSummary: r.prompt_summary,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at
+        };
+      } catch (_) {
+        return { id: r.id, title: r.title, createdAt: r.created_at, updatedAt: r.updated_at };
+      }
+    });
+    res.json({ success: true, sessions });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post(['/api/copilot/sessions', '/api/v1/copilot/sessions'], (req, res) => {
+  try {
+    const session = req.body || {};
+    const id = session.id || `copilot-session-${Date.now()}`;
+    const title = session.title || 'Untitled Workspace';
+    const promptSummary = session.promptSummary || '';
+    const createdAt = session.createdAt || Date.now();
+    const updatedAt = session.updatedAt || Date.now();
+    const sessionData = JSON.stringify(session);
+
+    db.prepare(`
+      INSERT INTO copilot_sessions (id, title, prompt_summary, created_at, updated_at, session_data)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        prompt_summary = excluded.prompt_summary,
+        updated_at = excluded.updated_at,
+        session_data = excluded.session_data
+    `).run(id, title, promptSummary, createdAt, updatedAt, sessionData);
+
+    res.json({ success: true, session: { ...session, id } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete(['/api/copilot/sessions/:id', '/api/v1/copilot/sessions/:id'], (req, res) => {
+  try {
+    const { id } = req.params;
+    db.prepare('DELETE FROM copilot_sessions WHERE id = ?').run(id);
+    res.json({ success: true, message: 'Session deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ── Project Memory endpoints (SQLite-backed) ──────────────────────────
 app.get(['/api/v1/memory/projects', '/api/projects'], (req, res) => {
     const userId = projectAuth.resolveUser(req);
@@ -929,35 +1135,61 @@ app.get(['/api/v1/memory/project/:id/search', '/api/project/:id/search'], (req, 
 
 // Chat history persistence endpoints (delegated to ConversationDAO / MessageDAO with legacy fallback)
 function getChatHistory(req, res) {
-    const sessionId = req.query.session_id || 'default';
+    const sessionId = req.query.session_id;
     const userId = projectAuth.resolveUser(req);
     const conversationDao = new ConversationDAO(db);
     const messageDao = new MessageDAO(db);
 
-    const conv = conversationDao.getById(sessionId);
-    if (conv && conv.user_id && conv.user_id !== userId && userId !== 'local-user') {
-        return res.status(403).json({ success: false, error: `Access denied: You do not own conversation '${sessionId}'` });
-    }
+    if (sessionId && sessionId !== 'all') {
+        const conv = conversationDao.getById(sessionId);
+        if (conv && conv.user_id && conv.user_id !== userId && userId !== 'local-user') {
+            return res.status(403).json({ success: false, error: `Access denied: You do not own conversation '${sessionId}'` });
+        }
 
-    if (conv) {
-        const msgs = messageDao.listByConversation(sessionId);
-        if (msgs && msgs.length > 0) {
-            return res.json({
-                success: true,
-                session_id: sessionId,
-                messages: msgs.map(m => ({
+        if (conv) {
+            const msgs = messageDao.listByConversation(sessionId);
+            if (msgs && msgs.length > 0) {
+                const formatted = msgs.map(m => ({
                     id: m.id.startsWith(`${sessionId}_`) ? m.id.slice(sessionId.length + 1) : m.id,
+                    session_id: sessionId,
                     role: m.role,
                     content: m.content,
                     timestamp: m.created_at
-                }))
-            });
+                }));
+                return res.json({
+                    success: true,
+                    session_id: sessionId,
+                    messages: formatted,
+                    history: formatted
+                });
+            }
         }
+
+        // Legacy fallback for specific session
+        const rows = db.prepare('SELECT id, session_id, role, content, timestamp FROM chat_history WHERE session_id = ? ORDER BY id ASC').all(sessionId);
+        const formatted = rows.map(r => ({ ...r, session_id: r.session_id || sessionId }));
+        return res.json({ success: true, session_id: sessionId, messages: formatted, history: formatted });
     }
 
-    // Legacy fallback
-    const rows = db.prepare('SELECT id, role, content, timestamp FROM chat_history WHERE session_id = ? ORDER BY id ASC').all(sessionId);
-    res.json({ success: true, session_id: sessionId, messages: rows });
+    // Return all messages across sessions when no session_id is specified or session_id === 'all'
+    let allRows = [];
+    try {
+        allRows = db.prepare('SELECT id, session_id, role, content, timestamp FROM chat_history ORDER BY id ASC').all();
+    } catch (_) {}
+
+    if (!allRows || allRows.length === 0) {
+        try {
+            const msgs = db.prepare(`
+                SELECT m.id, m.conversation_id AS session_id, m.role, m.content, m.created_at AS timestamp
+                FROM messages m
+                ORDER BY m.created_at ASC
+            `).all();
+            allRows = msgs;
+        } catch (_) {}
+    }
+
+    const formattedAll = (allRows || []).map(r => ({ ...r, session_id: r.session_id || 'default' }));
+    res.json({ success: true, session_id: 'all', messages: formattedAll, history: formattedAll });
 }
 
 function deleteChatHistory(req, res) {

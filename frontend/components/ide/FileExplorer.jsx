@@ -6,6 +6,16 @@ import {
 } from 'lucide-react';
 import { iconForFile, colorForFile } from '../views/CopilotTree';
 
+export function normalizePath(p) {
+  if (!p || typeof p !== 'string') return '';
+  return p
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
+    .replace(/^\/+/, '')
+    .replace(/\/+/g, '/')
+    .trim();
+}
+
 export function FileExplorer({
   files = [],
   activePath = '',
@@ -24,11 +34,16 @@ export function FileExplorer({
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newItemName, setNewItemName] = useState('');
 
-  // Build tree from files array
-  const tree = useMemo(() => {
+  // Build tree from files array with path normalization & deduplication
+  const { tree, uniqueCount } = useMemo(() => {
     const root = {};
+    const seen = new Set();
     for (const f of files || []) {
-      const parts = f.path.split('/');
+      const cleanPath = normalizePath(f.path || f.name);
+      if (!cleanPath || seen.has(cleanPath)) continue;
+      seen.add(cleanPath);
+
+      const parts = cleanPath.split('/').filter(Boolean);
       let current = root;
       for (let i = 0; i < parts.length - 1; i++) {
         const dir = parts[i];
@@ -36,26 +51,42 @@ export function FileExplorer({
         current = current[dir].children;
       }
       const filename = parts[parts.length - 1];
-      current[filename] = { __file: true, path: f.path, name: filename, content: f.content || '' };
+      if (filename) {
+        current[filename] = { __file: true, path: cleanPath, name: filename, content: f.content || '' };
+      }
     }
-    return root;
+    return { tree: root, uniqueCount: seen.size };
   }, [files]);
 
   const toggleDir = (dirPath) => {
     setExpandedDirs((prev) => ({ ...prev, [dirPath]: !prev[dirPath] }));
   };
 
+  const cleanInputPath = normalizePath(newItemName);
+  const isDuplicate = useMemo(() => {
+    if (!cleanInputPath) return false;
+    return (files || []).some(f => normalizePath(f.path || f.name).toLowerCase() === cleanInputPath.toLowerCase());
+  }, [cleanInputPath, files]);
+
   const handleCreateSubmit = (e) => {
     e.preventDefault();
-    if (!newItemName.trim()) {
+    const clean = normalizePath(newItemName);
+    if (!clean) {
+      setIsCreatingFile(false);
+      setIsCreatingFolder(false);
+      return;
+    }
+    if (isDuplicate) {
+      if (onSelectFile) onSelectFile(clean);
+      setNewItemName('');
       setIsCreatingFile(false);
       setIsCreatingFolder(false);
       return;
     }
     if (isCreatingFile && onCreateFile) {
-      onCreateFile(newItemName.trim());
+      onCreateFile(clean);
     } else if (isCreatingFolder && onCreateFolder) {
-      onCreateFolder(newItemName.trim());
+      onCreateFolder(clean);
     }
     setNewItemName('');
     setIsCreatingFile(false);
@@ -96,7 +127,7 @@ export function FileExplorer({
       }
 
       // File Row
-      const isActive = activePath === item.path;
+      const isActive = normalizePath(activePath) === normalizePath(item.path);
       const Icon = iconForFile(item.path);
 
       if (searchQuery && !item.path.toLowerCase().includes(searchQuery.toLowerCase())) {
@@ -151,7 +182,7 @@ export function FileExplorer({
             Files
           </span>
           <span className="text-[10px] font-mono text-ink-muted">
-            ({files.length})
+            ({uniqueCount})
           </span>
         </div>
 
@@ -217,9 +248,16 @@ export function FileExplorer({
               onChange={(e) => setNewItemName(e.target.value)}
               placeholder={isCreatingFile ? 'filename.js' : 'folder_name'}
               onKeyDown={(e) => e.key === 'Escape' && (setIsCreatingFile(false), setIsCreatingFolder(false))}
-              className="flex-1 bg-canvas-base px-1.5 py-0.5 rounded-xs text-xs font-mono text-paper-100 border border-border focus:outline-none focus:border-accent-primary"
+              className={`flex-1 bg-canvas-base px-1.5 py-0.5 rounded-xs text-xs font-mono text-paper-100 border focus:outline-none ${
+                isDuplicate ? 'border-amber-500/80' : 'border-border focus:border-accent-primary'
+              }`}
             />
           </div>
+          {isDuplicate && (
+            <div className="text-[10px] font-mono text-amber-400 mt-1 pl-5">
+              ⚠️ Already exists (press Enter to open)
+            </div>
+          )}
         </form>
       )}
 
