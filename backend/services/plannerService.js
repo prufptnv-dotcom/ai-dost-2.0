@@ -1,6 +1,8 @@
 const fs = require('fs').promises;
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const { capabilityDiscovery } = require('../agent/registry/CapabilityDiscovery');
+const { capabilityGatekeeper } = require('../agent/policy/CapabilityGatekeeper');
 
 const FRAMEWORK_TEMPLATES = {
   'react-vite': {
@@ -671,6 +673,21 @@ class PlannerService {
       throw err;
     }
 
+    let capabilities = null;
+    let gate = null;
+    try {
+      capabilities = capabilityDiscovery.discover(prompt, {
+        requestId: options.requestId || null,
+        runtimeContext: options.runtimeContext || {}
+      });
+      gate = capabilityGatekeeper.evaluate(capabilities, {
+        requestId: options.requestId || null,
+        runtimeContext: options.runtimeContext || {},
+        permissions: options.permissions || null,
+        planId
+      });
+    } catch (_) {}
+
     const plan = {
       id: planId,
       projectName,
@@ -678,6 +695,8 @@ class PlannerService {
       frameworkKey: framework,
       prompt: String(prompt).slice(0, 2000),
       template,
+      capabilities,
+      gate,
       steps: this.generateSteps(prompt, template, projectName),
       createdAt: new Date().toISOString(),
       status: 'planned',

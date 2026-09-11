@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clean UI Fixture (No Bugs)</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: sans-serif; line-height: 1.6; }
+    h1 { color: #333; margin-bottom: 10px; }
+    p { color: #666; margin-bottom: 8px; }
+    .card {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 16px;
+      max-width: 400px;
+      margin-top: 20px;
+    }
+    .modal-overlay[aria-hidden="true"] {
+      display: none;
+    }
+    .tooltip {
+      position: absolute;
+      left: -9999px;
+      top: -9999px;
+      background: #333;
+      color: white;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Clean Page Title</h1>
+  <p>First paragraph of text content.</p>
+  <p>Second paragraph of text content.</p>
+  <div class="card">
+    <h2>Card Title</h2>
+    <p>Card content with proper spacing.</p>
+  </div>
+  <!-- Hidden modal — should NOT trigger findings -->
+  <div class="modal-overlay" aria-hidden="true" id="hidden-modal">
+    <div role="dialog">
+      <p>This modal is intentionally hidden with aria-hidden="true"</p>
+    </div>
+  </div>
+  <!-- Tooltip offscreen — should NOT trigger findings -->
+  <span class="tooltip" id="tooltip-1">Tooltip text</span>
+</body>
+</html>

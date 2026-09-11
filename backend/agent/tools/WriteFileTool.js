@@ -19,6 +19,16 @@ class WriteFileTool extends Tool {
     
     // 1. Validate boundary via workspaceManager
     const resolvedPath = context.workspaceManager.resolvePath(context.projectId, relativePath, context.userId);
+
+    // Existing-file write enforcement (GAP-01)
+    if (fs.existsSync(resolvedPath) && !input.allowOverwrite) {
+      return {
+        success: false,
+        code: 'WRITE_FORBIDDEN_ON_EXISTING',
+        error: `Full-file replacement is forbidden for existing project files. Use apply_diff with a validated SEARCH/REPLACE patch on ${relativePath}.`
+      };
+    }
+
     const guard = deterministicCodeGuard.guard(relativePath, content);
     if (!guard.accepted) {
       return { success: false, error: `Code rejected before persistence: ${guard.reason}`, diagnostics: guard.diagnostics };

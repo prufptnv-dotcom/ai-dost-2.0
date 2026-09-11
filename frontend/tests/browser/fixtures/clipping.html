@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fixture D — Clipping</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: sans-serif; }
+    .clip-container {
+      width: 200px;
+      height: 60px;
+      overflow: hidden;
+      border: 2px solid #333;
+      padding: 5px;
+      margin-bottom: 40px;
+    }
+    .clipped-content {
+      width: 400px;
+      background: #ff6b6b;
+      color: white;
+      padding: 10px;
+      font-size: 14px;
+    }
+    /* Interactive element deterministically clipped by the right viewport edge:
+       1280px viewport -> left = calc(100% - 80px) = 1200px, right = 1360px (80px past). */
+    .clip-button {
+      position: fixed;
+      top: 240px;
+      left: calc(100% - 80px);
+      width: 160px;
+      height: 48px;
+      background: #4ecdc4;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <p>Content clipped by an overflow:hidden container (non-interactive, not flagged):</p>
+  <div class="clip-container">
+    <div class="clipped-content">This content is 400px wide but the container is only 200px with overflow:hidden</div>
+  </div>
+
+  <p>Interactive element clipped at the viewport right edge (flagged):</p>
+  <button class="clip-button">Partially Off-Edge Button</button>
+</body>
+</html>

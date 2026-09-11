@@ -34,16 +34,8 @@ class AgentOrchestrator {
   }
 
   resolveSafePath(workspacePath, targetPath) {
-    if (!workspacePath || !targetPath) return null;
-    const normalizedTarget = targetPath.replace(/\\/g, '/');
-    if (normalizedTarget.includes('../') || normalizedTarget.includes('..\\')) return null;
-    const ws = require('path').resolve(workspacePath);
-    const target = require('path').resolve(ws, targetPath);
-    if (target !== ws && !target.startsWith(ws + require('path').sep)) return null;
-    const blockedSecrets = ['.env', '.pem', '.key', 'id_rsa', 'secrets.json', 'credentials'];
-    const basename = require('path').basename(target).toLowerCase();
-    if (blockedSecrets.some(sec => basename.includes(sec))) return null;
-    return target;
+    const { resolveSafePath: safePathResolver } = require('../services/pathSecurity');
+    return safePathResolver(workspacePath, targetPath);
   }
 
   constructor(options = {}) {
@@ -253,11 +245,28 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           const filePath = this.resolveSafePath(this.projectPath, parameters.path);
           if (!filePath) return { success: false, error: 'Access denied: Invalid or unsafe path' };
           
+          const existsOnDisk = fs.existsSync(filePath);
+          const inMem = projectFiles && Array.isArray(projectFiles) ? projectFiles.find(f => f.path === parameters.path) : null;
+          const exists = existsOnDisk || Boolean(inMem);
+
+          // Phase 1: Existing-file write enforcement (allow explicit trusted override only)
+          if (exists && !parameters.allowOverwrite) {
+            return {
+              success: false,
+              code: 'WRITE_FORBIDDEN_ON_EXISTING',
+              error: `Full-file replacement is forbidden for existing project files. Use apply_diff with a validated SEARCH/REPLACE patch on ${parameters.path}.`
+            };
+          }
+
+          const guard = deterministicCodeGuard.guard(parameters.path, parameters.content || '');
+          if (!guard.accepted) {
+            return { success: false, error: `Code rejected before persistence: ${guard.reason}`, diagnostics: guard.diagnostics };
+          }
+          
           fs.mkdirSync(require('path').dirname(filePath), { recursive: true });
           fs.writeFileSync(filePath, parameters.content || '', 'utf-8');
           
           if (projectFiles && Array.isArray(projectFiles)) {
-            const inMem = projectFiles.find(f => f.path === parameters.path);
             if (inMem) inMem.content = parameters.content || '';
             else projectFiles.push({ path: parameters.path, content: parameters.content || '' });
           }
@@ -269,6 +278,22 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 
       case 'apply_diff': {
         try {
+          const search = parameters.search !== undefined ? parameters.search : (parameters.search_block !== undefined ? parameters.search_block : (parameters.find !== undefined ? parameters.find : parameters.old_code));
+          const replace = parameters.replace !== undefined ? parameters.replace : (parameters.new_code !== undefined ? parameters.new_code : (parameters.replacement !== undefined ? parameters.replacement : parameters.replace_block));
+
+          if (!parameters.path || typeof parameters.path !== 'string') {
+            return { success: false, code: 'INVALID_PATCH_CONTRACT', error: 'Missing or invalid path in apply_diff' };
+          }
+          if (!search || typeof search !== 'string' || !search.trim()) {
+            return { success: false, code: 'INVALID_PATCH_CONTRACT', error: 'Non-empty search block is required for apply_diff' };
+          }
+          if (replace === undefined || typeof replace !== 'string') {
+            return { success: false, code: 'INVALID_PATCH_CONTRACT', error: 'Replace block must be a string in apply_diff' };
+          }
+          if (parameters.expectedSourceHash !== undefined && typeof parameters.expectedSourceHash !== 'string') {
+            return { success: false, code: 'INVALID_PATCH_CONTRACT', error: 'expectedSourceHash must be a string if provided' };
+          }
+
           const filePath = this.resolveSafePath(this.projectPath, parameters.path);
           if (!filePath) return { success: false, error: 'Access denied: Invalid or unsafe path' };
           
@@ -281,14 +306,14 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             content = inMem.content || '';
           }
           
-          const search = parameters.search || parameters.search_block || '';
-          const replace = parameters.replace || parameters.new_code || parameters.replacement || '';
+          const expectedSourceHash = parameters.expectedSourceHash || parameters.sourceHash || parameters.beforeHash;
           
-          const diffResult = DiffEngine.apply(content, search, replace);
+          const diffResult = DiffEngine.apply(content, search, replace, { expectedSourceHash });
           
           if (!diffResult.success) {
             return { 
               success: false, 
+              code: diffResult.code,
               error: diffResult.error 
             };
           }
@@ -296,8 +321,26 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           const newContent = diffResult.newContent;
           const guard = deterministicCodeGuard.guard(parameters.path, newContent);
           if (!guard.accepted) return { success: false, error: `Code rejected before persistence: ${guard.reason}`, diagnostics: guard.diagnostics };
-          fs.mkdirSync(require('path').dirname(filePath), { recursive: true });
-          fs.writeFileSync(filePath, newContent, 'utf-8');
+          
+          const priorContent = content;
+          try {
+            fs.mkdirSync(require('path').dirname(filePath), { recursive: true });
+            fs.writeFileSync(filePath, newContent, 'utf-8');
+          } catch (writeErr) {
+            try { fs.writeFileSync(filePath, priorContent, 'utf-8'); } catch (_) {}
+            return { success: false, code: 'WRITE_ERROR', error: `Failed to persist patch: ${writeErr.message}` };
+          }
+
+          const vReport = guard.verification;
+          if (vReport && vReport.valid === false) {
+            try { fs.writeFileSync(filePath, priorContent, 'utf-8'); } catch (_) {}
+            return {
+              success: false,
+              code: 'VERIFICATION_FAILED_ROLLED_BACK',
+              error: `Code failed verification (${vReport.repairSuggestion || 'syntax error'}). Automatically rolled back.`,
+              diagnostics: guard.diagnostics
+            };
+          }
           
           if (projectFiles && Array.isArray(projectFiles)) {
             const inMem = projectFiles.find(f => f.path === parameters.path);

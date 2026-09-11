@@ -1,0 +1,50 @@
+FAIL tests/browser/visualHealer.browser.test.js
+  ● Test suite failed to run
+
+    TypeError: Class extends value undefined is not a constructor or null
+
+    [0m [90m 16 |[39m [90m */[39m
+     [90m 17 |[39m
+    [31m[1m>[22m[39m[90m 18 |[39m [36mconst[39m { test[33m,[39m expect } [33m=[39m require([32m'@playwright/test'[39m)[33m;[39m
+     [90m    |[39m                          [31m[1m^[22m[39m
+     [90m 19 |[39m [36mconst[39m path [33m=[39m require([32m'path'[39m)[33m;[39m
+     [90m 20 |[39m [36mconst[39m fs [33m=[39m require([32m'fs'[39m)[33m;[39m
+     [90m 21 |[39m [36mconst[39m { pathToFileURL } [33m=[39m require([32m'url'[39m)[33m;[39m[0m
+
+      at Object.<anonymous> (node_modules/playwright-core/lib/utilsBundle.js:83524:15)
+      at packages/utils/comparators.ts (node_modules/playwright-core/lib/coreBundle.js:7960:14)
+      at __init (node_modules/playwright-core/lib/coreBundle.js:11:58)
+      at packages/utils/index.ts (node_modules/playwright-core/lib/coreBundle.js:10871:5)
+      at __init (node_modules/playwright-core/lib/coreBundle.js:11:58)
+      at packages/playwright-core/src/coreBundle.ts (node_modules/playwright-core/lib/coreBundle.js:75773:5)
+      at __init (node_modules/playwright-core/lib/coreBundle.js:11:58)
+      at Object.<anonymous> (node_modules/playwright-core/lib/coreBundle.js:75786:1)
+      at Object.<anonymous> (node_modules/playwright-core/index.js:17:18)
+      at Object.<anonymous> (node_modules/playwright/lib/index.js:42:33)
+      at Object.<anonymous> (node_modules/playwright/test.js:17:13)
+      at Object.<anonymous> (node_modules/@playwright/test/index.js:17:18)
+      at Object.require (tests/browser/visualHealer.browser.test.js:18:26)
+
+FAIL tests/visualHealer.test.js
+  ● Performance Optimization › scan completes within reasonable time
+
+    expect(received).toBeLessThan(expected)
+
+    Expected: < 500
+    Received:   824.8307000000004
+
+    [0m [90m 562 |[39m     
+     [90m 563 |[39m     [90m// Should complete in under 500ms even with 100 elements[39m
+    [31m[1m>[22m[39m[90m 564 |[39m     expect(elapsed)[33m.[39mtoBeLessThan([35m500[39m)[33m;[39m
+     [90m     |[39m                     [31m[1m^[22m[39m
+     [90m 565 |[39m     expect(report[33m.[39mscanTimeMs)[33m.[39mtoBeLessThan([35m500[39m)[33m;[39m
+     [90m 566 |[39m   })[33m;[39m
+     [90m 567 |[39m })[33m;[39m[0m
+
+      at Object.toBeLessThan (tests/visualHealer.test.js:564:21)
+
+Test Suites: 2 failed, 2 total
+Tests:       1 failed, 32 passed, 33 total
+Snapshots:   0 total
+Time:        7.009 s
+Ran all test suites matching visualHealer.

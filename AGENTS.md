@@ -275,6 +275,11 @@ cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\frontend"
 npm test                    # 24 tests / 5 suites
 npm test -- --coverage      # coverage thresholds enforced (4% baseline, grows as suites expand)
 
+# Frontend: real-browser VisualHealer suite (Playwright + Chromium, file:// fixtures)
+cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\frontend"
+npx playwright test         # 13 tests — real geometry, computed styles, MutationObserver, iframe, responsive
+# NOTE: tests/browser/* is Playwright-only; Jest ignores it via testPathIgnorePatterns.
+
 # Backend: unit + integration (node:test, 0 LLM calls, ephemeral port)
 cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\backend"
 npm run test:unit           # 58 tests total (unit+integration)

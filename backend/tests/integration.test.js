@@ -239,6 +239,12 @@ test('POST /api/agent/rag-sync -> responds with success or warning', async () =>
   assert.ok(body.success !== undefined);
 });
 
+test('POST /api/agent/heal missing parameters -> 400', async () => {
+  const { status, body } = await req('POST', '/api/agent/heal', {});
+  assert.equal(status, 400);
+  assert.ok(body.error);
+});
+
 // ── Resume Endpoints (Validation & Error Handling) ───────────────────────
 test('POST /api/v1/resume/regenerate-section missing body -> 400', async () => {
   const { status, body } = await req('POST', '/api/v1/resume/regenerate-section', {});

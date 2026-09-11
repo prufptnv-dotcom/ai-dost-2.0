@@ -21,6 +21,7 @@ import ProjectWizardModal from './ProjectWizardModal';
 import DeployModal from './DeployModal';
 import TaskStepItem from './TaskStepItem';
 import VisualDebugger from './VisualDebugger';
+import VisualHealer from '../VisualHealer';
 import CopilotHistoryModal from './CopilotHistoryModal';
 import VisualDatabaseExplorer from './VisualDatabaseExplorer';
 import { FileExplorer, normalizePath } from '../ide/FileExplorer';
@@ -3677,6 +3678,8 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                           : { width: '100%', height: '100%' }
                       }
                     >
+                      {/* Visual Healer — analyzes the preview iframe for UI issues */}
+                      <VisualHealer iframeRef={iframeRef} />
                       <iframe
                         ref={iframeRef}
                         src={

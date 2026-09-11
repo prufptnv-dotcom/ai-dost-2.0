@@ -24,7 +24,7 @@ const QUICK_PROMPTS = [
 ];
 
 export default function AgentView({ onToast, onOpenFile }) {
-  const BACKEND = (typeof window !== 'undefined' && window.__AI_DOST_BACKEND__) || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+  const BACKEND = (typeof window !== 'undefined' && window.__AI_DOST_BACKEND__) || process.env.NEXT_PUBLIC_BACKEND_URL || '';
 
   const [tab, setTab] = useState('workbench'); // 'workbench' | 'kanban' | 'spec' | 'crew'
   const [objective, setObjective] = useState('Autonomous Developer Runtime');
@@ -104,7 +104,7 @@ export default function AgentView({ onToast, onOpenFile }) {
     runAgent(`Build this project from spec: ${JSON.stringify(spec)}`);
   };
 
-  const runAgent = async (text) => {
+  const runAgent = async (text, approvalToken = null) => {
     const prompt = (text || input).trim();
     if (!prompt || running) return;
 
@@ -136,10 +136,14 @@ export default function AgentView({ onToast, onOpenFile }) {
     try {
       const res = await fetch(`${BACKEND}/api/agent/run`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(approvalToken ? { 'x-approval-token': approvalToken } : {})
+        },
         signal: controller.signal,
         body: JSON.stringify({
           userPrompt: prompt,
+          approvalToken: approvalToken,
           projectPath: '',
           saveToRepo: false,
           forceLocal: false,
@@ -171,6 +175,23 @@ export default function AgentView({ onToast, onOpenFile }) {
               setStatus('working');
               setActiveRole('SUPERVISOR');
               addTimelineEvent('SUPERVISOR', `Execution plan generated with ${data.plan.tasks?.length || 0} subtasks`, 'success');
+            } else if (data.type === 'gate_approval_required' || data.type === 'waiting_for_user') {
+              setStatus('waiting_for_user');
+              const blockedAction = (data.gate?.capabilities || []).map((c) => c.capability_id).join(', ') || data.blockedAction || 'Workspace Operation';
+              const reason = data.message || (data.gate?.capabilities || []).map((c) => c.reason).join('; ') || 'User approval required to proceed with sensitive workspace operations.';
+              setWaitingApproval({
+                reason,
+                blockedAction,
+                token: data.gate?.approval_token,
+                prompt
+              });
+              addTimelineEvent('SUPERVISOR', `Action blocked — Waiting for your approval (${blockedAction})`, 'waiting');
+            } else if (data.type === 'gate_blocked') {
+              setStatus('failed');
+              const reason = (data.gate?.capabilities || []).map((c) => c.reason).join(', ') || data.message || 'Blocked by security policy';
+              addTimelineEvent('SUPERVISOR', `Security Policy Block: ${reason}`, 'failed');
+            } else if (data.type === 'gate_approved') {
+              addTimelineEvent('SUPERVISOR', 'Capability approval validated and consumed.', 'success');
             } else if (data.type === 'tool_call') {
               const toolName = data.action || data.tool || 'tool';
               const argsStr = typeof data.parameters === 'object' ? JSON.stringify(data.parameters) : String(data.arguments || '');
@@ -230,10 +251,6 @@ export default function AgentView({ onToast, onOpenFile }) {
             } else if (data.type === 'verification') {
               setVerificationResult(data.result);
               addTimelineEvent('VERIFIER', `Verification finished: ${data.result?.verdict || 'PASS'}`, data.result?.verdict === 'PASS' ? 'success' : 'failed');
-            } else if (data.type === 'waiting_for_user') {
-              setStatus('waiting_for_user');
-              setWaitingApproval(data.reason || 'User approval required to proceed.');
-              addTimelineEvent('SUPERVISOR', 'Execution paused: WAITING FOR USER', 'waiting');
             } else if (data.type === 'done') {
               setStatus('complete');
               setActiveRole('SUPERVISOR');
@@ -260,9 +277,12 @@ export default function AgentView({ onToast, onOpenFile }) {
   };
 
   const handleApprove = () => {
+    const token = typeof waitingApproval === 'object' ? waitingApproval?.token : null;
+    const promptText = typeof waitingApproval === 'object' ? waitingApproval?.prompt : input;
     setWaitingApproval(null);
-    setStatus('working');
-    addTimelineEvent('SUPERVISOR', 'User approved pending operation. Resuming...', 'working');
+    setRunning(false);
+    addTimelineEvent('SUPERVISOR', 'User approved pending operation. Resuming with approval token...', 'working');
+    runAgent(promptText, token);
   };
 
   const handleReject = () => {
@@ -324,7 +344,8 @@ export default function AgentView({ onToast, onOpenFile }) {
         {/* Waiting For User Approval Banner */}
         {status === 'waiting_for_user' && (
           <ApprovalBanner
-            reason={waitingApproval || 'Sensitive workspace mutation requires approval.'}
+            reason={typeof waitingApproval === 'object' ? waitingApproval?.reason : (waitingApproval || 'Sensitive workspace mutation requires approval.')}
+            blockedAction={typeof waitingApproval === 'object' ? waitingApproval?.blockedAction : null}
             onApprove={handleApprove}
             onReject={handleReject}
             onRetry={() => runAgent()}

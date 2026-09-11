@@ -7,13 +7,46 @@ class DiffEngine {
   /**
    * Applies a search/replace block to original content with multiple fallback strategies.
    * @param {string} originalContent 
+   * @param {string} originalContent 
    * @param {string} searchBlock 
    * @param {string} replaceBlock 
-   * @returns { success: boolean, newContent?: string, strategy?: string, confidence?: number, error?: string }
+   * @param {string|object} [options] Optional expectedSourceHash or options object { expectedSourceHash }
+   * @returns { success: boolean, newContent?: string, strategy?: string, confidence?: number, error?: string, code?: string }
    */
-  static apply(originalContent, searchBlock, replaceBlock) {
+  static apply(originalContent, searchBlock, replaceBlock, options = {}) {
+    const expectedSourceHash = typeof options === 'string' ? options : options?.expectedSourceHash;
+    if (expectedSourceHash) {
+      const crypto = require('crypto');
+      const currentHash = crypto.createHash('sha256').update(originalContent || '').digest('hex');
+      if (currentHash !== expectedSourceHash) {
+        return {
+          success: false,
+          code: 'STALE_PATCH',
+          error: `Source conflict: File has changed since analysis. Expected hash ${expectedSourceHash.substring(0, 8)}... but found ${currentHash.substring(0, 8)}...`,
+          expectedHash: expectedSourceHash,
+          actualHash: currentHash
+        };
+      }
+    }
+
     if (!searchBlock) {
       return { success: false, error: 'Empty search block provided.' };
+    }
+
+    // Idempotency: If replaceBlock already exists and searchBlock does not exist at all,
+    // the patch was likely already applied. Do not corrupt source.
+    if (replaceBlock && searchBlock !== replaceBlock) {
+      const searchCount = originalContent.split(searchBlock).length - 1;
+      const replaceCount = originalContent.split(replaceBlock).length - 1;
+      if (searchCount === 0 && replaceCount >= 1) {
+        return {
+          success: true,
+          newContent: originalContent,
+          strategy: 'idempotent-noop',
+          confidence: 1.0,
+          message: 'Patch already applied. No-op.'
+        };
+      }
     }
 
     // Determine the original line ending style to preserve it

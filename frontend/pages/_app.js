@@ -6,7 +6,6 @@ import { ModeProvider } from "../context/ModeContext";
 
 
 import ErrorBoundary from "../components/ErrorBoundary";
-import VisualHealer from "../components/VisualHealer";
 
 export default function App({ Component, pageProps }) {
 
@@ -15,7 +14,6 @@ export default function App({ Component, pageProps }) {
       <ToastProvider>
         <SocketProvider>
           <ModeProvider>
-            <VisualHealer />
             <Component {...pageProps} />
           </ModeProvider>
         </SocketProvider>

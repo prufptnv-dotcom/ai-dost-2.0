@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fixture C — Hidden Interactive</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: sans-serif; }
+    .hidden-button {
+      display: none;
+      background: #ff6b6b;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      cursor: pointer;
+    }
+    .zero-size-button {
+      width: 0;
+      height: 0;
+      overflow: hidden;
+      padding: 0;
+      margin: 0;
+      border: none;
+      background: #4ecdc4;
+      color: white;
+      cursor: pointer;
+    }
+    .invisible-button {
+      visibility: hidden;
+      background: #ffe66d;
+      color: #333;
+      padding: 10px 20px;
+      border: none;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <p>Hidden interactive elements that should be detected:</p>
+  <button class="hidden-button" onclick="alert('hidden clicked')">Display None Button</button>
+  <button class="zero-size-button" onclick="alert('zero clicked')">Zero Size</button>
+  <button class="invisible-button" onclick="alert('invisible clicked')">Visibility Hidden</button>
+</body>
+</html>

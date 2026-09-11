@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 
 class ExecutionController {
-  constructor({ db, agentRunDao, agentStepDao, toolCallDao, observationDao, verificationResultDao, workspaceManager }) {
+  constructor({ db, agentRunDao, agentStepDao, toolCallDao, observationDao, verificationResultDao, workspaceManager, gatekeeper } = {}) {
     this.db = db;
     this.agentRunDao = agentRunDao;
     this.agentStepDao = agentStepDao;
@@ -9,6 +9,7 @@ class ExecutionController {
     this.observationDao = observationDao;
     this.verificationResultDao = verificationResultDao;
     this.workspaceManager = workspaceManager;
+    this.gatekeeper = gatekeeper !== undefined ? gatekeeper : require('../policy/CapabilityGatekeeper').capabilityGatekeeper;
     
     this.VALID_TRANSITIONS = {
       'PENDING': ['RUNNING', 'CANCELLED', 'FAILED'],
@@ -139,13 +140,64 @@ class ExecutionController {
     return this.toolCallDao.update(toolCallId, { status, output, errorInfo, timingMeta });
   }
 
-  async executeTool(stepId, toolName, input, context, toolRegistry) {
+  async executeTool(stepId, toolName, input, context = {}, toolRegistry) {
     const tool = toolRegistry.get(toolName);
     if (!tool) {
       throw new Error(`Unknown tool: ${toolName}`);
     }
     
-    // Permission checks can be added here based on context.permissions vs tool.permissions
+    // Phase 4 Gatekeeper Integration: evaluate risk, permissions, and approval policy
+    if (this.gatekeeper && typeof this.gatekeeper.evaluate === 'function') {
+      const toolToCapMap = {
+        'run_terminal': 'devops.terminal',
+        'terminal': 'devops.terminal',
+        'exec_command': 'devops.terminal',
+        'apply_diff': 'coding.production_code',
+        'write_file': 'coding.production_code',
+        'read_file': 'coding.code_explanation',
+        'list_files': 'coding.code_explanation',
+        'load_skill': 'autonomy.skill_loading'
+      };
+
+      const capId = tool.capabilityId || toolToCapMap[toolName] || null;
+      if (capId) {
+        const evaluation = this.gatekeeper.evaluate([capId], {
+          user: (context && context.user) || (context && context.userId ? { id: context.userId, role: context.role || 'developer' } : null),
+          project_id: context && context.projectId,
+          permissions: (context && context.permissions) !== undefined ? context.permissions : null
+        });
+
+        if (evaluation.decision === 'BLOCK') {
+          const reason = (evaluation.capabilities || []).map(c => c.reason).join(', ') || 'Blocked by security policy';
+          throw new Error(`Execution blocked by CapabilityGatekeeper: ${reason}`);
+        }
+
+        if (['REQUIRE_EXPLICIT_APPROVAL', 'REQUIRE_CONFIRMATION'].includes(evaluation.decision)) {
+          const token = context && (context.approvalToken || context.approval_token);
+          if (!token) {
+            const err = new Error(`Action requires user approval (${evaluation.decision}): ${capId}`);
+            err.code = 'APPROVAL_REQUIRED';
+            err.decision = evaluation.decision;
+            err.approvalToken = evaluation.approval_token;
+            err.capabilities = evaluation.capabilities;
+            throw err;
+          }
+
+          const validation = this.gatekeeper.validateApproval({
+            token,
+            requestId: context && (context.requestId || context.request_id),
+            planId: context && (context.planId || context.taskId),
+            user: context && (context.user || { id: context.userId }),
+            capabilityIds: [capId]
+          });
+
+          if (!validation.valid) {
+            throw new Error(`Invalid or expired approval token: ${validation.reason}`);
+          }
+        }
+      }
+    }
+
     const toolCall = await this.recordToolCall(stepId, toolName, input);
     
     const startTime = Date.now();
