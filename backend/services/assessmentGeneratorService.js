@@ -330,6 +330,38 @@ Output MUST be a single, valid JSON object matching:
   // Process and sanitize AI output or build fallback
   let assessment;
   if (rawJson && Array.isArray(rawJson.questions)) {
+    let processedQuestions = rawJson.questions.map((q, idx) => ({
+      id: q.id || `q${idx + 1}`,
+      type: q.type || (q.options?.length ? 'mcq' : 'short-answer'),
+      prompt: q.prompt || `Question ${idx + 1}`,
+      options: Array.isArray(q.options) ? q.options : [],
+      correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : 0,
+      marks: q.marks || 1,
+      negativeMarks: q.negativeMarks !== undefined ? q.negativeMarks : (mode === 'mock' ? 0.25 : 0),
+      topic: q.topic || topic,
+      explanation: q.explanation || 'Refer to standard documentation for this topic.',
+      hint: q.hint || 'Review fundamental concepts.',
+      sourceReferences: q.sourceReferences || null
+    }));
+
+    // If document content provided, rigorously verify citations and eliminate hallucinations
+    if (docContent && docContent.trim().length > 100) {
+      const lowerDoc = docContent.toLowerCase();
+      processedQuestions = processedQuestions.map(q => {
+        let ref = q.sourceReferences;
+        if (!ref || typeof ref !== 'object') {
+          ref = { source: docName || 'Document', excerpt: null };
+        }
+        if (ref.excerpt) {
+          const isVerbatim = lowerDoc.includes(ref.excerpt.toLowerCase().trim());
+          ref.verified = isVerbatim;
+        } else {
+          ref.verified = false;
+        }
+        return { ...q, sourceReferences: ref };
+      });
+    }
+
     assessment = {
       id: assessmentId,
       title: rawJson.title || `${topic} Assessment`,
@@ -340,19 +372,49 @@ Output MUST be a single, valid JSON object matching:
       timeLimit: timeLimit || (mode === 'mock' ? actualCount * 75 : 0),
       negativeMarks: negativeMarks || (mode === 'mock' ? 0.25 : 0),
       created_at: new Date().toISOString(),
-      questions: rawJson.questions.map((q, idx) => ({
-        id: q.id || `q${idx + 1}`,
-        type: q.type || (q.options?.length ? 'mcq' : 'short-answer'),
-        prompt: q.prompt || `Question ${idx + 1}`,
-        options: Array.isArray(q.options) ? q.options : [],
-        correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : 0,
-        marks: q.marks || 1,
-        negativeMarks: q.negativeMarks !== undefined ? q.negativeMarks : (mode === 'mock' ? 0.25 : 0),
-        topic: q.topic || topic,
-        explanation: q.explanation || 'Refer to standard documentation for this topic.',
-        hint: q.hint || 'Review fundamental concepts.',
-        sourceReferences: q.sourceReferences || null
-      }))
+      questions: processedQuestions
+    };
+  } else if (docContent && docContent.trim().length > 100) {
+    // Document-grounded deterministic fallback (avoids serving unrelated programming questions)
+    const sentences = docContent
+      .split(/[.\n]+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 30 && s.length < 220);
+
+    const questions = [];
+    const count = Math.min(sentences.length, actualCount);
+    for (let i = 0; i < count; i++) {
+      const s = sentences[i];
+      questions.push({
+        id: `q${i + 1}`,
+        type: 'true-false',
+        prompt: `According to the document: "${s}"`,
+        options: ['True', 'False'],
+        correctAnswer: 0,
+        marks: 1,
+        negativeMarks: mode === 'mock' ? (negativeMarks || 0.25) : 0,
+        topic: docName || 'Document Grounding',
+        explanation: `Explicitly stated in the document source text: "${s}"`,
+        hint: 'Refer to the provided document excerpt.',
+        sourceReferences: {
+          source: docName || 'Document',
+          excerpt: s.slice(0, 160),
+          verified: true
+        }
+      });
+    }
+
+    assessment = {
+      id: assessmentId,
+      title: `${docName || topic} Grounded Assessment`,
+      subject,
+      topic,
+      mode,
+      difficulty,
+      timeLimit: timeLimit || (mode === 'mock' ? questions.length * 75 : 0),
+      negativeMarks: mode === 'mock' ? (negativeMarks || 0.25) : 0,
+      created_at: new Date().toISOString(),
+      questions
     };
   } else {
     // Robust template fallback

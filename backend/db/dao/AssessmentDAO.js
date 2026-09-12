@@ -23,11 +23,11 @@ class AssessmentDAO {
       stmt.run(
         assessment.id,
         userId,
-        assessment.title,
-        assessment.subject,
-        assessment.topic,
-        assessment.mode,
-        assessment.difficulty,
+        assessment.title || 'Untitled Assessment',
+        assessment.subject || 'General',
+        assessment.topic || 'General',
+        assessment.mode || 'practice',
+        assessment.difficulty || 'intermediate',
         assessment.timeLimit || 0,
         assessment.negativeMarks || 0,
         JSON.stringify(assessment.questions || []),
@@ -86,8 +86,8 @@ class AssessmentDAO {
         SET answers_json = ?, time_spent_seconds = ?
         WHERE id = ? AND status = 'in_progress'
       `);
-      stmt.run(JSON.stringify(answers), timeSpentSeconds, attemptId);
-      return true;
+      const info = stmt.run(JSON.stringify(answers), timeSpentSeconds, attemptId);
+      return info.changes > 0;
     } catch (err) {
       logger.warn('[AssessmentDAO] saveAttemptProgress error:', err.message);
       return false;
@@ -100,13 +100,40 @@ class AssessmentDAO {
       const stmt = this.db.prepare(`
         UPDATE assessment_attempts
         SET status = 'submitted', submitted_at = ?, result_json = ?, answers_json = ?, time_spent_seconds = ?
-        WHERE id = ?
+        WHERE id = ? AND status = 'in_progress'
       `);
-      stmt.run(now, JSON.stringify(result), JSON.stringify(answers), timeSpentSeconds, attemptId);
-      return true;
+      const info = stmt.run(now, JSON.stringify(result), JSON.stringify(answers), timeSpentSeconds, attemptId);
+      
+      // If 0 changes, attempt was either not found or already submitted/expired
+      if (info.changes === 0) {
+        const existing = this.getAttemptById(attemptId);
+        if (existing && existing.status === 'submitted') {
+          logger.info(`[AssessmentDAO] submitAttempt idempotent hit for already-submitted attempt ${attemptId}`);
+          return { success: true, alreadySubmitted: true, attempt: existing };
+        }
+        return { success: false, error: 'Attempt is not in_progress' };
+      }
+
+      return { success: true, alreadySubmitted: false };
     } catch (err) {
       logger.error('[AssessmentDAO] submitAttempt failed:', err.message);
       throw err;
+    }
+  }
+
+  expireAttempt(attemptId, result = null, timeSpentSeconds = 0) {
+    try {
+      const now = new Date().toISOString();
+      const stmt = this.db.prepare(`
+        UPDATE assessment_attempts
+        SET status = 'expired', submitted_at = ?, result_json = ?, time_spent_seconds = ?
+        WHERE id = ? AND status = 'in_progress'
+      `);
+      const info = stmt.run(now, result ? JSON.stringify(result) : null, timeSpentSeconds, attemptId);
+      return info.changes > 0;
+    } catch (err) {
+      logger.error('[AssessmentDAO] expireAttempt failed:', err.message);
+      return false;
     }
   }
 
@@ -194,6 +221,55 @@ class AssessmentDAO {
     } catch (err) {
       logger.error('[AssessmentDAO] getUserWeakTopics error:', err.message);
       return [];
+    }
+  }
+
+  /**
+   * Computes an adaptive learning profile with dynamic difficulty targeting
+   */
+  getUserAdaptiveProfile(userId = 'default') {
+    try {
+      const attempts = this.getUserAttempts(userId, 20);
+      const weakTopics = this.getUserWeakTopics(userId);
+
+      if (attempts.length === 0) {
+        return {
+          recommendedDifficulty: 'intermediate',
+          averagePercentage: 0,
+          totalAttempts: 0,
+          weakTopics: []
+        };
+      }
+
+      const percentages = attempts
+        .filter(a => a.result && typeof a.result.percentage === 'number')
+        .map(a => a.result.percentage);
+
+      const avgPct = percentages.length > 0
+        ? Math.round(percentages.reduce((a, b) => a + b, 0) / percentages.length)
+        : 50;
+
+      let recommendedDifficulty = 'intermediate';
+      if (avgPct < 50) {
+        recommendedDifficulty = 'beginner';
+      } else if (avgPct >= 78) {
+        recommendedDifficulty = 'advanced';
+      }
+
+      return {
+        recommendedDifficulty,
+        averagePercentage: avgPct,
+        totalAttempts: attempts.length,
+        weakTopics: weakTopics.map(w => w.topic)
+      };
+    } catch (err) {
+      logger.error('[AssessmentDAO] getUserAdaptiveProfile error:', err.message);
+      return {
+        recommendedDifficulty: 'intermediate',
+        averagePercentage: 50,
+        totalAttempts: 0,
+        weakTopics: []
+      };
     }
   }
 }

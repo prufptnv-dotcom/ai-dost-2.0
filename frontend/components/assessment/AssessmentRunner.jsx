@@ -20,6 +20,7 @@ export function AssessmentRunner({ assessment, onClose, onComplete }) {
   const [shortAnswerFeedback, setShortAnswerFeedback] = useState({});
   const [evaluatingShortAnswer, setEvaluatingShortAnswer] = useState(false);
   const [reviewExpanded, setReviewExpanded] = useState({});
+  const [showMobilePalette, setShowMobilePalette] = useState(false);
 
   const isPractice = assessment?.mode === 'practice';
   const isMock = assessment?.mode === 'mock';
@@ -238,7 +239,16 @@ export function AssessmentRunner({ assessment, onClose, onComplete }) {
             </div>
           </div>
 
-          <div className="flex items-center gap-4 shrink-0">
+          <div className="flex items-center gap-3 shrink-0">
+            {/* Mobile Palette Toggle Button */}
+            <button
+              onClick={() => setShowMobilePalette(prev => !prev)}
+              className="md:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-canvas-overlay border border-border text-paper-200 text-xs font-semibold hover:border-accent/40 cursor-pointer"
+              title="Toggle Question Palette"
+            >
+              <span>Palette ({answeredCount}/{questions.length})</span>
+            </button>
+
             {/* Countdown / Stopwatch */}
             <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border font-mono text-xs font-semibold ${
               isTimeCritical ? 'bg-rose-500/15 border-rose-500/40 text-rose-400 animate-pulse' : 'bg-canvas-overlay border-border text-paper-200'
@@ -249,7 +259,7 @@ export function AssessmentRunner({ assessment, onClose, onComplete }) {
 
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg hover:bg-canvas-overlay text-ink-muted hover:text-paper-100 transition-colors"
+              className="p-1.5 rounded-lg hover:bg-canvas-overlay text-ink-muted hover:text-paper-100 transition-colors cursor-pointer"
               title="Close Assessment"
             >
               <X className="w-4 h-4" />
@@ -435,8 +445,18 @@ export function AssessmentRunner({ assessment, onClose, onComplete }) {
             </div>
 
             {/* Right Column: Question Palette Navigation */}
-            <aside className="w-full md:w-64 border-t md:border-t-0 md:border-l border-border bg-canvas-elevated p-4 flex flex-col shrink-0">
-              <h4 className="text-xs font-bold text-paper-100 uppercase tracking-wider mb-3">Question Palette</h4>
+            <aside className={`w-full md:w-64 border-t md:border-t-0 md:border-l border-border bg-canvas-elevated p-4 flex flex-col shrink-0 ${
+              showMobilePalette ? 'block animate-fade-in' : 'hidden md:flex'
+            }`}>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-xs font-bold text-paper-100 uppercase tracking-wider">Question Palette</h4>
+                <button
+                  onClick={() => setShowMobilePalette(false)}
+                  className="md:hidden text-xs text-ink-muted hover:text-paper-100 cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
               
               <div className="grid grid-cols-5 gap-2 mb-4 overflow-y-auto flex-1 max-h-48 md:max-h-full">
                 {questions.map((q, idx) => {
@@ -456,7 +476,10 @@ export function AssessmentRunner({ assessment, onClose, onComplete }) {
                   return (
                     <button
                       key={q.id}
-                      onClick={() => setCurrentIndex(idx)}
+                      onClick={() => {
+                        setCurrentIndex(idx);
+                        setShowMobilePalette(false);
+                      }}
                       className={`h-9 rounded-lg text-xs font-mono font-semibold border flex items-center justify-center transition-all cursor-pointer relative ${colorClass} ${
                         isActive ? 'ring-2 ring-accent ring-offset-1 ring-offset-canvas-surface scale-105' : 'hover:opacity-80'
                       }`}
