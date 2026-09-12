@@ -64,8 +64,8 @@ export function ChatComposer({
             </button>
           )}
 
-          {persona && (
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-xs bg-canvas-elevated text-txt-muted border border-border-subtle">
+          {persona && persona !== 'auto' && (
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-xs bg-canvas-elevated text-txt-muted border border-border-subtle" title="Active Persona">
               {persona}
             </span>
           )}

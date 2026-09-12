@@ -1,0 +1,130 @@
+[
+  {
+    "stage": "10_users",
+    "concurrency": 10,
+    "durationMs": 2505.8515,
+    "totalRequests": 4643,
+    "successfulRequests": 4643,
+    "failedRequests": 0,
+    "timeoutCount": 0,
+    "rps": 1852.86,
+    "errorRate": 0,
+    "statusDistribution": {
+      "200": 4643
+    },
+    "latencies": {
+      "minMs": 1.03,
+      "p50Ms": 4.55,
+      "p95Ms": 9.44,
+      "p99Ms": 15.38,
+      "maxMs": 89.49
+    },
+    "eventLoopLag": {
+      "meanMs": 20.73,
+      "maxMs": 30.77
+    },
+    "resourceUsage": {
+      "rssDeltaMb": 9.28,
+      "heapUsedMb": 8.16,
+      "cpuUserMs": 1500,
+      "cpuSystemMs": 516
+    },
+    "circuitBroken": false
+  },
+  {
+    "stage": "50_users",
+    "concurrency": 50,
+    "durationMs": 2524.3745,
+    "totalRequests": 4288,
+    "successfulRequests": 4288,
+    "failedRequests": 0,
+    "timeoutCount": 0,
+    "rps": 1698.64,
+    "errorRate": 0,
+    "statusDistribution": {
+      "200": 4288
+    },
+    "latencies": {
+      "minMs": 12.42,
+      "p50Ms": 24.49,
+      "p95Ms": 57.38,
+      "p99Ms": 65.63,
+      "maxMs": 77.39
+    },
+    "eventLoopLag": {
+      "meanMs": 21.09,
+      "maxMs": 34.01
+    },
+    "resourceUsage": {
+      "rssDeltaMb": 10.66,
+      "heapUsedMb": 13.77,
+      "cpuUserMs": 1063,
+      "cpuSystemMs": 640
+    },
+    "circuitBroken": false
+  },
+  {
+    "stage": "100_users",
+    "concurrency": 100,
+    "durationMs": 2565.2779,
+    "totalRequests": 4190,
+    "successfulRequests": 4190,
+    "failedRequests": 0,
+    "timeoutCount": 0,
+    "rps": 1633.35,
+    "errorRate": 0,
+    "statusDistribution": {
+      "200": 4190
+    },
+    "latencies": {
+      "minMs": 23.88,
+      "p50Ms": 56.49,
+      "p95Ms": 104.89,
+      "p99Ms": 156.62,
+      "maxMs": 186.92
+    },
+    "eventLoopLag": {
+      "meanMs": 22.06,
+      "maxMs": 38.47
+    },
+    "resourceUsage": {
+      "rssDeltaMb": 5.79,
+      "heapUsedMb": 14.22,
+      "cpuUserMs": 1328,
+      "cpuSystemMs": 453
+    },
+    "circuitBroken": false
+  },
+  {
+    "stage": "500_users",
+    "concurrency": 500,
+    "durationMs": 2865.2042,
+    "totalRequests": 4520,
+    "successfulRequests": 4520,
+    "failedRequests": 0,
+    "timeoutCount": 0,
+    "rps": 1577.55,
+    "errorRate": 0,
+    "statusDistribution": {
+      "200": 4520
+    },
+    "latencies": {
+      "minMs": 113.53,
+      "p50Ms": 253.89,
+      "p95Ms": 471.36,
+      "p99Ms": 513.31,
+      "maxMs": 587.05
+    },
+    "eventLoopLag": {
+      "meanMs": 22.99,
+      "maxMs": 44.53
+    },
+    "resourceUsage": {
+      "rssDeltaMb": 24.25,
+      "heapUsedMb": 21.67,
+      "cpuUserMs": 1109,
+      "cpuSystemMs": 813
+    },
+    "circuitBroken": false
+  }
+]

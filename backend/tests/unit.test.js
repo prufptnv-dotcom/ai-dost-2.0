@@ -245,7 +245,7 @@ describe('utils/errors', () => {
 
 // ── Sandbox path traversal guard ────────────────────────────────────────
 describe('sandboxManager path safety', () => {
-  const sandboxManager = require('../sandbox/sandboxManager');
+  const sandboxManager = require('../sandbox/SandboxManager');
 
   test('rejects path traversal (../)', () => {
     assert.throws(() => sandboxManager._resolveSafe('C:\\sandbox\\proj-123', '../evil.txt'), /traversal/i);
@@ -544,5 +544,69 @@ describe('copilot ide path normalization & deduplication', () => {
   });
 });
 
+// ── Project Intent: CREATE_NEW_PROJECT vs MODIFY_EXISTING_PROJECT ─────────
+describe('Project Intent: CREATE_NEW_PROJECT vs MODIFY_EXISTING_PROJECT', () => {
+  const agentRouter = require('../routes/agent');
+  const { classifyProjectIntent } = agentRouter;
 
+  test('greenfield prompt with empty workspace classifies as CREATE_NEW_PROJECT', () => {
+    const intent = classifyProjectIntent('Build a weather dashboard app with React and Tailwind', false);
+    assert.equal(intent, 'CREATE_NEW_PROJECT');
+  });
 
+  test('explicit new project prompt with existing files classifies as CREATE_NEW_PROJECT', () => {
+    const intent = classifyProjectIntent('Create a brand new portfolio website from scratch', true);
+    assert.equal(intent, 'CREATE_NEW_PROJECT');
+  });
+
+  test('SmartFinance upgrade scenario with existing files classifies as MODIFY_EXISTING_PROJECT', () => {
+    const prompt = 'Upgrade this SmartFinance app: add a monthly spending trends chart and an export CSV button';
+    const intent = classifyProjectIntent(prompt, true);
+    assert.equal(intent, 'MODIFY_EXISTING_PROJECT');
+  });
+
+  test('feature addition, refactoring or bugfix on existing project classifies as MODIFY_EXISTING_PROJECT', () => {
+    assert.equal(classifyProjectIntent('Add a dark mode toggle to the navbar', true), 'MODIFY_EXISTING_PROJECT');
+    assert.equal(classifyProjectIntent('Fix broken authentication redirect in login.jsx', true), 'MODIFY_EXISTING_PROJECT');
+    assert.equal(classifyProjectIntent('Refactor database query to use SQLite index', true), 'MODIFY_EXISTING_PROJECT');
+    assert.equal(classifyProjectIntent('iss app me export button lagao', true), 'MODIFY_EXISTING_PROJECT');
+  });
+
+  test('SmartFinance existing project simulation preserves existing files and state', () => {
+    const projectStore = require('../projectStore');
+    const smartFinanceProjId = 'smart-finance-upgrade-test-' + Date.now();
+
+    // 1. Seed existing SmartFinance application files
+    projectStore.saveProjectFile(smartFinanceProjId, 'package.json', JSON.stringify({ name: 'smart-finance', version: '1.0.0' }), 'json');
+    projectStore.saveProjectFile(smartFinanceProjId, 'src/App.jsx', 'export default function App() { return <div>SmartFinance v1</div>; }', 'javascript');
+    projectStore.saveProjectFile(smartFinanceProjId, 'src/components/TransactionList.jsx', 'export function TransactionList() { return <ul><li>$50 Groceries</li></ul>; }', 'javascript');
+
+    const initialFiles = projectStore.getProjectFiles(smartFinanceProjId);
+    assert.equal(initialFiles.length, 3);
+
+    // 2. Classify intent for upgrade prompt
+    const prompt = 'Upgrade this SmartFinance app: add a monthly spending trends chart and an export CSV button';
+    const intent = classifyProjectIntent(prompt, initialFiles.length > 0);
+    assert.equal(intent, 'MODIFY_EXISTING_PROJECT');
+
+    // 3. Verify that under MODIFY_EXISTING_PROJECT, existing files are preserved, and new features are integrated additively
+    projectStore.saveProjectFile(smartFinanceProjId, 'src/components/SpendingTrendsChart.jsx', 'export function SpendingTrendsChart() { return <div className="chart">Trends</div>; }', 'javascript');
+    
+    // Update existing App.jsx to import new chart
+    const updatedApp = 'import { SpendingTrendsChart } from "./components/SpendingTrendsChart";\nexport default function App() { return <div>SmartFinance v1.1 <SpendingTrendsChart /></div>; }';
+    projectStore.saveProjectFile(smartFinanceProjId, 'src/App.jsx', updatedApp, 'javascript');
+
+    const finalFiles = projectStore.getProjectFiles(smartFinanceProjId);
+    assert.equal(finalFiles.length, 4);
+
+    // Assert existing TransactionList.jsx was untouched
+    const txList = finalFiles.find(f => f.path === 'src/components/TransactionList.jsx');
+    assert.ok(txList, 'TransactionList.jsx must be preserved');
+    assert.equal(txList.content, 'export function TransactionList() { return <ul><li>$50 Groceries</li></ul>; }');
+
+    // Assert App.jsx was updated, not wiped
+    const appFile = finalFiles.find(f => f.path === 'src/App.jsx');
+    assert.ok(appFile.content.includes('SpendingTrendsChart'), 'App.jsx must integrate new feature');
+    assert.ok(appFile.content.includes('SmartFinance'), 'Original branding and code must be preserved');
+  });
+});

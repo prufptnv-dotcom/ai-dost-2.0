@@ -4,7 +4,7 @@ const { EventEmitter } = require('events');
 const { spawn } = require('child_process');
 const net = require('net');
 const os = require('os');
-const sandboxManager = require('./sandboxManager');
+const sandboxManager = require('./SandboxManager');
 const workspaceManager = require('../services/workspaceManager');
 
 const FRAMEWORK_CONFIGS = {

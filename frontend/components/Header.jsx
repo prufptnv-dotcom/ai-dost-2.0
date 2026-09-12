@@ -102,6 +102,35 @@ const Header = ({ sidebarPadding = 0 }) => {
     }
   }, []);
 
+  const mobileMenuRef = useRef(null);
+  const hamburgerBtnRef = useRef(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (
+        menuOpen &&
+        mobileMenuRef.current &&
+        !mobileMenuRef.current.contains(e.target) &&
+        hamburgerBtnRef.current &&
+        !hamburgerBtnRef.current.contains(e.target)
+      ) {
+        setMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setMenuOpen(false);
+        setShowSettings(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [menuOpen, showSettings]);
+
   const toggleTheme = () => {
     if (isLightTheme) {
       document.body.classList.remove('light-theme');
@@ -251,6 +280,7 @@ const Header = ({ sidebarPadding = 0 }) => {
 
             {/* Mobile hamburger */}
             <button
+              ref={hamburgerBtnRef}
               suppressHydrationWarning
               aria-label={menuOpen ? 'Close menu' : 'Open menu'}
               onClick={() => setMenuOpen(!menuOpen)}
@@ -264,6 +294,7 @@ const Header = ({ sidebarPadding = 0 }) => {
         {/* ─── Mobile Menu ─── */}
         {menuOpen && (
           <div
+            ref={mobileMenuRef}
             className="md:hidden absolute top-14 left-0 right-0 animate-fadeIn"
             style={{
               background: 'rgba(8,9,14,0.97)',

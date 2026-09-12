@@ -64,8 +64,8 @@ describe('Phase 4: Production Hardening & Security Audit Suite', () => {
   });
 
   afterEach(() => {
-    if (db && db.open) {
-      db.close();
+    if (db) {
+      try { db.close(); } catch (_) {}
     }
   });
 

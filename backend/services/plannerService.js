@@ -869,4 +869,9 @@ class PlannerService {
   }
 }
 
-module.exports = new PlannerService();
+const defaultPlannerService = new PlannerService();
+defaultPlannerService.FRAMEWORK_TEMPLATES = FRAMEWORK_TEMPLATES;
+PlannerService.FRAMEWORK_TEMPLATES = FRAMEWORK_TEMPLATES;
+defaultPlannerService.PlannerService = PlannerService;
+
+module.exports = defaultPlannerService;

@@ -371,7 +371,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           try {
             const sandboxMgr = require('../sandbox/SandboxManager');
             if (!this.sandboxId) {
-              const sb = await sandboxMgr.createSandbox(this.projectId || 'orchestrator-task', { workdir: ws });
+              const sb = await sandboxMgr.createSandbox(this.projectId || 'orchestrator-task', { workdir: this.projectPath });
               this.sandboxId = sb.id;
             }
             const r = await sandboxMgr.exec(this.sandboxId, cmd, { timeout: 30000 });
@@ -618,9 +618,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       }
 
       case 'generate_project_from_prompt': {
-        return new Promise(async (resolve) => {
-          try {
-            const prompt = parameters.prompt || '';
+        try {
+          const prompt = parameters.prompt || '';
             const targetDir = parameters.targetDir || this.projectPath;
             
             const cleanPrompt = prompt.toLowerCase();
@@ -643,16 +642,15 @@ ReactDOM.createRoot(document.getElementById('root')).render(
               } catch (e) {}
             }
             
-            resolve({ 
+            return { 
               success: true, 
               message: `Project generated: ${projectType}`, 
               generatedFiles: projectFiles.map(f => ({ path: f.path, size: Buffer.from(f.content).length })),
               targetDir: targetDir
-            });
+            };
           } catch (e) {
-            resolve({ success: false, error: `Project generation failed: ${e.message}` });
+            return { success: false, error: `Project generation failed: ${e.message}` };
           }
-        });
       }
 
       case 'read_file_tree':
@@ -708,14 +706,12 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       }
 
       case 'resume_from_chat': {
-        return new Promise(async (resolve) => {
-          try {
-            const prompt = parameters.prompt || '';
-            resolve({ success: true, message: 'Resume generation endpoint called', resumeData: null });
-          } catch (e) {
-            resolve({ success: false, error: `Resume generation failed: ${e.message}` });
-          }
-        });
+        try {
+          const prompt = parameters.prompt || '';
+          return { success: true, message: 'Resume generation endpoint called', resumeData: null };
+        } catch (e) {
+          return { success: false, error: `Resume generation failed: ${e.message}` };
+        }
       }
 
       default:

@@ -3581,8 +3581,21 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);`
     {
       path: 'src/App.jsx',
       content: `import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, TrendingUp, TrendingDown, DollarSign, Wallet, PieChart, Filter } from 'lucide-react';
+import { Plus, Trash2, TrendingUp, TrendingDown, DollarSign, Wallet, PieChart, Filter, Download } from 'lucide-react';
 import { fetchTransactions, addTransaction } from './services/api';
+
+const CATEGORY_COLORS = {
+  Food: '#f59e0b',
+  Housing: '#6366f1',
+  Shopping: '#ec4899',
+  Utilities: '#06b6d4',
+  Transport: '#3b82f6',
+  Entertainment: '#a855f7',
+  Healthcare: '#10b981',
+  Investment: '#38bdf8',
+  Salary: '#10b981',
+  Other: '#64748b',
+};
 
 export default function App() {
   const [transactions, setTransactions] = useState([]);
@@ -3591,14 +3604,24 @@ export default function App() {
   const [type, setType] = useState('expense');
   const [category, setCategory] = useState('Food');
   const [filterType, setFilterType] = useState('all');
+  const [hoveredCategory, setHoveredCategory] = useState(null);
 
   useEffect(() => {
-    fetchTransactions().then(data => setTransactions(data));
+    fetchTransactions().then(data => {
+      if (Array.isArray(data) && data.length > 0) {
+        setTransactions(data);
+      } else {
+        try {
+          const saved = JSON.parse(localStorage.getItem('finance_tx') || '[]');
+          if (Array.isArray(saved) && saved.length > 0) setTransactions(saved);
+        } catch (_) {}
+      }
+    });
   }, []);
 
   const handleAdd = async (e) => {
     e.preventDefault();
-    if (!title.trim() || !amount) return;
+    if (!title.trim() || !amount || isNaN(amount) || parseFloat(amount) <= 0) return;
     const newTx = {
       title: title.trim(),
       amount: parseFloat(amount),
@@ -3607,19 +3630,76 @@ export default function App() {
       date: new Date().toISOString().split('T')[0]
     };
     const res = await addTransaction(newTx);
-    setTransactions([res, ...transactions]);
+    const updated = [res, ...transactions];
+    setTransactions(updated);
+    try { localStorage.setItem('finance_tx', JSON.stringify(updated)); } catch (_) {}
     setTitle('');
     setAmount('');
+  };
+
+  const handleDelete = (id) => {
+    const updated = transactions.filter(t => t.id !== id);
+    setTransactions(updated);
+    try { localStorage.setItem('finance_tx', JSON.stringify(updated)); } catch (_) {}
   };
 
   const totalIncome = transactions.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
   const totalExpense = transactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
   const netBalance = totalIncome - totalExpense;
 
+  // Category breakdown for expenses only (income strictly excluded)
+  const expenseTransactions = transactions.filter(t => t.type === 'expense');
+  const categoryTotals = expenseTransactions.reduce((acc, tx) => {
+    const cat = tx.category || 'Other';
+    acc[cat] = (acc[cat] || 0) + tx.amount;
+    return acc;
+  }, {});
+
+  const categoryEntries = Object.entries(categoryTotals)
+    .map(([cat, total]) => ({
+      category: cat,
+      amount: total,
+      percentage: totalExpense > 0 ? (total / totalExpense) * 100 : 0,
+      color: CATEGORY_COLORS[cat] || '#8b5cf6'
+    }))
+    .sort((a, b) => b.amount - a.amount);
+
+  // SVG Donut calculation
+  const radius = 64;
+  const circumference = 2 * Math.PI * radius;
+  let accumulatedAngle = 0;
+
+  // CSV Export Handler with proper RFC 4180 escaping
+  const exportCSV = () => {
+    if (transactions.length === 0) {
+      alert('No transactions available to export.');
+      return;
+    }
+    const headers = ['ID', 'Title', 'Amount', 'Type', 'Category', 'Date'];
+    const rows = transactions.map(t => [
+      '"' + String(t.id || '').replace(/"/g, '""') + '"',
+      '"' + String(t.title || '').replace(/"/g, '""') + '"',
+      t.amount,
+      '"' + t.type + '"',
+      '"' + String(t.category || '').replace(/"/g, '""') + '"',
+      '"' + (t.date || '') + '"'
+    ]);
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\\r\\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'smartfinance_transactions_' + new Date().toISOString().split('T')[0] + '.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const filteredList = transactions.filter(t => filterType === 'all' || t.type === filterType);
 
   return (
-    <div className="min-h-screen bg-[#07090e] text-slate-100 font-sans p-6">
+    <div className="min-h-screen bg-[#07090e] text-slate-100 font-sans p-4 md:p-6">
       {/* Header */}
       <header className="max-w-6xl mx-auto flex items-center justify-between pb-6 border-b border-slate-800">
         <div className="flex items-center gap-3">
@@ -3631,6 +3711,15 @@ export default function App() {
             <p className="text-[11px] text-emerald-400 font-medium">Income, Expenses & Budget Analytics</p>
           </div>
         </div>
+
+        <button
+          onClick={exportCSV}
+          title="Export all transactions to CSV file"
+          className="px-3.5 py-1.5 bg-[#141928] hover:bg-[#1c2236] border border-slate-700 hover:border-slate-500 text-slate-200 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+        >
+          <Download size={13} className="text-emerald-400" />
+          <span>Export CSV</span>
+        </button>
       </header>
 
       <main className="max-w-6xl mx-auto mt-6 space-y-6">
@@ -3668,6 +3757,7 @@ export default function App() {
           <input
             type="number"
             required
+            step="any"
             placeholder="Amount (₹)"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
@@ -3688,10 +3778,14 @@ export default function App() {
           >
             <option value="Food">Food & Dining</option>
             <option value="Housing">Housing & Rent</option>
-            <option value="Salary">Salary</option>
-            <option value="Investment">Investment</option>
             <option value="Shopping">Shopping</option>
             <option value="Utilities">Utilities</option>
+            <option value="Transport">Transport & Travel</option>
+            <option value="Entertainment">Entertainment</option>
+            <option value="Healthcare">Healthcare</option>
+            <option value="Salary">Salary</option>
+            <option value="Investment">Investment</option>
+            <option value="Other">Other</option>
           </select>
           <button
             type="submit"
@@ -3701,43 +3795,168 @@ export default function App() {
           </button>
         </form>
 
-        {/* Transactions List */}
-        <div className="bg-[#0e121e] border border-slate-800 rounded-2xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-bold text-white">Recent Transactions</h3>
-            <div className="flex gap-2">
-              {['all', 'income', 'expense'].map(f => (
-                <button
-                  key={f}
-                  onClick={() => setFilterType(f)}
-                  className={filterType === f ? 'px-3 py-1 bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-bold uppercase' : 'px-3 py-1 text-slate-400 text-xs font-semibold hover:text-white uppercase'}
-                >
-                  {f}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-2.5">
-            {filteredList.map(tx => (
-              <div key={tx.id} className="p-3.5 bg-[#121624] border border-slate-800 rounded-xl flex items-center justify-between">
-                <div>
-                  <h4 className="text-xs font-bold text-white">{tx.title}</h4>
-                  <span className="text-[10px] text-slate-400">{tx.category} • {tx.date}</span>
+        {/* Analytics & Transactions Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Expense Analytics SVG Chart Card (5 cols) */}
+          <div className="lg:col-span-5 bg-[#0e121e] border border-slate-800 rounded-2xl p-5 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <PieChart size={16} className="text-emerald-400" />
+                  <h3 className="text-sm font-bold text-white">Expense Analytics</h3>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className={tx.type === 'income' ? 'text-xs font-extrabold text-emerald-400' : 'text-xs font-extrabold text-rose-400'}>
-                    {tx.type === 'income' ? '+₹' : '-₹'}{tx.amount.toLocaleString()}
-                  </span>
-                  <button
-                    onClick={() => setTransactions(transactions.filter(t => t.id !== tx.id))}
-                    className="p-1 text-slate-500 hover:text-rose-400"
-                  >
-                    <Trash2 size={12} />
-                  </button>
+                <span className="text-[10px] text-slate-400 uppercase font-mono tracking-wider">
+                  {categoryEntries.length} Categories
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mb-4">
+                Category-wise expense distribution (excluding income).
+              </p>
+            </div>
+
+            {categoryEntries.length > 0 ? (
+              <div className="space-y-4">
+                {/* SVG Donut Chart */}
+                <div className="flex items-center justify-center relative py-2">
+                  <svg width="170" height="170" viewBox="0 0 170 170" className="transform -rotate-90">
+                    <circle
+                      cx="85"
+                      cy="85"
+                      r={radius}
+                      fill="transparent"
+                      stroke="#1e293b"
+                      strokeWidth="18"
+                    />
+                    {categoryEntries.map((item) => {
+                      const strokeDash = (item.percentage / 100) * circumference;
+                      const strokeGap = circumference - strokeDash;
+                      const offset = -accumulatedAngle;
+                      accumulatedAngle += strokeDash;
+                      const isHovered = hoveredCategory === item.category;
+
+                      return (
+                        <circle
+                          key={item.category}
+                          cx="85"
+                          cy="85"
+                          r={radius}
+                          fill="transparent"
+                          stroke={item.color}
+                          strokeWidth={isHovered ? 22 : 18}
+                          strokeDasharray={[strokeDash, strokeGap].join(' ')}
+                          strokeDashoffset={offset}
+                          className="transition-all duration-200 cursor-pointer"
+                          onMouseEnter={() => setHoveredCategory(item.category)}
+                          onMouseLeave={() => setHoveredCategory(null)}
+                        />
+                      );
+                    })}
+                  </svg>
+                  {/* Center Metric */}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-4">
+                    <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">
+                      {hoveredCategory || 'Expenses'}
+                    </span>
+                    <span className="text-sm font-extrabold text-white mt-0.5">
+                      {hoveredCategory
+                        ? '₹' + (categoryTotals[hoveredCategory] || 0).toLocaleString()
+                        : '₹' + totalExpense.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Legend List */}
+                <div className="space-y-1.5 pt-2 border-t border-slate-800/80 max-h-48 overflow-y-auto pr-1">
+                  {categoryEntries.map((item) => {
+                    const isHovered = hoveredCategory === item.category;
+                    return (
+                      <div
+                        key={item.category}
+                        onMouseEnter={() => setHoveredCategory(item.category)}
+                        onMouseLeave={() => setHoveredCategory(null)}
+                        className={'flex items-center justify-between p-1.5 rounded-lg text-xs transition-colors cursor-pointer ' + (isHovered ? 'bg-slate-800/60 text-white' : 'text-slate-300 hover:bg-slate-800/30')}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: item.color }}
+                          />
+                          <span className="font-medium text-slate-200">{item.category}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-right">
+                          <span className="font-semibold text-white">₹{item.amount.toLocaleString()}</span>
+                          <span className="text-[10px] font-mono text-slate-400 w-10 text-right">
+                            {item.percentage.toFixed(1)}%
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-            ))}
+            ) : (
+              <div className="py-12 px-4 text-center rounded-xl bg-[#121624] border border-slate-800/60">
+                <PieChart className="w-8 h-8 mx-auto text-slate-600 mb-2 opacity-50" />
+                <p className="text-xs text-slate-400 font-medium">No expense data recorded yet.</p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Add an expense entry above to see category analytics and donut breakdown.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Transactions List (7 cols) */}
+          <div className="lg:col-span-7 bg-[#0e121e] border border-slate-800 rounded-2xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold text-white">Recent Transactions</h3>
+              <div className="flex gap-1.5 bg-[#141928] p-1 rounded-xl border border-slate-800">
+                {['all', 'income', 'expense'].map(f => (
+                  <button
+                    key={f}
+                    onClick={() => setFilterType(f)}
+                    className={filterType === f
+                      ? 'px-2.5 py-1 bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-bold uppercase transition-all'
+                      : 'px-2.5 py-1 text-slate-400 text-xs font-semibold hover:text-white uppercase transition-all'}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
+              {filteredList.length > 0 ? (
+                filteredList.map(tx => (
+                  <div key={tx.id} className="p-3.5 bg-[#121624] hover:bg-[#151a2b] border border-slate-800/80 rounded-xl flex items-center justify-between transition-colors">
+                    <div>
+                      <h4 className="text-xs font-bold text-white">{tx.title}</h4>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] text-slate-400">{tx.category}</span>
+                        <span className="text-[10px] text-slate-600">•</span>
+                        <span className="text-[10px] text-slate-500">{tx.date}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={tx.type === 'income' ? 'text-xs font-extrabold text-emerald-400' : 'text-xs font-extrabold text-rose-400'}>
+                        {tx.type === 'income' ? '+₹' : '-₹'}{Number(tx.amount || 0).toLocaleString()}
+                      </span>
+                      <button
+                        onClick={() => handleDelete(tx.id)}
+                        title="Delete transaction"
+                        aria-label="Delete transaction"
+                        className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="py-12 text-center text-slate-500 text-xs italic">
+                  No {filterType !== 'all' ? filterType : ''} transactions found.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </main>

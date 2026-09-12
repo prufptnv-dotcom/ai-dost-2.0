@@ -156,7 +156,10 @@ class ExecutionController {
         'write_file': 'coding.production_code',
         'read_file': 'coding.code_explanation',
         'list_files': 'coding.code_explanation',
-        'load_skill': 'autonomy.skill_loading'
+        'load_skill': 'autonomy.skill_loading',
+        'web_search': 'autonomy.web_acquisition',
+        'fetch_webpage': 'autonomy.web_acquisition',
+        'create_assessment': 'autonomy.skill_loading'
       };
 
       const capId = tool.capabilityId || toolToCapMap[toolName] || null;

@@ -397,6 +397,7 @@ const researchRoutes = require('./routes/research');
 const skillsRoutes = require('./routes/skills');
 const analyticsRoutes = require('./routes/analytics');
 const databaseRoutes  = require('./routes/database');
+const assessmentRoutes = require('./routes/assessment');
 
 app.use('/api/chat',     chatRoutes);
 app.use('/api/test',     testRoutes);
@@ -414,6 +415,7 @@ app.use('/api/research', researchRoutes);
 app.use('/api/skills',   skillsRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/database', databaseRoutes);
+app.use('/api/assessment', assessmentRoutes);
 
 const projectGraphRoutes = require('./routes/projectGraph');
 const workflowRoutes = require('./routes/workflows')(db);
@@ -881,7 +883,7 @@ app.delete(['/api/copilot/sessions/:id', '/api/v1/copilot/sessions/:id'], (req, 
 });
 
 // ── Project Memory endpoints (SQLite-backed) ──────────────────────────
-app.get(['/api/v1/memory/projects', '/api/projects'], (req, res) => {
+app.get(['/api/v1/memory/projects', '/api/memory/projects', '/api/projects'], (req, res) => {
     const userId = projectAuth.resolveUser(req);
     const projectDao = new ProjectDAO(db);
     const rows = projectDao.list(userId === 'local-user' ? null : userId);

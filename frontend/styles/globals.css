@@ -905,6 +905,12 @@ html.light-theme .prose-chat hr,
   transform: translateY(-2px);
 }
 
+.gemini-btn-primary:focus-visible {
+  outline: 2px solid #4893fc;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px rgba(72, 147, 252, 0.35);
+}
+
 .gemini-btn-primary:active {
   transform: scale(0.97);
 }

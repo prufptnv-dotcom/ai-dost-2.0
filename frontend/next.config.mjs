@@ -142,6 +142,14 @@ const nextConfig = {
         destination: `${BACKEND_URL}/api/projects/:path*`
       },
       {
+        source: '/api/assessment',
+        destination: `${BACKEND_URL}/api/assessment`
+      },
+      {
+        source: '/api/assessment/:path*',
+        destination: `${BACKEND_URL}/api/assessment/:path*`
+      },
+      {
         source: '/api/workflows',
         destination: `${BACKEND_URL}/api/workflows`
       },

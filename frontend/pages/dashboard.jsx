@@ -97,6 +97,31 @@ export default function Dashboard() {
     setModel(localStorage.getItem('ai_dost_model') || 'auto');
   }, []);
 
+  const handleToggleTheme = useCallback(() => {
+    setTheme((prevTheme) => {
+      const nextTheme = prevTheme === 'dark' ? 'light' : 'dark';
+      try {
+        localStorage.setItem('ai_dost_theme', nextTheme);
+        localStorage.setItem('theme', nextTheme);
+      } catch (_) {}
+      
+      document.body.classList.remove('light-theme', 'dark-theme', 'hacker-theme', 'ocean-theme');
+      document.documentElement.classList.remove('light-theme', 'dark-theme', 'hacker-theme', 'ocean-theme');
+      
+      if (nextTheme !== 'dark') {
+        document.body.classList.add(`${nextTheme}-theme`);
+        document.documentElement.classList.add(`${nextTheme}-theme`);
+      }
+      document.documentElement.setAttribute('data-theme', nextTheme);
+      return nextTheme;
+    });
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('ai-dost-toggle-theme', handleToggleTheme);
+    return () => window.removeEventListener('ai-dost-toggle-theme', handleToggleTheme);
+  }, [handleToggleTheme]);
+
   // Load projects
   useEffect(() => {
     (async () => {
@@ -129,29 +154,6 @@ export default function Dashboard() {
       setView(router.query.view);
     }
   }, [router.query?.view]);
-
-  const handleToggleTheme = useCallback(() => {
-    setTheme((prev) => {
-      const themes = ['dark', 'light', 'hacker', 'ocean'];
-      const currentIndex = themes.indexOf(prev);
-      const next = themes[(currentIndex + 1) % themes.length];
-      
-      localStorage.setItem('ai_dost_theme', next);
-      localStorage.setItem('theme', next);
-      
-      // Remove all possible theme classes
-      document.body.classList.remove('light-theme', 'dark-theme', 'hacker-theme', 'ocean-theme');
-      document.documentElement.classList.remove('light-theme', 'dark-theme', 'hacker-theme', 'ocean-theme');
-      
-      // Add current theme class
-      if (next !== 'dark') {
-        document.body.classList.add(`${next}-theme`);
-        document.documentElement.classList.add(`${next}-theme`);
-      }
-      document.documentElement.setAttribute('data-theme', next);
-      return next;
-    });
-  }, []);
 
   const showToast = useCallback((message, type = 'success') => {
     const id = Date.now() + Math.random();

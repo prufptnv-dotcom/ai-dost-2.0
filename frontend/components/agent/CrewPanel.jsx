@@ -7,6 +7,8 @@ import {
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 
+const BACKEND = process.env.NEXT_PUBLIC_API_URL || '';
+
 const DEFAULT_AGENTS = [
   {
     id: 'architect',

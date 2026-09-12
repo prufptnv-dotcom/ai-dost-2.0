@@ -109,7 +109,13 @@ class RetrievalService {
 
     } catch (err) {
       // Normalize external failure contracts
-      if (err.message.includes('ECONNREFUSED') || err.message.includes('Circuit breaker: OPEN')) {
+      if (
+        err.message.includes('ECONNREFUSED') ||
+        err.message.includes('Circuit breaker') ||
+        err.message.includes('fetch failed') ||
+        err.message.includes('INDEX_UNAVAILABLE') ||
+        (err.cause && (err.cause.code === 'ECONNREFUSED' || err.cause.code === 'ENOTFOUND'))
+      ) {
         throw new Error('INDEX_UNAVAILABLE: Python AI engine is down');
       }
       if (err.message.includes('timeout')) {

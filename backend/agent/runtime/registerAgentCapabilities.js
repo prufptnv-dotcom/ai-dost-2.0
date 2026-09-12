@@ -1,26 +1,47 @@
-const toolRegistry = require('./ToolRegistry');
+const ToolRegistry = require('./ToolRegistry');
+const toolRegistry = ToolRegistry;
 const McpTool = require('../tools/McpTool');
 const LoadSkillTool = require('../tools/LoadSkillTool');
+const WebSearchTool = require('../tools/WebSearchTool');
+const FetchWebpageTool = require('../tools/FetchWebpageTool');
+const AssessmentTool = require('../tools/AssessmentTool');
 const mcpClientManager = require('../../mcp/McpClientManager');
 const skillRegistry = require('../../services/skillRegistry');
 const logger = require('../../logger');
 
 /**
- * registerAgentCapabilities — Wires MCP tools + skills into the agent ToolRegistry.
+ * registerAgentCapabilities — Wires MCP tools + skills + web tools into the agent ToolRegistry.
  *
  * This is the bridge between the AI-Dost autonomous agent and the free MCP
- * servers / skills installed on this machine. It:
+ * servers / skills / web tools installed on this machine. It:
  *   1. Registers the load_skill tool (skills on demand — token saving).
- *   2. Lazily connects MCP servers and registers their tools as McpTool adapters.
- *   3. Injects a compact skills summary into the agent system prompt.
- *
- * Token-saving design:
- *   - MCP tools are registered once, but results are truncated (4KB default).
- *   - Skill content is NOT in the prompt — loaded on demand via load_skill.
- *   - Only relevant skills are suggested in the system prompt (name + 1 line).
+ *   2. Registers web_search and fetch_webpage (live web access).
+ *   3. Lazily connects MCP servers and registers their tools as McpTool adapters.
+ *   4. Injects a compact skills summary into the agent system prompt.
  */
 
 let _registered = false;
+
+/**
+ * Register web search and webpage fetching tools.
+ */
+function registerWebTools() {
+    if (!toolRegistry.has('web_search')) {
+        toolRegistry.register(new WebSearchTool());
+        logger.info('🌐 web_search tool registered in agent runtime');
+    }
+    if (!toolRegistry.has('fetch_webpage')) {
+        toolRegistry.register(new FetchWebpageTool());
+        logger.info('🌐 fetch_webpage tool registered in agent runtime');
+    }
+}
+
+function registerAssessmentTool() {
+    if (!toolRegistry.has('create_assessment')) {
+        toolRegistry.register(AssessmentTool);
+        logger.info('📝 create_assessment tool registered in agent runtime');
+    }
+}
 
 /**
  * Register the load_skill tool (always available).
@@ -82,17 +103,28 @@ async function registerAll(options = {}) {
     }
 
     registerSkillTool();
+    registerWebTools();
+    registerAssessmentTool();
     const mcpTools = await registerMcpTools(options.mcpServers, options.maxToolsPerServer || 15);
     const skills = skillRegistry.list();
 
     _registered = true;
-    logger.info(`✅ Agent capabilities ready: ${mcpTools} MCP tools + ${skills.length} skills + load_skill`);
+    logger.info(`✅ Agent capabilities ready: ${mcpTools} MCP tools + ${skills.length} skills + load_skill + web_search + fetch_webpage`);
     return { mcpTools, skills: skills.length };
 }
+
+// Auto-register core web and skill tools on load
+try {
+    registerWebTools();
+    registerSkillTool();
+    registerAssessmentTool();
+} catch (_) {}
 
 module.exports = {
     registerAll,
     registerSkillTool,
+    registerWebTools,
+    registerAssessmentTool,
     registerMcpTools,
     buildSkillsPromptSection
 };

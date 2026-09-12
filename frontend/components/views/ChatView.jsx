@@ -16,6 +16,8 @@ import ChatArtifactsCanvas from '../chat/ChatArtifactsCanvas';
 import { AiDostMark } from '../brand/AiDostMark';
 import SmartChatHeader from '../chat/SmartChatHeader';
 import CodeBlock from '../chat/CodeBlock';
+import { AssessmentCard } from '../assessment/AssessmentCard';
+import { AssessmentRunner } from '../assessment/AssessmentRunner';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -69,8 +71,16 @@ const WELCOME = {
   timestamp: new Date().toISOString(),
 };
 
+export const stripInternalTags = (text) => {
+  if (!text || typeof text !== 'string') return '';
+  return text
+    .replace(/\[GENERATE_(?:PDF|PPTX|PPT|DOC|DOCX|CSV|XLSX|CODE|FILE|ACTION|TOOL)(?::\s*[^\]]*)?\]/gi, '')
+    .replace(/\[TOOL_CALL:[^\]]*\]/gi, '')
+    .trim();
+};
+
 const renderMarkdown = (text) =>
-  DOMPurify.sanitize(marked.parse((text || '').replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '')));
+  DOMPurify.sanitize(marked.parse(stripInternalTags(text || '').replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '')));
 
 const extractImages = (content) => {
   const images = [];
@@ -248,6 +258,7 @@ function MessageBubble({
   onVariants,
   onNavigate,
   onOpenArtifact,
+  onStartAssessment,
 }) {
   const [visualSuggestions, setVisualSuggestions] = useState([]);
   const [copied, setCopied] = useState(false);
@@ -412,27 +423,42 @@ function MessageBubble({
             </div>
           )}
 
-          {/* Search sources */}
-          {!isStreaming && msg.sources && msg.sources.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-3 pt-2.5 border-t border-border-subtle">
-              {msg.sources.map((s, i) => {
-                let domain = '';
-                try { domain = new URL(s.url).hostname; } catch (_) {}
-                return (
-                  <a
-                    key={i}
-                    href={s.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[11px] px-2.5 py-1 rounded-lg flex items-center gap-1.5 max-w-[220px] truncate bg-canvas-elevated border border-border text-ink-muted hover:text-paper-100 transition-fast shadow-xs"
-                  >
-                    <Globe className="w-3 h-3 shrink-0" />
-                    <span className="truncate">[{i + 1}] {s.title || domain}</span>
-                    <ExternalLink className="w-2.5 h-2.5 shrink-0 opacity-60" />
-                  </a>
-                );
-              })}
+          {/* Search sources & Web citations */}
+          {msg.sources && msg.sources.length > 0 && (
+            <div className="flex flex-col gap-1.5 mt-3 pt-2.5 border-t border-border-subtle">
+              <div className="flex items-center gap-1.5 text-[11px] font-medium text-ink-muted">
+                <Globe className="w-3.5 h-3.5 text-accent" />
+                <span>Web Sources ({msg.sources.length}):</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {msg.sources.map((s, i) => {
+                  let domain = '';
+                  try { domain = new URL(s.url).hostname; } catch (_) {}
+                  return (
+                    <a
+                      key={i}
+                      href={s.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] px-2.5 py-1 rounded-lg flex items-center gap-1.5 max-w-[240px] truncate bg-canvas-elevated border border-border text-ink-muted hover:text-paper-100 hover:border-accent/40 transition-fast shadow-xs cursor-pointer"
+                      title={s.title || domain}
+                    >
+                      <span className="font-mono text-accent text-[10px]">[{s.citationId || i + 1}]</span>
+                      <span className="truncate">{s.title || domain}</span>
+                      <ExternalLink className="w-2.5 h-2.5 shrink-0 opacity-60 ml-0.5" />
+                    </a>
+                  );
+                })}
+              </div>
             </div>
+          )}
+
+          {/* Interactive Assessment Card */}
+          {msg.assessment && (
+            <AssessmentCard
+              assessment={msg.assessment}
+              onStart={onStartAssessment}
+            />
           )}
 
           {/* Generated images */}
@@ -581,13 +607,14 @@ export default function ChatView({
   const [input, setInput] = useState('');
   const [showFollowUps, setShowFollowUps] = useState(false);
   const [lastReply, setLastReply] = useState('');
+  const [activeAssessment, setActiveAssessment] = useState(null);
   const [localThinking, setLocalThinking] = useState(false);
   const [thinkingLabel, setThinkingLabel] = useState('Thinking…');
   const [backendHistory, setBackendHistory] = useState(null);
   const [lightboxUrl, setLightboxUrl] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [attachment, setAttachment] = useState(null);
-  const [persona, setPersona] = useState('hinglish');
+  const [persona, setPersona] = useState('auto');
   const [variants, setVariants] = useState(null);
   const [activeArtifact, setActiveArtifact] = useState(null);
   const [thinkingElapsed, setThinkingElapsed] = useState(0);
@@ -599,6 +626,32 @@ export default function ChatView({
   const inputRef = useRef(null);
   const newChatCount = useRef(0);
   const fileInputRef = useRef(null);
+
+  const [selectedModel, setSelectedModel] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        return localStorage.getItem('ai_dost_model') || model || 'auto';
+      } catch (_) {}
+    }
+    return model || 'auto';
+  });
+
+  useEffect(() => {
+    if (model && model !== selectedModel) {
+      setSelectedModel(model);
+    }
+  }, [model, selectedModel]);
+
+  const handleModelChange = (e) => {
+    const nextModel = e.target.value;
+    setSelectedModel(nextModel);
+    try {
+      localStorage.setItem('ai_dost_model', nextModel);
+    } catch (_) {}
+    if (typeof onModelChange === 'function') {
+      onModelChange(nextModel);
+    }
+  };
 
   const thinking = thinkingProp !== undefined ? thinkingProp : localThinking;
   const setThinking = typeof setIsThinkingProp === 'function' ? setIsThinkingProp : setLocalThinking;
@@ -619,7 +672,8 @@ export default function ChatView({
   useEffect(() => {
     try {
       const p = localStorage.getItem(PERSONA_KEY);
-      if (p) setPersona(p);
+      if (p && p !== 'hinglish') setPersona(p);
+      else setPersona('auto');
       const s = JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]');
       if (Array.isArray(s) && s.length > 0) setSessions(s);
     } catch (_) {}
@@ -836,11 +890,8 @@ export default function ChatView({
       } catch (_) { /* fall through */ }
     }
 
-    // DOC_CREATE_INTENT: sirf FILE banana ke words match karo
-    // "generate kar raha hai" (describing AI doing something) → NO match
-    // "report banao", "PDF chahiye", "document likhdo" → match
-    // "generate karo/karna" (imperative to user's request) is OK, but "generate kar raha hai" is NOT
-    const DOC_CREATE_INTENT = /\b(banao|bana\s*do|bana\s*de|chahiye|taiyar\s*karo|likhdo|draft\s*karo|export|nikalo|bana\s*kar\s*do|create\s+(?:a|an|ek|mera|meri)?\s*(?:pdf|docx?|pptx?|csv|xlsx|file|doc|report|document|presentation)|generate\s+(?:a|an|ek|mera|meri)?\s*(?:pdf|docx?|pptx?|csv|xlsx|file|doc|report|document|presentation))\b/i;
+    // DOC_CREATE_INTENT: match file creation requests across Hindi/Hinglish/English
+    const DOC_CREATE_INTENT = /\b(banao|bana\s*do|bana\s*de|chahiye|taiyar\s*karo|likhdo|draft|export|nikalo|bana\s*kar\s*do)\b|\b(create|generate|make|build|write|draft)\b.*?\b(pdf|docx?|pptx?|csv|xlsx|file|doc|report|document|presentation|slides?)\b/i;
 
     const specificDoc = DOC_CREATE_INTENT.test(content)
       ? DOC_KEYWORDS
@@ -855,10 +906,11 @@ export default function ChatView({
     if (docIntent) {
       setThinkingLabel('Creating document…');
       try {
-        const topic = content.replace(docIntent.re, '').trim() || content;
+        const rawTopic = content.replace(docIntent.re, '').trim() || content;
+        const topic = rawTopic.replace(/^(?:write|create|generate|make|build|draft|please|kripya)\s+(?:a|an|the|ek)?\s*(?:report|document|presentation|slides?|doc|pdf|csv|sheet|xlsx)?\s*(?:on|about|ke liye|pe)?\s*/i, '').trim() || rawTopic;
         const typeLabel = { docx: 'Word', pptx: 'PowerPoint', csv: 'CSV', xlsx: 'Excel', pdf: 'PDF' }[docIntent.type] || docIntent.type;
         setMessages((prev) => [...prev, { id: Date.now() + 1, role: 'assistant', content: `⏳ ${typeLabel} file ban rahi hai…`, timestamp: new Date().toISOString() }]);
-        const r = await api.post('/document/generate', { type: docIntent.type, topic, title: content.slice(0, 50) });
+        const r = await api.post('/document/generate', { type: docIntent.type, topic, title: topic.slice(0, 80) });
         if (r.data?.success && r.data.downloadUrl) {
           const readyMsg = {
             id: Date.now() + 2,
@@ -963,7 +1015,7 @@ export default function ChatView({
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: content, model: model === 'auto' ? 'auto' : model, section: 'chat', history, mode: 'chat', persona }),
+        body: JSON.stringify({ message: content, model: selectedModel === 'auto' ? 'auto' : selectedModel, section: 'chat', history, mode: 'chat', persona }),
       });
 
       if (!response.ok) throw new Error(`Streaming failed: ${response.status}`);
@@ -986,10 +1038,47 @@ export default function ChatView({
           if (dataStr === '[DONE]') continue;
           try {
             const parsed = JSON.parse(dataStr);
+            if (parsed.type === 'language_lock') {
+              setMessages((prev) =>
+                prev.map((m) => m.id === aiMsgId ? { ...m, detectedResponseLanguage: parsed.detectedResponseLanguage, languageName: parsed.languageName } : m)
+              );
+            }
+            if (parsed.type === 'web_search_start') {
+              setThinking(true);
+              setThinkingLabel(parsed.intent === 'URL_FETCH' ? 'Reading webpage…' : 'Searching the web…');
+            }
+            if (parsed.type === 'web_search_sources' && parsed.sources) {
+              setMessages((prev) =>
+                prev.map((m) => m.id === aiMsgId ? { ...m, sources: parsed.sources } : m)
+              );
+            }
+            if (parsed.type === 'web_search_done') {
+              setThinking(false);
+            }
+            if (parsed.type === 'assessment_creating') {
+              setThinking(true);
+              setThinkingLabel(parsed.status || 'Preparing assessment...');
+            }
+            if (parsed.type === 'assessment_created' && parsed.assessment) {
+              setThinking(false);
+              setMessages((prev) =>
+                prev.map((m) => m.id === aiMsgId ? { ...m, assessment: parsed.assessment } : m)
+              );
+            }
+            if (parsed.done && parsed.assessment) {
+              setMessages((prev) =>
+                prev.map((m) => m.id === aiMsgId ? { ...m, assessment: parsed.assessment } : m)
+              );
+            }
+            if (parsed.done && parsed.sources && parsed.sources.length > 0) {
+              setMessages((prev) =>
+                prev.map((m) => m.id === aiMsgId ? { ...m, sources: parsed.sources } : m)
+              );
+            }
             if (parsed.chunk) {
               accumulated += parsed.chunk;
               setMessages((prev) =>
-                prev.map((m) => m.id === aiMsgId ? { ...m, content: accumulated, isStreaming: true } : m)
+                prev.map((m) => m.id === aiMsgId ? { ...m, content: stripInternalTags(accumulated), isStreaming: true } : m)
               );
             }
           } catch (_) {}
@@ -1006,6 +1095,8 @@ export default function ChatView({
         finalReply = finalReply.replace(imageTagRegex, '').trim();
         finalReply += `\n\n![Generated: ${imagePromptText}](${pollinationsUrl})`;
       }
+
+      finalReply = stripInternalTags(finalReply);
 
       setMessages((prev) =>
         prev.map((m) => m.id === aiMsgId ? { ...m, content: finalReply || 'Kuch response nahi mila.', isStreaming: false } : m)
@@ -1034,10 +1125,16 @@ export default function ChatView({
       // REST fallback
       console.warn('Stream failed, falling back to REST:', err.message);
       try {
-        const res = await api.post('/chat/', { message: content, model: model === 'auto' ? 'auto' : model, section: 'chat', history, mode: 'chat', persona });
-        const reply0 = res.data?.reply || res.data?.message || 'Response nahi mila.';
+        const res = await api.post('/chat/', { message: content, model: selectedModel === 'auto' ? 'auto' : selectedModel, section: 'chat', history, mode: 'chat', persona });
+        const reply0 = stripInternalTags(res.data?.reply || res.data?.message || 'Response nahi mila.');
         setMessages((prev) =>
-          prev.map((m) => m.id === aiMsgId ? { ...m, content: reply0, isStreaming: false } : m)
+          prev.map((m) => m.id === aiMsgId ? {
+            ...m,
+            content: reply0,
+            detectedResponseLanguage: res.data?.detectedResponseLanguage,
+            languageName: res.data?.languageName,
+            isStreaming: false
+          } : m)
         );
         setLastReply(reply0);
         const artifact = extractArtifact(reply0);
@@ -1056,7 +1153,7 @@ export default function ChatView({
       setThinking(false);
       setThinkingLabel('Thinking…');
     }
-  }, [input, thinking, messages, model, setThinking, onOpenResumeWithData, onNavigate, attachment, persona, scrollToBottom, sessionId]);
+  }, [input, thinking, messages, selectedModel, setThinking, onOpenResumeWithData, onNavigate, attachment, persona, scrollToBottom, sessionId]);
 
   const handleRegenerate = () => {
     if (thinking) return;
@@ -1075,12 +1172,6 @@ export default function ChatView({
     setInput(msg.content);
     setShowFollowUps(false);
     setTimeout(() => inputRef.current && inputRef.current.focus(), 50);
-  };
-
-  const handleModelChange = (e) => {
-    const val = e.target.value;
-    if (onModelChange) onModelChange(val);
-    try { localStorage.setItem('ai_dost_model', val); } catch (_) {}
   };
 
   const persistSessions = (list) => {
@@ -1345,6 +1436,7 @@ export default function ChatView({
                   onNavigate={onNavigate}
                   onOpenArtifact={setActiveArtifact}
                   onEdit={handleEditMessage}
+                  onStartAssessment={(asmt) => setActiveAssessment(asmt)}
                 />
               ))}
 
@@ -1374,8 +1466,8 @@ export default function ChatView({
                 )}
               </AnimatePresence>
 
-              {/* Bottom scroll anchor */}
-              <div ref={messagesEndRef} className="h-4 shrink-0" aria-hidden="true" />
+              {/* Bottom scroll anchor (ensures ample clearance above composer) */}
+              <div ref={messagesEndRef} className="h-16 shrink-0" aria-hidden="true" />
             </div>
           </div>
         </div>
@@ -1464,7 +1556,7 @@ export default function ChatView({
                     onClick={() => fileInputRef.current && fileInputRef.current.click()}
                     title="Attach file"
                     aria-label="Attach file"
-                    className="p-1.5 rounded-lg hover:bg-canvas-elevated text-ink-muted hover:text-paper-200 transition-fast cursor-pointer focus-ring"
+                    className="p-1.5 rounded-lg hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 transition-fast cursor-pointer focus-ring"
                   >
                     <Paperclip className="w-4 h-4" />
                   </button>
@@ -1475,7 +1567,7 @@ export default function ChatView({
                       onClick={onOpenVoice}
                       title="Voice input"
                       aria-label="Voice input"
-                      className="p-1.5 rounded-lg hover:bg-canvas-elevated text-ink-muted hover:text-accent transition-fast cursor-pointer focus-ring"
+                      className="p-1.5 rounded-lg hover:bg-canvas-elevated text-paper-200 hover:text-accent transition-fast cursor-pointer focus-ring"
                     >
                       <Mic className="w-4 h-4" />
                     </button>
@@ -1485,11 +1577,11 @@ export default function ChatView({
                 <div className="flex items-center gap-2">
                   {/* Model selector */}
                   <select
-                    value={model}
+                    value={selectedModel}
                     onChange={handleModelChange}
                     title="Select model"
                     aria-label="Select model"
-                    className="px-2 py-1 rounded-lg text-[11px] font-medium bg-canvas-elevated border border-border text-ink-muted cursor-pointer focus:outline-none transition-fast"
+                    className="px-2.5 py-1 rounded-lg text-[12px] font-medium bg-canvas-elevated border border-border text-paper-100 cursor-pointer focus:outline-none focus:border-accent transition-fast"
                   >
                     {MODEL_OPTIONS.map((m) => (
                       <option key={m.id} value={m.id}>{m.label}</option>
@@ -1531,6 +1623,20 @@ export default function ChatView({
       {/* Image lightbox */}
       {lightboxUrl && (
         <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
+      )}
+      {/* Interactive Assessment Runner Modal */}
+      {activeAssessment && (
+        <AssessmentRunner
+          assessment={activeAssessment}
+          onClose={() => setActiveAssessment(null)}
+          onComplete={(res) => {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('ai_dost_toast', {
+                detail: { type: 'success', message: `Assessment complete! Score: ${res.netScore}/${res.totalMarks} (${res.percentage}%)` }
+              }));
+            }
+          }}
+        />
       )}
     </div>
   );

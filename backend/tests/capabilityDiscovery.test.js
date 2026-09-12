@@ -217,9 +217,9 @@ describe('AI-Dost 2.0 Capability Discovery & Intent Matching (Phase 2)', () => {
   });
 
   test('18. FOUNDATION_ONLY capability status is preserved and marked for configuration', () => {
-    const res = capabilityDiscovery.discover('coding.api_integration');
+    const res = capabilityDiscovery.discover('devops.ssl_automation');
     assert.equal(res.matched[0].status, STATUS.FOUNDATION_ONLY);
-    assert.ok(res.unavailable_capabilities.includes('coding.api_integration'));
+    assert.ok(res.unavailable_capabilities.includes('devops.ssl_automation'));
   });
 
   test('19. NOT_IMPLEMENTED / MISSING capability status is handled accurately', () => {

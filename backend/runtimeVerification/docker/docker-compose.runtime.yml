@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  runtime_backend:
+    build:
+      context: ../..
+      dockerfile: runtimeVerification/docker/Dockerfile.backend
+    container_name: aidost_runtime_backend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5050:5000"
+    environment:
+      - PORT=5000
+      - NODE_ENV=production
+      - FRONTEND_URL=http://localhost:3000,http://127.0.0.1:3000,http://127.0.0.1:3030
+      - JWT_SECRET=runtime-verify-secure-jwt-secret-min-32-chars-ok!
+      - DB_FILE=/app/data/runtime_test.sqlite
+    volumes:
+      - runtime_data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:5000/api/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  runtime_data:
+    name: aidost_runtime_data

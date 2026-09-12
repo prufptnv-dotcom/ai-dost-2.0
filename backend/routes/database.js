@@ -163,4 +163,271 @@ router.post('/:projectId/query', (req, res) => {
   });
 });
 
+// ==============================================================================
+// Phase 4B: Database Schema Generation & Migration Automation Endpoints
+// ==============================================================================
+
+const {
+  DatabaseSchemaPlan,
+  DatabaseSchemaValidator,
+  DatabaseSchemaGenerator,
+  DatabaseMigrationManager,
+  DatabaseSchemaResult
+} = require('../agent/capabilities/databaseSchema');
+
+// Helper to format structured error response
+function sendStructuredError(res, status, code, message, details = {}, retryable = false) {
+  return res.status(status).json({
+    ok: false,
+    success: false,
+    error: {
+      code,
+      message,
+      details,
+      retryable
+    }
+  });
+}
+
+// ── POST /api/database/schema/generate ───────────────────────────────────────
+router.post('/schema/generate', (req, res) => {
+  try {
+    const rawPlan = req.body?.plan || req.body;
+    if (!rawPlan || typeof rawPlan !== 'object') {
+      return sendStructuredError(res, 400, 'INVALID_SCHEMA_PLAN', 'Schema plan payload is required');
+    }
+
+    const planInstance = new DatabaseSchemaPlan(rawPlan);
+    const plan = planInstance.toJSON();
+
+    const validation = DatabaseSchemaValidator.validate(plan);
+    if (!validation.valid) {
+      return sendStructuredError(res, 400, 'SCHEMA_VALIDATION_FAILED', 'Schema validation failed', {
+        errors: validation.errors
+      });
+    }
+
+    const generator = new DatabaseSchemaGenerator(plan);
+    const generated = generator.generateAll();
+
+    return res.json({
+      ok: true,
+      success: true,
+      data: {
+        engine: plan.engine,
+        databaseName: plan.databaseName,
+        tables: plan.tables.map(t => t.name),
+        schemaSql: generated.schemaSql,
+        migrations: generated.migrations,
+        seedSql: generated.seedSql,
+        summary: generated.summary
+      }
+    });
+  } catch (err) {
+    logger.error('[Database] Schema generation error:', err);
+    return sendStructuredError(res, 500, 'SCHEMA_GENERATION_FAILED', err.message);
+  }
+});
+
+// ── POST /api/database/schema/validate ───────────────────────────────────────
+router.post('/schema/validate', (req, res) => {
+  try {
+    const rawPlan = req.body?.plan || req.body;
+    if (!rawPlan || typeof rawPlan !== 'object') {
+      return sendStructuredError(res, 400, 'INVALID_SCHEMA_PLAN', 'Schema plan payload is required');
+    }
+
+    const validation = DatabaseSchemaValidator.validate(rawPlan);
+    return res.json({
+      ok: true,
+      success: true,
+      valid: validation.valid,
+      errors: validation.errors,
+      warnings: validation.warnings,
+      destructiveDetected: validation.destructiveDetected
+    });
+  } catch (err) {
+    logger.error('[Database] Schema validation error:', err);
+    return sendStructuredError(res, 500, 'SCHEMA_VALIDATION_ERROR', err.message);
+  }
+});
+
+// ── POST /api/database/migration/dry-run ─────────────────────────────────────
+router.post('/migration/dry-run', (req, res) => {
+  try {
+    const rawPlan = req.body?.plan || req.body;
+    if (!rawPlan) {
+      return sendStructuredError(res, 400, 'INVALID_SCHEMA_PLAN', 'Schema plan payload is required');
+    }
+
+    const planInstance = new DatabaseSchemaPlan(rawPlan);
+    const plan = planInstance.toJSON();
+
+    const validation = DatabaseSchemaValidator.validate(plan);
+    if (!validation.valid) {
+      return sendStructuredError(res, 400, 'SCHEMA_VALIDATION_FAILED', 'Schema validation failed', {
+        errors: validation.errors
+      });
+    }
+
+    const generator = new DatabaseSchemaGenerator(plan);
+    const generated = generator.generateAll();
+
+    const manager = new DatabaseMigrationManager({
+      engine: plan.engine,
+      migrations: generated.migrations
+    });
+
+    const dryRunResult = manager.dryRun();
+    return res.json({
+      ok: dryRunResult.success,
+      success: dryRunResult.success,
+      data: dryRunResult
+    });
+  } catch (err) {
+    logger.error('[Database] Migration dry-run error:', err);
+    return sendStructuredError(res, 500, 'MIGRATION_DRYRUN_FAILED', err.message);
+  }
+});
+
+// ── POST /api/database/migration/apply ───────────────────────────────────────
+router.post('/migration/apply', async (req, res) => {
+  try {
+    const { plan: rawPlan, workspacePath, dbPath, projectId, approvalToken } = req.body || {};
+    if (!rawPlan) {
+      return sendStructuredError(res, 400, 'INVALID_SCHEMA_PLAN', 'Schema plan is required');
+    }
+
+    const planInstance = new DatabaseSchemaPlan(rawPlan);
+    const plan = planInstance.toJSON();
+
+    // Check destructive changes policy
+    const validation = DatabaseSchemaValidator.validate(plan);
+    if (validation.destructiveDetected && !approvalToken) {
+      return res.status(403).json(
+        DatabaseSchemaResult.approvalRequired(
+          'Destructive database operation requires explicit user approval token',
+          { engine: plan.engine, warnings: validation.warnings }
+        ).toJSON()
+      );
+    }
+
+    const targetDbPath = dbPath || (projectId ? findSqliteDbFile(projectId) : null) || ':memory:';
+
+    const generator = new DatabaseSchemaGenerator(plan);
+    const generated = generator.generateAll();
+
+    const manager = new DatabaseMigrationManager({
+      engine: plan.engine,
+      dbPath: targetDbPath,
+      workspacePath,
+      migrations: generated.migrations
+    });
+
+    const applyResult = manager.apply();
+    if (!applyResult.success) {
+      return res.status(500).json({
+        ok: false,
+        success: false,
+        error: {
+          code: 'MIGRATION_APPLY_FAILED',
+          message: applyResult.error,
+          retryable: false
+        }
+      });
+    }
+
+    return res.json({
+      ok: true,
+      success: true,
+      data: applyResult
+    });
+  } catch (err) {
+    logger.error('[Database] Migration apply error:', err);
+    return sendStructuredError(res, 500, 'MIGRATION_APPLY_ERROR', err.message);
+  }
+});
+
+// ── POST /api/database/migration/rollback ────────────────────────────────────
+router.post('/migration/rollback', (req, res) => {
+  try {
+    const { plan: rawPlan, targetVersion, steps, dbPath, projectId } = req.body || {};
+    const targetDbPath = dbPath || (projectId ? findSqliteDbFile(projectId) : null) || ':memory:';
+
+    const plan = rawPlan ? new DatabaseSchemaPlan(rawPlan).toJSON() : { engine: 'sqlite' };
+    const generator = new DatabaseSchemaGenerator(plan);
+    const generated = generator.generateAll();
+
+    const manager = new DatabaseMigrationManager({
+      engine: plan.engine,
+      dbPath: targetDbPath,
+      migrations: generated.migrations
+    });
+
+    const rollbackResult = manager.rollback({ targetVersion, steps });
+    return res.json({
+      ok: rollbackResult.success,
+      success: rollbackResult.success,
+      data: rollbackResult
+    });
+  } catch (err) {
+    logger.error('[Database] Migration rollback error:', err);
+    return sendStructuredError(res, 500, 'MIGRATION_ROLLBACK_ERROR', err.message);
+  }
+});
+
+// ── GET /api/database/migration/history ──────────────────────────────────────
+router.get('/migration/history', (req, res) => {
+  try {
+    const { projectId, dbPath } = req.query;
+    const targetDbPath = dbPath || (projectId ? findSqliteDbFile(projectId) : null);
+
+    if (!targetDbPath) {
+      return res.json({ ok: true, success: true, migrations: [] });
+    }
+
+    const manager = new DatabaseMigrationManager({
+      engine: 'sqlite',
+      dbPath: targetDbPath
+    });
+
+    const history = manager.getHistory();
+    return res.json({
+      ok: true,
+      success: true,
+      migrations: history
+    });
+  } catch (err) {
+    logger.error('[Database] Migration history error:', err);
+    return sendStructuredError(res, 500, 'MIGRATION_HISTORY_ERROR', err.message);
+  }
+});
+
+// ── GET /api/database/schema/drift ───────────────────────────────────────────
+router.get('/schema/drift', (req, res) => {
+  try {
+    const { projectId, dbPath } = req.query;
+    const targetDbPath = dbPath || (projectId ? findSqliteDbFile(projectId) : null);
+
+    if (!targetDbPath) {
+      return res.json({ ok: true, success: true, drift: [] });
+    }
+
+    const manager = new DatabaseMigrationManager({
+      engine: 'sqlite',
+      dbPath: targetDbPath
+    });
+
+    const drift = manager.detectDrift();
+    return res.json({
+      ok: true,
+      success: true,
+      drift
+    });
+  } catch (err) {
+    logger.error('[Database] Schema drift check error:', err);
+    return sendStructuredError(res, 500, 'SCHEMA_DRIFT_ERROR', err.message);
+  }
+});
+
 module.exports = router;

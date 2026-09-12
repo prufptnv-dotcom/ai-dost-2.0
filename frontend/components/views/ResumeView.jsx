@@ -151,6 +151,37 @@ export default function ResumeView({ onToast, onClose }) {
     pushHistory(updated);
   };
 
+  const addEducation = () => {
+    const updated = {
+      ...resumeData,
+      education: [
+        ...(resumeData.education || []),
+        { institution: 'New University / School', degree: 'Degree / Certificate', year: '2020 - 2024' },
+      ],
+    };
+    setResumeData(updated);
+    pushHistory(updated);
+  };
+
+  const removeEducation = (idx) => {
+    const updated = {
+      ...resumeData,
+      education: (resumeData.education || []).filter((_, i) => i !== idx),
+    };
+    setResumeData(updated);
+    pushHistory(updated);
+  };
+
+  const updateEducation = (idx, field, value) => {
+    const nextEdu = [...(resumeData.education || [])];
+    if (nextEdu[idx]) {
+      nextEdu[idx] = { ...nextEdu[idx], [field]: value };
+      const updated = { ...resumeData, education: nextEdu };
+      setResumeData(updated);
+      pushHistory(updated);
+    }
+  };
+
   const addSkill = (skill) => {
     if (!skill.trim() || resumeData.skills.includes(skill.trim())) return;
     const updated = {
@@ -370,7 +401,9 @@ export default function ResumeView({ onToast, onClose }) {
           <select
             value={selectedTemplate}
             onChange={(e) => setSelectedTemplate(e.target.value)}
-            className="px-2 py-1 rounded-xs bg-canvas-surface border border-border text-paper-100 text-xs font-sans focus:outline-none cursor-pointer"
+            className="px-2.5 py-1.5 rounded-xs bg-canvas-surface border border-border text-paper-100 text-xs font-sans focus:outline-none focus:border-accent-primary cursor-pointer hover:border-border-subtle transition-fast"
+            title="Choose Resume Template"
+            aria-label="Choose Resume Template"
           >
             {TEMPLATES.map((t) => (
               <option key={t.id} value={t.id}>
@@ -471,7 +504,7 @@ export default function ResumeView({ onToast, onClose }) {
 
         {/* Structured Document Editor Form */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-canvas-base">
-          <div className="max-w-2xl mx-auto space-y-6">
+          <div className={`${showPreview ? 'max-w-2xl' : 'max-w-4xl'} mx-auto space-y-6 transition-all duration-200`}>
             {/* Section 1: Profile & Contact */}
             {activeSection === 'profile' && (
               <div className="space-y-4 rounded-sm border border-border bg-canvas-surface p-5 shadow-xs">
@@ -592,7 +625,63 @@ export default function ResumeView({ onToast, onClose }) {
               </div>
             )}
 
-            {/* Section 4: Skills */}
+            {/* Section 4: Education */}
+            {activeSection === 'education' && (
+              <div className="space-y-4 rounded-sm border border-border bg-canvas-surface p-5 shadow-xs">
+                <div className="flex items-center justify-between border-b border-border-subtle pb-2">
+                  <h2 className="text-sm font-semibold text-paper-100 font-display">
+                    Education & Credentials
+                  </h2>
+                  <Button variant="secondary" size="sm" icon={Plus} onClick={addEducation}>
+                    Add Education
+                  </Button>
+                </div>
+
+                <div className="space-y-4">
+                  {(resumeData.education || []).map((edu, idx) => (
+                    <div key={idx} className="p-3 rounded-xs border border-border bg-canvas-base space-y-2">
+                      <div className="flex items-center justify-between">
+                        <input
+                          value={edu.institution}
+                          onChange={(e) => updateEducation(idx, 'institution', e.target.value)}
+                          placeholder="Institution / University"
+                          className="font-medium text-xs text-paper-100 bg-transparent border-b border-transparent hover:border-border focus:border-accent-primary focus:outline-none w-3/4"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeEducation(idx)}
+                          className="text-ink-muted hover:text-signal-error p-1 cursor-pointer"
+                          title="Remove education"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <input
+                          value={edu.degree}
+                          onChange={(e) => updateEducation(idx, 'degree', e.target.value)}
+                          placeholder="Degree / Program"
+                          className="px-2 py-1 rounded-xs bg-canvas-surface border border-border text-paper-100 text-xs"
+                        />
+                        <input
+                          value={edu.year}
+                          onChange={(e) => updateEducation(idx, 'year', e.target.value)}
+                          placeholder="e.g. 2018 - 2022"
+                          className="px-2 py-1 rounded-xs bg-canvas-surface border border-border text-paper-100 text-xs"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  {(!resumeData.education || resumeData.education.length === 0) && (
+                    <div className="text-xs text-ink-muted italic text-center py-4">
+                      No education entries yet. Click &ldquo;Add Education&rdquo; above.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Section 5: Skills */}
             {activeSection === 'skills' && (
               <div className="space-y-4 rounded-sm border border-border bg-canvas-surface p-5 shadow-xs">
                 <h2 className="text-sm font-semibold text-paper-100 font-display border-b border-border-subtle pb-2">

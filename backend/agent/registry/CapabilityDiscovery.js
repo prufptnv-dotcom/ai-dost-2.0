@@ -50,18 +50,18 @@ const MATCH_TYPE = Object.freeze({
 // Domain keyword patterns precisely mapped to the 83 canonical capability IDs
 const EXTENDED_KEYWORD_PATTERNS = Object.freeze([
   // Category 1: Coding & Software Engineering (12)
-  { pattern: /\b(?:scaffold|full[\s-]stack|generate\s+project|create\s+project|new\s+app|boilerplate|saas\s+app)\b/i, id: 'coding.full_stack_delivery', weight: 0.95 },
+  { pattern: /\b(?:scaffold|full[\s-]stack|generate\s+project|create\s+project|new\s+app|boilerplate|saas\s+app|frontend\s+(?:with\s+a\s+|and\s+)backend|backend\s+(?:with\s+a\s+|and\s+)frontend|production[\s-]ready\s+dashboard|entire\s+application)\b/i, id: 'coding.full_stack_delivery', weight: 0.95 },
   { pattern: /\b(?:production[\s-]grade|production\s+code|production\s+readiness)\b/i, id: 'coding.production_code', weight: 0.90 },
   { pattern: /\b(?:refactor|legacy\s+refactor|clean\s+up\s+code|modernize\s+code)\b/i, id: 'coding.legacy_refactoring', weight: 0.90 },
   { pattern: /\b(?:fix\s+bug|bug\s+fix|automated\s+bug|resolve\s+error|crash\s+fix|runtime\s+error)\b/i, id: 'coding.automated_bug_resolution', weight: 0.90 },
   { pattern: /\b(?:zero[\s-]knowledge|no[\s-]leak\s+architecture|client[\s-]side\s+storage)\b/i, id: 'coding.zero_knowledge_architecture', weight: 0.88 },
   { pattern: /\b(?:git\s+commit|git\s+status|git\s+rollback|commit\s+changes?|git\s+log|git\s+branch)\b/i, id: 'coding.git_operations', weight: 0.95 },
   { pattern: /\b(?:multi[\s-]file|file\s+context|across\s+files|cross[\s-]file)\b/i, id: 'coding.multi_file_context', weight: 0.88 },
-  { pattern: /\b(?:api\s+integration|external\s+api|third[\s-]party\s+api|rest\s+client)\b/i, id: 'coding.api_integration', weight: 0.90 },
-  { pattern: /\b(?:database\s+schema|schema\s+generation|prisma\s+schema|sql\s+table|db\s+migration|schema\s+migration|postgresql(?:\s+database)?|postgres(?:\s+db)?|sqlite\s+schema|mysql\s+schema)\b/i, id: 'coding.database_schema_generation', weight: 0.92 },
+  { pattern: /\b(?:api\s+integration|external\s+api|third[\s-]party\s+api|rest\s+client|generate\s+api\s+client|openapi(?:\s+spec)?|swagger(?:\s+spec)?|typed\s+api)\b/i, id: 'coding.api_integration', weight: 0.90 },
+  { pattern: /\b(?:database\s+schema|schema\s+generation|prisma\s+schema|sql\s+tables?|db\s+migrations?|schema\s+migrations?|(?:postgresql|postgres|sqlite|mysql)\s+(?:migrations?|database)|(?:design|create|define)\s+tables?(?:\s+and\s+relationships|\s+and\s+indexes)?|(?:sqlite|postgresql|postgres|mysql)\s+tables?(?:\s+and\s+indexes)?|(?:generate|create|apply|run)\s+(?:a\s+)?migrations?|sqlite\s+schema|mysql\s+schema)\b/i, id: 'coding.database_schema_generation', weight: 0.95 },
   { pattern: /\b(?:linting|prettier|eslint|format\s+code|lint\s+code)\b/i, id: 'coding.linting_formatting', weight: 0.90 },
   { pattern: /\b(?:explain\s+code|code\s+walkthrough|what\s+does\s+this\s+code\s+do|code\s+explanation)\b/i, id: 'coding.code_explanation', weight: 0.90 },
-  { pattern: /\b(?:unit\s+tests?|test\s+cases?|test\s+generation|write\s+tests?|jest\s+test|playwright\s+test|tests?)\b/i, id: 'coding.test_case_generation', weight: 0.92 },
+  { pattern: /\b(?:unit\s+tests?|integration\s+tests?|e2e\s+tests?|test\s+cases?|test\s+suites?|test\s+generation|(?:generate|create|write|add|synthesize|build)\s+(?:[\w-]+\s+)?tests?|jest\s+tests?|playwright\s+tests?|node:test|(?<!(?:run|exec|execute|start)\s+(?:all\s+|the\s+|existing\s+|our\s+)?)tests)\b/i, id: 'coding.test_case_generation', weight: 0.92 },
 
   // Category 2: UI/UX & Visual Design (11)
   { pattern: /\b(?:pixel[\s-]perfect|exact\s+design|fidelity\s+match)\b/i, id: 'ui.pixel_perfect', weight: 0.90 },

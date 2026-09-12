@@ -139,15 +139,33 @@ class VerifierService {
         new vm.Script(content, { filename: filePath || 'script.js' });
         checks.push({ name: 'Syntax Parser (V8 VM)', passed: true });
       } catch (err) {
-        syntaxValid = false;
-        syntaxError = err.message;
-        checks.push({ name: 'Syntax Parser (V8 VM)', passed: false, error: err.message });
-        diagnostics.push({
-          type: 'syntax',
-          severity: 'error',
-          message: err.message,
-          line: err.stack?.match(/:(\d+):/)?.[1] ? parseInt(err.stack.match(/:(\d+):/)[1], 10) : 1
-        });
+        // If ES Module syntax (export / import) is used, validate structural balance
+        if ((err.message.includes("Unexpected token 'export'") || err.message.includes("Cannot use import statement") || err.message.includes("Unexpected token 'import'")) && (content.includes('export ') || content.includes('import '))) {
+          const balance = this.checkStructuralBalance(content);
+          if (balance.valid) {
+            checks.push({ name: 'Structural Syntax Balance (ESM)', passed: true });
+          } else {
+            syntaxValid = false;
+            syntaxError = balance.message;
+            checks.push({ name: 'Structural Syntax Balance (ESM)', passed: false, error: balance.message });
+            diagnostics.push({
+              type: 'syntax',
+              severity: 'error',
+              message: balance.message,
+              line: 1
+            });
+          }
+        } else {
+          syntaxValid = false;
+          syntaxError = err.message;
+          checks.push({ name: 'Syntax Parser (V8 VM)', passed: false, error: err.message });
+          diagnostics.push({
+            type: 'syntax',
+            severity: 'error',
+            message: err.message,
+            line: err.stack?.match(/:(\d+):/)?.[1] ? parseInt(err.stack.match(/:(\d+):/)[1], 10) : 1
+          });
+        }
       }
     } else if (ext === '.json') {
       try {

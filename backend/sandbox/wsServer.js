@@ -1,7 +1,7 @@
 const WebSocket = require('ws');
 const { EventEmitter } = require('events');
 const crypto = require('crypto');
-const sandboxManager = require('./sandboxManager');
+const sandboxManager = require('./SandboxManager');
 const devServerManager = require('./devServerManager');
 
 class SandboxWebSocketServer extends EventEmitter {

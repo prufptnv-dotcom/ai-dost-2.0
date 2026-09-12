@@ -95,9 +95,9 @@ const RAW_CAPABILITIES = [
     supported_inputs: ['text/prompt', 'application/json'],
     supported_outputs: ['filesystem/directory', 'application/zip'],
     implementation: {
-      service: 'routes/agent.js (generate_project_from_prompt)',
-      module: 'backend/services/plannerService.js',
-      entrypoint: 'plannerService.specToPlan'
+      service: 'backend/agent/capabilities/softwareFactory/index.js',
+      module: 'backend/agent/capabilities/softwareFactory/SoftwareFactoryOrchestrator.js',
+      entrypoint: 'softwareFactory.execute'
     },
     requires_code_diff_gate: true,
     gap_notes: 'React+Vite and Express template scaffolding operational; dynamic Next.js App Router/Astro selection requires multi-framework wiring.'
@@ -265,7 +265,7 @@ const RAW_CAPABILITIES = [
     category: CATEGORIES.CATEGORY_1,
     name: 'API Integration Automation',
     description: 'Automated synthesis of typed REST/GraphQL API integration clients from OpenAPI specs',
-    status: STATUS.FOUNDATION_ONLY,
+    status: STATUS.IMPLEMENTED,
     required_skills: ['api-client-generator'],
     required_tools: ['CodeTool', 'WriteTool'],
     required_permissions: ['workspace:write'],
@@ -280,19 +280,18 @@ const RAW_CAPABILITIES = [
     supported_inputs: ['application/json', 'text/yaml'],
     supported_outputs: ['text/javascript', 'text/typescript'],
     implementation: {
-      service: 'backend/services/specService.js',
-      module: 'backend/agent/tools/CodeTool.js',
-      entrypoint: 'specService.suggestApiIntegrations'
+      service: 'backend/agent/capabilities/apiIntegration/index.js',
+      module: 'backend/agent/capabilities/apiIntegration/ApiClientGenerator.js',
+      entrypoint: 'apiIntegration.generateApiIntegration'
     },
-    requires_code_diff_gate: true,
-    gap_notes: 'specService detects API integration patterns; automated Swagger/OpenAPI parsing to typed client generator is missing.'
+    requires_code_diff_gate: true
   },
   {
     capability_id: 'coding.database_schema_generation',
     category: CATEGORIES.CATEGORY_1,
     name: 'Database Schema Generation',
     description: 'Relational database schema modeling, table migration generation, and foreign key relations',
-    status: STATUS.PARTIAL,
+    status: STATUS.IMPLEMENTED,
     required_skills: ['schema-design', 'sql-migrations'],
     required_tools: ['CodeTool', 'WriteTool'],
     required_permissions: ['workspace:write'],
@@ -308,11 +307,10 @@ const RAW_CAPABILITIES = [
     supported_outputs: ['text/x-sql', 'text/javascript'],
     implementation: {
       service: 'backend/routes/database.js',
-      module: 'backend/services/specService.js',
-      entrypoint: 'database.generateSchema'
+      module: 'backend/agent/capabilities/databaseSchema/index.js',
+      entrypoint: 'databaseSchema.generate'
     },
-    requires_code_diff_gate: true,
-    gap_notes: 'Relational SQLite query execution and spec schema design exist; automated multi-database (Postgres/MySQL) migration generator needs scaffolding.'
+    requires_code_diff_gate: true
   },
   {
     capability_id: 'coding.linting_formatting',
@@ -370,9 +368,9 @@ const RAW_CAPABILITIES = [
     capability_id: 'coding.test_case_generation',
     category: CATEGORIES.CATEGORY_1,
     name: 'Test Case Generation',
-    description: 'Automated synthesis of unit and integration test suites from source code contracts',
-    status: STATUS.PARTIAL,
-    required_skills: ['test-synthesis', 'jest-runner'],
+    description: 'Automated synthesis of unit, integration, database constraint, and security test suites',
+    status: STATUS.IMPLEMENTED,
+    required_skills: ['test-synthesis', 'jest-runner', 'node-test-runner'],
     required_tools: ['CodeTool', 'WriteTool', 'TerminalTool'],
     required_permissions: ['workspace:write', 'terminal:execute'],
     risk_level: RISK.MEDIUM,
@@ -383,15 +381,14 @@ const RAW_CAPABILITIES = [
     rollback_policy: 'ACID_TRANSACTION',
     fallback_strategy: 'test_skip',
     dependencies: ['coding.production_code', 'devops.terminal'],
-    supported_inputs: ['text/javascript', 'text/typescript'],
+    supported_inputs: ['text/javascript', 'text/typescript', 'application/json'],
     supported_outputs: ['text/javascript', 'text/typescript'],
     implementation: {
-      service: 'backend/routes/agent.js',
-      module: 'backend/services/verifierService.js',
-      entrypoint: 'agent.runTests'
+      service: 'backend/agent/capabilities/testCaseGeneration/index.js',
+      module: 'backend/agent/capabilities/testCaseGeneration/TestCaseGenerator.js',
+      entrypoint: 'testCaseGenerator.generate'
     },
-    requires_code_diff_gate: true,
-    gap_notes: 'Test runner execution (npm test) and Jest parser operational; autonomous synthesis of test cases for arbitrary input code requires template generator.'
+    requires_code_diff_gate: true
   },
 
   // ==========================================
@@ -522,9 +519,9 @@ const RAW_CAPABILITIES = [
     supported_inputs: ['text/html', 'image/png'],
     supported_outputs: ['application/json', 'text/patch'],
     implementation: {
-      service: 'frontend/utils/visualHealer.js',
-      module: 'backend/agent/tools/VisualVerifyTool.js',
-      entrypoint: 'visualHealer.scanAndHeal'
+      service: 'backend/agent/capabilities/visualVerification/index.js',
+      module: 'backend/agent/capabilities/visualVerification/VisualGeometryInspector.js',
+      entrypoint: 'visualVerification.verifyAndHeal'
     },
     requires_code_diff_gate: true
   },
@@ -711,12 +708,14 @@ const RAW_CAPABILITIES = [
     supported_inputs: ['application/json', 'text/plain'],
     supported_outputs: ['application/json'],
     implementation: {
-      service: 'backend/services/deployService.js',
-      module: 'backend/routes/deploy.js',
-      entrypoint: 'deployService.deploy'
+      service: 'backend/agent/capabilities/deployment/index.js',
+      module: 'backend/agent/capabilities/deployment/DeploymentExecutor.js',
+      entrypoint: 'deployment.execute'
     },
     requires_code_diff_gate: false,
-    gap_notes: 'Adapter configs for Vercel, Netlify, and Cloudflare exist; interactive OAuth token authorization and custom domain binding need automation.'
+    supported_targets: ['local_docker', 'docker_compose', 'mock'],
+    unsupported_targets: ['vercel', 'netlify', 'cloudflare', 'aws_ecs', 'kubernetes'],
+    gap_notes: 'Local Docker and Mock deployment are implemented. Remote cloud providers and Kubernetes are unsupported in Phase 4H.'
   },
   {
     capability_id: 'devops.docker',
@@ -774,10 +773,10 @@ const RAW_CAPABILITIES = [
     capability_id: 'devops.ci_cd_pipeline',
     category: CATEGORIES.CATEGORY_3,
     name: 'CI/CD Pipeline Setup',
-    description: 'Generation of automated GitHub Actions and GitLab CI multi-stage test and deploy pipelines',
-    status: STATUS.FOUNDATION_ONLY,
-    required_skills: ['ci-cd-authoring'],
-    required_tools: ['WriteTool'],
+    description: 'Production-grade automated GitHub Actions CI pipeline synthesis and inert deployment workflow preparation',
+    status: STATUS.IMPLEMENTED,
+    required_skills: ['ci-cd-authoring', 'github-actions-generator'],
+    required_tools: ['WriteTool', 'CodeTool'],
     required_permissions: ['workspace:write'],
     risk_level: RISK.MEDIUM,
     approval_policy: APPROVAL.CONFIRM,
@@ -786,16 +785,15 @@ const RAW_CAPABILITIES = [
     verification_policy: 'LINT_CHECK',
     rollback_policy: 'ACID_TRANSACTION',
     fallback_strategy: 'minimal_ci_workflow',
-    dependencies: [],
-    supported_inputs: ['text/plain'],
+    dependencies: ['coding.production_code'],
+    supported_inputs: ['text/plain', 'application/json'],
     supported_outputs: ['text/yaml'],
     implementation: {
-      service: '.github/workflows/ci.yml',
-      module: 'backend/agent/tools/WriteTool.js',
-      entrypoint: 'WriteTool.execute'
+      service: 'backend/agent/capabilities/ciCdPipeline/index.js',
+      module: 'backend/agent/capabilities/ciCdPipeline/GitHubActionsAdapter.js',
+      entrypoint: 'ciCdPipeline.generateCiCdPipeline'
     },
-    requires_code_diff_gate: true,
-    gap_notes: 'Repository contains internal CI/CD config; automated generator for user project CI workflows is missing.'
+    requires_code_diff_gate: true
   },
   {
     capability_id: 'devops.env_management',
@@ -1416,8 +1414,8 @@ const RAW_CAPABILITIES = [
     capability_id: 'saas.authentication',
     category: CATEGORIES.CATEGORY_6,
     name: 'Authentication Integration',
-    description: 'User authentication scaffolding supporting JWT sessions, bcrypt password hashing, and cookie guards',
-    status: STATUS.PARTIAL,
+    description: 'User authentication scaffolding supporting JWT sessions, native Node.js scryptSync password hashing, and cookie guards',
+    status: STATUS.IMPLEMENTED,
     required_skills: ['auth-scaffold'],
     required_tools: ['CodeTool', 'WriteTool'],
     required_permissions: ['workspace:write'],
@@ -1432,12 +1430,12 @@ const RAW_CAPABILITIES = [
     supported_inputs: ['text/plain', 'application/json'],
     supported_outputs: ['text/javascript'],
     implementation: {
-      service: 'backend/models/UserDAO.js',
-      module: 'backend/routes/database.js',
-      entrypoint: 'UserDAO.authenticate'
+      service: 'backend/agent/capabilities/auth/index.js',
+      module: 'backend/agent/capabilities/auth/AuthSynthesizer.js',
+      entrypoint: 'AuthSynthesizer.synthesize'
     },
     requires_code_diff_gate: true,
-    gap_notes: 'Backend UserDAO, bcrypt, and JWT middleware implemented; automated 1-click NextAuth/OAuth scaffolding for user projects is missing.'
+    gap_notes: 'Phase 5A full-stack authentication gate implemented: native Node.js scryptSync password hashing, HS256 JWT, rotating refresh tokens with reuse detection, Double-Submit CSRF, dual-dimensional rate limiting, and RBAC hierarchy.'
   },
   {
     capability_id: 'saas.payments',
@@ -1737,7 +1735,7 @@ const RAW_CAPABILITIES = [
     capability_id: 'security.password_hashing',
     category: CATEGORIES.CATEGORY_7,
     name: 'Cryptographic Password Hashing',
-    description: 'Bcrypt cryptographic password hashing with 12 salt rounds ensuring zero plain-text credential storage',
+    description: 'Native Node.js scryptSync cryptographic password hashing (N=16384, r=8, p=1) ensuring zero plain-text credential storage',
     status: STATUS.IMPLEMENTED,
     required_skills: ['password-security'],
     required_tools: [],
@@ -1753,9 +1751,9 @@ const RAW_CAPABILITIES = [
     supported_inputs: ['text/plain'],
     supported_outputs: ['text/plain'],
     implementation: {
-      service: 'backend/models/UserDAO.js',
-      module: 'backend/models/UserDAO.js',
-      entrypoint: 'bcrypt.hash'
+      service: 'backend/agent/capabilities/auth/AuthCryptoEngine.js',
+      module: 'backend/agent/capabilities/auth/AuthCryptoEngine.js',
+      entrypoint: 'AuthCryptoEngine.hashPassword'
     },
     requires_code_diff_gate: false
   },
@@ -2304,7 +2302,7 @@ const INTENT_ALIASES = Object.freeze({
   'commit': 'coding.git_operations',
   'lint': 'coding.linting_formatting',
   'explain': 'coding.code_explanation',
-  'test': 'coding.test_case_generation',
+  'test generation': 'coding.test_case_generation',
   'theme': 'ui.theme_switching',
   'dark mode': 'ui.theme_switching',
   'visual heal': 'ui.visual_bug_detection',
@@ -2330,7 +2328,8 @@ const INTENT_ALIASES = Object.freeze({
   'rollback': 'ux.seamless_rollback',
   'hinglish': 'ux.multilingual',
   'voice': 'ux.omnichannel_input',
-  'export': 'ux.exportable_workspace'
+  'export': 'ux.exportable_workspace',
+  'openapi': 'coding.api_integration'
 });
 
 class CapabilityRegistry {

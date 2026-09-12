@@ -212,7 +212,7 @@ export default function HomePage() {
 
                 <div className="pt-3 border-t border-border-subtle">
                   <span className="text-[10px] font-mono uppercase tracking-wider text-ink-muted block mb-1">Example Request</span>
-                  <p className="text-[11px] font-mono text-paper-200 bg-canvas-base/80 p-2.5 rounded-lg border border-white/5 truncate">
+                  <p className="text-[11px] font-mono text-paper-200 bg-canvas-base/80 p-2.5 rounded-lg border border-white/5 break-words">
                     &ldquo;{cap.prompt}&rdquo;
                   </p>
                 </div>

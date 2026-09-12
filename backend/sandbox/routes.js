@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const sandboxManager = require('./sandboxManager');
+const sandboxManager = require('./SandboxManager');
 const devServerManager = require('./devServerManager');
 const crypto = require('crypto');
 

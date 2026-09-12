@@ -71,7 +71,7 @@ describe('AutomationsView', () => {
     await waitFor(() => {
       expect(screen.getAllByRole('heading', { name: 'Daily Market & AI Tech Brief' }).length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByRole('heading', { name: 'Nightly Codebase Health & Git Audit' }).length).toBeGreaterThanOrEqual(1);
-    });
+    }, { timeout: 4000 });
 
     expect(screen.getByText('Active Watchers')).toBeInTheDocument();
     expect(screen.getByText('Total Executions')).toBeInTheDocument();

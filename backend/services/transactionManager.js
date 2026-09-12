@@ -40,6 +40,55 @@ class TransactionManager {
     return this.transactions.get(transactionId);
   }
 
+  hasActiveTransaction(transactionId) {
+    const tx = this.transactions.get(transactionId);
+    return Boolean(tx && tx.status === 'ACTIVE');
+  }
+
+  /**
+   * Stages a new file creation into the active transaction.
+   */
+  stageNewFile(transactionId, { path: relPath, content }) {
+    const tx = this.transactions.get(transactionId);
+    if (!tx || tx.status !== 'ACTIVE') {
+      return { success: false, code: 'INVALID_TRANSACTION', error: `Transaction ${transactionId} is not active` };
+    }
+    if (!relPath || typeof relPath !== 'string') {
+      return { success: false, code: 'INVALID_CONTRACT', error: 'Missing or invalid path for stageNewFile' };
+    }
+    if (typeof content !== 'string') {
+      return { success: false, code: 'INVALID_CONTRACT', error: 'Content must be a string for stageNewFile' };
+    }
+
+    const resolvedPath = resolveSafePath(tx.workspacePath, relPath);
+    if (!resolvedPath) {
+      return { success: false, code: 'ACCESS_DENIED', error: `Access denied or path traversal blocked: ${relPath}` };
+    }
+
+    // Capture snapshot of original state before any modification
+    if (!tx.snapshots.has(relPath)) {
+      if (fs.existsSync(resolvedPath)) {
+        const origContent = fs.readFileSync(resolvedPath, 'utf-8');
+        const origHash = crypto.createHash('sha256').update(origContent).digest('hex');
+        tx.snapshots.set(relPath, { exists: true, content: origContent, hash: origHash, diskPath: resolvedPath });
+      } else {
+        tx.snapshots.set(relPath, { exists: false, content: null, hash: null, diskPath: resolvedPath });
+      }
+    }
+
+    tx.stagedWrites.set(relPath, {
+      newContent: content,
+      strategy: 'new_file',
+      confidence: 1.0
+    });
+
+    return {
+      success: true,
+      path: relPath,
+      strategy: 'new_file'
+    };
+  }
+
   /**
    * Stages an apply_diff patch into the active transaction.
    * Validates patch contract, checks source hash, computes diff, runs deterministicCodeGuard.
@@ -142,7 +191,7 @@ class TransactionManager {
         writtenFiles.push(relPath);
       }
       tx.status = 'COMMITTED';
-      return { success: true, committedFiles: writtenFiles };
+      return { success: true, status: 'COMMITTED', committedFiles: writtenFiles };
     } catch (writeErr) {
       // Auto-rollback immediately on write failure
       const rbResult = this.rollback(transactionId);
@@ -211,4 +260,6 @@ class TransactionManager {
   }
 }
 
-module.exports = new TransactionManager();
+const defaultInstance = new TransactionManager();
+defaultInstance.TransactionManager = TransactionManager;
+module.exports = defaultInstance;

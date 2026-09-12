@@ -1,3 +1,4 @@
+require('./sqlitePolyfill');
 const logger = require('../logger');
 
 class MigrationRunner {

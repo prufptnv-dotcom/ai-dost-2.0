@@ -1,3 +1,5 @@
+const Tool = require('./Tool');
+
 class ToolRegistry {
   constructor() {
     this.tools = new Map();
@@ -9,6 +11,9 @@ class ToolRegistry {
     }
     if (this.tools.has(tool.name)) {
       throw new Error(`Tool '${tool.name}' is already registered`);
+    }
+    if (typeof tool.validateInput !== 'function') {
+      tool.validateInput = Tool.prototype.validateInput.bind(tool);
     }
     this.tools.set(tool.name, tool);
   }

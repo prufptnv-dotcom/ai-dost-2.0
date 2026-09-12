@@ -1,0 +1,26 @@
+# AI-Dost 2.0 - Runtime Verification Backend Dockerfile
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Ensure curl for healthcheck
+RUN apk add --no-cache curl
+
+# Copy dependency manifests
+COPY package*.json ./
+RUN npm ci --omit=dev --ignore-scripts || npm install --omit=dev
+
+# Copy application source
+COPY . .
+
+# Ensure data directory exists with write permissions for node user
+RUN mkdir -p /app/data && chown -R node:node /app/data
+
+USER node
+
+EXPOSE 5000
+
+ENV PORT=5000
+ENV NODE_ENV=production
+
+CMD ["node", "server.js"]

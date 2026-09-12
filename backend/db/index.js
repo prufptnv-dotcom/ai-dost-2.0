@@ -1,3 +1,4 @@
+require('./sqlitePolyfill');
 const { DatabaseSync: Database } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
@@ -10,6 +11,7 @@ const migration005 = require('./migrations/005_workflows_schema');
 const migration006 = require('./migrations/006_skills_schema');
 const migration007 = require('./migrations/007_performance_indexes');
 const migration008 = require('./migrations/008_context_compression_cache');
+const migration009 = require('./migrations/009_assessments_schema');
 const logger = require('../logger');
 
 let dbInstance = null;
@@ -58,7 +60,8 @@ function initDatabase(customPath = null) {
     migration005,
     { version: 6, name: '006_skills_schema', up: migration006.up },
     migration007,
-    migration008
+    migration008,
+    migration009
   ]);
 
   // Run legacy data migrator (idempotent)

@@ -1,6 +1,7 @@
 const express = require('express');
 const logger = require('../logger');
 const router = express.Router();
+const { detectResponseLanguage } = require('../services/languageDetector');
 const GroqService = require('../services/groqService');
 const GeminiService = require('../services/geminiService');
 const DeepSeekService = require('../services/deepseekService');
@@ -11,6 +12,14 @@ const MistralService = require('../services/mistralService');
 const TogetherService = require('../services/togetherService');
 const CerebrasService = require('../services/cerebrasService');
 const OpenAIService = require('../services/openaiService');
+const webSearchService = require('../services/webSearchService');
+const { fetchSafeUrl } = require('../services/urlFetcherService');
+const { classifyWebIntent } = require('../services/webIntentClassifier');
+const { getPublicConfig } = require('../config/webAccessConfig');
+const { classifyAssessmentIntent, INTENTS: ASSESS_INTENTS } = require('../services/assessmentIntentClassifier');
+const { generateAssessment } = require('../services/assessmentGeneratorService');
+const { sanitizeAssessmentForClient } = require('../services/assessmentSchema');
+const assessmentDAO = require('../db/dao/AssessmentDAO');
 
 // Helper to check if response indicates rate limit or error
 function isRateLimitedOrError(response) {
@@ -171,23 +180,62 @@ router.post('/', async (req, res) => {
             });
         }
         
-        // Persona tone control (hinglish / english / formal)
-        const PERSONAS = {
-            hinglish: 'Tone: Always reply in Hinglish (Hindi written in Roman script, mixed with English). Be friendly, casual and fun. Use light emojis. Keep technical accuracy. ',
-            english: 'Tone: Reply in clear simple English. Friendly but professional. ',
-            formal: 'Tone: Reply in formal, professional Hindi or English. Polite, structured, no slang, no emojis. '
-        };
+        // Clean history: sliding window up to 20 messages
+        const cleanHistory = buildCleanHistory(history, 20, 24000);
+
+        // Production-Grade Automatic Response-Language Matching
+        const langInfo = detectResponseLanguage(message, cleanHistory, { persona });
+        logger.info(`🌐 [Language Matcher] Latest Message -> Detected: ${langInfo.languageName} (${langInfo.detectedResponseLanguage}, confidence: ${langInfo.languageConfidence})`);
+
         let processedMessage = message;
-        if (persona && PERSONAS[persona]) {
-            processedMessage = `${PERSONAS[persona]}\n\n${message}`;
-        }
         if (uploadedDocs && uploadedDocs.length > 0) {
             const docsContext = uploadedDocs.map(doc => `--- START OF DOCUMENT: ${doc.name} ---\n${doc.content}\n--- END OF DOCUMENT: ${doc.name} ---`).join('\n\n');
             processedMessage = `Knowledge Base / Document Library Context:\n${docsContext}\n\nUser Message:\n${message}`;
         }
-        
-        // Clean history: sliding window up to 20 messages
-        const cleanHistory = buildCleanHistory(history, 20, 24000);
+        // Prepend locked language directive to guarantee response language consistency
+        processedMessage = `${langInfo.instruction}\n\n${processedMessage}`;
+
+        // Production-Grade Web Intent Classification & Live Data Injection
+        let attachedSources = [];
+        const webIntent = classifyWebIntent(message);
+
+        if (webIntent.needsWeb) {
+            logger.info(`🌐 [Chat Router] Web intent: ${webIntent.intent} for query: "${webIntent.query}"`);
+            if (webIntent.intent === 'URL_FETCH' && webIntent.extractedUrls.length > 0) {
+                const targetUrl = webIntent.extractedUrls[0];
+                const fetchRes = await fetchSafeUrl(targetUrl);
+                if (fetchRes.success) {
+                    attachedSources = [{
+                        citationId: 1,
+                        title: fetchRes.title || fetchRes.domain,
+                        url: fetchRes.url,
+                        domain: fetchRes.domain,
+                        snippet: fetchRes.content.slice(0, 300)
+                    }];
+                    processedMessage += `\n\n[FETCHED_PAGE_CONTENT: ${targetUrl}]\nTitle: ${fetchRes.title}\nDomain: ${fetchRes.domain}\nContent:\n${fetchRes.content}\n\nInstructions: Answer the user's prompt using the fetched webpage content above. Cite the source using [1] or (${fetchRes.domain}).`;
+                } else {
+                    processedMessage += `\n\n[NOTE: Could not open URL: ${targetUrl}. Security/Network reason: ${fetchRes.error}. Please inform the user honestly.]`;
+                }
+            } else {
+                const searchRes = await webSearchService.search(webIntent.query, { maxResults: 5 });
+                if (searchRes.success && searchRes.results && searchRes.results.length > 0) {
+                    attachedSources = searchRes.results.map((r, i) => ({
+                        citationId: i + 1,
+                        title: r.title,
+                        url: r.url,
+                        domain: r.domain,
+                        snippet: r.snippet,
+                        publishedDate: r.publishedDate,
+                        retrievalTimestamp: r.retrievalTimestamp,
+                        reliability: r.reliability
+                    }));
+
+                    const webContextText = attachedSources.map(s => `[${s.citationId}] "${s.title}" (${s.domain})\nURL: ${s.url}\nDate: ${s.publishedDate || 'recent'}\nSnippet: ${s.snippet}`).join('\n\n');
+
+                    processedMessage += `\n\n[VERIFIED_LIVE_WEB_SEARCH_RESULTS]\nQuery: ${webIntent.query}\nProvider: ${searchRes.provider}\nSources:\n${webContextText}\n\nStrict Instructions for Live Web Answers:\n1. Base factual claims only on the verified web search results above.\n2. Cite sources using [1], [2], etc., matching the numbered sources.\n3. If facts cannot be verified or sources conflict, state this honestly.\n4. Do not invent facts or URLs. Keep URLs and domain names exact.\n5. Answer in the locked user language: ${langInfo.languageName} (${langInfo.detectedResponseLanguage}).`;
+                }
+            }
+        }
 
         let response;
         let usedModel = model || 'auto';
@@ -326,11 +374,13 @@ router.post('/', async (req, res) => {
                 case 'huggingface':
                     response = await HuggingFaceService.chat(groqMsg);
                     break;
-                default:
+                default: {
                     // Auto-select best model with intelligent intent detection
                     const autoResult = await autoSelectModel(processedMessage, section, fileContent, cleanHistory, mode, customKeys);
                     response = autoResult.response;
                     usedModel = autoResult.model;
+                    break;
+                }
             }
         }
         
@@ -348,6 +398,19 @@ router.post('/', async (req, res) => {
             success: true,
             reply: response,
             model: usedModel,
+            sources: attachedSources,
+            detectedResponseLanguage: langInfo.detectedResponseLanguage,
+            languageName: langInfo.languageName,
+            languageConfidence: langInfo.languageConfidence,
+            explicitLanguageOverride: langInfo.isExplicitOverride,
+            script: langInfo.script,
+            languageInfo: {
+                detectedResponseLanguage: langInfo.detectedResponseLanguage,
+                languageName: langInfo.languageName,
+                languageConfidence: langInfo.languageConfidence,
+                explicitLanguageOverride: langInfo.isExplicitOverride,
+                script: langInfo.script
+            },
             fallbacksAttempted,
             duration
         });
@@ -373,20 +436,20 @@ router.post('/', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 async function executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys) {
     // Wrap each provider call: resolves with response if valid, rejects if not
-    const makeRacer = (name, fn) => new Promise(async (resolve, reject) => {
+    const makeRacer = async (name, fn) => {
         try {
             logger.info(`⚡ Racing ${name}...`);
             const res = await fn();
             if (isValidResponse(res)) {
                 logger.info(`✅ ${name} won the race`);
-                resolve({ response: res, winner: name });
+                return { response: res, winner: name };
             } else {
-                reject(new Error(`${name}: invalid/rate-limited response`));
+                throw new Error(`${name}: invalid/rate-limited response`);
             }
         } catch (e) {
-            reject(new Error(`${name}: ${e.message}`));
+            throw new Error(`${name}: ${e.message}`);
         }
-    });
+    };
 
     // ── TIER 1: Top 3 fastest — race simultaneously ──────────────────────
     try {
@@ -522,122 +585,108 @@ async function autoSelectModel(message, section, fileContent, cleanHistory, mode
     }
 }
 
+// ── Web Access Status & Health ───────────────────────────────────────────────
+router.get('/web-status', (req, res) => {
+    res.json({ success: true, ...getPublicConfig() });
+});
+
 // ── Web Search with sources (Perplexity-style) ────────────────────────────────
 router.post('/search', async (req, res) => {
-    const { message } = req.body;
+    const { message, model, history } = req.body;
     if (!message || !message.trim()) {
         return res.status(400).json({ success: false, error: 'message is required' });
     }
     const query = message.trim();
 
-    // 1) Gemini with Google Search grounding (free tier, uses existing key)
+    // Production-Grade Automatic Response-Language Matching for Web Search answers
+    const cleanHistory = buildCleanHistory(history, 10, 12000);
+    const langInfo = detectResponseLanguage(query, cleanHistory);
+
     try {
-        const API_KEY = process.env.GEMINI_API_KEY;
-        if (API_KEY) {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${API_KEY}`;
-            const payload = {
-                contents: [{ role: 'user', parts: [{ text: query }] }],
-                tools: [{ googleSearch: {} }],
-                generationConfig: { temperature: 0.4 }
-            };
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 25000);
-            const r = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-                signal: controller.signal
+        const searchRes = await webSearchService.search(query, { maxResults: 6 });
+        const sources = (searchRes.results || []).map((s, i) => ({
+            citationId: i + 1,
+            title: s.title,
+            url: s.url,
+            domain: s.domain,
+            snippet: s.snippet,
+            publishedDate: s.publishedDate,
+            retrievalTimestamp: s.retrievalTimestamp,
+            reliability: s.reliability
+        }));
+
+        if (sources.length === 0) {
+            return res.json({
+                success: true,
+                reply: langInfo.detectedResponseLanguage === 'hindi'
+                    ? 'इंटरनेट पर इस विषय पर कोई सत्यापित जानकारी नहीं मिली। कृपया अपने प्रश्न को थोड़ा और स्पष्ट करें।'
+                    : 'Could not find verified live web results for this query. Please try again with more specific keywords.',
+                sources: [],
+                provider: searchRes.provider || 'none',
+                status: 'NO_RESULTS',
+                detectedResponseLanguage: langInfo.detectedResponseLanguage,
+                languageName: langInfo.languageName
             });
-            clearTimeout(timer);
-            const data = await r.json();
-            const text = (data?.candidates?.[0]?.content?.parts || [])
-                .map((p) => p.text).filter(Boolean).join('\n');
-            if (text && text.length > 10) {
-                const chunks = data?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-                const sources = chunks
-                    .filter((c) => c.web)
-                    .map((c) => ({ title: c.web.title || c.web.uri, url: c.web.uri }))
-                    .filter((s) => s.url)
-                    .slice(0, 6);
-                return res.json({ success: true, reply: text, sources, provider: 'gemini-grounding' });
-            }
         }
-    } catch (e) {
-        logger.warn('[Search] Gemini grounding failed:', e.message);
-    }
 
-    // 2) Wikipedia search + summary fallback (free, no API key, fast)
-    try {
-        const wikiRes = await fetch(
-            `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&srlimit=4&utf8=1`,
-            { signal: AbortSignal.timeout(8000) }
-        );
-        const wikiData = await wikiRes.json();
-        const hits = (wikiData?.query?.search || []).slice(0, 4);
-        if (hits.length > 0) {
-            const sources = hits.map((s) => ({
-                title: s.title,
-                url: `https://en.wikipedia.org/wiki/${encodeURIComponent(s.title.replace(/ /g, '_'))}`
-            }));
-            // Get a short extract from the top result
-            const summaryRes = await fetch(
-                `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(hits[0].title.replace(/ /g, '_'))}`,
-                { signal: AbortSignal.timeout(8000) }
-            );
-            const summary = await summaryRes.json();
-            const extract = summary?.extract || hits[0].snippet?.replace(/<[^>]+>/g, '') || '';
-            if (extract) {
-                return res.json({
-                    success: true,
-                    reply: `**${hits[0].title}**\n\n${extract}`,
-                    sources,
-                    provider: 'wikipedia'
-                });
-            }
-        }
-    } catch (e) {
-        logger.warn('[Search] Wikipedia failed:', e.message);
-    }
+        // Synthesize response using LLM grounded with verified web sources and strict citation rules
+        const sourcesContext = sources.map((s, i) => `[${i + 1}] "${s.title}" (${s.domain})\nURL: ${s.url}\nDate: ${s.publishedDate || 'N/A'}\nSnippet: ${s.snippet}`).join('\n\n');
 
-    // 3) DuckDuckGo Instant Answer fallback
-    try {
-        const r = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&no_redirect=1`, {
-            signal: AbortSignal.timeout(12000)
-        });
-        const data = await r.json();
-        let reply = data?.AbstractText || data?.Answer || '';
-        const sources = [];
-        (data?.RelatedTopics || []).forEach((t) => {
-            if (t.Text && t.FirstURL) sources.push({ title: t.Text.slice(0, 90), url: t.FirstURL });
-        });
-        if (data?.AbstractURL) sources.unshift({ title: data?.Heading || 'Source', url: data.AbstractURL });
-        if (!reply && sources.length === 0) {
-            reply = 'Dhundhne me kuch khaas nahi mila — thoda specific prompt try karo.';
+        const prompt = `${langInfo.instruction}
+
+You are AI-Dost with live web search access. Answer the user query factually based ONLY on the verified live web search results below.
+
+USER QUERY:
+${query}
+
+VERIFIED LIVE WEB SOURCES:
+${sourcesContext}
+
+STRICT CITATION DIRECTIVES:
+- Only assert facts directly substantiated by the sources above.
+- Embed numbered bracket citations [1], [2], etc., immediately following the facts they support.
+- Do not invent, hallucinate, or fabricate any facts or citations.
+- If information is missing or sources conflict, state this transparently.
+- Keep original URLs and proper names intact.
+- Respond in: ${langInfo.languageName} (${langInfo.detectedResponseLanguage}).`;
+
+        let reply = '';
+        try {
+            const llmPromise = autoSelectModel(prompt, 'chat', null, cleanHistory, 'chat', null);
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('LLM synthesis timeout')), 8000));
+            const llmRes = await Promise.race([llmPromise, timeoutPromise]);
+            if (isValidResponse(llmRes.response)) {
+                reply = llmRes.response;
+            }
+        } catch (llmErr) {
+            logger.warn('[Search] LLM synthesis fallback:', llmErr.message);
         }
+
+        if (!reply) {
+            // Fallback synthesis directly from verified snippets in user language
+            reply = sources.slice(0, 4).map((s, i) => `**[${i + 1}] ${s.title}**\n${s.snippet}\n🔗 [${s.domain}](${s.url})`).join('\n\n');
+        }
+
         return res.json({
             success: true,
-            reply: reply || 'Ye raha summary — sources niche hain.',
-            sources: sources.slice(0, 6),
-            provider: 'duckduckgo'
+            reply,
+            sources,
+            provider: searchRes.provider,
+            status: 'SUCCESS',
+            retrievalTimestamp: new Date().toISOString(),
+            detectedResponseLanguage: langInfo.detectedResponseLanguage,
+            languageName: langInfo.languageName
         });
     } catch (e) {
-        logger.warn('[Search] DuckDuckGo failed:', e.message);
-    }
-
-    // 4) Last resort: normal cascading chat
-    try {
-        const result = await autoSelectModel(query, 'chat', null, [], 'chat', null);
-        return res.json({ success: true, reply: result.response, sources: [], provider: 'chat-fallback' });
-    } catch (e) {
-        logger.error('[Search] All methods failed:', e.message);
-        return res.status(500).json({ success: false, error: 'Search failed', detail: e.message });
+        logger.error('[Search] Web search error:', e.message);
+        return res.status(500).json({ success: false, error: 'Web search failed', detail: e.message });
     }
 });
 
 // ── Creative Canvas & Visual Art System Directive ───────────────────────────
 const CREATIVE_CANVAS_SYSTEM_PROMPT = `You are AI-Dost, an elite Senior Software Engineer, Creative Canvas/SVG Technologist, and Autonomous AI Assistant.
 Key Directives & Mandates:
-1. Tone & Responsibility: Be confident, proactive, and authoritative. Answer in natural, clean Hinglish/Hindi/English matching the user's language. Never make excuses, never write broken words, and never ask the user to manually debug or wire files together.
+1. Tone & Responsibility: Be confident, proactive, and authoritative. STRICT LANGUAGE RULE: Always respond in the EXACT language and script detected from the user's latest prompt (e.g. English for English questions, Hindi in Devanagari script for Hindi questions, Hinglish for Romanized Hindi, Bengali for Bengali, etc.). Never force Hinglish if the user asks in pure English or another language.
 2. Multimodal Intents:
    - IMAGE REQUEST: If user asks for an image, drawing, or picture (e.g. "image banao"), respond ONLY with: [GENERATE_IMAGE: detailed English description].
    - PDF / REPORT: If user asks for a PDF or document, wrap in [GENERATE_PDF: Title] content [/GENERATE_PDF].
@@ -771,21 +820,163 @@ router.post('/stream', async (req, res) => {
             return res.end();
         }
 
-        const PERSONAS = {
-            hinglish: 'Tone: Always reply in Hinglish (Hindi written in Roman script, mixed with English). Be friendly, casual and fun. Use light emojis. Keep technical accuracy. ',
-            english: 'Tone: Reply in clear simple English. Friendly but professional. ',
-            formal: 'Tone: Reply in formal, professional Hindi or English. Polite, structured, no slang, no emojis. '
-        };
+        const cleanHistory = buildCleanHistory(history, 20, 24000);
+
+        // Production-Grade Automatic Response-Language Matching (Locked before streaming starts)
+        const langInfo = detectResponseLanguage(message, cleanHistory, { persona });
+        logger.info(`🌐 [Stream Language Matcher] Locking Language: ${langInfo.languageName} (${langInfo.detectedResponseLanguage}, confidence: ${langInfo.languageConfidence})`);
+
+        // Emit language lock event before any text chunks (Requirements 5 & 6)
+        sendEvent({
+            type: 'language_lock',
+            detectedResponseLanguage: langInfo.detectedResponseLanguage,
+            languageName: langInfo.languageName,
+            languageConfidence: langInfo.languageConfidence,
+            script: langInfo.script,
+            explicitLanguageOverride: langInfo.isExplicitOverride
+        });
+
         let processedMessage = message;
-        if (persona && PERSONAS[persona]) {
-            processedMessage = `${PERSONAS[persona]}\n\n${message}`;
-        }
         if (uploadedDocs && uploadedDocs.length > 0) {
             const docsContext = uploadedDocs.map(doc => `--- START OF DOCUMENT: ${doc.name} ---\n${doc.content}\n--- END OF DOCUMENT: ${doc.name} ---`).join('\n\n');
             processedMessage = `Knowledge Base / Document Library Context:\n${docsContext}\n\nUser Message:\n${message}`;
         }
+        // Prepend locked language directive
+        processedMessage = `${langInfo.instruction}\n\n${processedMessage}`;
 
-        const cleanHistory = buildCleanHistory(history, 20, 24000);
+        // Production-Grade Assessment Intent Detection
+        const assessIntent = classifyAssessmentIntent(message, { hasPdf: !!fileContent, uploadedDocs });
+        if (assessIntent.isAssessment && [ASSESS_INTENTS.QUIZ_START, ASSESS_INTENTS.MOCK_TEST_START, ASSESS_INTENTS.INTERVIEW_MODE, ASSESS_INTENTS.ADAPTIVE_QUIZ, ASSESS_INTENTS.PDF_GROUNDED_TEST].includes(assessIntent.intent)) {
+            logger.info(`📝 [Chat Router] Assessment intent: ${assessIntent.intent} for topic: "${assessIntent.topic}" (${assessIntent.questionCount} Qs)`);
+            sendEvent({
+                type: 'assessment_creating',
+                status: `Preparing ${assessIntent.mode} assessment on ${assessIntent.topic}...`
+            });
+
+            let weakTopics = [];
+            if (assessIntent.mode === 'adaptive') {
+                const userWeak = assessmentDAO.getUserWeakTopics(req.body.userId || 'default');
+                weakTopics = userWeak.map(w => w.topic);
+            }
+
+            const docText = fileContent || (uploadedDocs && uploadedDocs[0]?.content) || null;
+            const docName = (uploadedDocs && uploadedDocs[0]?.name) || 'Uploaded Document';
+
+            const masterAssessment = await generateAssessment({
+                topic: assessIntent.topic,
+                subject: assessIntent.subject,
+                mode: assessIntent.mode,
+                difficulty: assessIntent.difficulty,
+                questionCount: assessIntent.questionCount,
+                timeLimit: assessIntent.timeLimit,
+                negativeMarks: assessIntent.negativeMarks,
+                docContent: docText,
+                docName,
+                weakTopics
+            });
+
+            assessmentDAO.saveAssessment(masterAssessment, req.body.userId || 'default');
+            const clientSafe = sanitizeAssessmentForClient(masterAssessment);
+
+            sendEvent({
+                type: 'assessment_created',
+                assessment: clientSafe
+            });
+
+            const isHindi = langInfo.detectedResponseLanguage === 'hindi';
+            const isHinglish = langInfo.detectedResponseLanguage === 'hinglish';
+            let intro = `I have prepared a **${clientSafe.title}** for you! (${clientSafe.questionCount} questions, Mode: ${clientSafe.mode}, Difficulty: ${clientSafe.difficulty}).\n\nClick **"Launch Assessment"** below to start the interactive test.`;
+            if (isHindi) {
+                intro = `मैंने आपके लिए **${clientSafe.title}** तैयार कर लिया है! (${clientSafe.questionCount} प्रश्न, मोड: ${clientSafe.mode}, स्तर: ${clientSafe.difficulty})।\n\nनीचे दिए गए **"Launch Assessment"** बटन पर क्लिक करके टेस्ट शुरू करें।`;
+            } else if (isHinglish) {
+                intro = `Maine aapke liye **${clientSafe.title}** ready kar diya hai! (${clientSafe.questionCount} questions, Mode: ${clientSafe.mode}, Difficulty: ${clientSafe.difficulty}).\n\nNeeche diye gaye **"Launch Assessment"** button par click karke interactive test shuru karein.`;
+            }
+
+            sendEvent({ chunk: intro });
+            sendEvent({ done: true, model: 'assessment-engine', assessment: clientSafe });
+            sendEvent('[DONE]');
+            return res.end();
+        }
+
+        // Production-Grade Web Intent Classification & Live Data Injection for SSE
+        let attachedSources = [];
+        const webIntent = classifyWebIntent(message);
+
+        if (webIntent.needsWeb) {
+            logger.info(`🌐 [Stream Router] Web intent: ${webIntent.intent} for query: "${webIntent.query}"`);
+            if (webIntent.intent === 'URL_FETCH' && webIntent.extractedUrls.length > 0) {
+                const targetUrl = webIntent.extractedUrls[0];
+                sendEvent({
+                    type: 'web_search_start',
+                    intent: 'URL_FETCH',
+                    status: 'Reading webpage...',
+                    url: targetUrl
+                });
+
+                const fetchRes = await fetchSafeUrl(targetUrl);
+                if (fetchRes.success) {
+                    attachedSources = [{
+                        citationId: 1,
+                        title: fetchRes.title || fetchRes.domain,
+                        url: fetchRes.url,
+                        domain: fetchRes.domain,
+                        snippet: fetchRes.content.slice(0, 300)
+                    }];
+                    sendEvent({
+                        type: 'web_search_sources',
+                        sources: attachedSources
+                    });
+
+                    processedMessage += `\n\n[FETCHED_PAGE_CONTENT: ${targetUrl}]\nTitle: ${fetchRes.title}\nDomain: ${fetchRes.domain}\nContent:\n${fetchRes.content}\n\nInstructions: Answer the user's prompt using the fetched webpage content above. Cite the source using [1] or (${fetchRes.domain}).`;
+                    sendEvent({ type: 'web_search_done', totalResults: 1 });
+                } else {
+                    sendEvent({
+                        type: 'web_search_error',
+                        error: fetchRes.error || 'Failed to fetch webpage safely'
+                    });
+                    processedMessage += `\n\n[NOTE: Could not open URL: ${targetUrl}. Security/Network reason: ${fetchRes.error}. Please inform the user honestly.]`;
+                }
+            } else {
+                sendEvent({
+                    type: 'web_search_start',
+                    intent: webIntent.intent,
+                    status: 'Searching live web...',
+                    query: webIntent.query
+                });
+
+                const searchRes = await webSearchService.search(webIntent.query, { maxResults: 5 });
+                if (searchRes.success && searchRes.results && searchRes.results.length > 0) {
+                    attachedSources = searchRes.results.map((r, i) => ({
+                        citationId: i + 1,
+                        title: r.title,
+                        url: r.url,
+                        domain: r.domain,
+                        snippet: r.snippet,
+                        publishedDate: r.publishedDate,
+                        retrievalTimestamp: r.retrievalTimestamp,
+                        reliability: r.reliability
+                    }));
+
+                    sendEvent({
+                        type: 'web_search_sources',
+                        sources: attachedSources
+                    });
+
+                    const webContextText = attachedSources.map(s => `[${s.citationId}] "${s.title}" (${s.domain})\nURL: ${s.url}\nDate: ${s.publishedDate || 'recent'}\nSnippet: ${s.snippet}`).join('\n\n');
+
+                    processedMessage += `\n\n[VERIFIED_LIVE_WEB_SEARCH_RESULTS]\nQuery: ${webIntent.query}\nProvider: ${searchRes.provider}\nSources:\n${webContextText}\n\nStrict Instructions for Live Web Answers:\n1. Base factual claims only on the verified web search results above.\n2. Cite sources using [1], [2], etc., matching the numbered sources.\n3. If facts cannot be verified or sources conflict, state this honestly.\n4. Do not invent facts or URLs. Keep URLs and domain names exact.\n5. Answer in the locked user language: ${langInfo.languageName} (${langInfo.detectedResponseLanguage}).`;
+
+                    sendEvent({ type: 'web_search_done', totalResults: attachedSources.length });
+                } else {
+                    sendEvent({
+                        type: 'web_search_done',
+                        totalResults: 0,
+                        status: searchRes.status || 'NO_RESULTS'
+                    });
+                }
+            }
+        }
+
         const groqMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
 
         let streamedSuccessfully = false;
@@ -965,7 +1156,7 @@ router.post('/stream', async (req, res) => {
             }
         }
 
-        sendEvent({ done: true, model: usedModel });
+        sendEvent({ done: true, model: usedModel, sources: attachedSources });
         sendEvent('[DONE]');
         res.end();
     } catch (error) {

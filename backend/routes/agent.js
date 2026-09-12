@@ -3,9 +3,9 @@ const logger = require('../logger');
 const router = express.Router();
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
+const { exec, execSync } = require('child_process');
 const os = require('os');
-const sandboxManager = require('../sandbox/sandboxManager');
+const sandboxManager = require('../sandbox/SandboxManager');
 const devServerManager = require('../sandbox/devServerManager');
 const workspaceManager = require('../services/workspaceManager');
 
@@ -77,6 +77,8 @@ TOOLS AVAILABLE:
 8. take_screenshot(url) / inspect_visual_dom() — Capture full-page screenshot of running app for visual UI verification
 9. generate_project_from_prompt(prompt, targetDir) — Plan and create a complete full-stack project from a single prompt
 10. resume_from_chat(prompt) — Generate a structured resume from a user prompt
+11. web_search(query, maxResults) — Search the live web for real-time information, news, weather, stock prices, or documentation
+12. fetch_webpage(url, maxLength) — Safely open and read public webpage contents with SSRF protection
 
 SANDBOX TOOLS (isolated Docker containers for safe code execution):
 11. sandbox_create(projectId, options) — Create a new isolated sandbox container
@@ -187,6 +189,26 @@ function searchCodebase(query, projectFiles) {
   }));
 
   return { success: true, results };
+}
+
+function getCurrentBranch(targetProjectPath) {
+  try {
+    const { stdout } = execSync(`git branch --show-current`, { cwd: targetProjectPath, timeout: 5000 });
+    return stdout.trim();
+  } catch {
+    return 'main';
+  }
+}
+
+function classifyProjectIntent(userPrompt = '', hasExistingFiles = false) {
+  const isExistingProjectModification = /\b(upgrade|update|add|chart|export|fix|modify|enhance|improve|refactor|optimize|debug|change|badlo|jodo|lagao|karo|integrate|feature|current|existing|iss? project|iss? app)\b/i.test(userPrompt);
+  const isExplicitNewProject = !isExistingProjectModification && /\b(new project|naya project|scratch se|brand new|create a new (?:app|project|website)|build a new (?:app|project|website)|generate a new (?:app|project|website)|scaffold a new)\b/i.test(userPrompt);
+  const isGreenfieldScaffold = !hasExistingFiles && (isExplicitNewProject || !isExistingProjectModification);
+
+  if (isGreenfieldScaffold || isExplicitNewProject) {
+    return 'CREATE_NEW_PROJECT';
+  }
+  return 'MODIFY_EXISTING_PROJECT';
 }
 
 // ── Tool Executor ─────────────────────────────────────────────────────────────
@@ -352,23 +374,6 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
       }
     }
 
-    case 'list_directory': {
-      try {
-        const dirPath = safeJoin(projectPath, parameters.path || '.');
-        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-        return { success: true, entries: entries.map(e => ({ name: e.name, type: e.isDirectory() ? 'dir' : 'file' })) };
-      } catch (e) {
-        // Fallback: derive from in-memory files
-        const dirs = new Set();
-        for (const f of (projectFiles || [])) {
-          dirs.add(f.path);
-          const parts = f.path.split('/');
-          for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join('/'));
-        }
-        return { success: true, entries: [...dirs].map(d => ({ name: d, type: 'file' })), note: 'From memory' };
-      }
-    }
-
     case 'run_terminal': {
       const { runInSessionAuto } = require('../sockets/terminal');
       return new Promise((resolve) => {
@@ -469,7 +474,7 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
                 success: true,
                 type: 'status',
                 message: 'Git repository exists',
-                branch: this._getCurrentBranch(projectPath)
+                branch: getCurrentBranch(projectPath)
               });
             } else {
               resolve({
@@ -541,54 +546,52 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
       });
     }
 
-    // Helper: Get current branch
-    this._getCurrentBranch = function(projectPath) {
-      try {
-        const { stdout } = execSync(`git branch --show-current`, { cwd: projectPath, timeout: 5000 });
-        return stdout.trim();
-      } catch {
-        return 'main';
-      }
-    };
     case 'take_screenshot': {
-      return new Promise(async (resolve) => {
-        try {
-          // Dynamic import of Playwright
-          const { chromium } = await import('playwright');
-          const browser = await chromium.launch({ headless: true });
-          const page = await browser.newPage();
-          
-          const targetUrl = parameters.url || 'http://localhost:3001';
-          await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 30000 });
-          
-          // Take full page screenshot
-          const screenshotBuffer = await page.screenshot({ fullPage: true, type: 'png' });
-          await browser.close();
-          
-          // Convert to base64
-          const base64 = screenshotBuffer.toString('base64');
-          
-          resolve({ 
-            success: true, 
-            screenshot: base64,
-            mimeType: 'image/png',
-            url: targetUrl,
-            message: `Screenshot captured from ${targetUrl}`
-          });
-        } catch (e) {
-          logger.error('[Agent] Screenshot error:', e.message);
-          resolve({ success: false, error: `Screenshot failed: ${e.message}` });
-        }
-      });
+      try {
+        // Dynamic import of Playwright
+        const { chromium } = await import('playwright');
+        const browser = await chromium.launch({ headless: true });
+        const page = await browser.newPage();
+        
+        const targetUrl = parameters.url || 'http://localhost:3001';
+        await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 30000 });
+        
+        // Take full page screenshot
+        const screenshotBuffer = await page.screenshot({ fullPage: true, type: 'png' });
+        await browser.close();
+        
+        // Convert to base64
+        const base64 = screenshotBuffer.toString('base64');
+        
+        return { 
+          success: true, 
+          screenshot: base64,
+          mimeType: 'image/png',
+          url: targetUrl,
+          message: `Screenshot captured from ${targetUrl}`
+        };
+      } catch (e) {
+        logger.error('[Agent] Screenshot error:', e.message);
+        return { success: false, error: `Screenshot failed: ${e.message}` };
+      }
     }
 
     // ── Full Project Generation Tool ──────────────────────────────────────────
     case 'generate_project_from_prompt': {
-      return new Promise(async (resolve) => {
-        try {
-const prompt = parameters.prompt || '';
-          const requestedDir = parameters.targetDir || projectPath;
-          const targetDir = path.isAbsolute(requestedDir) ? requestedDir : safeJoin(projectPath, requestedDir);
+      try {
+        const prompt = parameters.prompt || '';
+        const requestedDir = parameters.targetDir || projectPath;
+        const targetDir = path.isAbsolute(requestedDir) ? requestedDir : safeJoin(projectPath, requestedDir);
+
+        const isExplicitNew = /\b(new project|naya project|scratch se|brand new|create a new (?:app|project|website)|build a new (?:app|project|website)|generate a new (?:app|project|website)|scaffold a new)\b/i.test(prompt);
+        const hasExisting = (projectFiles && Array.isArray(projectFiles) && projectFiles.length > 0) || (fs.existsSync(targetDir) && fs.readdirSync(targetDir).filter(f => f !== 'node_modules' && !f.startsWith('.')).length > 0);
+        if (hasExisting && !isExplicitNew) {
+          logger.warn(`[Agent] Blocked generate_project_from_prompt on existing project: "${prompt}"`);
+          return {
+            success: false,
+            error: 'This is an existing-project modification task. Stop creating a new application. Inspect and modify the existing project instead.'
+          };
+        }
           
           logger.info(`[Agent] Generating full-stack project for prompt: "${prompt}"`);
           if (onProgress) onProgress({ type: 'step', stepLog: { action: 'Generating architecture', thought: 'Analyzing prompt and generating file tree...' } });
@@ -608,7 +611,7 @@ const prompt = parameters.prompt || '';
           
           let parsedData = null;
           try {
-            const scaffoldResult = await callScaffoldLLM(systemPrompt, null, req.headers);
+            const scaffoldResult = await callScaffoldLLM(systemPrompt, null, parameters?.headers || {});
             if (scaffoldResult && Array.isArray(scaffoldResult.files) && scaffoldResult.files.length >= 2) {
               parsedData = scaffoldResult;
             } else if (typeof scaffoldResult === 'string') {
@@ -853,47 +856,44 @@ ${writtenFiles.map(f => `- \`${f.path}\` (${f.size} bytes)`).join('\n')}
 - **Headless Browser Screenshot QA**: Passed — UI rendered with 0 console errors.
 - **Preview Ready**: Click the **Live Preview** tab to interact with your live application!`;
 
-          resolve({ 
+          return { 
             success: true, 
             message: finalReport,
             generatedFiles: writtenFiles,
             targetDir: targetDir
-          });
+          };
         } catch (e) {
           logger.error('[Agent] Project generation error:', e.message);
-          resolve({ success: false, error: `Project generation failed: ${e.message}` });
+          return { success: false, error: `Project generation failed: ${e.message}` };
         }
-      });
     }
     // ── Resume Generation Tool ────────────────────────────────────────────────
     case 'resume_from_chat': {
-      return new Promise(async (resolve) => {
-        try {
-          const prompt = parameters.prompt || '';
-          
-          // Call the resume generation API
-          const res = await fetch('http://localhost:5000/api/resume/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt })
-          });
-          
-          if (!res.ok) {
-            throw new Error('Resume API failed');
-          }
-          
-          const data = await res.json();
-          
-          resolve({ 
-            success: true, 
-            resumeData: data,
-            message: 'Resume generated successfully'
-          });
-        } catch (e) {
-          logger.error('[Agent] Resume generation error:', e.message);
-          resolve({ success: false, error: `Resume generation failed: ${e.message}` });
+      try {
+        const prompt = parameters.prompt || '';
+        
+        // Call the resume generation API
+        const res = await fetch('http://localhost:5000/api/resume/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt })
+        });
+        
+        if (!res.ok) {
+          throw new Error('Resume API failed');
         }
-      });
+        
+        const data = await res.json();
+        
+        return { 
+          success: true, 
+          resumeData: data,
+          message: 'Resume generated successfully'
+        };
+      } catch (e) {
+        logger.error('[Agent] Resume generation error:', e.message);
+        return { success: false, error: `Resume generation failed: ${e.message}` };
+      }
     }
 
     // ── Sandbox Tools ──────────────────────────────────────────────────────────
@@ -997,16 +997,6 @@ ${writtenFiles.map(f => `- \`${f.path}\` (${f.size} bytes)`).join('\n')}
       }
     }
 
-    case 'sandbox_destroy': {
-      try {
-        const { sandboxId } = parameters;
-        await sandboxManager.destroy(sandboxId);
-        return { success: true };
-      } catch (e) {
-        return { success: false, error: e.message };
-      }
-    }
-
     // ── Planner Tools ────────────────────────────────────────────────────────
     case 'plan_project': {
       try {
@@ -1043,8 +1033,34 @@ ${writtenFiles.map(f => `- \`${f.path}\` (${f.size} bytes)`).join('\n')}
       }
     }
 
+    case 'web_search': {
+      try {
+        const webSearchService = require('../services/webSearchService');
+        const q = parameters.query || parameters.q || parameters.search || parameters.topic || '';
+        const maxResults = parameters.maxResults || parameters.limit || 5;
+        if (!q.trim()) return { success: false, error: 'Query is required for web_search' };
+        const result = await webSearchService.search(q.trim(), { maxResults });
+        return result;
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
+    case 'fetch_webpage': {
+      try {
+        const { fetchSafeUrl } = require('../services/urlFetcherService');
+        const targetUrl = parameters.url || parameters.link || '';
+        const maxLength = parameters.maxLength || parameters.limit || 8000;
+        if (!targetUrl.trim()) return { success: false, error: 'URL is required for fetch_webpage' };
+        const result = await fetchSafeUrl(targetUrl.trim(), { maxExtractedChars: maxLength });
+        return result;
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
     default:
-      return { success: false, error: `Unknown tool: ${action}. Available: read_file, write_file, apply_diff, run_terminal, list_directory, search_codebase, run_tests, take_screenshot, generate_project_from_prompt, resume_from_chat, sandbox_create, sandbox_exec, sandbox_write, sandbox_read, sandbox_list, sandbox_dev_start, sandbox_dev_stop, sandbox_dev_build, sandbox_expose, sandbox_destroy, plan_project, execute_plan, list_templates` };
+      return { success: false, error: `Unknown tool: ${action}. Available: read_file, write_file, apply_diff, run_terminal, list_directory, search_codebase, run_tests, take_screenshot, generate_project_from_prompt, resume_from_chat, web_search, fetch_webpage, sandbox_create, sandbox_exec, sandbox_write, sandbox_read, sandbox_list, sandbox_dev_start, sandbox_dev_stop, sandbox_dev_build, sandbox_expose, sandbox_destroy, plan_project, execute_plan, list_templates` };
   }
 }
 
@@ -1369,6 +1385,9 @@ function parseLLMAction(raw) {
       customCommand: params.customCommand || params.custom_command || params.command,
       containerPort: params.containerPort || params.container_port || params.port,
       options:    params.options,
+      url:        params.url || params.link || params.uri || params.target_url,
+      maxResults: params.maxResults || params.max_results || params.limit,
+      maxLength:  params.maxLength || params.max_length || params.max_chars,
     };
 
     // If textual SEARCH/REPLACE block was placed inside patch or content parameter
@@ -2411,8 +2430,9 @@ router.post('/run', async (req, res) => {
         ? projectFiles
         : getProjectFiles(projectId || 'default');
       const hasExistingFiles = existingProjectFiles && existingProjectFiles.length > 0;
-      const isExplicitNewProject = /\b(new project|naya project|fullstack|full-stack|scaffold|make\s+(?:a\s+)?(?:new\s+)?|create\s+(?:a\s+)?(?:new\s+)?|build\s+(?:a\s+)?(?:new\s+)?|generate\s+(?:a\s+)?(?:new\s+)?|develop\s+(?:a\s+)?(?:new\s+)?|web\s+app\s+banao|app\s+banao|website\s+banao|system\s+banao|\bbanao\b|\btracker\b|\bportfolio\b|\bdashboard\b|\bclone\b)\b/i.test(userPrompt);
-      const isGreenfieldScaffold = !hasExistingFiles || isExplicitNewProject;
+      const isExistingProjectModification = /\b(upgrade|update|add|chart|export|fix|modify|enhance|improve|refactor|optimize|debug|change|badlo|jodo|lagao|karo|integrate|feature|current|existing|iss? project|iss? app)\b/i.test(userPrompt);
+      const isExplicitNewProject = !isExistingProjectModification && /\b(new project|naya project|scratch se|brand new|create a new (?:app|project|website)|build a new (?:app|project|website)|generate a new (?:app|project|website)|scaffold a new)\b/i.test(userPrompt);
+      const isGreenfieldScaffold = !hasExistingFiles && (isExplicitNewProject || !isExistingProjectModification);
 
       // Greenfield Full-Stack Project Generator
       if (step === 0 && isGreenfieldScaffold) {
@@ -3017,6 +3037,7 @@ Output ONLY valid JSON. No markdown fences outside the JSON.`;
       let context = null;
       let page = null;
       let screenshotBase64 = null;
+      let visionResult = null;
 
       try {
         browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
@@ -3073,7 +3094,7 @@ Return a JSON object with exactly these fields:
 Do not output any reasoning, apologies, or extra text. Only the JSON object.`;
 
         const modelCascade = [GroqService, GeminiService, CerebrasService, OpenRouterService, NvidiaService];
-        let visionResult = null;
+        visionResult = null;
         for (const s of modelCascade) {
           try {
             const resp = await s.chat(systemPrompt, [], null, 'agent');
@@ -3757,4 +3778,5 @@ router.post('/rag-sync', async (req, res) => {
 router.parseLLMAction = parseLLMAction;
 router.searchCodebase = searchCodebase;
 router.buildCodebaseIndex = buildCodebaseIndex;
+router.classifyProjectIntent = classifyProjectIntent;
 module.exports = router;

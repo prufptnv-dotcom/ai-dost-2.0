@@ -226,8 +226,8 @@ describe('AI-Dost 2.0 Capability Registry', () => {
     assert.equal(dockerUnavail, AVAILABILITY.UNAVAILABLE);
 
     // Foundation capability requires configuration
-    const ciCd = capabilityRegistry.isAvailable('devops.ci_cd_pipeline');
-    assert.equal(ciCd, AVAILABILITY.REQUIRES_CONFIGURATION);
+    const ssl = capabilityRegistry.isAvailable('devops.ssl_automation');
+    assert.equal(ssl, AVAILABILITY.REQUIRES_CONFIGURATION);
   });
 
   test('21. requiresCodeDiffGate() identifies persistent source modifying capabilities', () => {
