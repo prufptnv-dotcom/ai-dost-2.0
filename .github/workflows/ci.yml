@@ -39,7 +39,7 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: node --check server.js
-      - run: node --test tests/unit.test.js tests/integration.test.js
+      - run: node --test tests/unit.test.js tests/integration.test.js tests/security-hardening.test.js
 
   e2e:
     name: E2E (Playwright smoke)
@@ -85,7 +85,7 @@ jobs:
         run: |
           cd backend
           npm ci
-          node server.js &
+          node -r ./security-hardening.js server.js &
           sleep 10
           curl -f http://localhost:5000/health
       - name: Test project generation with sandbox
