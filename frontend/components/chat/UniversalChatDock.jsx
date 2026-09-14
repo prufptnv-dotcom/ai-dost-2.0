@@ -2,6 +2,8 @@ import { useCallback } from 'react';
 import { useRouter } from 'next/router';
 import ChatExperienceLayer from './ChatExperienceLayerV4';
 import UniversalCommandBridge from './UniversalCommandBridge';
+import TaskRuntimeBridge from './TaskRuntimeBridge';
+import TaskActivityOverlay from './TaskActivityOverlay';
 
 const VIEW_IDS = new Set([
   'chat',
@@ -70,6 +72,7 @@ export default function UniversalChatDock() {
 
   return (
     <>
+      <TaskRuntimeBridge />
       <UniversalCommandBridge
         onNavigate={onNavigate}
         onNewChat={onNewChat}
@@ -80,6 +83,7 @@ export default function UniversalChatDock() {
         onNewChat={onNewChat}
         onDeleteChat={onDeleteChat}
       />
+      <TaskActivityOverlay />
     </>
   );
 }
