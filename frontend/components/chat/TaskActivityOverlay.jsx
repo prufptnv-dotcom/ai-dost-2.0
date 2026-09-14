@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, CircleAlert, Loader2, Square, XCircle } from 'lucide-react';
+import { Check, CircleAlert, Loader2, RotateCcw, Square, XCircle } from 'lucide-react';
 
 const MAX_ITEMS = 10;
+const RECOVERY_KEY = '__aiDostInterruptedTask';
+const RECOVERY_TTL_MS = 15 * 60 * 1000;
+const COMPOSER_SELECTOR = 'textarea[aria-label="Ask AI-Dost anything"]';
 
 const phaseIcon = (status) => {
   if (status === 'success') return Check;
@@ -40,15 +43,65 @@ function mergeEvent(prev, event) {
   };
 }
 
+function readRecovery() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(RECOVERY_KEY);
+    if (!raw) return null;
+    const value = JSON.parse(raw);
+    if (!value?.message || !value?.startedAt || Date.now() - Number(value.startedAt) > RECOVERY_TTL_MS) {
+      localStorage.removeItem(RECOVERY_KEY);
+      return null;
+    }
+    return value;
+  } catch (_) {
+    try { localStorage.removeItem(RECOVERY_KEY); } catch (_) {}
+    return null;
+  }
+}
+
+function clearRecovery() {
+  try { localStorage.removeItem(RECOVERY_KEY); } catch (_) {}
+}
+
+function retryInComposer(message) {
+  const composer = document.querySelector(COMPOSER_SELECTOR);
+  if (!composer) return false;
+
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  if (setter) setter.call(composer, message);
+  else composer.value = message;
+  composer.dispatchEvent(new Event('input', { bubbles: true }));
+  composer.focus();
+  window.setTimeout(() => {
+    composer.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      which: 13,
+      bubbles: true,
+    }));
+  }, 60);
+  return true;
+}
+
 export default function TaskActivityOverlay() {
   const [tasks, setTasks] = useState({});
+  const [recovery, setRecovery] = useState(null);
   const active = useMemo(() => Object.values(tasks).filter((task) => !task.terminal).at(-1), [tasks]);
 
   useEffect(() => {
+    setRecovery(readRecovery());
     const handle = (event) => {
       const detail = event?.detail;
       if (!detail?.taskId) return;
       setTasks((prev) => mergeEvent(prev, detail));
+      if (detail.type === 'task_started') setRecovery(null);
+      if (detail.type === 'task_complete' || detail.type === 'task_canceled') {
+        clearRecovery();
+        setRecovery(null);
+      }
+      if (detail.type === 'task_error') setRecovery(readRecovery());
     };
     window.addEventListener('ai_dost_task_event', handle);
     return () => window.removeEventListener('ai_dost_task_event', handle);
@@ -67,13 +120,53 @@ export default function TaskActivityOverlay() {
     return () => timers.forEach(window.clearTimeout);
   }, [tasks]);
 
-  if (!active) return null;
-
   const cancel = () => {
-    if (typeof window !== 'undefined' && typeof window.aiDostCancelTask === 'function') {
+    if (active && typeof window !== 'undefined' && typeof window.aiDostCancelTask === 'function') {
       window.aiDostCancelTask(active.taskId);
     }
   };
+
+  const retry = () => {
+    if (!recovery?.message) return;
+    const submitted = retryInComposer(recovery.message);
+    if (submitted) {
+      clearRecovery();
+      setRecovery(null);
+    } else {
+      window.dispatchEvent(new CustomEvent('ai_dost_toast', {
+        detail: { type: 'warning', message: 'Chat composer abhi available nahi hai. Chat view open karke Retry karein.' },
+      }));
+    }
+  };
+
+  const dismissRecovery = () => {
+    clearRecovery();
+    setRecovery(null);
+  };
+
+  if (!active && !recovery) return null;
+
+  if (!active && recovery) {
+    return (
+      <div className="fixed left-1/2 bottom-5 -translate-x-1/2 z-[75] w-[min(92vw,500px)] rounded-2xl border border-border bg-canvas-surface/95 backdrop-blur-xl shadow-2xl px-4 py-3" role="status" aria-live="polite">
+        <div className="flex items-start gap-3">
+          <RotateCcw className="w-4 h-4 mt-0.5 shrink-0 text-paper-200" />
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-semibold text-paper-100">Pichla task ruk gaya tha</div>
+            <div className="mt-1 text-[11px] text-ink-muted line-clamp-2">{recovery.message}</div>
+            <div className="mt-3 flex items-center gap-2">
+              <button type="button" onClick={retry} className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-[10px] font-medium text-paper-100 hover:bg-canvas-elevated" aria-label="Retry interrupted task">
+                <RotateCcw className="w-3 h-3" /> Retry
+              </button>
+              <button type="button" onClick={dismissRecovery} className="rounded-md px-2.5 py-1.5 text-[10px] text-ink-muted hover:text-paper-100" aria-label="Dismiss interrupted task recovery">
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed left-1/2 bottom-5 -translate-x-1/2 z-[75] w-[min(92vw,420px)] rounded-2xl border border-border bg-canvas-surface/95 backdrop-blur-xl shadow-2xl px-3 py-2.5" role="status" aria-live="polite" aria-busy="true">
