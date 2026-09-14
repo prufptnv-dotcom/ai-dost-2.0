@@ -36,6 +36,17 @@ describe('task runtime', () => {
     });
   });
 
+  test('normalizes user cancellation as a terminal canceled event', () => {
+    expect(normalizeServerEvent('task-1', {
+      canceled: true,
+      error: 'Task canceled by user',
+    })).toMatchObject({
+      type: 'task_canceled',
+      phase: 'canceled',
+      label: 'Task canceled by user',
+    });
+  });
+
   test('parses SSE lines and preserves incomplete trailing data', () => {
     const events = [];
     const rest = parseSseLines('data: {"type":"language_lock"}\n\ndata: {"chunk":"hi"}\ndata: {"done":true}', (value) => events.push(value));
