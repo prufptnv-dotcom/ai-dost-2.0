@@ -4,6 +4,7 @@ import ChatExperienceLayer from './ChatExperienceLayerV4';
 import UniversalCommandBridge from './UniversalCommandBridge';
 import TaskRuntimeBridge from './TaskRuntimeBridge';
 import TaskActivityOverlay from './TaskActivityOverlay';
+import SharedContextCapture from './SharedContextCapture';
 
 const VIEW_IDS = new Set([
   'chat',
@@ -72,6 +73,7 @@ export default function UniversalChatDock() {
 
   return (
     <>
+      <SharedContextCapture />
       <TaskRuntimeBridge />
       <UniversalCommandBridge
         onNavigate={onNavigate}
