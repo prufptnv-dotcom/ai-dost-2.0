@@ -2,7 +2,7 @@ import React from 'react';
 import { Search, Plus, PanelLeft } from 'lucide-react';
 import { useRouter } from 'next/router';
 import { AiDostMark } from '../brand/AiDostMark';
-import ChatExperienceLayer from './ChatExperienceLayer';
+import ChatExperienceLayerV2 from './ChatExperienceLayerV2';
 
 export default function SmartChatHeader({
   sessionName = 'New conversation',
@@ -80,7 +80,7 @@ export default function SmartChatHeader({
         </div>
       </header>
 
-      <ChatExperienceLayer
+      <ChatExperienceLayerV2
         onNavigate={handleNavigate}
         onNewChat={onNewSession}
         onDeleteChat={sessionId && onDeleteSession ? () => onDeleteSession(sessionId) : undefined}
