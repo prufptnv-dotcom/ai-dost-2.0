@@ -3,9 +3,9 @@ import { createTaskId, normalizeServerEvent, parseSseLines, TASK_EVENT_TYPES } f
 import { buildUploadedDocsContext, readSharedContext } from './sharedChatContext';
 
 const STREAM_PATH = '/api/chat/stream';
-const CANCELED_KEY = '__aiDostCanceledTasks';
 const ACTIVE_KEY = '__aiDostActiveTask';
 const BLOCK_FALLBACK_KEY = '__aiDostBlockNextChatFallback';
+const FALLBACK_BLOCK_TTL_MS = 2000;
 
 function isChatStreamRequest(input) {
   const url = typeof input === 'string' ? input : input?.url;
@@ -28,16 +28,26 @@ function isChatFallbackRequest(input) {
   }
 }
 
-function getCanceledTasks() {
-  if (typeof window === 'undefined') return new Set();
-  const ids = window[CANCELED_KEY];
-  return ids instanceof Set ? ids : new Set();
+function getRequestInit(args) {
+  return args[1] || (args[0] && typeof args[0] === 'object' ? args[0] : null) || {};
 }
 
-function markCanceled(taskId) {
-  const canceled = getCanceledTasks();
-  canceled.add(taskId);
-  if (typeof window !== 'undefined') window[CANCELED_KEY] = canceled;
+function getChatRequestKey(args) {
+  try {
+    const init = getRequestInit(args);
+    if (typeof init.body !== 'string') return null;
+    const body = JSON.parse(init.body);
+    return JSON.stringify([
+      body.message || '',
+      body.model || '',
+      body.section || '',
+      body.mode || '',
+      body.persona || '',
+      Array.isArray(body.history) ? body.history : [],
+    ]);
+  } catch (_) {
+    return null;
+  }
 }
 
 function augmentStreamRequest(args) {
@@ -61,18 +71,28 @@ export default function TaskRuntimeBridge() {
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const originalFetch = window.fetch.bind(window);
-    const controllers = new Map();
+    const tasks = new Map();
 
     const cancelTask = (taskId) => {
       if (!taskId) return false;
-      markCanceled(taskId);
-      window[BLOCK_FALLBACK_KEY] = true;
-      const controller = controllers.get(taskId);
-      controller?.abort();
-      controllers.delete(taskId);
+      const task = tasks.get(taskId);
+      if (!task) return false;
+
+      task.canceled = true;
+      task.controller.abort();
+      tasks.delete(taskId);
+
+      if (task.requestKey) {
+        const marker = { requestKey: task.requestKey, expiresAt: Date.now() + FALLBACK_BLOCK_TTL_MS };
+        window[BLOCK_FALLBACK_KEY] = marker;
+        window.setTimeout(() => {
+          if (window[BLOCK_FALLBACK_KEY] === marker) delete window[BLOCK_FALLBACK_KEY];
+        }, FALLBACK_BLOCK_TTL_MS);
+      }
+
       if (window[ACTIVE_KEY] === taskId) delete window[ACTIVE_KEY];
       window.dispatchEvent(new CustomEvent('ai_dost_task_event', {
-        detail: normalizeServerEvent(taskId, { error: 'Task canceled by user' }),
+        detail: normalizeServerEvent(taskId, { canceled: true, error: 'Task canceled by user' }),
       }));
       window.dispatchEvent(new CustomEvent('ai_dost_toast', {
         detail: { type: 'warning', message: 'AI-Dost task canceled.' },
@@ -84,15 +104,21 @@ export default function TaskRuntimeBridge() {
 
     const patchedFetch = async (...args) => {
       const input = args[0];
-      if (isChatFallbackRequest(input) && window[BLOCK_FALLBACK_KEY]) {
-        delete window[BLOCK_FALLBACK_KEY];
-        throw new DOMException('Chat task canceled', 'AbortError');
+      if (isChatFallbackRequest(input)) {
+        const marker = window[BLOCK_FALLBACK_KEY];
+        const requestKey = getChatRequestKey(args);
+        if (marker && marker.expiresAt > Date.now() && marker.requestKey === requestKey) {
+          delete window[BLOCK_FALLBACK_KEY];
+          throw new DOMException('Chat task canceled', 'AbortError');
+        }
+        if (marker && marker.expiresAt <= Date.now()) delete window[BLOCK_FALLBACK_KEY];
       }
       if (!isChatStreamRequest(input)) return originalFetch(...args);
 
       const taskId = createTaskId('chat');
       const controller = new AbortController();
-      controllers.set(taskId, controller);
+      const task = { taskId, controller, requestKey: getChatRequestKey(args), canceled: false };
+      tasks.set(taskId, task);
       window[ACTIVE_KEY] = taskId;
 
       const [, init] = args;
@@ -151,7 +177,7 @@ export default function TaskRuntimeBridge() {
         }
         return response;
       } finally {
-        if (controllers.get(taskId) === controller) controllers.delete(taskId);
+        if (tasks.get(taskId) === task) tasks.delete(taskId);
         if (window[ACTIVE_KEY] === taskId) delete window[ACTIVE_KEY];
       }
     };
@@ -159,8 +185,8 @@ export default function TaskRuntimeBridge() {
     window.fetch = patchedFetch;
     return () => {
       window.fetch = originalFetch;
-      controllers.forEach((controller) => controller.abort());
-      controllers.clear();
+      tasks.forEach(({ controller }) => controller.abort());
+      tasks.clear();
       delete window[BLOCK_FALLBACK_KEY];
       if (window.aiDostCancelTask === cancelTask) delete window.aiDostCancelTask;
       if (window[ACTIVE_KEY]) delete window[ACTIVE_KEY];
