@@ -5,6 +5,7 @@ export const TASK_EVENT_TYPES = {
   SOURCE: 'task_source',
   CHUNK: 'task_chunk',
   COMPLETE: 'task_complete',
+  CANCELED: 'task_canceled',
   ERROR: 'task_error',
 };
 
@@ -33,8 +34,12 @@ export function normalizeServerEvent(taskId, payload) {
     payload,
   };
 
+  const errorMessage = String(payload.error || '');
+  if (payload.canceled || /^task\s+(?:was\s+)?cancel(?:ed|led)|^canceled\b|^cancelled\b/i.test(errorMessage)) {
+    return { ...base, type: TASK_EVENT_TYPES.CANCELED, phase: 'canceled', label: errorMessage || 'Task canceled' };
+  }
   if (payload.error && !payload.chunk && !payload.done) {
-    return { ...base, type: TASK_EVENT_TYPES.ERROR, phase: 'error', label: String(payload.error) };
+    return { ...base, type: TASK_EVENT_TYPES.ERROR, phase: 'error', label: errorMessage };
   }
   if (payload.done) {
     return { ...base, type: TASK_EVENT_TYPES.COMPLETE, phase: 'success', label: 'Completed' };
