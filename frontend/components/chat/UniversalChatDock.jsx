@@ -6,6 +6,8 @@ import TaskRuntimeBridge from './TaskRuntimeBridge';
 import TaskActivityOverlay from './TaskActivityOverlay';
 import SharedContextCapture from './SharedContextCapture';
 import UnifiedChatAttachments from './UnifiedChatAttachments';
+import ChatWorkspaceBridge from './ChatWorkspaceBridge';
+import ChatWorkspacePanel from './ChatWorkspacePanel';
 
 const VIEW_IDS = new Set([
   'chat',
@@ -76,6 +78,7 @@ export default function UniversalChatDock() {
     <>
       <SharedContextCapture />
       <TaskRuntimeBridge />
+      <ChatWorkspaceBridge />
       <UniversalCommandBridge
         onNavigate={onNavigate}
         onNewChat={onNewChat}
@@ -87,6 +90,17 @@ export default function UniversalChatDock() {
         onNewChat={onNewChat}
         onDeleteChat={onDeleteChat}
       />
+      <ChatWorkspacePanel onOpenInCopilot={(artifact) => {
+        try {
+          localStorage.setItem('ai_dost_copilot_import', JSON.stringify({
+            title: artifact.title || 'chat-artifact',
+            code: artifact.code || '',
+            language: artifact.language || 'html',
+            timestamp: Date.now(),
+          }));
+        } catch (_) {}
+        onNavigate('copilot');
+      }} />
       <TaskActivityOverlay />
     </>
   );
