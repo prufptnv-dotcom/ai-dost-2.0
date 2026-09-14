@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { createTaskId, normalizeServerEvent, parseSseLines, TASK_EVENT_TYPES } from './taskRuntime';
 import { buildUploadedDocsContext, readSharedContext } from './sharedChatContext';
+import { createTaskPlan } from './taskPlanner';
 
 const STREAM_PATH = '/api/chat/stream';
 const ACTIVE_KEY = '__aiDostActiveTask';
@@ -168,14 +169,25 @@ export default function TaskRuntimeBridge() {
       const [, init] = args;
       const requestArgs = augmentStreamRequest(args);
       const nextInit = { ...(requestArgs[1] || init || {}), signal: controller.signal };
+      const sharedContext = readSharedContext();
+      const plan = createTaskPlan(task.message, {
+        hasFiles: Array.isArray(requestBody?.uploadedDocs) && requestBody.uploadedDocs.length > 0,
+        fileCount: Array.isArray(requestBody?.uploadedDocs) ? requestBody.uploadedDocs.length : 0,
+        hasSharedContext: sharedContext.length > 0,
+      });
+      task.plan = plan;
+      window.dispatchEvent(new CustomEvent('ai_dost_intent_plan', {
+        detail: { taskId, plan },
+      }));
+
       window.dispatchEvent(new CustomEvent('ai_dost_task_event', {
         detail: {
           id: `${taskId}:start`,
           taskId,
           ts: Date.now(),
           type: TASK_EVENT_TYPES.START,
-          phase: 'understanding',
-          label: 'Understanding',
+          phase: plan.intent.type === 'task' ? 'planning' : 'understanding',
+          label: plan.intent.type === 'task' ? 'Planning' : 'Understanding',
         },
       }));
 
