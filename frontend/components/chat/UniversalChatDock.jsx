@@ -5,6 +5,7 @@ import UniversalCommandBridge from './UniversalCommandBridge';
 import TaskRuntimeBridge from './TaskRuntimeBridge';
 import TaskActivityOverlay from './TaskActivityOverlay';
 import SharedContextCapture from './SharedContextCapture';
+import UnifiedChatAttachments from './UnifiedChatAttachments';
 
 const VIEW_IDS = new Set([
   'chat',
@@ -80,6 +81,7 @@ export default function UniversalChatDock() {
         onNewChat={onNewChat}
         onDeleteChat={onDeleteChat}
       />
+      <UnifiedChatAttachments />
       <ChatExperienceLayer
         onNavigate={onNavigate}
         onNewChat={onNewChat}
