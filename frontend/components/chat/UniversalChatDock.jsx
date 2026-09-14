@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { useRouter } from 'next/router';
 import ChatExperienceLayer from './ChatExperienceLayerV4';
+import UniversalCommandBridge from './UniversalCommandBridge';
 
 const VIEW_IDS = new Set([
   'chat',
@@ -62,21 +63,26 @@ export default function UniversalChatDock() {
 
   const onNewChat = useCallback(() => {
     resetChatState();
-    if (router.pathname !== '/dashboard') router.push('/dashboard');
-  }, [router]);
+  }, []);
 
   const onDeleteChat = useCallback(() => {
     deleteCurrentChatState();
-    if (router.pathname !== '/dashboard') router.push('/dashboard');
-  }, [router]);
+  }, []);
 
   if (router.pathname !== '/dashboard') return null;
 
   return (
-    <ChatExperienceLayer
-      onNavigate={onNavigate}
-      onNewChat={onNewChat}
-      onDeleteChat={onDeleteChat}
-    />
+    <>
+      <UniversalCommandBridge
+        onNavigate={onNavigate}
+        onNewChat={onNewChat}
+        onDeleteChat={onDeleteChat}
+      />
+      <ChatExperienceLayer
+        onNavigate={onNavigate}
+        onNewChat={onNewChat}
+        onDeleteChat={onDeleteChat}
+      />
+    </>
   );
 }
