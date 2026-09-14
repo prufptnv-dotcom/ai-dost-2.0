@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, CircleAlert, Loader2 } from 'lucide-react';
+import { Check, CircleAlert, Loader2, Square } from 'lucide-react';
 
 const MAX_ITEMS = 10;
 
@@ -62,11 +62,22 @@ export default function TaskActivityOverlay() {
 
   if (!active) return null;
 
+  const cancel = () => {
+    if (typeof window !== 'undefined' && typeof window.aiDostCancelTask === 'function') {
+      window.aiDostCancelTask(active.taskId);
+    }
+  };
+
   return (
     <div className="fixed left-1/2 bottom-5 -translate-x-1/2 z-[75] w-[min(92vw,420px)] rounded-2xl border border-border bg-canvas-surface/95 backdrop-blur-xl shadow-2xl px-3 py-2.5" role="status" aria-live="polite" aria-busy="true">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 gap-3">
         <div className="text-[11px] font-semibold text-paper-100">AI-Dost is working</div>
-        <div className="text-[10px] text-ink-muted">{active.phase}</div>
+        <div className="flex items-center gap-2">
+          <div className="text-[10px] text-ink-muted">{active.phase}</div>
+          <button type="button" onClick={cancel} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated" aria-label="Stop AI-Dost task" title="Stop task">
+            <Square className="w-3 h-3" /> Stop
+          </button>
+        </div>
       </div>
       <div className="space-y-1.5">
         {active.items.slice(-5).map((item) => {
