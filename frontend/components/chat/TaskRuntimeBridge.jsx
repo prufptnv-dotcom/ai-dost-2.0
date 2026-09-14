@@ -4,6 +4,7 @@ import { buildUploadedDocsContext, readSharedContext } from './sharedChatContext
 
 const STREAM_PATH = '/api/chat/stream';
 const ACTIVE_KEY = '__aiDostActiveTask';
+const RECOVERY_KEY = '__aiDostInterruptedTask';
 const BLOCK_FALLBACK_KEY = '__aiDostBlockNextChatFallback';
 const FALLBACK_BLOCK_TTL_MS = 2000;
 
@@ -50,6 +51,30 @@ function getChatRequestKey(args) {
   }
 }
 
+function writeRecoveryTask(task) {
+  if (typeof window === 'undefined' || !task?.message) return;
+  try {
+    localStorage.setItem(RECOVERY_KEY, JSON.stringify({
+      taskId: task.taskId,
+      message: String(task.message).slice(0, 12000),
+      startedAt: task.startedAt,
+      sessionId: task.sessionId || null,
+    }));
+  } catch (_) {}
+}
+
+function clearRecoveryTask(taskId = null) {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = localStorage.getItem(RECOVERY_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (!taskId || saved?.taskId === taskId) localStorage.removeItem(RECOVERY_KEY);
+  } catch (_) {
+    localStorage.removeItem(RECOVERY_KEY);
+  }
+}
+
 function augmentStreamRequest(args) {
   const [input, init] = args;
   if (!init || typeof init.body !== 'string') return args;
@@ -81,6 +106,7 @@ export default function TaskRuntimeBridge() {
       task.canceled = true;
       task.controller.abort();
       tasks.delete(taskId);
+      clearRecoveryTask(taskId);
 
       if (task.requestKey) {
         const marker = { requestKey: task.requestKey, expiresAt: Date.now() + FALLBACK_BLOCK_TTL_MS };
@@ -117,9 +143,24 @@ export default function TaskRuntimeBridge() {
 
       const taskId = createTaskId('chat');
       const controller = new AbortController();
-      const task = { taskId, controller, requestKey: getChatRequestKey(args), canceled: false };
+      const requestInit = getRequestInit(args);
+      let requestBody = null;
+      try {
+        requestBody = typeof requestInit.body === 'string' ? JSON.parse(requestInit.body) : null;
+      } catch (_) {}
+
+      const task = {
+        taskId,
+        controller,
+        requestKey: getChatRequestKey(args),
+        canceled: false,
+        startedAt: Date.now(),
+        message: requestBody?.message || '',
+        sessionId: requestBody?.sessionId || null,
+      };
       tasks.set(taskId, task);
       window[ACTIVE_KEY] = taskId;
+      writeRecoveryTask(task);
 
       const [, init] = args;
       const requestArgs = augmentStreamRequest(args);
@@ -147,7 +188,14 @@ export default function TaskRuntimeBridge() {
 
           const emit = (payload) => {
             const event = normalizeServerEvent(taskId, payload);
-            if (event) window.dispatchEvent(new CustomEvent('ai_dost_task_event', { detail: event }));
+            if (!event) return;
+            if (event.type === TASK_EVENT_TYPES.COMPLETE || event.type === TASK_EVENT_TYPES.CANCELED) {
+              clearRecoveryTask(taskId);
+            }
+            if (event.type === TASK_EVENT_TYPES.ERROR && !task.canceled) {
+              writeRecoveryTask(task);
+            }
+            window.dispatchEvent(new CustomEvent('ai_dost_task_event', { detail: event }));
           };
 
           const pump = async () => {
@@ -162,6 +210,7 @@ export default function TaskRuntimeBridge() {
               if (buffer.trim()) parseSseLines(`${buffer}\n`, emit);
             } catch (error) {
               if (controller.signal.aborted) return;
+              writeRecoveryTask(task);
               window.dispatchEvent(new CustomEvent('ai_dost_task_event', {
                 detail: normalizeServerEvent(taskId, { error: error?.message || 'Task stream interrupted' }),
               }));
@@ -170,12 +219,16 @@ export default function TaskRuntimeBridge() {
           void pump();
         } catch (error) {
           if (!controller.signal.aborted) {
+            writeRecoveryTask(task);
             window.dispatchEvent(new CustomEvent('ai_dost_task_event', {
               detail: normalizeServerEvent(taskId, { error: error?.message || 'Unable to inspect task stream' }),
             }));
           }
         }
         return response;
+      } catch (error) {
+        if (!controller.signal.aborted) writeRecoveryTask(task);
+        throw error;
       } finally {
         if (tasks.get(taskId) === task) tasks.delete(taskId);
         if (window[ACTIVE_KEY] === taskId) delete window[ACTIVE_KEY];
