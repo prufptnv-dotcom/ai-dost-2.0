@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, CircleAlert, Loader2, Square } from 'lucide-react';
+import { Check, CircleAlert, Loader2, Square, XCircle } from 'lucide-react';
 
 const MAX_ITEMS = 10;
 
 const phaseIcon = (status) => {
   if (status === 'success') return Check;
+  if (status === 'canceled') return XCircle;
   if (status === 'error') return CircleAlert;
   return Loader2;
 };
@@ -17,7 +18,13 @@ function mergeEvent(prev, event) {
     label: event.label || event.phase || 'Processing',
     phase: event.phase || 'processing',
     ts: event.ts || Date.now(),
-    status: event.type === 'task_error' ? 'error' : event.type === 'task_complete' ? 'success' : 'running',
+    status: event.type === 'task_canceled'
+      ? 'canceled'
+      : event.type === 'task_error'
+        ? 'error'
+        : event.type === 'task_complete'
+          ? 'success'
+          : 'running',
   };
   const items = event.type === 'task_chunk'
     ? current.items
@@ -28,7 +35,7 @@ function mergeEvent(prev, event) {
       ...current,
       items,
       phase: event.phase || current.phase,
-      terminal: event.type === 'task_complete' || event.type === 'task_error',
+      terminal: event.type === 'task_complete' || event.type === 'task_error' || event.type === 'task_canceled',
     },
   };
 }
