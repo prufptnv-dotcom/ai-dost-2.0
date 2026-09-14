@@ -10,6 +10,8 @@
  * - JSON parsing is small by default, with explicit large-route allowlisting.
  * - AI response finish/close listeners are idempotent for the same callback,
  *   preventing double release of the in-memory concurrency slot.
+ * - Chat SSE output is enriched with stable runtime task events without
+ *   changing the legacy event payloads consumed by existing ChatView code.
  */
 
 'use strict';
@@ -87,12 +89,127 @@ function wrapExpress(expressFactory) {
     });
 
     return function routeAwareJson(req, res, next) {
-      const path = req.path || req.url || '';
-      const useLargeParser = largeJsonPrefixes.some((prefix) => path.startsWith(prefix));
+      const requestPath = req.path || req.url || '';
+      const useLargeParser = largeJsonPrefixes.some((prefix) => requestPath.startsWith(prefix));
       return (useLargeParser ? largeParser : smallParser)(req, res, next);
     };
   };
   return expressFactory;
+}
+
+const CHAT_STREAM_PATH = '/api/chat/stream';
+const TASK_EVENT_WRITE_GUARD = Symbol('aiDostTaskEventWrite');
+
+/**
+ * Translate legacy chat SSE payloads into the structured runtime contract.
+ * The legacy payload remains untouched; these events are additive.
+ */
+function buildTaskRuntimeEvents(payload, state = {}) {
+  if (!payload || typeof payload !== 'object') return [];
+
+  const events = [];
+  const pushPhase = (phase, status, metadata = {}) => {
+    events.push({ type: 'task_phase', phase, status, ...metadata });
+  };
+
+  switch (payload.type) {
+    case 'language_lock':
+      pushPhase('understanding', 'Understanding request');
+      break;
+    case 'assessment_creating':
+      pushPhase('planning', payload.status || 'Planning assessment');
+      break;
+    case 'assessment_created':
+      pushPhase('executing', 'Assessment ready');
+      break;
+    case 'web_search_start':
+      pushPhase('searching', payload.status || 'Searching live web', {
+        intent: payload.intent,
+        query: payload.query,
+        url: payload.url,
+      });
+      break;
+    case 'web_search_sources':
+      pushPhase('reading', `Reading ${Array.isArray(payload.sources) ? payload.sources.length : 0} sources`);
+      break;
+    case 'web_search_done':
+      pushPhase('reading', `Web research complete (${Number(payload.totalResults || 0)} results)`);
+      break;
+    case 'web_search_error':
+      pushPhase('error', payload.error || 'Web search failed');
+      break;
+    default:
+      break;
+  }
+
+  if (payload.chunk && !state.generatingStarted) {
+    state.generatingStarted = true;
+    pushPhase('generating', 'Writing response');
+  }
+
+  if (payload.done) {
+    pushPhase('verifying', 'Verifying response', { model: payload.model });
+    if (payload.model) {
+      events.push({
+        type: 'task_tool',
+        tool: 'model',
+        name: String(payload.model),
+        status: 'completed',
+      });
+    }
+  }
+
+  if (payload.error && !payload.done) {
+    pushPhase('error', String(payload.error));
+  }
+
+  return events;
+}
+
+function encodeTaskEvent(event) {
+  return `data: ${JSON.stringify(event)}\n\n`;
+}
+
+function isChatStreamResponse(response) {
+  const requestUrl = String(response?.req?.originalUrl || response?.req?.url || '');
+  return requestUrl.split('?')[0] === CHAT_STREAM_PATH;
+}
+
+function installChatTaskEventWriter() {
+  const originalWrite = http.ServerResponse.prototype.write;
+  if (originalWrite[TASK_EVENT_WRITE_GUARD]) return;
+
+  function hardenedResponseWrite(chunk, encoding, callback) {
+    if (!isChatStreamResponse(this) || !chunk) {
+      return originalWrite.call(this, chunk, encoding, callback);
+    }
+
+    const state = this.__aiDostTaskEventState || (this.__aiDostTaskEventState = { generatingStarted: false });
+    const text = Buffer.isBuffer(chunk)
+      ? chunk.toString(typeof encoding === 'string' ? encoding : 'utf8')
+      : String(chunk);
+
+    const matches = text.matchAll(/data:\s*(\{[\s\S]*?\})\n\n/g);
+    const inserts = [];
+    for (const match of matches) {
+      try {
+        const payload = JSON.parse(match[1]);
+        for (const event of buildTaskRuntimeEvents(payload, state)) {
+          inserts.push(encodeTaskEvent(event));
+        }
+      } catch (_) {
+        // Ignore malformed/non-JSON SSE frames and preserve legacy stream output.
+      }
+    }
+
+    if (inserts.length > 0) {
+      originalWrite.call(this, Buffer.from(inserts.join(''), 'utf8'));
+    }
+    return originalWrite.call(this, chunk, encoding, callback);
+  }
+
+  hardenedResponseWrite[TASK_EVENT_WRITE_GUARD] = true;
+  http.ServerResponse.prototype.write = hardenedResponseWrite;
 }
 
 // Patch module loading before server.js requires its middleware dependencies.
@@ -103,6 +220,8 @@ Module._load = function hardenedModuleLoad(request, parent, isMain) {
   if (request === 'express' && loaded && typeof loaded.json === 'function') return wrapExpress(loaded);
   return loaded;
 };
+
+installChatTaskEventWriter();
 
 // Guard the specific duplicate finish/close listener pattern used by the AI
 // concurrency queue. It only deduplicates the exact same callback identity on
@@ -139,4 +258,5 @@ module.exports = {
   largeJsonLimit,
   largeJsonPrefixes,
   isOriginAllowed,
+  buildTaskRuntimeEvents,
 };
