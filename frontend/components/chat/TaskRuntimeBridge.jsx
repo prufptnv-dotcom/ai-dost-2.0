@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { createTaskId, normalizeServerEvent, parseSseLines, TASK_EVENT_TYPES } from './taskRuntime';
+import { buildUploadedDocsContext, readSharedContext } from './sharedChatContext';
 
 const STREAM_PATH = '/api/chat/stream';
 
@@ -10,6 +11,23 @@ function isChatStreamRequest(input) {
     return new URL(url, window.location.origin).pathname === STREAM_PATH;
   } catch (_) {
     return String(url).includes(STREAM_PATH);
+  }
+}
+
+function augmentStreamRequest(args) {
+  const [input, init] = args;
+  if (!init || typeof init.body !== 'string') return args;
+  try {
+    const body = JSON.parse(init.body);
+    const sharedDocs = buildUploadedDocsContext(readSharedContext());
+    if (!sharedDocs.length) return args;
+
+    const existingDocs = Array.isArray(body.uploadedDocs) ? body.uploadedDocs : [];
+    const existingNames = new Set(existingDocs.map((doc) => String(doc?.name || '')));
+    const mergedDocs = [...existingDocs, ...sharedDocs.filter((doc) => !existingNames.has(doc.name))];
+    return [input, { ...init, body: JSON.stringify({ ...body, uploadedDocs: mergedDocs.slice(0, 15) }) }];
+  } catch (_) {
+    return args;
   }
 }
 
@@ -34,7 +52,7 @@ export default function TaskRuntimeBridge() {
         },
       }));
 
-      const response = await originalFetch(...args);
+      const response = await originalFetch(...augmentStreamRequest(args));
       if (!response?.body) return response;
 
       try {
