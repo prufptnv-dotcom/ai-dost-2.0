@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { createTaskId, normalizeServerEvent, parseSseLines, TASK_EVENT_TYPES } from './taskRuntime';
 import { buildUploadedDocsContext, readSharedContext } from './sharedChatContext';
 import { createTaskPlan } from './taskPlanner';
+import { getComposerAttachments } from './UnifiedChatAttachments';
 
 const STREAM_PATH = '/api/chat/stream';
 const ACTIVE_KEY = '__aiDostActiveTask';
@@ -82,12 +83,16 @@ function augmentStreamRequest(args) {
   try {
     const body = JSON.parse(init.body);
     const sharedDocs = buildUploadedDocsContext(readSharedContext());
-    if (!sharedDocs.length) return args;
-
+    const composerDocs = getComposerAttachments();
     const existingDocs = Array.isArray(body.uploadedDocs) ? body.uploadedDocs : [];
-    const existingNames = new Set(existingDocs.map((doc) => String(doc?.name || '')));
-    const mergedDocs = [...existingDocs, ...sharedDocs.filter((doc) => !existingNames.has(doc.name))];
-    return [input, { ...init, body: JSON.stringify({ ...body, uploadedDocs: mergedDocs.slice(0, 15) }) }];
+    const knownNames = new Set(existingDocs.map((doc) => String(doc?.name || '')));
+    const runtimeDocs = [
+      ...existingDocs,
+      ...composerDocs.filter((doc) => !knownNames.has(String(doc?.name || ''))),
+      ...sharedDocs.filter((doc) => !knownNames.has(String(doc?.name || ''))),
+    ];
+    if (!runtimeDocs.length) return args;
+    return [input, { ...init, body: JSON.stringify({ ...body, uploadedDocs: runtimeDocs.slice(0, 15) }) }];
   } catch (_) {
     return args;
   }
@@ -153,6 +158,7 @@ export default function TaskRuntimeBridge() {
         requestBody = typeof requestInit.body === 'string' ? JSON.parse(requestInit.body) : null;
       } catch (_) {}
 
+      const composerDocs = getComposerAttachments();
       const task = {
         taskId,
         controller,
@@ -161,6 +167,7 @@ export default function TaskRuntimeBridge() {
         startedAt: Date.now(),
         message: requestBody?.message || '',
         sessionId: requestBody?.sessionId || null,
+        attachmentCount: Math.min(15, composerDocs.length),
       };
       tasks.set(taskId, task);
       window[ACTIVE_KEY] = taskId;
@@ -171,8 +178,8 @@ export default function TaskRuntimeBridge() {
       const nextInit = { ...(requestArgs[1] || init || {}), signal: controller.signal };
       const sharedContext = readSharedContext();
       const plan = createTaskPlan(task.message, {
-        hasFiles: Array.isArray(requestBody?.uploadedDocs) && requestBody.uploadedDocs.length > 0,
-        fileCount: Array.isArray(requestBody?.uploadedDocs) ? requestBody.uploadedDocs.length : 0,
+        hasFiles: task.attachmentCount > 0 || Array.isArray(requestBody?.uploadedDocs),
+        fileCount: task.attachmentCount || (Array.isArray(requestBody?.uploadedDocs) ? requestBody.uploadedDocs.length : 0),
         hasSharedContext: sharedContext.length > 0,
       });
       task.plan = plan;
