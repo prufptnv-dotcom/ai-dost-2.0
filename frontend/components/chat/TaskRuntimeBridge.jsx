@@ -138,6 +138,9 @@ export default function TaskRuntimeBridge() {
           throw new DOMException('Chat task canceled', 'AbortError');
         }
         if (marker && marker.expiresAt <= Date.now()) delete window[BLOCK_FALLBACK_KEY];
+        const response = await originalFetch(...args);
+        if (response?.ok) clearRecoveryTask();
+        return response;
       }
       if (!isChatStreamRequest(input)) return originalFetch(...args);
 
