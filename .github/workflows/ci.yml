@@ -39,7 +39,7 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: node --check server.js
-      - run: node --test tests/unit.test.js tests/integration.test.js tests/security-hardening.test.js tests/projectAuthorization.security.test.js tests/webAccess.test.js
+      - run: node --test tests/unit.test.js tests/integration.test.js tests/security-hardening.test.js tests/projectAuthorization.security.test.js tests/ssrf.security.test.js
 
   e2e:
     name: E2E (Playwright smoke)
