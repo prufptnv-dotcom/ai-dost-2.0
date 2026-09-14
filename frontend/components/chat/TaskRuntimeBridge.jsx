@@ -5,6 +5,7 @@ import { buildUploadedDocsContext, readSharedContext } from './sharedChatContext
 const STREAM_PATH = '/api/chat/stream';
 const CANCELED_KEY = '__aiDostCanceledTasks';
 const ACTIVE_KEY = '__aiDostActiveTask';
+const BLOCK_FALLBACK_KEY = '__aiDostBlockNextChatFallback';
 
 function isChatStreamRequest(input) {
   const url = typeof input === 'string' ? input : input?.url;
@@ -65,6 +66,7 @@ export default function TaskRuntimeBridge() {
     const cancelTask = (taskId) => {
       if (!taskId) return false;
       markCanceled(taskId);
+      window[BLOCK_FALLBACK_KEY] = true;
       const controller = controllers.get(taskId);
       controller?.abort();
       controllers.delete(taskId);
@@ -82,7 +84,8 @@ export default function TaskRuntimeBridge() {
 
     const patchedFetch = async (...args) => {
       const input = args[0];
-      if (isChatFallbackRequest(input) && getCanceledTasks().size > 0) {
+      if (isChatFallbackRequest(input) && window[BLOCK_FALLBACK_KEY]) {
+        delete window[BLOCK_FALLBACK_KEY];
         throw new DOMException('Chat task canceled', 'AbortError');
       }
       if (!isChatStreamRequest(input)) return originalFetch(...args);
@@ -90,7 +93,7 @@ export default function TaskRuntimeBridge() {
       const taskId = createTaskId('chat');
       const controller = new AbortController();
       controllers.set(taskId, controller);
-      if (typeof window !== 'undefined') window[ACTIVE_KEY] = taskId;
+      window[ACTIVE_KEY] = taskId;
 
       const [, init] = args;
       const requestArgs = augmentStreamRequest(args);
@@ -118,9 +121,7 @@ export default function TaskRuntimeBridge() {
 
           const emit = (payload) => {
             const event = normalizeServerEvent(taskId, payload);
-            if (event) {
-              window.dispatchEvent(new CustomEvent('ai_dost_task_event', { detail: event }));
-            }
+            if (event) window.dispatchEvent(new CustomEvent('ai_dost_task_event', { detail: event }));
           };
 
           const pump = async () => {
@@ -140,7 +141,6 @@ export default function TaskRuntimeBridge() {
               }));
             }
           };
-
           void pump();
         } catch (error) {
           if (!controller.signal.aborted) {
@@ -149,7 +149,6 @@ export default function TaskRuntimeBridge() {
             }));
           }
         }
-
         return response;
       } finally {
         if (controllers.get(taskId) === controller) controllers.delete(taskId);
@@ -162,6 +161,7 @@ export default function TaskRuntimeBridge() {
       window.fetch = originalFetch;
       controllers.forEach((controller) => controller.abort());
       controllers.clear();
+      delete window[BLOCK_FALLBACK_KEY];
       if (window.aiDostCancelTask === cancelTask) delete window.aiDostCancelTask;
       if (window[ACTIVE_KEY]) delete window[ACTIVE_KEY];
     };
