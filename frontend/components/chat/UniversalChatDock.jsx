@@ -18,13 +18,24 @@ const VIEW_IDS = new Set([
   'voice',
 ]);
 
+function notifyDashboardNewChat() {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new KeyboardEvent('keydown', {
+    key: 'n',
+    code: 'KeyN',
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  }));
+}
+
 function resetChatState() {
   if (typeof window === 'undefined') return;
   try {
     localStorage.removeItem('ai_dost_messages_chat');
     localStorage.setItem('ai_dost_session_id', 'default');
   } catch (_) {}
-  window.dispatchEvent(new CustomEvent('ai_dost_force_new_chat'));
+  notifyDashboardNewChat();
 }
 
 function deleteCurrentChatState() {
@@ -34,7 +45,7 @@ function deleteCurrentChatState() {
     localStorage.removeItem(sessionId === 'default' ? 'ai_dost_messages_chat' : `ai_dost_messages_${sessionId}`);
     localStorage.setItem('ai_dost_session_id', 'default');
   } catch (_) {}
-  window.dispatchEvent(new CustomEvent('ai_dost_force_new_chat'));
+  notifyDashboardNewChat();
 }
 
 export default function UniversalChatDock() {
@@ -51,12 +62,12 @@ export default function UniversalChatDock() {
 
   const onNewChat = useCallback(() => {
     resetChatState();
-    router.push('/dashboard?view=chat');
+    if (router.pathname !== '/dashboard') router.push('/dashboard');
   }, [router]);
 
   const onDeleteChat = useCallback(() => {
     deleteCurrentChatState();
-    router.push('/dashboard?view=chat');
+    if (router.pathname !== '/dashboard') router.push('/dashboard');
   }, [router]);
 
   if (router.pathname !== '/dashboard') return null;
