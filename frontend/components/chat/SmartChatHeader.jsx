@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Search, Plus, PanelLeft } from 'lucide-react';
 import { useRouter } from 'next/router';
 import { AiDostMark } from '../brand/AiDostMark';
-import ChatExperienceLayerV3 from './ChatExperienceLayerV3';
+import ChatExperienceLayer from './ChatExperienceLayerV4';
 
 export default function SmartChatHeader({
   sessionName = 'New conversation',
@@ -22,6 +22,28 @@ export default function SmartChatHeader({
     router.push({ pathname: '/dashboard', query: { view } });
   };
 
+  useEffect(() => {
+    const interceptComposerActions = (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('[data-chat-experience-control="true"]')) return;
+      const button = target.closest('button');
+      if (!button) return;
+      const label = (button.getAttribute('aria-label') || '').trim().toLowerCase();
+      if (label === 'voice input') {
+        event.preventDefault();
+        event.stopPropagation();
+        window.dispatchEvent(new CustomEvent('ai_dost_chat_voice_toggle'));
+      } else if (label === 'attach file') {
+        event.preventDefault();
+        event.stopPropagation();
+        window.dispatchEvent(new CustomEvent('ai_dost_chat_attach'));
+      }
+    };
+    document.addEventListener('click', interceptComposerActions, true);
+    return () => document.removeEventListener('click', interceptComposerActions, true);
+  }, []);
+
   return (
     <>
       <header className="h-12 shrink-0 px-4 md:px-6 border-b border-border-subtle bg-canvas-base flex items-center justify-between gap-3 select-none" role="banner">
@@ -36,7 +58,7 @@ export default function SmartChatHeader({
           <button type="button" onClick={handleOpenSearch} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-canvas-elevated hover:text-paper-100 transition-colors cursor-pointer" title="Search chats (Ctrl+K)" aria-label="Search chats"><Search size={15} /></button>
         </div>
       </header>
-      <ChatExperienceLayerV3 onNavigate={handleNavigate} onNewChat={onNewSession} onDeleteChat={sessionId && onDeleteSession ? () => onDeleteSession(sessionId) : undefined} />
+      <ChatExperienceLayer onNavigate={handleNavigate} onNewChat={onNewSession} onDeleteChat={sessionId && onDeleteSession ? () => onDeleteSession(sessionId) : undefined} />
     </>
   );
 }
