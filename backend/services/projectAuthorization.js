@@ -16,40 +16,60 @@ class ProjectAuthorizationService {
   get projects() { return new ProjectDAO(this.db); }
 
   /**
-   * Resolve trusted user identity from request context.
-   * Priority:
-   * 1. req.user.id (from authenticated session/JWT middleware if present)
-   * 2. req.headers['x-user-id'] (canonical header for multi-user/test requests)
-   * 3. Fallback to 'local-user' for local development mode
+   * Resolve caller identity from a trusted authentication context.
    *
-   * SECURITY RULE: Never trust req.body.userId or req.query.userId as proof of caller identity!
+   * Production rule: req.user.id is the only accepted authenticated identity.
+   * The x-user-id header is retained only as an explicit local/test escape hatch
+   * when ALLOW_UNTRUSTED_USER_HEADER=true. Body/query userId is never trusted.
    */
   resolveUser(req) {
     if (req && req.user && typeof req.user.id === 'string' && req.user.id.trim()) {
       return req.user.id.trim();
     }
-    if (req && req.headers && typeof req.headers['x-user-id'] === 'string' && req.headers['x-user-id'].trim()) {
+
+    const allowHeader = process.env.ALLOW_UNTRUSTED_USER_HEADER === 'true';
+    if (allowHeader && !isProduction() && req && req.headers &&
+        typeof req.headers['x-user-id'] === 'string' && req.headers['x-user-id'].trim()) {
       return req.headers['x-user-id'].trim();
     }
+
     return 'local-user';
   }
 
   /**
-   * Check if a user owns or is authorized to access a project
+   * Returns true when the process is explicitly running in production.
+   */
+  isProductionRequest(req) {
+    return process.env.NODE_ENV === 'production' && !(req && req.user && req.user.id);
+  }
+
+  /**
+   * Check if a user owns or is authorized to access a project.
+   * Owner-less legacy projects are restricted to local development identity.
    */
   verifyOwnership(project, userId) {
     if (!project) return false;
-    // Default project is shared/local
+    // Shared/local workspaces are intentionally available to every local caller.
     if (project.id === 'default' || project.id === 'copilot-workspace') return true;
-    if (!project.user_id) return true; // Legacy project without assigned user
+    // Legacy rows without ownership must not become cross-tenant resources.
+    if (!project.user_id) return userId === 'local-user' && !isProduction();
     return project.user_id === userId;
   }
 
   /**
    * Authorize a request against a project.
-   * Returns { authorized: true, user, project } or { authorized: false, status: 403|404, error: string }
+   * Returns { authorized: true, user, project } or { authorized: false, status, error }.
    */
   authorize(projectId, req, options = {}) {
+    const authenticated = Boolean(req && req.user && typeof req.user.id === 'string' && req.user.id.trim());
+    if (isProduction() && !authenticated) {
+      return {
+        authorized: false,
+        status: 401,
+        error: 'Authentication required for project access'
+      };
+    }
+
     const userId = this.resolveUser(req);
     const targetId = (projectId && typeof projectId === 'string') ? projectId.trim() : 'default';
 
@@ -82,9 +102,9 @@ class ProjectAuthorizationService {
       };
     }
 
-    // 3. Verify Ownership (SEC-001)
+    // 3. Verify ownership
     if (!this.verifyOwnership(project, userId)) {
-      logger.warn(`[ProjectAuth] Access denied: User '${userId}' attempted unauthorized access to project '${targetId}' (owned by '${project.user_id}')`);
+      logger.warn(`[ProjectAuth] Access denied: User '${userId}' attempted unauthorized access to project '${targetId}' (owned by '${project.user_id || 'legacy-unowned'}')`);
       return {
         authorized: false,
         status: 403,
@@ -112,6 +132,10 @@ class ProjectAuthorizationService {
       next();
     };
   }
+}
+
+function isProduction() {
+  return process.env.NODE_ENV === 'production';
 }
 
 const defaultInstance = new ProjectAuthorizationService();
