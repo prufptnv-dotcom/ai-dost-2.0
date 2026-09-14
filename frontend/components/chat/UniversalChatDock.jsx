@@ -19,15 +19,12 @@ const VIEW_IDS = new Set([
   'voice',
 ]);
 
-function notifyDashboardNewChat() {
-  if (typeof window === 'undefined') return;
-  window.dispatchEvent(new KeyboardEvent('keydown', {
-    key: 'n',
-    code: 'KeyN',
-    ctrlKey: true,
-    bubbles: true,
-    cancelable: true,
-  }));
+function clickNewConversationButton() {
+  if (typeof document === 'undefined') return false;
+  const button = document.querySelector('button[aria-label="New conversation"]');
+  if (!button) return false;
+  button.click();
+  return true;
 }
 
 function resetChatState() {
@@ -36,7 +33,7 @@ function resetChatState() {
     localStorage.removeItem('ai_dost_messages_chat');
     localStorage.setItem('ai_dost_session_id', 'default');
   } catch (_) {}
-  notifyDashboardNewChat();
+  if (!clickNewConversationButton()) window.location.assign('/dashboard');
 }
 
 function deleteCurrentChatState() {
@@ -46,7 +43,7 @@ function deleteCurrentChatState() {
     localStorage.removeItem(sessionId === 'default' ? 'ai_dost_messages_chat' : `ai_dost_messages_${sessionId}`);
     localStorage.setItem('ai_dost_session_id', 'default');
   } catch (_) {}
-  notifyDashboardNewChat();
+  if (!clickNewConversationButton()) window.location.assign('/dashboard');
 }
 
 export default function UniversalChatDock() {
