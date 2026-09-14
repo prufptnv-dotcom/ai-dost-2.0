@@ -1,10 +1,12 @@
 'use strict';
 
 const { AsyncLocalStorage } = require('async_hooks');
+const { URL } = require('url');
 const http = require('http');
 const Module = require('module');
 
 const STREAM_PATH = '/api/chat/stream';
+const CANCEL_PATH_PREFIX = '/api/chat/tasks/';
 const storage = new AsyncLocalStorage();
 const activeTasks = new Map();
 const PATCHED = Symbol('aiDostTaskCancellationPatched');
@@ -103,6 +105,34 @@ function installExpressRouterHook(expressFactory) {
   return expressFactory;
 }
 
+function installCancellationEndpoint() {
+  const originalEmit = http.Server.prototype.emit;
+  if (originalEmit[PATCHED]) return;
+
+  const patchedEmit = function aiDostTaskCancellationEmit(event, ...args) {
+    if (event === 'request' && args[0] && args[1]) {
+      const req = args[0];
+      const res = args[1];
+      const method = String(req.method || '').toUpperCase();
+      const pathname = String(req.url || '').split('?')[0];
+      if ((method === 'POST' || method === 'DELETE') && pathname.startsWith(CANCEL_PATH_PREFIX)) {
+        const taskId = decodeURIComponent(pathname.slice(CANCEL_PATH_PREFIX.length).replace(/\/cancel$/, ''));
+        if (taskId && pathname.endsWith('/cancel')) {
+          const canceled = cancelActiveTask(taskId, 'task canceled by user');
+          res.statusCode = canceled ? 200 : 404;
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          res.end(JSON.stringify({ success: canceled, taskId, canceled }));
+          return true;
+        }
+      }
+    }
+    return originalEmit.call(this, event, ...args);
+  };
+  patchedEmit[PATCHED] = true;
+  http.Server.prototype.emit = patchedEmit;
+}
+
 const originalLoad = Module._load;
 Module._load = function taskCancellationModuleLoad(request, parent, isMain) {
   const loaded = originalLoad.call(this, request, parent, isMain);
@@ -120,6 +150,8 @@ if (typeof originalFetch === 'function' && !originalFetch[PATCHED]) {
   wrappedFetch[PATCHED] = true;
   global.fetch = wrappedFetch;
 }
+
+installCancellationEndpoint();
 
 function getActiveTask(taskId) {
   return activeTasks.get(String(taskId || '')) || null;
