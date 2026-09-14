@@ -43,20 +43,10 @@ async function normalizeFile(file, index) {
     };
   }
 
-  if (mime === 'application/pdf' || name.toLowerCase().endsWith('.pdf')) {
-    const text = await readFileAsText(file);
-    return {
-      name,
-      type: 'pdf',
-      mime,
-      content: text.slice(0, MAX_CHAT_ATTACHMENT_CHARS),
-    };
-  }
-
   const text = await readFileAsText(file);
   return {
     name,
-    type: 'text',
+    type: name.toLowerCase().endsWith('.pdf') ? 'pdf' : 'text',
     mime,
     content: text.slice(0, MAX_CHAT_ATTACHMENT_CHARS),
   };
@@ -96,9 +86,7 @@ export default function UnifiedChatAttachments() {
 
     const handleDocumentClick = (event) => {
       const target = event.target;
-      if (target instanceof Element && target.closest('button')) {
-        window.setTimeout(syncInput, 0);
-      }
+      if (target instanceof Element && target.closest('button')) window.setTimeout(syncInput, 0);
     };
 
     const handleChange = async (event) => {
@@ -107,6 +95,12 @@ export default function UnifiedChatAttachments() {
       if (!input.multiple || !input.files?.length) return;
       const files = Array.from(input.files).slice(0, MAX_CHAT_ATTACHMENTS);
       if (!files.length) return;
+
+      // This bridge owns the shared file input. Prevent ChatView's legacy
+      // single-attachment onChange from consuming only the first file.
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
 
       const next = [];
       let totalChars = 0;
@@ -118,7 +112,7 @@ export default function UnifiedChatAttachments() {
           totalChars += contentLength;
           next.push(item);
         } catch (_) {
-          // Ignore unreadable files and keep the usable attachments.
+          // Keep usable attachments when one file cannot be read.
         }
       }
 
@@ -139,11 +133,13 @@ export default function UnifiedChatAttachments() {
     syncInput();
     document.addEventListener('click', handleDocumentClick, true);
     document.addEventListener('change', handleChange, true);
-    window.addEventListener('ai_dost_composer_attachments', (event) => setAttachments(event.detail?.attachments || []));
+    const onAttachmentUpdate = (event) => setAttachments(event.detail?.attachments || []);
+    window.addEventListener('ai_dost_composer_attachments', onAttachmentUpdate);
 
     return () => {
       document.removeEventListener('click', handleDocumentClick, true);
       document.removeEventListener('change', handleChange, true);
+      window.removeEventListener('ai_dost_composer_attachments', onAttachmentUpdate);
       delete window[ATTACHMENTS_KEY];
     };
   }, []);
