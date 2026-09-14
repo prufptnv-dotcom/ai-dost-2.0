@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { createTaskId, normalizeServerEvent, parseSseLines, TASK_EVENT_TYPES } from './taskRuntime';
 import { buildUploadedDocsContext, readSharedContext } from './sharedChatContext';
 import { createTaskPlan } from './taskPlanner';
-import { getComposerAttachments } from './UnifiedChatAttachments';
+import { clearComposerAttachments, getComposerAttachments } from './UnifiedChatAttachments';
 
 const STREAM_PATH = '/api/chat/stream';
 const ACTIVE_KEY = '__aiDostActiveTask';
@@ -175,6 +175,10 @@ export default function TaskRuntimeBridge() {
 
       const [, init] = args;
       const requestArgs = augmentStreamRequest(args);
+      // The current task owns these files; clear the composer immediately so
+      // the next user message cannot accidentally inherit old attachments.
+      if (composerDocs.length > 0) clearComposerAttachments();
+
       const nextInit = { ...(requestArgs[1] || init || {}), signal: controller.signal };
       const sharedContext = readSharedContext();
       const plan = createTaskPlan(task.message, {
