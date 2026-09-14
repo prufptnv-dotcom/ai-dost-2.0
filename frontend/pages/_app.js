@@ -6,6 +6,7 @@ import { useRouter } from "next/router";
 
 import ErrorBoundary from "../components/ErrorBoundary";
 import UniversalChatDock from "../components/chat/UniversalChatDock";
+import TaskServerCancelBridge from "../components/chat/TaskServerCancelBridge";
 
 export default function App({ Component, pageProps }) {
   const router = useRouter();
@@ -16,7 +17,12 @@ export default function App({ Component, pageProps }) {
         <SocketProvider>
           <ModeProvider>
             <Component {...pageProps} />
-            {router.pathname === '/dashboard' && <UniversalChatDock />}
+            {router.pathname === '/dashboard' && (
+              <>
+                <UniversalChatDock />
+                <TaskServerCancelBridge />
+              </>
+            )}
           </ModeProvider>
         </SocketProvider>
       </ToastProvider>
