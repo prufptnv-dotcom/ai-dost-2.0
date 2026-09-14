@@ -1,31 +1,45 @@
-import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { initWebSocket } from '../services/websocket';
 import { logger } from '../utils/logger';
 
 export const SocketContext = createContext(null);
+
+const INITIAL_CONNECTION_STATE = 'idle';
 
 export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
   const [projectId, setProjectId] = useState(null);
   const [collaborators, setCollaborators] = useState([]);
   const [remoteCursors, setRemoteCursors] = useState({});
+  const [connectionState, setConnectionState] = useState(INITIAL_CONNECTION_STATE);
+  const [connectionMeta, setConnectionMeta] = useState({});
 
   useEffect(() => {
-    if (!projectId) return;
-    
-    const token = localStorage.getItem('ai_dost_token');
-    // If no real auth token exists, skip WebSocket — server will reject fake tokens
-    if (!token) {
-      return;
+    // Never carry collaboration state from the previous project into the next one.
+    setCollaborators([]);
+    setRemoteCursors({});
+    setSocket(null);
+    setConnectionMeta({});
+
+    if (!projectId) {
+      setConnectionState('idle');
+      return undefined;
     }
+
+    const token = localStorage.getItem('ai_dost_token');
+    // If no real auth token exists, skip WebSocket — server will reject fake tokens.
+    if (!token) {
+      setConnectionState('unauthenticated');
+      return undefined;
+    }
+
     let isMounted = true;
-    
     const ws = initWebSocket(
-      projectId, 
+      projectId,
       token,
       (message) => {
-        if (!message) return;
-        
+        if (!isMounted || !message) return;
+
         switch (message.type) {
           case 'project_init':
             if (message.data) {
@@ -39,7 +53,7 @@ export const SocketProvider = ({ children }) => {
               });
             }
             break;
-            
+
           case 'user_joined':
             setCollaborators(prev => {
               if (prev.some(c => c.userId === message.user_id)) return prev;
@@ -50,7 +64,7 @@ export const SocketProvider = ({ children }) => {
               }];
             });
             break;
-            
+
           case 'user_left':
             setCollaborators(prev => prev.filter(c => c.userId !== message.user_id));
             setRemoteCursors(prev => {
@@ -59,7 +73,7 @@ export const SocketProvider = ({ children }) => {
               return copy;
             });
             break;
-            
+
           case 'cursor_move':
             if (message.user_id && message.position) {
               setRemoteCursors(prev => ({
@@ -73,37 +87,53 @@ export const SocketProvider = ({ children }) => {
               }));
             }
             break;
-            
+
           default:
             break;
         }
       },
-      (error) => logger.error('WebSocket error:', error),
-      (reason) => logger.log('WebSocket disconnected:', reason)
+      (error) => {
+        if (isMounted) logger.error('WebSocket error:', error);
+      },
+      (reason) => {
+        if (isMounted) logger.log('WebSocket disconnected:', reason);
+      },
+      (status, meta) => {
+        if (!isMounted) return;
+        setConnectionState(status);
+        setConnectionMeta(meta || {});
+      }
     );
-    
-    const timer = setTimeout(() => {
-      if (isMounted) setSocket(ws);
-    }, 0);
-    
+
+    if (ws) {
+      setSocket(ws);
+    } else {
+      setConnectionState('failed');
+    }
+
     return () => {
       isMounted = false;
-      clearTimeout(timer);
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.close();
-      }
-      setSocket(null);
+      if (ws) ws.close(1000, 'Project changed or component unmounted');
     };
   }, [projectId]);
 
   const sendMessage = (data) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify(data));
-    }
+    if (!socket) return false;
+    return socket.send(JSON.stringify(data));
   };
 
   return (
-    <SocketContext.Provider value={{ socket, sendMessage, setProjectId, collaborators, remoteCursors }}>
+    <SocketContext.Provider
+      value={{
+        socket,
+        sendMessage,
+        setProjectId,
+        collaborators,
+        remoteCursors,
+        connectionState,
+        connectionMeta,
+      }}
+    >
       {children}
     </SocketContext.Provider>
   );
