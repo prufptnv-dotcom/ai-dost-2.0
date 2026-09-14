@@ -1,8 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import {
-  Mic, MicOff, Volume2, VolumeX, Sparkles, X,
-  History as HistoryIcon, Send, Loader2, MessageSquare, CornerDownLeft
-} from 'lucide-react';
+import { Mic, MicOff, X } from 'lucide-react';
 import api from '../../services/api';
 import { Button } from '../ui/Button';
 import { classifyUniversalIntent } from '../chat/universalIntent';
@@ -43,8 +40,6 @@ async function readChatStream(response, onEvent) {
 export default function VoiceView({ onClose, onTranscript, onToast }) {
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
-  const [transcript, setTranscript] = useState('');
-  const [reply, setReply] = useState('');
   const [thinking, setThinking] = useState(false);
   const [conversation, setConversation] = useState([]);
   const [manualInput, setManualInput] = useState('');
@@ -53,7 +48,6 @@ export default function VoiceView({ onClose, onTranscript, onToast }) {
   const recognitionRef = useRef(null);
   const animRef = useRef(null);
   const transcriptRef = useRef('');
-  const speakRef = useRef(false);
 
   const stopListening = useCallback(() => {
     if (recognitionRef.current) {
@@ -98,9 +92,9 @@ export default function VoiceView({ onClose, onTranscript, onToast }) {
         const blob = await ttsRes.blob();
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
-        audio.onplay = () => { setSpeaking(true); speakRef.current = true; };
-        audio.onended = () => { setSpeaking(false); speakRef.current = false; URL.revokeObjectURL(url); };
-        audio.onerror = () => { setSpeaking(false); speakRef.current = false; URL.revokeObjectURL(url); };
+        audio.onplay = () => setSpeaking(true);
+        audio.onended = () => { setSpeaking(false); URL.revokeObjectURL(url); };
+        audio.onerror = () => { setSpeaking(false); URL.revokeObjectURL(url); };
         await audio.play();
         return;
       }
@@ -109,9 +103,9 @@ export default function VoiceView({ onClose, onTranscript, onToast }) {
       const utter = new SpeechSynthesisUtterance(text.replace(/[*#`]/g, ''));
       utter.lang = 'hi-IN';
       utter.rate = 1;
-      utter.onstart = () => { setSpeaking(true); speakRef.current = true; };
-      utter.onend = () => { setSpeaking(false); speakRef.current = false; };
-      utter.onerror = () => { setSpeaking(false); speakRef.current = false; };
+      utter.onstart = () => setSpeaking(true);
+      utter.onend = () => setSpeaking(false);
+      utter.onerror = () => setSpeaking(false);
       window.speechSynthesis?.speak(utter);
     } catch (_) { setSpeaking(false); }
   };
@@ -119,7 +113,6 @@ export default function VoiceView({ onClose, onTranscript, onToast }) {
   const processQuery = useCallback(async (query) => {
     const text = query.trim();
     if (!text || thinking) return;
-    setTranscript(text);
     setManualInput('');
     setConversation((prev) => [...prev, { role: 'user', content: text }]);
 
@@ -131,15 +124,12 @@ export default function VoiceView({ onClose, onTranscript, onToast }) {
         : intent.action === 'delete-chat'
           ? 'Current conversation reset kar raha hoon.'
           : `${intent.action} open kar raha hoon.`;
-      setReply(commandReply);
       setConversation((prev) => [...prev, { role: 'assistant', content: commandReply }]);
       await speak(commandReply);
       return;
     }
 
     setThinking(true);
-    setReply('');
-
     try {
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
@@ -149,17 +139,19 @@ export default function VoiceView({ onClose, onTranscript, onToast }) {
       if (!response.ok) throw new Error(`Voice stream failed: ${response.status}`);
 
       const answer = await readChatStream(response, (event) => {
-        if (event.type === 'web_search_start') setReply(event.intent === 'URL_FETCH' ? 'Reading webpage…' : 'Searching the web…');
-        if (event.type === 'assessment_creating') setReply(event.status || 'Preparing assessment…');
+        if (event.type === 'web_search_start') {
+          setConversation((prev) => [...prev.slice(-9), { role: 'assistant', content: event.intent === 'URL_FETCH' ? 'Reading webpage…' : 'Searching the web…' }]);
+        }
+        if (event.type === 'assessment_creating') {
+          setConversation((prev) => [...prev.slice(-9), { role: 'assistant', content: event.status || 'Preparing assessment…' }]);
+        }
       });
 
       const finalReply = answer || 'Kuch response nahi mila.';
-      setReply(finalReply);
       setConversation((prev) => [...prev, { role: 'assistant', content: finalReply }]);
       await speak(finalReply);
     } catch (e) {
       const err = `Inference failed: ${e.message || 'Network error'}`;
-      setReply(err);
       setConversation((prev) => [...prev, { role: 'assistant', content: err }]);
     } finally {
       setThinking(false);
@@ -170,7 +162,7 @@ export default function VoiceView({ onClose, onTranscript, onToast }) {
     if (typeof window === 'undefined') return;
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      if (onToast) onToast('Speech recognition not supported in this browser', 'warning');
+      onToast?.('Speech recognition not supported in this browser', 'warning');
       return;
     }
 
@@ -179,7 +171,6 @@ export default function VoiceView({ onClose, onTranscript, onToast }) {
       const rec = new SpeechRecognition();
       recognitionRef.current = rec;
       transcriptRef.current = '';
-      setTranscript('');
       rec.lang = 'hi-IN';
       rec.continuous = false;
       rec.interimResults = true;
@@ -190,9 +181,7 @@ export default function VoiceView({ onClose, onTranscript, onToast }) {
       };
 
       rec.onresult = (e) => {
-        const text = Array.from(e.results).map((r) => r[0].transcript).join('').trim();
-        transcriptRef.current = text;
-        setTranscript(text);
+        transcriptRef.current = Array.from(e.results).map((r) => r[0].transcript).join('').trim();
       };
 
       rec.onend = () => {
@@ -271,7 +260,7 @@ export default function VoiceView({ onClose, onTranscript, onToast }) {
 
         <form onSubmit={handleManualSubmit} className="flex items-center gap-2">
           <input value={manualInput} onChange={(e) => setManualInput(e.target.value)} placeholder="Type your message if microphone is unavailable..." aria-label="Voice assistant message" className="flex-1 px-3 py-2 rounded-xs bg-canvas-surface border border-border text-paper-100 text-xs font-sans placeholder:text-ink-muted focus:outline-none focus:border-accent-primary" />
-          <Button type="submit" variant="primary" size="sm" icon={CornerDownLeft} disabled={!manualInput.trim() || thinking}>Send</Button>
+          <Button type="submit" variant="primary" size="sm" disabled={!manualInput.trim() || thinking}>Send</Button>
         </form>
       </div>
     </div>
