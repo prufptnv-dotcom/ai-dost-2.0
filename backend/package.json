@@ -10,9 +10,10 @@
     "lint": "eslint .",
     "test:unit": "node --test tests/unit.test.js",
     "test:integration": "node --test tests/integration.test.js",
+    "test:security": "node --test tests/security-hardening.test.js tests/projectAuthorization.security.test.js",
     "test:api": "node tests/test_apiClient.js",
     "test:chat": "node tests/test_chat_endpoint.js",
-    "test:all": "npm run test:unit && npm run test:integration && npm run test:api && npm run test:chat"
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:security && npm run test:api && npm run test:chat"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
