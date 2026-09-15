@@ -127,38 +127,26 @@ class CopilotDirector {
   }
 
   async executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs }) {
-    let lastError = null;
-    for (let attempt = 1; attempt <= MAX_WORKER_RETRIES + 1; attempt += 1) {
-      if (signal?.aborted) return { status: 'CANCELLED' };
-      try {
-        return await this.coordinator.startWorker(delegated.workerRun.id, {
-          autoPlan: false,
-          runner: async () => {
-            const workerPlan = await this.taskPlanner.generatePlan(task.objective, {
-              projectId,
-              role: task.role,
-              specialty: task.specialty,
-              directorTaskId: task.id,
-              request,
-              expectedOutput: task.expectedOutput,
-              attempt
-            });
-            return this.plannerExecutionLoop.runWithPlan(
-              projectId,
-              userId,
-              workerPlan,
-              maxRepairs,
-              () => Boolean(signal?.aborted),
-              `copilot_${delegated.workerRun.id}`
-            );
-          }
-        });
-      } catch (error) {
-        lastError = error;
-        if (attempt <= MAX_WORKER_RETRIES) continue;
-      }
+    try {
+      const workerPlan = await this.taskPlanner.generatePlan(task.objective, {
+        projectId,
+        role: task.role,
+        specialty: task.specialty,
+        directorTaskId: task.id,
+        request,
+        expectedOutput: task.expectedOutput,
+      });
+      return await this.plannerExecutionLoop.runWithPlan(
+        projectId,
+        userId,
+        workerPlan,
+        maxRepairs,
+        () => Boolean(signal?.aborted),
+        `copilot_${delegated.workerRun.id}`
+      );
+    } catch (error) {
+      throw error;
     }
-    throw lastError || new Error(`Worker '${task.id}' failed`);
   }
 
   async run({ userId, projectId, request, signal = null, onEvent = () => {}, maxRepairs = 3 }) {
@@ -177,6 +165,7 @@ class CopilotDirector {
 
     onEvent({ type: 'director_plan', status: 'PLANNED', summary: plan.summary, taskCount: plan.tasks.length, tasks: plan.tasks.map(({ id, specialty, role, dependsOn }) => ({ id, specialty, role, dependsOn })) });
     this.agentTaskDao.updateStatus(supervisorTaskId, 'RUNNING');
+    this.agentRunDao.updateStatus(supervisorRunId, 'RUNNING');
 
     try {
       for (const task of plan.tasks) {
@@ -184,28 +173,39 @@ class CopilotDirector {
         const unmet = task.dependsOn.filter((dep) => completed.get(dep) !== 'SUCCEEDED');
         if (unmet.length) throw new Error(`Director dependency blocked task '${task.id}': ${unmet.join(', ')}`);
 
-        onEvent({ type: 'director_task', status: 'DELEGATING', taskId: task.id, specialty: task.specialty, role: task.role, objective: task.objective });
-        const delegated = await this.coordinator.delegate({
-          supervisorRunId,
-          role: task.role,
-          objective: task.objective,
-          constraints: { specialty: task.specialty, directorTaskId: task.id },
-          expectedOutput: task.expectedOutput
-        });
-
-        try {
-          const executionResult = await this.executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs });
-          const taskStatus = executionResult?.status === 'CANCELLED' ? 'CANCELLED' : 'SUCCEEDED';
-          completed.set(task.id, taskStatus);
-          results.push({ task, status: taskStatus, workerRunId: delegated.workerRun.id, result: executionResult });
-          onEvent({ type: 'director_task', status: taskStatus, taskId: task.id, specialty: task.specialty, role: task.role, workerRunId: delegated.workerRun.id, result: executionResult });
-          if (taskStatus === 'CANCELLED') return { status: 'CANCELLED', taskId: supervisorTaskId, runId: supervisorRunId, plan, results };
-        } catch (error) {
-          completed.set(task.id, 'FAILED');
-          results.push({ task, status: 'FAILED', error: error.message });
-          onEvent({ type: 'director_task', status: 'FAILED', taskId: task.id, specialty: task.specialty, role: task.role, error: error.message });
-          throw error;
+        let delegated = null;
+        let executionResult = null;
+        let lastError = null;
+        for (let attempt = 1; attempt <= MAX_WORKER_RETRIES + 1; attempt += 1) {
+          onEvent({ type: 'director_task', status: attempt === 1 ? 'DELEGATING' : 'RETRYING', attempt, taskId: task.id, specialty: task.specialty, role: task.role, objective: task.objective });
+          delegated = await this.coordinator.delegate({
+            supervisorRunId,
+            role: task.role,
+            objective: task.objective,
+            constraints: { specialty: task.specialty, directorTaskId: task.id, attempt },
+            expectedOutput: task.expectedOutput
+          });
+          try {
+            executionResult = await this.coordinator.startWorker(delegated.workerRun.id, { autoPlan: false, runner: () => this.executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs }) });
+            lastError = null;
+            break;
+          } catch (error) {
+            lastError = error;
+            if (signal?.aborted) break;
+          }
         }
+        if (lastError) {
+          completed.set(task.id, 'FAILED');
+          results.push({ task, status: 'FAILED', error: lastError.message });
+          onEvent({ type: 'director_task', status: 'FAILED', taskId: task.id, specialty: task.specialty, role: task.role, error: lastError.message });
+          throw lastError;
+        }
+
+        const taskStatus = executionResult?.status === 'CANCELLED' ? 'CANCELLED' : 'SUCCEEDED';
+        completed.set(task.id, taskStatus);
+        results.push({ task, status: taskStatus, workerRunId: delegated.workerRun.id, result: executionResult });
+        onEvent({ type: 'director_task', status: taskStatus, taskId: task.id, specialty: task.specialty, role: task.role, workerRunId: delegated.workerRun.id, result: executionResult });
+        if (taskStatus === 'CANCELLED') return { status: 'CANCELLED', taskId: supervisorTaskId, runId: supervisorRunId, plan, results };
       }
 
       onEvent({ type: 'director_verification', status: 'DELEGATING' });
@@ -223,9 +223,7 @@ class CopilotDirector {
         }
       });
       onEvent({ type: 'director_verification', status: finalVerification?.status || 'FAILED', workerRunId: verifier.workerRun.id, result: finalVerification });
-      if (finalVerification?.status !== 'SUCCEEDED') {
-        throw new Error('Final Director verification gate did not pass');
-      }
+      if (finalVerification?.status !== 'SUCCEEDED') throw new Error('Final Director verification gate did not pass');
 
       this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
       this.agentRunDao.updateStatus(supervisorRunId, 'SUCCEEDED');
