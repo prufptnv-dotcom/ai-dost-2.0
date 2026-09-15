@@ -5,6 +5,7 @@ import { createTaskPlan } from './taskPlanner';
 import { clearComposerAttachments, getComposerAttachments } from './UnifiedChatAttachments';
 
 const STREAM_PATH = '/api/chat/stream';
+const AGENT_RUN_PATH = '/api/agent/run';
 const ACTIVE_KEY = '__aiDostActiveTask';
 const RECOVERY_KEY = '__aiDostInterruptedTask';
 const BLOCK_FALLBACK_KEY = '__aiDostBlockNextChatFallback';
@@ -98,6 +99,31 @@ function augmentStreamRequest(args) {
   }
 }
 
+function agentTaskEvent(taskId, phase, status, type = TASK_EVENT_TYPES.PHASE) {
+  return {
+    id: `${taskId}:${type}:${Date.now()}`,
+    taskId,
+    ts: Date.now(),
+    type,
+    phase,
+    label: status,
+    status,
+  };
+}
+
+function toAgentRunBody(task, plan, requestBody) {
+  return {
+    userPrompt: task.message,
+    projectId: requestBody?.projectId || requestBody?.project_id || 'default',
+    projectPath: requestBody?.projectPath,
+    projectFiles: requestBody?.projectFiles,
+    customKeys: requestBody?.customKeys,
+    chatTaskPlan: plan,
+    taskId: task.taskId,
+    sessionId: task.sessionId,
+  };
+}
+
 export default function TaskRuntimeBridge() {
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -173,17 +199,21 @@ export default function TaskRuntimeBridge() {
       window[ACTIVE_KEY] = taskId;
       writeRecoveryTask(task);
 
-      const [, init] = args;
       const requestArgs = augmentStreamRequest(args);
-      // The current task owns these files; clear the composer immediately so
-      // the next user message cannot accidentally inherit old attachments.
+      const effectiveBody = (() => {
+        try {
+          return typeof requestArgs[1]?.body === 'string' ? JSON.parse(requestArgs[1].body) : requestBody || {};
+        } catch (_) {
+          return requestBody || {};
+        }
+      })();
+
       if (composerDocs.length > 0) clearComposerAttachments();
 
-      const nextInit = { ...(requestArgs[1] || init || {}), signal: controller.signal };
       const sharedContext = readSharedContext();
       const plan = createTaskPlan(task.message, {
-        hasFiles: task.attachmentCount > 0 || Array.isArray(requestBody?.uploadedDocs),
-        fileCount: task.attachmentCount || (Array.isArray(requestBody?.uploadedDocs) ? requestBody.uploadedDocs.length : 0),
+        hasFiles: task.attachmentCount > 0 || Array.isArray(effectiveBody.uploadedDocs),
+        fileCount: task.attachmentCount || (Array.isArray(effectiveBody.uploadedDocs) ? effectiveBody.uploadedDocs.length : 0),
         hasSharedContext: sharedContext.length > 0,
       });
       task.plan = plan;
@@ -192,18 +222,65 @@ export default function TaskRuntimeBridge() {
       }));
 
       window.dispatchEvent(new CustomEvent('ai_dost_task_event', {
-        detail: {
-          id: `${taskId}:start`,
-          taskId,
-          ts: Date.now(),
-          type: TASK_EVENT_TYPES.START,
-          phase: plan.intent.type === 'task' ? 'planning' : 'understanding',
-          label: plan.intent.type === 'task' ? 'Planning' : 'Understanding',
-        },
+        detail: agentTaskEvent(taskId, plan.intent.type === 'task' ? 'planning' : 'understanding', plan.intent.type === 'task' ? 'Planning' : 'Understanding'),
       }));
 
       try {
-        const response = await originalFetch(requestArgs[0], nextInit);
+        // Autonomous tool-bearing chat commands use the existing agent runtime.
+        // Regular conversation keeps the established /api/chat/stream pipeline.
+        if (plan.intent.type === 'task' && plan.intent.requiresTool) {
+          const [, init] = args;
+          const agentBody = toAgentRunBody(task, plan, effectiveBody);
+          const agentInit = {
+            ...(init || {}),
+            method: 'POST',
+            headers: {
+              ...(init?.headers || {}),
+              'Content-Type': 'application/json',
+              'X-AI-Dost-Task-Id': taskId,
+            },
+            body: JSON.stringify(agentBody),
+            signal: controller.signal,
+          };
+
+          window.dispatchEvent(new CustomEvent('ai_dost_task_event', {
+            detail: agentTaskEvent(taskId, 'executing', 'Executing task'),
+          }));
+
+          const response = await originalFetch(AGENT_RUN_PATH, agentInit);
+          if (!response?.body) return response;
+
+          const cloned = response.clone();
+          const reader = cloned.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          const emit = (payload) => {
+            const event = normalizeServerEvent(taskId, payload);
+            if (event) window.dispatchEvent(new CustomEvent('ai_dost_task_event', { detail: event }));
+          };
+          const pump = async () => {
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                buffer = parseSseLines(buffer, emit);
+              }
+              buffer += decoder.decode();
+              if (buffer.trim()) parseSseLines(`${buffer}\n`, emit);
+            } catch (error) {
+              if (controller.signal.aborted) return;
+              writeRecoveryTask(task);
+              emit({ error: error?.message || 'Agent task stream interrupted' });
+            }
+          };
+          void pump();
+          return response;
+        }
+
+        const [, init] = args;
+        const nextInit = { ...(augmentStreamRequest(args)[1] || init || {}), signal: controller.signal };
+        const response = await originalFetch(augmentStreamRequest(args)[0], nextInit);
         if (!response?.body) return response;
 
         try {
