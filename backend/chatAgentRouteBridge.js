@@ -2,15 +2,15 @@
 
 const Module = require('module');
 const { handleChatTaskRequest } = require('./agent/runtime/chatAgentTaskHandler');
+const { handleCopilotDirectorRequest } = require('./agent/runtime/copilotDirectorHandler');
 
 const PATCHED = Symbol('aiDostChatAgentRouteBridgePatched');
 
-function createChatTaskAwareHandler(handler, chatHandler = handleChatTaskRequest) {
+function createChatTaskAwareHandler(handler, chatHandler = handleChatTaskRequest, directorHandler = handleCopilotDirectorRequest) {
   if (typeof handler !== 'function') return handler;
   return function chatTaskAwareAgentRun(req, res, next) {
-    if (req?.body?.chatTaskPlan) {
-      return chatHandler(req, res, next);
-    }
+    if (req?.body?.copilotDirector) return directorHandler(req, res, next);
+    if (req?.body?.chatTaskPlan) return chatHandler(req, res, next);
     return handler(req, res, next);
   };
 }
