@@ -12,6 +12,7 @@ const ArtifactDAO = require('../../db/dao/ArtifactDAO');
 const ConversationDAO = require('../../db/dao/ConversationDAO');
 const WorkspaceManager = require('../../services/workspaceManager');
 const projectAuthorization = require('../../services/projectAuthorization');
+const OpenAIService = require('../../services/openaiService');
 const ExecutionController = require('./ExecutionController');
 const ChatPlannerExecutionLoop = require('./ChatPlannerExecutionLoop');
 const TaskPlanner = require('./TaskPlanner');
@@ -47,6 +48,7 @@ function createChatTaskGateway({ db = getDatabase(), aiService = null, runtime =
   });
 
   const structuredPlanner = aiService || createStructuredAgentPlanner({ toolRegistry });
+  const directorAiService = runtime.directorAiService || aiService || OpenAIService;
 
   const executionController = runtime.executionController || new ExecutionController({
     db,
@@ -112,6 +114,7 @@ function createChatTaskGateway({ db = getDatabase(), aiService = null, runtime =
     agentTaskDao,
     agentRunDao,
     projectAuthorization,
+    directorAiService,
   };
 }
 
@@ -131,8 +134,9 @@ async function getChatTaskGateway({ aiService, db, runtime } = {}) {
 async function getCopilotDirectorRuntime({ aiService, db, runtime } = {}) {
   const state = await getChatTaskRuntime({ aiService, db, runtime });
   if (!state.director) {
+    const runtimeDb = db || getDatabase();
     state.coordinator = new AgentCoordinator({
-      db: db || getDatabase(),
+      db: runtimeDb,
       projectAuthService: state.projectAuthorization,
       workspaceManager: state.workspaceManager,
       toolRegistry,
@@ -141,10 +145,10 @@ async function getCopilotDirectorRuntime({ aiService, db, runtime } = {}) {
       executionController: state.executionController,
       agentTaskDao: state.agentTaskDao,
       agentRunDao: state.agentRunDao,
-      artifactDao: new ArtifactDAO(db || getDatabase())
+      artifactDao: new ArtifactDAO(runtimeDb)
     });
     state.director = new CopilotDirector({
-      db: db || getDatabase(),
+      db: runtimeDb,
       projectAuthorization: state.projectAuthorization,
       workspaceManager: state.workspaceManager,
       toolRegistry,
@@ -154,7 +158,7 @@ async function getCopilotDirectorRuntime({ aiService, db, runtime } = {}) {
       executionController: state.executionController,
       agentTaskDao: state.agentTaskDao,
       agentRunDao: state.agentRunDao,
-      aiService: aiService || createStructuredAgentPlanner({ toolRegistry }),
+      aiService: state.directorAiService,
       coordinator: state.coordinator
     });
   }
