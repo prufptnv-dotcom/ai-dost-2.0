@@ -18,6 +18,7 @@ dist/
 __pycache__/
 *.pyc
 chroma_data/
+ai-engine/chroma_db/
 
 # Local Configs & Keys
 .env
