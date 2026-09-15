@@ -2,6 +2,23 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const Module = require('node:module');
+
+// CopilotDirector's pure planning helpers should be testable without loading
+// database, network, or model-provider dependencies from the runtime graph.
+const originalLoad = Module._load;
+Module._load = function isolatedRuntimeLoad(request, parent, isMain) {
+  if (request === '../../services/openaiService') {
+    return class OpenAIServiceMock {};
+  }
+  if (request === './AgentCoordinator') {
+    return class AgentCoordinatorMock {};
+  }
+  if (request === './resultValidator') {
+    return { ResultValidator: class ResultValidatorMock {} };
+  }
+  return originalLoad.call(this, request, parent, isMain);
+};
 
 const {
   normalizePlan,
@@ -10,6 +27,8 @@ const {
   MAX_TASKS,
   hasDependencyCycle
 } = require('./CopilotDirector');
+
+Module._load = originalLoad;
 
 test('normalizePlan removes duplicate ids and invalid dependencies', () => {
   const plan = normalizePlan({
