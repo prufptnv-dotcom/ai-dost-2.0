@@ -18,6 +18,7 @@ const TaskPlanner = require('./TaskPlanner');
 const ContextAssembler = require('./ContextAssembler');
 const ChatTaskAdapter = require('./ChatTaskAdapter');
 const ChatTaskGateway = require('./ChatTaskGateway');
+const DurableTaskIdempotencyStore = require('./DurableTaskIdempotencyStore');
 const toolRegistry = require('./ToolRegistry');
 const { ResultValidator } = require('./resultValidator');
 const { registerAll } = require('./registerAgentCapabilities');
@@ -38,6 +39,10 @@ function createChatTaskGateway({ db = getDatabase(), aiService = null, runtime =
   const verificationResultDao = runtime.verificationResultDao || new VerificationResultDAO(db);
   const artifactDao = runtime.artifactDao || new ArtifactDAO(db);
   const conversationDao = runtime.conversationDao || new ConversationDAO(db);
+  const idempotencyStore = runtime.idempotencyStore || new DurableTaskIdempotencyStore(db, {
+    ttlMs: Number(process.env.AGENT_TASK_IDEMPOTENCY_TTL_MS) || 10 * 60 * 1000,
+    maxEvents: Number(process.env.AGENT_TASK_IDEMPOTENCY_MAX_EVENTS) || 100,
+  });
 
   const structuredPlanner = aiService || createStructuredAgentPlanner({ toolRegistry });
 
@@ -87,7 +92,8 @@ function createChatTaskGateway({ db = getDatabase(), aiService = null, runtime =
     plannerExecutionLoop,
     adapter,
     taskPlanner,
-    contextAssembler
+    contextAssembler,
+    idempotencyStore,
   });
 
   return {
@@ -97,7 +103,8 @@ function createChatTaskGateway({ db = getDatabase(), aiService = null, runtime =
     contextAssembler,
     executionController,
     adapter,
-    toolRegistry
+    toolRegistry,
+    idempotencyStore,
   };
 }
 
