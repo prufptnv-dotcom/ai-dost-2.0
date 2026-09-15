@@ -69,9 +69,14 @@ function wrapStreamHandler(handler) {
     const task = registerTask(taskId, req, res);
     res.setHeader('X-AI-Dost-Task-Id', taskId);
 
-    return storage.run(task, () => Promise.resolve(handler(req, res, next)).finally(() => {
-      if (!res.writableEnded) cleanupTask(taskId);
-    }));
+    return storage.run(task, () => {
+      const requestHandler = req.body?.chatTaskPlan
+        ? require('./agent/runtime/chatAgentTaskHandler').handleChatTaskRequest
+        : handler;
+      return Promise.resolve(requestHandler(req, res, next)).finally(() => {
+        if (!res.writableEnded) cleanupTask(taskId);
+      });
+    });
   };
 }
 
