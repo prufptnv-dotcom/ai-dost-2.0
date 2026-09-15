@@ -23,6 +23,8 @@ const toolRegistry = require('./ToolRegistry');
 const { ResultValidator } = require('./resultValidator');
 const { registerAll } = require('./registerAgentCapabilities');
 const { createStructuredAgentPlanner } = require('./structuredAgentPlanner');
+const { CopilotDirector } = require('./CopilotDirector');
+const AgentCoordinator = require('./AgentCoordinator');
 
 let runtimeCache = null;
 
@@ -105,15 +107,58 @@ function createChatTaskGateway({ db = getDatabase(), aiService = null, runtime =
     adapter,
     toolRegistry,
     idempotencyStore,
+    workspaceManager,
+    projectDao,
+    agentTaskDao,
+    agentRunDao,
+    projectAuthorization,
   };
 }
 
-async function getChatTaskGateway({ aiService, db, runtime } = {}) {
+async function getChatTaskRuntime({ aiService, db, runtime } = {}) {
   if (!runtimeCache) {
     await registerAll().catch(() => {});
     runtimeCache = createChatTaskGateway({ aiService, db, runtime });
   }
-  return runtimeCache.gateway;
+  return runtimeCache;
+}
+
+async function getChatTaskGateway({ aiService, db, runtime } = {}) {
+  const runtimeState = await getChatTaskRuntime({ aiService, db, runtime });
+  return runtimeState.gateway;
+}
+
+async function getCopilotDirectorRuntime({ aiService, db, runtime } = {}) {
+  const state = await getChatTaskRuntime({ aiService, db, runtime });
+  if (!state.director) {
+    state.coordinator = new AgentCoordinator({
+      db: db || getDatabase(),
+      projectAuthService: state.projectAuthorization,
+      workspaceManager: state.workspaceManager,
+      toolRegistry,
+      plannerExecutionLoop: state.plannerExecutionLoop,
+      contextAssembler: state.contextAssembler,
+      executionController: state.executionController,
+      agentTaskDao: state.agentTaskDao,
+      agentRunDao: state.agentRunDao,
+      artifactDao: new ArtifactDAO(db || getDatabase())
+    });
+    state.director = new CopilotDirector({
+      db: db || getDatabase(),
+      projectAuthorization: state.projectAuthorization,
+      workspaceManager: state.workspaceManager,
+      toolRegistry,
+      plannerExecutionLoop: state.plannerExecutionLoop,
+      contextAssembler: state.contextAssembler,
+      taskPlanner: state.taskPlanner,
+      executionController: state.executionController,
+      agentTaskDao: state.agentTaskDao,
+      agentRunDao: state.agentRunDao,
+      aiService: aiService || createStructuredAgentPlanner({ toolRegistry }),
+      coordinator: state.coordinator
+    });
+  }
+  return state;
 }
 
 function resetChatTaskGatewayForTests() {
@@ -122,6 +167,8 @@ function resetChatTaskGatewayForTests() {
 
 module.exports = {
   createChatTaskGateway,
+  getChatTaskRuntime,
   getChatTaskGateway,
+  getCopilotDirectorRuntime,
   resetChatTaskGatewayForTests
 };
