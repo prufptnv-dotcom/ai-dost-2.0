@@ -13,7 +13,7 @@ const ConversationDAO = require('../../db/dao/ConversationDAO');
 const WorkspaceManager = require('../../services/workspaceManager');
 const projectAuthorization = require('../../services/projectAuthorization');
 const ExecutionController = require('./ExecutionController');
-const PlannerExecutionLoop = require('./PlannerExecutionLoop');
+const ChatPlannerExecutionLoop = require('./ChatPlannerExecutionLoop');
 const TaskPlanner = require('./TaskPlanner');
 const ContextAssembler = require('./ContextAssembler');
 const ChatTaskAdapter = require('./ChatTaskAdapter');
@@ -21,14 +21,11 @@ const ChatTaskGateway = require('./ChatTaskGateway');
 const toolRegistry = require('./ToolRegistry');
 const { ResultValidator } = require('./resultValidator');
 const { registerAll } = require('./registerAgentCapabilities');
+const { createStructuredAgentPlanner } = require('./structuredAgentPlanner');
 
 let runtimeCache = null;
 
-function createChatTaskGateway({ db = getDatabase(), aiService, runtime = {} } = {}) {
-  if (!aiService || typeof aiService.generateRepairPlan !== 'function' || typeof aiService.generateVerificationPlan !== 'function') {
-    throw new Error('createChatTaskGateway requires an aiService with repair and verification planners');
-  }
-
+function createChatTaskGateway({ db = getDatabase(), aiService = null, runtime = {} } = {}) {
   if (runtime.gateway) return runtime.gateway;
 
   const workspaceManager = runtime.workspaceManager || new WorkspaceManager.WorkspaceManager(db);
@@ -41,6 +38,8 @@ function createChatTaskGateway({ db = getDatabase(), aiService, runtime = {} } =
   const verificationResultDao = runtime.verificationResultDao || new VerificationResultDAO(db);
   const artifactDao = runtime.artifactDao || new ArtifactDAO(db);
   const conversationDao = runtime.conversationDao || new ConversationDAO(db);
+
+  const structuredPlanner = aiService || createStructuredAgentPlanner({ toolRegistry });
 
   const executionController = runtime.executionController || new ExecutionController({
     db,
@@ -67,10 +66,10 @@ function createChatTaskGateway({ db = getDatabase(), aiService, runtime = {} } =
 
   const taskPlanner = runtime.taskPlanner || new TaskPlanner({
     toolRegistry,
-    aiService
+    aiService: structuredPlanner
   });
 
-  const plannerExecutionLoop = runtime.plannerExecutionLoop || new PlannerExecutionLoop({
+  const plannerExecutionLoop = runtime.plannerExecutionLoop || new ChatPlannerExecutionLoop({
     contextAssembler,
     taskPlanner,
     executionController,
