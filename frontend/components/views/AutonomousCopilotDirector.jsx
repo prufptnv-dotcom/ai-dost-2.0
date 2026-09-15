@@ -1,6 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertCircle, BrainCircuit, CheckCircle2, Loader2, Play, RotateCcw, ShieldCheck, Terminal, Wrench, X } from 'lucide-react';
+import { BrainCircuit, CheckCircle2, Loader2, Play, RotateCcw, ShieldCheck, Terminal, X } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
 const CopilotIDE = dynamic(() => import('./CopilotIDE'), { ssr: false });
@@ -9,14 +9,11 @@ const DIRECTOR_INSTRUCTION = `You are the Director/Boss agent for AI-Dost Copilo
 
 function parseEventPayload(raw, onEvent) {
   if (!raw) return;
-  const lines = raw.split(/\n\n+/);
-  for (const block of lines) {
-    const dataLine = block.split('\n').find((line) => line.startsWith('data:'));
-    if (!dataLine) continue;
-    const payload = dataLine.slice(5).trim();
-    if (!payload || payload === '[DONE]') continue;
-    try { onEvent(JSON.parse(payload)); } catch (_) {}
-  }
+  const dataLine = raw.split(/\r?\n/).find((line) => line.startsWith('data:'));
+  if (!dataLine) return;
+  const payload = dataLine.slice(5).trim();
+  if (!payload || payload === '[DONE]') return;
+  try { onEvent(JSON.parse(payload)); } catch (_) {}
 }
 
 export default function AutonomousCopilotDirector({ projectId = 'copilot-workspace', projectName = 'Copilot Workspace', onToast }) {
@@ -30,6 +27,27 @@ export default function AutonomousCopilotDirector({ projectId = 'copilot-workspa
     setEvents((prev) => [...prev.slice(-99), { id: `${Date.now()}-${Math.random()}`, text, type }]);
   }, []);
 
+  const handleEvent = useCallback((event) => {
+    const phase = event.phase || event.status || event.type || '';
+    if (phase) setStatus(String(phase).toLowerCase());
+    if (event.type === 'director_plan') {
+      log(`Director planned ${event.taskCount || 0} adaptive specialist task(s).`, 'plan');
+    } else if (event.type === 'director_task') {
+      const label = `${event.specialty || 'worker'}${event.taskId ? ` [${event.taskId}]` : ''}`;
+      log(`${label}: ${event.status || 'running'}${event.error ? ` — ${event.error}` : ''}`, event.status === 'FAILED' ? 'error' : event.status === 'SUCCEEDED' ? 'success' : 'step');
+    } else if (event.type === 'director_verification') {
+      log(`Final verification: ${event.status || 'completed'}`, event.status === 'SUCCEEDED' ? 'success' : 'step');
+    } else if (event.type === 'director_error') {
+      log(event.error || 'Director failed.', 'error');
+    } else if (event.type === 'director_canceled') {
+      log('Director run canceled.', 'warning');
+    } else if (event.type === 'director_complete') {
+      log(`Director finished: ${event.status || 'completed'}`, event.status === 'SUCCEEDED' ? 'success' : 'error');
+    } else if (event.action || event.stepLog?.action) {
+      log(`${event.stepLog?.action || event.action}${event.stepLog?.result?.message ? ` — ${event.stepLog.result.message}` : ''}`, 'step');
+    }
+  }, [log]);
+
   const run = useCallback(async () => {
     const request = input.trim();
     if (!request || running) return;
@@ -40,16 +58,7 @@ export default function AutonomousCopilotDirector({ projectId = 'copilot-workspa
     setRunning(true);
     setStatus('planning');
     setEvents([]);
-    log('Director received the request. Inspecting workspace and selecting the optimal execution path…', 'plan');
-
-    const plan = {
-      taskId,
-      intent: {
-        type: 'task',
-        requiresTool: true,
-        originalMessage: `${DIRECTOR_INSTRUCTION}\n\nUSER OUTCOME REQUEST:\n${request}`,
-      },
-    };
+    log('Director received the outcome. Inspecting workspace and selecting the optimal execution path…', 'plan');
 
     try {
       const response = await fetch('/api/agent/run', {
@@ -57,11 +66,12 @@ export default function AutonomousCopilotDirector({ projectId = 'copilot-workspa
         signal: controller.signal,
         headers: { 'Content-Type': 'application/json', 'X-AI-Dost-Task-Id': taskId },
         body: JSON.stringify({
-          chatTaskPlan: plan,
+          copilotDirector: true,
           taskId,
           projectId,
           userPrompt: request,
           projectName,
+          directorInstruction: DIRECTOR_INSTRUCTION,
         }),
       });
 
@@ -80,27 +90,16 @@ export default function AutonomousCopilotDirector({ projectId = 'copilot-workspa
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const chunks = buffer.split(/\n\n+/);
         buffer = chunks.pop() || '';
-        for (const chunk of chunks) {
-          parseEventPayload(chunk, (event) => {
-            const phase = event.phase || event.type || '';
-            if (phase) setStatus(phase);
-            if (event.type === 'task_phase') log(`${event.phase || 'task'}: ${event.status || ''}`.trim(), event.phase === 'error' ? 'error' : event.phase === 'success' ? 'success' : 'step');
-            else if (event.type === 'task_error') log(event.error || 'Autonomous task failed', 'error');
-            else if (event.type === 'task_canceled') log('Autonomous task canceled.', 'warning');
-            else if (event.type === 'task_complete') log(`Director finished: ${event.status || 'completed'}`, event.status === 'SUCCEEDED' ? 'success' : 'error');
-            else if (event.action || event.stepLog?.action) log(`${event.stepLog?.action || event.action}${event.stepLog?.result?.message ? ` — ${event.stepLog.result.message}` : ''}`, 'step');
-          });
-        }
+        for (const chunk of chunks) parseEventPayload(chunk, handleEvent);
       }
+      if (buffer) parseEventPayload(buffer, handleEvent);
 
-      log('Director run ended. Final workspace state is available in the IDE.', 'success');
       setStatus('complete');
       onToast?.('Copilot Director finished the autonomous run.', 'success');
     } catch (error) {
@@ -116,7 +115,7 @@ export default function AutonomousCopilotDirector({ projectId = 'copilot-workspa
       controllerRef.current = null;
       setRunning(false);
     }
-  }, [input, log, onToast, projectId, projectName, running]);
+  }, [handleEvent, input, log, onToast, projectId, projectName, running]);
 
   const stop = useCallback(() => controllerRef.current?.abort(), []);
   const reset = useCallback(() => {
@@ -130,17 +129,14 @@ export default function AutonomousCopilotDirector({ projectId = 'copilot-workspa
     <div className="relative h-full w-full overflow-hidden bg-canvas-base">
       <CopilotIDE projectId={projectId} projectName={projectName} onToast={onToast} />
 
-      <motion.aside
-        initial={false}
-        className="absolute top-3 right-3 z-[80] w-[min(400px,calc(100%-24px))] rounded-xl border border-border bg-canvas-surface/95 shadow-2xl backdrop-blur-xl overflow-hidden"
-      >
+      <motion.aside initial={false} className="absolute top-3 right-3 z-[80] w-[min(400px,calc(100%-24px))] rounded-xl border border-border bg-canvas-surface/95 shadow-2xl backdrop-blur-xl overflow-hidden">
         <div className="px-3 py-2 border-b border-border flex items-center gap-2 bg-canvas-elevated/70">
           <BrainCircuit size={15} className="text-accent" />
           <div className="min-w-0 flex-1">
             <div className="text-[11px] font-semibold text-paper-100">Copilot Director</div>
-            <div className="text-[8px] font-mono text-ink-muted">one input → plan → build → repair → verify</div>
+            <div className="text-[8px] font-mono text-ink-muted">one input → adaptive agents → repair → verify</div>
           </div>
-          <span className="text-[8px] font-mono text-ink-muted uppercase">{running ? status : status}</span>
+          <span className="text-[8px] font-mono text-ink-muted uppercase">{status}</span>
         </div>
 
         <div className="p-2.5 space-y-2 border-b border-border">
@@ -163,14 +159,8 @@ export default function AutonomousCopilotDirector({ projectId = 'copilot-workspa
               {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={11} />}
               {running ? 'Autonomous run in progress…' : 'Build / Fix / Upgrade'}
             </button>
-            {running ? (
-              <button type="button" onClick={stop} className="rounded-lg px-2 py-1.5 border border-border text-paper-200" title="Stop autonomous run">
-                <X size={11} />
-              </button>
-            ) : null}
-            <button type="button" onClick={reset} disabled={running} className="rounded-lg px-2 py-1.5 border border-border text-paper-200 disabled:opacity-30" title="Reset">
-              <RotateCcw size={11} />
-            </button>
+            {running ? <button type="button" onClick={stop} className="rounded-lg px-2 py-1.5 border border-border text-paper-200" title="Stop autonomous run"><X size={11} /></button> : null}
+            <button type="button" onClick={reset} disabled={running} className="rounded-lg px-2 py-1.5 border border-border text-paper-200 disabled:opacity-30" title="Reset"><RotateCcw size={11} /></button>
           </div>
         </div>
 
@@ -179,12 +169,12 @@ export default function AutonomousCopilotDirector({ projectId = 'copilot-workspa
           <span className="flex items-center gap-1"><ShieldCheck size={9} className="text-accent" /> supervised</span>
         </div>
 
-        <div className="max-h-[42vh] overflow-y-auto p-2.5 space-y-1.5">
+        <div className="max-h-[55vh] overflow-y-auto p-2.5 space-y-1.5">
           <AnimatePresence initial={false}>
             {events.length === 0 ? (
               <div className="rounded-lg border border-border bg-canvas-base p-3 text-[9px] text-ink-muted leading-[1.4]">
                 <div className="flex items-center gap-1.5 text-paper-100 font-semibold mb-1.5"><Terminal size={10} /> What happens automatically</div>
-                Request interpretation → workspace inspection → adaptive execution → automatic repair → tests/build → preview/interaction QA when needed → final verification.
+                Request interpretation → workspace-aware adaptive delegation → specialist execution → automatic repair → tests/build → preview/interaction QA when supported → final read-only verification.
               </div>
             ) : events.map((event) => (
               <div key={event.id} className={`rounded-md border px-2 py-1.5 text-[8px] font-mono leading-[1.3] ${event.type === 'error' ? 'border-red-500/20 text-red-300 bg-red-500/5' : event.type === 'success' ? 'border-accent/20 text-accent bg-accent/5' : event.type === 'warning' ? 'border-amber-500/20 text-amber-300 bg-amber-500/5' : 'border-border text-ink-muted bg-canvas-elevated/30'}`}>
