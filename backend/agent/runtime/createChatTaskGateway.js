@@ -83,7 +83,13 @@ function createChatTaskGateway({ db = getDatabase(), aiService = null, runtime =
     resultValidator: runtime.resultValidator || new ResultValidator()
   });
 
-  const gateway = new ChatTaskGateway({ plannerExecutionLoop, adapter });
+  const gateway = new ChatTaskGateway({
+    plannerExecutionLoop,
+    adapter,
+    taskPlanner,
+    contextAssembler
+  });
+
   return {
     gateway,
     plannerExecutionLoop,
