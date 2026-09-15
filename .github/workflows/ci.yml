@@ -89,7 +89,7 @@ jobs:
         run: |
           cd backend
           npm ci
-          node -r ./security-hardening.js server.js &
+          node -r ./security-hardening.js -r ./taskCancellation.js -r ./chatAgentRouteBridge.js server.js &
           sleep 10
           curl -f http://localhost:5000/health
       - name: Test project generation with sandbox
