@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import { extractArtifact, extractImages, stripInternalTags } from '../utils/chatContent';
 
 describe('chatContent', () => {
