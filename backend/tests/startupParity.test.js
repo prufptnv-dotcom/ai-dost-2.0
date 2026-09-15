@@ -8,15 +8,22 @@ const test = require('node:test');
 const backendRoot = path.resolve(__dirname, '..');
 const packageJson = JSON.parse(fs.readFileSync(path.join(backendRoot, 'package.json'), 'utf8'));
 const dockerfile = fs.readFileSync(path.join(backendRoot, 'Dockerfile'), 'utf8');
+const nvmrc = fs.readFileSync(path.join(backendRoot, '.nvmrc'), 'utf8').trim();
 const requiredPreloads = [
   './security-hardening.js',
   './taskCancellation.js',
   './chatAgentRouteBridge.js',
 ];
+const REQUIRED_NODE_MAJOR = '22';
 
 function normalizeCommand(command) {
   return String(command || '').replace(/\\/g, '/');
 }
+
+test('backend declares one supported production Node major', () => {
+  assert.equal(nvmrc, REQUIRED_NODE_MAJOR, 'backend/.nvmrc must pin Node 22');
+  assert.equal(packageJson.engines?.node, '22.x', 'backend package engines must pin Node 22.x');
+});
 
 test('production start preloads required runtime policy modules', () => {
   const start = normalizeCommand(packageJson.scripts?.start);
