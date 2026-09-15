@@ -6,6 +6,7 @@ const http = require('http');
 const Module = require('module');
 
 const STREAM_PATH = '/api/chat/stream';
+const AGENT_RUN_PATH = '/api/agent/run';
 const CANCEL_PATH_PREFIX = '/api/chat/tasks/';
 const storage = new AsyncLocalStorage();
 const activeTasks = new Map();
@@ -88,7 +89,7 @@ function installExpressRouterHook(expressFactory) {
     if (router?.post && !router.post[PATCHED]) {
       const originalPost = router.post.bind(router);
       router.post = (path, ...handlers) => {
-        if (path === '/stream') {
+        if (path === '/stream' || path === '/run') {
           handlers = handlers.map((handler) => (typeof handler === 'function' ? wrapStreamHandler(handler) : handler));
         }
         return originalPost(path, ...handlers);
