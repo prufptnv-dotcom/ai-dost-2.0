@@ -9,9 +9,7 @@ class TaskPlanner {
       maxInputKeys: Number.isInteger(limits.maxInputKeys) ? limits.maxInputKeys : 40,
       maxInputStringChars: Number.isInteger(limits.maxInputStringChars) ? limits.maxInputStringChars : 12000,
     };
-    if (!this.toolRegistry || typeof this.toolRegistry.get !== 'function') {
-      throw new Error('TaskPlanner requires a valid ToolRegistry');
-    }
+    if (!this.toolRegistry || typeof this.toolRegistry.get !== 'function') throw new Error('TaskPlanner requires a valid ToolRegistry');
   }
 
   async generatePlan(intent, context) {
@@ -25,12 +23,20 @@ class TaskPlanner {
 
   async generateVerificationPlan(goal, context) {
     const plan = this.validateAndSanitizePlan(await this._generate('generateVerificationPlan', goal, context));
+    const explicitlyReadOnly = new Set([
+      'read_file', 'list_directory', 'search_codebase', 'run_tests',
+      'take_screenshot', 'inspect_visual_dom', 'web_search', 'fetch_webpage',
+      'verify_project', 'sandbox_read', 'sandbox_list', 'sandbox_dev_build'
+    ]);
+    const obviouslyMutating = /^(write|create|delete|remove|move|rename|apply|edit|update|patch|run_terminal|execute|sandbox_(write|exec|create|destroy|dev_start|dev_stop|expose))/i;
     for (const step of plan.steps) {
       const tool = this.toolRegistry.get(step.tool);
-      if (tool?.mutates === true || tool?.sideEffect === true || tool?.permissions?.includes?.('write')) {
+      const permissions = Array.isArray(tool?.permissions) ? tool.permissions : [];
+      const mutates = tool?.mutates === true || tool?.sideEffect === true || permissions.some((p) => /write|mutation|destructive/i.test(String(p)));
+      if (mutates || obviouslyMutating.test(step.tool)) {
         throw new Error(`Invalid verification plan: mutating tool '${step.tool}' is not allowed`);
       }
-      if (!/^(read|list|search|fetch|get|inspect|status|verify|check|test)/i.test(step.tool)) {
+      if (!explicitlyReadOnly.has(step.tool) && !/^(read|list|search|fetch|get|inspect|status|verify|check|test)/i.test(step.tool)) {
         throw new Error(`Invalid verification plan: tool '${step.tool}' is not classified as read-only`);
       }
     }
@@ -38,9 +44,7 @@ class TaskPlanner {
   }
 
   async _generate(method, ...args) {
-    if (!this.aiService || typeof this.aiService[method] !== 'function') {
-      throw new Error(`AI Service missing planner method '${method}'`);
-    }
+    if (!this.aiService || typeof this.aiService[method] !== 'function') throw new Error(`AI Service missing planner method '${method}'`);
     return this.aiService[method](...args);
   }
 
@@ -75,9 +79,7 @@ class TaskPlanner {
     const stepIds = new Set();
     for (const step of rawPlan.steps) {
       if (!step || typeof step !== 'object' || Array.isArray(step)) throw new Error('Invalid plan structure: Each step must be an object');
-      if (typeof step.id !== 'string' || !step.id.trim() || typeof step.tool !== 'string' || !step.tool.trim() || typeof step.description !== 'string' || !step.description.trim() || !step.input || typeof step.input !== 'object' || Array.isArray(step.input)) {
-        throw new Error('Invalid plan structure: Step must contain string id, tool, description, and an object input');
-      }
+      if (typeof step.id !== 'string' || !step.id.trim() || typeof step.tool !== 'string' || !step.tool.trim() || typeof step.description !== 'string' || !step.description.trim() || !step.input || typeof step.input !== 'object' || Array.isArray(step.input)) throw new Error('Invalid plan structure: Step must contain string id, tool, description, and an object input');
       if (step.id.length > 200) throw new Error(`Invalid plan: step ID '${step.id}' is too long`);
       if (step.description.length > this.limits.maxDescriptionChars) throw new Error(`Invalid plan: step '${step.id}' description exceeds maximum length`);
       if (stepIds.has(step.id)) throw new Error(`Invalid plan: Duplicate step ID '${step.id}'`);
@@ -86,18 +88,12 @@ class TaskPlanner {
       const tool = this.toolRegistry.get(step.tool);
       if (!tool) throw new Error(`Invalid plan: Unknown tool '${step.tool}' requested`);
       this._validateValue(step.input, `step.${step.id}.input`);
-      try { tool.validateInput(step.input); }
-      catch (err) { throw new Error(`Invalid plan: Step '${step.id}' provided invalid input for tool '${step.tool}': ${err.message}`); }
+      try { tool.validateInput(step.input); } catch (err) { throw new Error(`Invalid plan: Step '${step.id}' provided invalid input for tool '${step.tool}': ${err.message}`); }
     }
 
     return {
       goal: rawPlan.goal.trim(),
-      steps: rawPlan.steps.map((step) => ({
-        id: step.id.trim(),
-        tool: step.tool.trim(),
-        description: step.description.trim(),
-        input: step.input,
-      })),
+      steps: rawPlan.steps.map((step) => ({ id: step.id.trim(), tool: step.tool.trim(), description: step.description.trim(), input: step.input })),
     };
   }
 }
