@@ -20,8 +20,11 @@ class ChatTaskGateway {
     if (!projectId || !userId) throw new Error('projectId and userId are required');
     if (!taskPlan || taskPlan.intent?.type !== 'task') throw new Error('ChatTaskGateway requires an autonomous chat task');
 
+    const taskId = typeof taskPlan.taskId === 'string' && taskPlan.taskId.trim()
+      ? taskPlan.taskId.trim()
+      : null;
     const emit = (event) => {
-      if (typeof onEvent === 'function') onEvent({ ...event, taskId: taskPlan.taskId || null });
+      if (typeof onEvent === 'function') onEvent({ ...event, taskId });
     };
 
     if (signal?.aborted) throw new Error('Chat task canceled before execution');
@@ -52,7 +55,8 @@ class ChatTaskGateway {
         userId,
         agentPlan,
         maxRepairs,
-        () => Boolean(signal?.aborted)
+        () => Boolean(signal?.aborted),
+        taskId
       );
 
       if (result?.status === 'SUCCEEDED') {
