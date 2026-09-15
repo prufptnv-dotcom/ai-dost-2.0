@@ -50,6 +50,128 @@ class PlannerExecutionLoop {
     return this.executeQueue(runId, taskId, context, stepQueue, repairAttempts, goal, maxRepairs);
   }
 
+  async runWithPlan(projectId, userId, plan, maxRepairs = 3, isCanceled = () => false) {
+    if (!projectId || !userId) throw new Error('projectId and userId are required');
+    if (!plan || typeof plan !== 'object' || typeof plan.goal !== 'string') {
+      throw new Error('runWithPlan requires a validated agent plan');
+    }
+    if (!Array.isArray(plan.steps) || plan.steps.length === 0) {
+      throw new Error('runWithPlan requires at least one executable step');
+    }
+    if (isCanceled()) return { runId: null, status: 'CANCELLED', reason: 'Canceled before execution' };
+
+    const context = await this.contextAssembler.assemble(projectId, userId, plan.goal);
+    const taskId = this.executionController.generateId('task');
+    this.agentTaskDao.create({
+      id: taskId,
+      projectId,
+      userId,
+      title: plan.goal,
+      status: 'PENDING'
+    });
+
+    const runId = this.executionController.generateId('run');
+    this.agentRunDao.create({ id: runId, taskId, status: 'PENDING' });
+    await this.executionController.startRun(runId);
+    this.agentTaskDao.updateStatus(taskId, 'RUNNING');
+
+    const stepQueue = [...plan.steps];
+    const result = await this.executeQueueWithCancellation(
+      runId,
+      taskId,
+      context,
+      stepQueue,
+      0,
+      plan.goal,
+      maxRepairs,
+      isCanceled
+    );
+
+    return { ...result, taskId, runId };
+  }
+
+  async executeQueueWithCancellation(runId, taskId, context, stepQueue, repairAttempts, goal, maxRepairs, isCanceled) {
+    const cancelGuard = () => {
+      if (isCanceled()) {
+        throw Object.assign(new Error('Chat task canceled by user'), { code: 'TASK_CANCELED' });
+      }
+    };
+
+    try {
+      cancelGuard();
+      while (stepQueue.length > 0) {
+        cancelGuard();
+        await this.executionController.saveCheckpoint(runId, { stepQueue, repairAttempts, goal });
+        const stepDef = stepQueue.shift();
+        const step = await this.executionController.recordStep(runId, 'TOOL', stepDef.input);
+        await this.executionController.startStep(step.id);
+        try {
+          const output = await this.executionController.executeTool(
+            step.id, stepDef.tool, stepDef.input, context, this.toolRegistry
+          );
+          cancelGuard();
+          await this.executionController.recordObservation(step.id, 'TOOL_OUTPUT', output);
+          await this.executionController.completeStep(step.id, 'SUCCEEDED', output);
+        } catch (err) {
+          await this.executionController.recordObservation(step.id, 'TOOL_ERROR', err.message);
+          await this.executionController.completeStep(step.id, 'FAILED', null, err.message).catch(() => {});
+          if (err.code === 'TASK_CANCELED' || isCanceled()) throw Object.assign(err, { code: 'TASK_CANCELED' });
+          if (repairAttempts >= maxRepairs) {
+            await this.executionController.completeRun(runId, 'FAILED', `Step ${step.id} failed: max repairs reached.`);
+            this.agentTaskDao.updateStatus(taskId, 'FAILED');
+            return { status: 'FAILED', reason: 'Max repairs reached' };
+          }
+          repairAttempts++;
+          const repairPlan = await this.taskPlanner.generateRepairPlan(stepDef, err.message, context);
+          if (Array.isArray(repairPlan?.steps)) stepQueue.unshift(...repairPlan.steps);
+        }
+      }
+
+      cancelGuard();
+      await this.executionController.verifyRun(runId);
+      const verifyPlan = await this.taskPlanner.generateVerificationPlan(goal, context);
+      if (!verifyPlan || !Array.isArray(verifyPlan.steps) || verifyPlan.steps.length === 0) {
+        throw new Error('Verification planner returned no executable steps');
+      }
+
+      for (const vStep of verifyPlan.steps) {
+        cancelGuard();
+        const step = await this.executionController.recordStep(runId, 'VERIFY', vStep.input);
+        await this.executionController.startStep(step.id);
+        try {
+          const output = await this.executionController.executeTool(
+            step.id, vStep.tool, vStep.input, context, this.toolRegistry
+          );
+          cancelGuard();
+          await this.executionController.recordObservation(step.id, 'VERIFICATION_OUTPUT', output);
+          await this.executionController.recordVerificationResult(step.id, 'PASSED', 'Tool executed successfully', output);
+          await this.executionController.completeStep(step.id, 'SUCCEEDED', output);
+        } catch (err) {
+          await this.executionController.recordObservation(step.id, 'VERIFICATION_FAILED', err.message);
+          await this.executionController.recordVerificationResult(step.id, 'FAILED', err.message).catch(() => {});
+          await this.executionController.completeStep(step.id, 'FAILED', null, err.message).catch(() => {});
+          if (isCanceled()) throw Object.assign(new Error('Chat task canceled by user'), { code: 'TASK_CANCELED' });
+          throw err;
+        }
+      }
+
+      await this.executionController.completeRun(runId, 'SUCCEEDED');
+      this.agentTaskDao.updateStatus(taskId, 'COMPLETED');
+      return { status: 'SUCCEEDED' };
+    } catch (err) {
+      if (err.code === 'TASK_CANCELED' || isCanceled()) {
+        await this.executionController.completeRun(runId, 'CANCELLED', 'Canceled by user').catch(() => {});
+        this.agentTaskDao.updateStatus(taskId, 'CANCELLED');
+        return { status: 'CANCELLED', reason: 'Canceled by user' };
+      }
+      await this.executionController.completeRun(runId, 'FAILED', err.message).catch(() => {});
+      this.agentTaskDao.updateStatus(taskId, 'FAILED');
+      return { status: 'FAILED', reason: err.message };
+    } finally {
+      this.activeRuns.delete(runId);
+    }
+  }
+
   async resume(runId, projectId, userId, maxRepairs = 3) {
     if (this.activeRuns.has(runId)) {
       throw new Error(`Run ${runId} is already actively executing`);
@@ -66,17 +188,13 @@ class PlannerExecutionLoop {
         throw new Error(`Cannot resume a run that is ${run.status}`);
       }
 
-      // Recover any steps that were in RUNNING state during a crash
       await this.executionController.recoverStaleSteps(runId);
-
       const checkpoint = await this.executionController.loadCheckpoint(runId);
       if (!checkpoint) {
         throw new Error(`Cannot resume run ${runId}: No checkpoint found.`);
       }
 
       const { stepQueue, repairAttempts, goal } = checkpoint;
-
-      // Ensure run is correctly marked as RUNNING or VERIFYING based on state
       if (run.status === 'PENDING' || run.status === 'WAITING') {
         await this.executionController.startRun(runId);
       }
@@ -97,7 +215,6 @@ class PlannerExecutionLoop {
       while (true) {
         await this.executionController.saveCheckpoint(runId, { stepQueue, repairAttempts, goal });
 
-        // 1. Drain the execution step queue
         while (stepQueue.length > 0) {
           const stepDef = stepQueue.shift();
           await this.executionController.saveCheckpoint(runId, { stepQueue, repairAttempts, goal });
@@ -131,7 +248,6 @@ class PlannerExecutionLoop {
           }
         }
 
-        // 2. Transition to VERIFYING state
         const run = this.agentRunDao.getById(runId);
         if (run.status !== 'VERIFYING') {
           await this.executionController.verifyRun(runId);
@@ -183,7 +299,7 @@ class PlannerExecutionLoop {
           }
           
           repairAttempts++;
-          await this.executionController.startRun(runId); // Transitions VERIFYING -> RUNNING
+          await this.executionController.startRun(runId);
           const repairPlan = await this.taskPlanner.generateRepairPlan(failedVerifyStep, `Verification failed: ${verificationError}`, context);
           stepQueue.push(...repairPlan.steps);
           await this.executionController.saveCheckpoint(runId, { stepQueue, repairAttempts, goal });
