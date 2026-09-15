@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const ChatTaskAdapter = require('../agent/runtime/ChatTaskAdapter');
 const ChatTaskGateway = require('../agent/runtime/ChatTaskGateway');
+const PlannerExecutionLoop = require('../agent/runtime/PlannerExecutionLoop');
 
 function makeTool(name) {
   return {
@@ -130,4 +131,66 @@ test('gateway does not enter runtime after pre-cancellation', async () => {
     /canceled before execution/
   );
   assert.equal(called, false);
+});
+
+test('PlannerExecutionLoop executes a preplanned chat task through tool and verification phases', async () => {
+  const calls = [];
+  const controller = {
+    generateId: (prefix) => `${prefix}_1`,
+    async startRun() { calls.push('start-run'); },
+    async saveCheckpoint() {},
+    async recordStep(_runId, type) { calls.push(`record-${type}`); return { id: `${type.toLowerCase()}_1` }; },
+    async startStep() {},
+    async executeTool(_stepId, toolName) { calls.push(`execute-${toolName}`); return { success: true }; },
+    async recordObservation() {},
+    async completeStep() {},
+    async verifyRun() { calls.push('verify-run'); },
+    async recordVerificationResult() {},
+    async completeRun(_runId, status) { calls.push(`complete-${status}`); },
+  };
+  const loop = new PlannerExecutionLoop({
+    contextAssembler: { assemble: async () => ({ project: 'p1' }) },
+    taskPlanner: {
+      generateRepairPlan: async () => ({ steps: [] }),
+      generateVerificationPlan: async () => ({ goal: 'verify', steps: [{ id: 'v1', tool: 'verify_website', input: {} }] }),
+    },
+    executionController: controller,
+    toolRegistry: { get: (name) => ['create_website', 'verify_website'].includes(name) ? makeTool(name) : null },
+    agentTaskDao: { create: (value) => value, updateStatus() {} },
+    agentRunDao: { create: (value) => value },
+  });
+
+  const result = await loop.runWithPlan('p1', 'u1', {
+    goal: 'Build a website',
+    steps: [{ id: 's1', tool: 'create_website', input: {} }],
+  }, 0, () => false);
+
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.ok(calls.includes('execute-create_website'));
+  assert.ok(calls.includes('execute-verify_website'));
+  assert.ok(calls.includes('complete-SUCCEEDED'));
+});
+
+test('PlannerExecutionLoop returns CANCELLED before executing a canceled chat task', async () => {
+  let executed = false;
+  const loop = new PlannerExecutionLoop({
+    contextAssembler: { assemble: async () => ({}) },
+    taskPlanner: { generateRepairPlan: async () => ({ steps: [] }), generateVerificationPlan: async () => ({ steps: [] }) },
+    executionController: {
+      generateId: (prefix) => `${prefix}_1`,
+      startRun: async () => {},
+      completeRun: async (_id, status) => assert.equal(status, 'CANCELLED'),
+    },
+    toolRegistry: { get: () => makeTool('any', async () => { executed = true; }) },
+    agentTaskDao: { create: () => {}, updateStatus: () => {} },
+    agentRunDao: { create: () => {} },
+  });
+
+  const result = await loop.runWithPlan('p1', 'u1', {
+    goal: 'cancelled',
+    steps: [{ id: 's1', tool: 'any', input: {} }],
+  }, 0, () => true);
+
+  assert.equal(result.status, 'CANCELLED');
+  assert.equal(executed, false);
 });
