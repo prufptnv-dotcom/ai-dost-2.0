@@ -4,7 +4,8 @@ const OpenAIService = require('../../services/openaiService');
 const AgentCoordinator = require('./AgentCoordinator');
 const { ResultValidator } = require('./resultValidator');
 
-const MAX_TASKS = 5;
+const MAX_TASKS = 4;
+const MAX_WORKER_RETRIES = 2;
 const ALLOWED_ROLES = new Set(['RESEARCHER', 'CODER', 'VERIFIER']);
 const SPECIALTY_TO_ROLE = {
   requirements: 'RESEARCHER',
@@ -25,7 +26,7 @@ Return ONLY JSON with this shape:
 {"summary":"string","tasks":[{"id":"string","specialty":"requirements|research|frontend|backend|integration|data|testing|verification|visual_qa|repair","objective":"string","dependsOn":["task-id"],"expectedOutput":"string"}]}
 
 Rules:
-- Maximum 5 tasks.
+- Maximum 4 planned tasks; the Director always adds a separate final read-only verification gate.
 - Dependencies must refer only to earlier task ids.
 - Avoid duplicate or ceremonial tasks.
 - For upgrades/fixes, target the affected subsystem rather than rebuilding unrelated areas.
@@ -52,13 +53,14 @@ function fallbackPlan(request) {
   if (!complex) {
     return { summary: 'Single-task adaptive execution', tasks: [{ id: 'task-1', specialty: 'integration', objective: request, dependsOn: [], expectedOutput: 'Working requested outcome with verification evidence.' }] };
   }
-  const tasks = [
-    { id: 'task-1', specialty: 'requirements', objective: `Inspect the existing workspace and define the smallest safe implementation for: ${request}`, dependsOn: [], expectedOutput: 'Concrete implementation scope and constraints.' },
-    { id: 'task-2', specialty: 'integration', objective: request, dependsOn: ['task-1'], expectedOutput: 'Implemented outcome in the affected subsystem(s).' },
-    { id: 'task-3', specialty: 'testing', objective: `Test the completed implementation for: ${request}`, dependsOn: ['task-2'], expectedOutput: 'Test/build/runtime evidence and actionable failures if any.' },
-    { id: 'task-4', specialty: 'verification', objective: `Perform final read-only verification of: ${request}`, dependsOn: ['task-2', 'task-3'], expectedOutput: 'Final verification result and remaining blockers.' }
-  ];
-  return { summary: 'Adaptive multi-specialist execution', tasks };
+  return {
+    summary: 'Adaptive multi-specialist execution',
+    tasks: [
+      { id: 'task-1', specialty: 'requirements', objective: `Inspect the existing workspace and define the smallest safe implementation for: ${request}`, dependsOn: [], expectedOutput: 'Concrete implementation scope and constraints.' },
+      { id: 'task-2', specialty: 'integration', objective: request, dependsOn: ['task-1'], expectedOutput: 'Implemented outcome in the affected subsystem(s).' },
+      { id: 'task-3', specialty: 'testing', objective: `Test the completed implementation for: ${request}`, dependsOn: ['task-2'], expectedOutput: 'Test/build/runtime evidence and actionable failures if any.' }
+    ]
+  };
 }
 
 function normalizePlan(raw, request) {
@@ -124,39 +126,12 @@ class CopilotDirector {
     }
   }
 
-  async run({ userId, projectId, request, signal = null, onEvent = () => {}, maxRepairs = 3 }) {
-    const plan = await this.createPlan(request, { projectId });
-    const supervisorResult = await this.coordinator.createSupervisorTask({
-      userId,
-      projectId,
-      title: `Copilot Director: ${String(request).slice(0, 180)}`,
-      prompt: request,
-      metadata: { source: 'copilot-director', plannedTaskCount: plan.tasks.length }
-    });
-
-    const completed = new Map();
-    const results = [];
-    onEvent({ type: 'director_plan', status: 'PLANNED', summary: plan.summary, taskCount: plan.tasks.length, tasks: plan.tasks.map(({ id, specialty, role, dependsOn }) => ({ id, specialty, role, dependsOn })) });
-
-    for (const task of plan.tasks) {
-      if (signal?.aborted) return { status: 'CANCELLED', taskId: supervisorResult.task.id, runId: supervisorResult.run.id, plan, results };
-      const unmet = task.dependsOn.filter((dep) => completed.get(dep) !== 'SUCCEEDED');
-      if (unmet.length) {
-        throw new Error(`Director dependency blocked task '${task.id}': ${unmet.join(', ')}`);
-      }
-
-      onEvent({ type: 'director_task', status: 'DELEGATING', taskId: task.id, specialty: task.specialty, role: task.role, objective: task.objective });
-      const delegated = await this.coordinator.delegate({
-        supervisorRunId: supervisorResult.run.id,
-        role: task.role,
-        objective: task.objective,
-        constraints: { specialty: task.specialty, directorTaskId: task.id },
-        expectedOutput: task.expectedOutput
-      });
-
-      let executionResult;
+  async executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs }) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= MAX_WORKER_RETRIES + 1; attempt += 1) {
+      if (signal?.aborted) return { status: 'CANCELLED' };
       try {
-        executionResult = await this.coordinator.startWorker(delegated.workerRun.id, {
+        return await this.coordinator.startWorker(delegated.workerRun.id, {
           autoPlan: false,
           runner: async () => {
             const workerPlan = await this.taskPlanner.generatePlan(task.objective, {
@@ -165,7 +140,8 @@ class CopilotDirector {
               specialty: task.specialty,
               directorTaskId: task.id,
               request,
-              expectedOutput: task.expectedOutput
+              expectedOutput: task.expectedOutput,
+              attempt
             });
             return this.plannerExecutionLoop.runWithPlan(
               projectId,
@@ -178,46 +154,96 @@ class CopilotDirector {
           }
         });
       } catch (error) {
-        completed.set(task.id, 'FAILED');
-        onEvent({ type: 'director_task', status: 'FAILED', taskId: task.id, specialty: task.specialty, role: task.role, error: error.message });
-        results.push({ task, status: 'FAILED', error: error.message });
-        throw error;
+        lastError = error;
+        if (attempt <= MAX_WORKER_RETRIES) continue;
+      }
+    }
+    throw lastError || new Error(`Worker '${task.id}' failed`);
+  }
+
+  async run({ userId, projectId, request, signal = null, onEvent = () => {}, maxRepairs = 3 }) {
+    const plan = await this.createPlan(request, { projectId });
+    const supervisorResult = await this.coordinator.createSupervisorTask({
+      userId,
+      projectId,
+      title: `Copilot Director: ${String(request).slice(0, 180)}`,
+      prompt: request,
+      metadata: { source: 'copilot-director', plannedTaskCount: plan.tasks.length }
+    });
+    const supervisorTaskId = supervisorResult.task.id;
+    const supervisorRunId = supervisorResult.run.id;
+    const completed = new Map();
+    const results = [];
+
+    onEvent({ type: 'director_plan', status: 'PLANNED', summary: plan.summary, taskCount: plan.tasks.length, tasks: plan.tasks.map(({ id, specialty, role, dependsOn }) => ({ id, specialty, role, dependsOn })) });
+    this.agentTaskDao.updateStatus(supervisorTaskId, 'RUNNING');
+
+    try {
+      for (const task of plan.tasks) {
+        if (signal?.aborted) return { status: 'CANCELLED', taskId: supervisorTaskId, runId: supervisorRunId, plan, results };
+        const unmet = task.dependsOn.filter((dep) => completed.get(dep) !== 'SUCCEEDED');
+        if (unmet.length) throw new Error(`Director dependency blocked task '${task.id}': ${unmet.join(', ')}`);
+
+        onEvent({ type: 'director_task', status: 'DELEGATING', taskId: task.id, specialty: task.specialty, role: task.role, objective: task.objective });
+        const delegated = await this.coordinator.delegate({
+          supervisorRunId,
+          role: task.role,
+          objective: task.objective,
+          constraints: { specialty: task.specialty, directorTaskId: task.id },
+          expectedOutput: task.expectedOutput
+        });
+
+        try {
+          const executionResult = await this.executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs });
+          const taskStatus = executionResult?.status === 'CANCELLED' ? 'CANCELLED' : 'SUCCEEDED';
+          completed.set(task.id, taskStatus);
+          results.push({ task, status: taskStatus, workerRunId: delegated.workerRun.id, result: executionResult });
+          onEvent({ type: 'director_task', status: taskStatus, taskId: task.id, specialty: task.specialty, role: task.role, workerRunId: delegated.workerRun.id, result: executionResult });
+          if (taskStatus === 'CANCELLED') return { status: 'CANCELLED', taskId: supervisorTaskId, runId: supervisorRunId, plan, results };
+        } catch (error) {
+          completed.set(task.id, 'FAILED');
+          results.push({ task, status: 'FAILED', error: error.message });
+          onEvent({ type: 'director_task', status: 'FAILED', taskId: task.id, specialty: task.specialty, role: task.role, error: error.message });
+          throw error;
+        }
       }
 
-      completed.set(task.id, executionResult?.status === 'CANCELLED' ? 'CANCELLED' : 'SUCCEEDED');
-      results.push({ task, status: completed.get(task.id), workerRunId: delegated.workerRun.id, result: executionResult });
-      onEvent({ type: 'director_task', status: completed.get(task.id), taskId: task.id, specialty: task.specialty, role: task.role, workerRunId: delegated.workerRun.id, result: executionResult });
-      if (completed.get(task.id) === 'CANCELLED') return { status: 'CANCELLED', taskId: supervisorResult.task.id, runId: supervisorResult.run.id, plan, results };
-    }
-
-    const verifier = plan.tasks.some((task) => task.specialty === 'verification') ? null : await this.coordinator.delegate({
-      supervisorRunId: supervisorResult.run.id,
-      role: 'VERIFIER',
-      objective: `Perform the final read-only verification gate for the requested outcome: ${request}. Inspect the current workspace state and confirm tests/build/runtime evidence where supported. Do not mutate the workspace.`,
-      constraints: { specialty: 'verification', generatedByDirector: true },
-      expectedOutput: 'Final verification evidence and any remaining blockers.'
-    });
-    let finalVerification = null;
-    if (verifier) {
-      finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, {
+      onEvent({ type: 'director_verification', status: 'DELEGATING' });
+      const verifier = await this.coordinator.delegate({
+        supervisorRunId,
+        role: 'VERIFIER',
+        objective: `Perform the final read-only verification gate for the requested outcome: ${request}. Inspect the current workspace state and confirm tests/build/runtime evidence where supported. Do not mutate the workspace.`,
+        constraints: { specialty: 'verification', generatedByDirector: true },
+        expectedOutput: 'Final verification evidence and any remaining blockers.'
+      });
+      const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, {
         runner: async () => {
           const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER' });
           return this.plannerExecutionLoop.runWithPlan(projectId, userId, verificationPlan, 0, () => Boolean(signal?.aborted), `copilot_verify_${verifier.workerRun.id}`);
         }
       });
-      onEvent({ type: 'director_verification', status: finalVerification?.status || 'FAILED', result: finalVerification });
-    }
+      onEvent({ type: 'director_verification', status: finalVerification?.status || 'FAILED', workerRunId: verifier.workerRun.id, result: finalVerification });
+      if (finalVerification?.status !== 'SUCCEEDED') {
+        throw new Error('Final Director verification gate did not pass');
+      }
 
-    onEvent({ type: 'director_complete', status: 'SUCCEEDED', taskId: supervisorResult.task.id, runId: supervisorResult.run.id, taskCount: plan.tasks.length });
-    return ResultValidator.validate({
-      status: 'COMPLETED',
-      summary: `Director completed ${plan.tasks.length} adaptive task(s) and final verification.`,
-      artifact_refs: results.flatMap((item) => item.result?.result?.artifact_refs || item.result?.artifact_refs || []),
-      context_refs: [],
-      verification_status: finalVerification ? 'PASSED' : 'SKIPPED',
-      errors: []
-    });
+      this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
+      this.agentRunDao.updateStatus(supervisorRunId, 'SUCCEEDED');
+      onEvent({ type: 'director_complete', status: 'SUCCEEDED', taskId: supervisorTaskId, runId: supervisorRunId, taskCount: plan.tasks.length });
+      return ResultValidator.validate({
+        status: 'COMPLETED',
+        summary: `Director completed ${plan.tasks.length} adaptive task(s) and final verification.`,
+        artifact_refs: results.flatMap((item) => item.result?.result?.artifact_refs || item.result?.artifact_refs || []),
+        context_refs: [],
+        verification_status: 'PASSED',
+        errors: []
+      });
+    } catch (error) {
+      this.agentTaskDao.updateStatus(supervisorTaskId, 'FAILED');
+      this.agentRunDao.updateStatus(supervisorRunId, 'FAILED', error.message);
+      throw error;
+    }
   }
 }
 
-module.exports = { CopilotDirector, normalizePlan, fallbackPlan, SPECIALTY_TO_ROLE };
+module.exports = { CopilotDirector, normalizePlan, fallbackPlan, SPECIALTY_TO_ROLE, MAX_TASKS };
