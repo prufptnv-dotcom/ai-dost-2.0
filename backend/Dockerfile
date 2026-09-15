@@ -6,4 +6,4 @@ COPY package*.json ./
 COPY . .
 USER node
 EXPOSE 5000
-CMD ["node", "-r", "./security-hardening.js", "server.js"]
+CMD ["node", "-r", "./security-hardening.js", "-r", "./taskCancellation.js", "-r", "./chatAgentRouteBridge.js", "server.js"]
