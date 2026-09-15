@@ -4,8 +4,8 @@
   "description": "Personal AI Assistant Backend",
   "main": "server.js",
   "scripts": {
-    "start": "node -r ./productionBoundaryHardening.js -r ./security-hardening.js -r ./taskCancellation.js -r ./chatAgentRouteBridge.js server.js",
-    "dev": "nodemon --exec \"node -r ./productionBoundaryHardening.js -r ./security-hardening.js -r ./taskCancellation.js -r ./chatAgentRouteBridge.js\" server.js",
+    "start": "node -r ./security-hardening.js -r ./taskCancellation.js -r ./chatAgentRouteBridge.js server.js",
+    "dev": "nodemon --exec \"node -r ./security-hardening.js -r ./taskCancellation.js -r ./chatAgentRouteBridge.js\" server.js",
     "postinstall": "playwright install chromium --with-deps || echo 'playwright browser install skipped'",
     "lint": "eslint .",
     "test:unit": "node --test tests/unit.test.js",
