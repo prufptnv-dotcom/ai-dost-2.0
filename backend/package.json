@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Personal AI Assistant Backend",
   "main": "server.js",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "start": "node -r ./security-hardening.js -r ./taskCancellation.js -r ./chatAgentRouteBridge.js server.js",
     "dev": "nodemon --exec \"node -r ./security-hardening.js -r ./taskCancellation.js -r ./chatAgentRouteBridge.js\" server.js",
