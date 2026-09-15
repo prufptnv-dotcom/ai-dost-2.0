@@ -16,7 +16,16 @@ class ChatPlannerExecutionLoop extends PlannerExecutionLoop {
     }
     if (typeof isCanceled !== 'function') throw new Error('isCanceled must be a function');
 
+    if (isCanceled()) {
+      return { runId: null, taskId: null, status: 'CANCELLED', reason: 'Canceled before execution' };
+    }
+
     const context = await this.contextAssembler.assemble(projectId, userId, plan.goal);
+
+    if (isCanceled()) {
+      return { runId: null, taskId: null, status: 'CANCELLED', reason: 'Canceled before execution' };
+    }
+
     const taskId = this.executionController.generateId('task_chat');
     this.agentTaskDao.create({
       id: taskId,
@@ -34,24 +43,26 @@ class ChatPlannerExecutionLoop extends PlannerExecutionLoop {
       metadata: { source: 'universal-chat' }
     });
 
-    if (isCanceled()) {
-      await this.executionController.completeRun(runId, 'CANCELLED', 'Canceled before execution').catch(() => {});
-      this.agentTaskDao.updateStatus(taskId, 'CANCELLED');
-      return { runId, taskId, status: 'CANCELLED', reason: 'Canceled before execution' };
-    }
+    try {
+      await this.executionController.startRun(runId);
+      this.agentTaskDao.updateStatus(taskId, 'RUNNING');
+      this.activeRuns.add(runId);
 
-    await this.executionController.startRun(runId);
-    this.agentTaskDao.updateStatus(taskId, 'RUNNING');
-    return this.executeQueue(
-      runId,
-      taskId,
-      context,
-      [...plan.steps],
-      0,
-      plan.goal,
-      maxRepairs,
-      isCanceled
-    );
+      const result = await this.executeQueueWithCancellation(
+        runId,
+        taskId,
+        context,
+        [...plan.steps],
+        0,
+        plan.goal,
+        maxRepairs,
+        isCanceled
+      );
+
+      return { ...result, taskId, runId };
+    } finally {
+      this.activeRuns.delete(runId);
+    }
   }
 }
 
