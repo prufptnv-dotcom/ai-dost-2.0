@@ -1,7 +1,7 @@
 import React from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/Button';
-import AutonomousCopilotWorkspace from './AutonomousCopilotWorkspace';
+import AutonomousCopilotDirector from './AutonomousCopilotDirector';
 
 export default class IDEErrorBoundary extends React.Component {
   constructor(props) {
@@ -40,7 +40,7 @@ export default class IDEErrorBoundary extends React.Component {
 
     return (
       <div className="relative h-full w-full">
-        <AutonomousCopilotWorkspace
+        <AutonomousCopilotDirector
           projectId="copilot-workspace"
           projectName="Copilot Workspace"
           onToast={(message, type = 'success') => {
