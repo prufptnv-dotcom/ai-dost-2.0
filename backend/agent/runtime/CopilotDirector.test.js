@@ -162,9 +162,10 @@ test('run fails closed when final verification does not pass', async () => {
     tasks: [{ id: 'change', specialty: 'frontend', role: 'CODER', objective: 'change UI', dependsOn: [], expectedOutput: 'change' }]
   };
   const director = createExecutionHarness({ plan });
+  const originalStartWorker = director.coordinator.startWorker;
   director.coordinator.startWorker = async (workerRunId, options = {}) => {
-    if (options.runner) return options.runner();
-    return { status: 'FAILED' };
+    if (workerRunId === 'worker-2') return { status: 'FAILED' };
+    return originalStartWorker(workerRunId, options);
   };
 
   await assert.rejects(
