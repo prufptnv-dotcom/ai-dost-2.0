@@ -1,0 +1,95 @@
+name: One-shot ChatView Refactor
+
+on:
+  push:
+    branches:
+      - audit/production-hardening-ui-state-2026-09
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/production-hardening-ui-state-2026-09
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Refactor ChatView deterministically
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('frontend/components/views/ChatView.jsx')
+          s = p.read_text()
+
+          required = [
+              'function ParsedMarkdown(',
+              'function MessageBubble(',
+              'function ThinkingDot(',
+              'export const stripInternalTags',
+              'const renderMarkdown =',
+              'const extractImages =',
+              'function extractArtifact(',
+              'export default function ChatView(',
+          ]
+          for marker in required:
+              if marker not in s:
+                  raise SystemExit(f'missing expected marker: {marker}')
+
+          marker = '// ─── ChatView ────────────────────────────────────────────────────────────────'
+          start = s.index('export const stripInternalTags')
+          end = s.index(marker)
+          s = s[:start] + marker + s[end + len(marker):]
+
+          replacements = {
+              "import { marked } from 'marked';\n": '',
+              "import { getPendingSuggestions } from '../../utils/visualHealer';\n": '',
+              "import DOMPurify from 'dompurify';\n": '',
+              "import { ImageCard, ImageLightbox } from './ImageLightbox';\n": "import { ImageLightbox } from './ImageLightbox';\n",
+              "import CodeBlock from '../chat/CodeBlock';\n": '',
+              "import { AssessmentCard } from '../assessment/AssessmentCard';\n": '',
+              "import { AiDostMark } from '../brand/AiDostMark';\n": "import { AiDostMark } from '../brand/AiDostMark';\nimport ChatMessageBubble from '../chat/ChatMessageBubble';\nimport ThinkingDot from '../chat/ThinkingDot';\nimport { extractArtifact, stripInternalTags } from '../../utils/chatContent';\n",
+              'function MessageBubble(': 'NEVER_REACHED_MESSAGE_BUBBLE_MARKER',
+          }
+          for old, new in replacements.items():
+              s = s.replace(old, new)
+          s = s.replace('<MessageBubble\n', '<ChatMessageBubble\n')
+          if 'function MessageBubble(' in s or 'function ParsedMarkdown(' in s or 'function ThinkingDot(' in s:
+              raise SystemExit('inline ChatView render components still remain')
+          if 'NEVER_REACHED_MESSAGE_BUBBLE_MARKER' in s:
+              raise SystemExit('unexpected marker replacement')
+
+          if "import ChatMessageBubble from '../chat/ChatMessageBubble';" not in s:
+              raise SystemExit('ChatMessageBubble import missing')
+          if "import ThinkingDot from '../chat/ThinkingDot';" not in s:
+              raise SystemExit('ThinkingDot import missing')
+
+          p.write_text(s)
+
+          t = Path('frontend/tests/chatViewDecomposition.test.js')
+          t.write_text("""import { readFileSync } from 'node:fs';\nimport { describe, expect, it } from 'vitest';\n\ndescribe('ChatView decomposition', () => {\n  const source = readFileSync(new URL('../components/views/ChatView.jsx', import.meta.url), 'utf8');\n\n  it('uses extracted message and thinking components', () => {\n    expect(source).toContain(\"import ChatMessageBubble from '../chat/ChatMessageBubble';\");\n    expect(source).toContain(\"import ThinkingDot from '../chat/ThinkingDot';\");\n    expect(source).toContain('<ChatMessageBubble');\n    expect(source).not.toContain('function MessageBubble(');\n    expect(source).not.toContain('function ThinkingDot(');\n    expect(source).not.toContain('function ParsedMarkdown(');\n  });\n\n  it('uses shared content helpers instead of inline parser implementations', () => {\n    expect(source).toContain(\"from '../../utils/chatContent'\");\n    expect(source).not.toContain('export const stripInternalTags');\n    expect(source).not.toContain('function extractArtifact(');\n    expect(source).not.toContain('const extractImages =');\n    expect(source).not.toContain('const renderMarkdown =');\n  });\n});\n""")
+
+          # The one-shot workflow is temporary; remove it before committing the refactor.
+          wf = Path('.github/workflows/chatview-refactor-once.yml')
+          if wf.exists():
+              wf.unlink()
+      - name: Validate frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npx vitest run tests/chatViewDecomposition.test.js tests/chatContent.test.js
+          npm run lint
+      - name: Commit refactor and remove one-shot workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/components/views/ChatView.jsx frontend/tests/chatViewDecomposition.test.js .github/workflows/chatview-refactor-once.yml
+          git diff --cached --quiet && exit 0
+          git commit -m "refactor(chat): integrate extracted render components"
+          git push origin HEAD:audit/production-hardening-ui-state-2026-09
