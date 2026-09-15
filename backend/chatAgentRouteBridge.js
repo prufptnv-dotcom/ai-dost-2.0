@@ -5,6 +5,16 @@ const { handleChatTaskRequest } = require('./agent/runtime/chatAgentTaskHandler'
 
 const PATCHED = Symbol('aiDostChatAgentRouteBridgePatched');
 
+function createChatTaskAwareHandler(handler, chatHandler = handleChatTaskRequest) {
+  if (typeof handler !== 'function') return handler;
+  return function chatTaskAwareAgentRun(req, res, next) {
+    if (req?.body?.chatTaskPlan) {
+      return chatHandler(req, res, next);
+    }
+    return handler(req, res, next);
+  };
+}
+
 function installExpressRouterHook(expressFactory) {
   if (!expressFactory || typeof expressFactory.Router !== 'function' || expressFactory.Router[PATCHED]) {
     return expressFactory;
@@ -20,17 +30,9 @@ function installExpressRouterHook(expressFactory) {
       if (routePath !== '/run' || handlers.length === 0) {
         return originalPost(routePath, ...handlers);
       }
-
-      const wrappedHandlers = handlers.map((handler, index) => {
-        if (index !== 0 || typeof handler !== 'function') return handler;
-        return function chatTaskAwareAgentRun(req, res, next) {
-          if (req?.body?.chatTaskPlan) {
-            return handleChatTaskRequest(req, res, next);
-          }
-          return handler(req, res, next);
-        };
-      });
-
+      const wrappedHandlers = handlers.map((handler, index) => (
+        index === 0 ? createChatTaskAwareHandler(handler) : handler
+      ));
       return originalPost(routePath, ...wrappedHandlers);
     };
     router.post[PATCHED] = true;
@@ -55,4 +57,4 @@ if (!originalLoad[PATCHED]) {
   Module._load = patchedLoad;
 }
 
-module.exports = { installExpressRouterHook };
+module.exports = { installExpressRouterHook, createChatTaskAwareHandler };
