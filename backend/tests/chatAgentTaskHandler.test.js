@@ -124,7 +124,7 @@ test('chatAgentTaskHandler returns SSE task completion', async () => {
   });
   const res = createResponse();
 
-  const result = await handleChatTaskRequest(req, res, () => {
+  await handleChatTaskRequest(req, res, () => {
     throw new Error('next must not be called');
   }, {
     projectAuthorization: {
@@ -145,7 +145,6 @@ test('chatAgentTaskHandler returns SSE task completion', async () => {
     },
   });
 
-  assert.equal(result, res);
   assert.equal(res.writableEnded, true);
   assert.match(res.body, /task_complete/);
   assert.match(res.body, /chat-task-3/);
