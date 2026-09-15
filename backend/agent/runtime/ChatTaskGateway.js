@@ -1,19 +1,19 @@
 'use strict';
 
-const ChatTaskAdapter = require('./ChatTaskAdapter');
-
 /**
  * Boundary between Universal Chat and the canonical autonomous execution
- * runtime. The gateway owns no tools and no second planner; it validates the
- * chat plan and delegates execution to PlannerExecutionLoop.
+ * runtime. The gateway validates chat intent and delegates planning/execution
+ * to the canonical TaskPlanner + PlannerExecutionLoop stack.
  */
 class ChatTaskGateway {
-  constructor({ plannerExecutionLoop, adapter } = {}) {
+  constructor({ plannerExecutionLoop, adapter, taskPlanner, contextAssembler } = {}) {
     if (!plannerExecutionLoop || typeof plannerExecutionLoop.runWithPlan !== 'function') {
       throw new Error('ChatTaskGateway requires PlannerExecutionLoop.runWithPlan');
     }
     this.plannerExecutionLoop = plannerExecutionLoop;
     this.adapter = adapter || null;
+    this.taskPlanner = taskPlanner || null;
+    this.contextAssembler = contextAssembler || null;
   }
 
   async run({ projectId, userId, taskPlan, context = {}, signal, maxRepairs = 3, onEvent = null } = {}) {
@@ -26,15 +26,26 @@ class ChatTaskGateway {
 
     if (signal?.aborted) throw new Error('Chat task canceled before execution');
 
-    const agentPlan = this.adapter
-      ? this.adapter.validateAgentPlan(this.adapter.toAgentPlan(taskPlan, context))
-      : taskPlan;
-
-    if (!Array.isArray(agentPlan.steps) || agentPlan.steps.length === 0) {
-      throw new Error('Chat task has no executable tool steps');
+    let agentPlan;
+    if (this.taskPlanner && this.contextAssembler && taskPlan.intent?.originalMessage) {
+      const intent = String(taskPlan.intent.originalMessage);
+      const plannerContext = {
+        ...(context || {}),
+        chatTaskPlan: taskPlan,
+      };
+      const assembledContext = await this.contextAssembler.assemble(projectId, userId, intent);
+      agentPlan = await this.taskPlanner.generatePlan(intent, { ...assembledContext, ...plannerContext });
+    } else {
+      agentPlan = this.adapter
+        ? this.adapter.validateAgentPlan(this.adapter.toAgentPlan(taskPlan, context))
+        : taskPlan;
     }
 
-    emit({ type: 'task_phase', phase: 'planning', status: 'Plan validated' });
+    if (!Array.isArray(agentPlan?.steps) || agentPlan.steps.length === 0) {
+      throw new Error('Canonical chat task has no executable tool steps');
+    }
+
+    emit({ type: 'task_phase', phase: 'planning', status: 'Canonical plan validated' });
 
     try {
       const result = await this.plannerExecutionLoop.runWithPlan(
@@ -53,7 +64,9 @@ class ChatTaskGateway {
         emit({ type: 'task_phase', phase: 'error', status: result?.reason || 'Task failed' });
       }
 
-      return this.adapter ? this.adapter.validateResult(result) : result;
+      return this.adapter && typeof this.adapter.validateResult === 'function'
+        ? this.adapter.validateResult(result)
+        : result;
     } catch (error) {
       if (signal?.aborted) {
         emit({ type: 'task_canceled', reason: 'canceled' });
