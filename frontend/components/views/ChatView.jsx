@@ -1,11 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Send, RefreshCw, Mic, Paperclip,
-  Globe, Pencil, ExternalLink, ArrowRight,
-  Eye, LayoutTemplate, Square, ArrowDown,
-} from 'lucide-react';
+import { Send, Mic, Paperclip, ArrowDown } from 'lucide-react';
 import api from '../../services/api';
 import { ImageLightbox } from './ImageLightbox';
 import ChatArtifactsCanvas from '../chat/ChatArtifactsCanvas';
@@ -147,15 +143,12 @@ export default function ChatView({
     try {
       localStorage.setItem('ai_dost_model', nextModel);
     } catch (_) {}
-    if (typeof onModelChange === 'function') {
-      onModelChange(nextModel);
-    }
+    if (typeof onModelChange === 'function') onModelChange(nextModel);
   };
 
   const thinking = thinkingProp !== undefined ? thinkingProp : localThinking;
   const setThinking = typeof setIsThinkingProp === 'function' ? setIsThinkingProp : setLocalThinking;
 
-  // Thinking elapsed timer
   useEffect(() => {
     let interval = null;
     if (thinking) {
@@ -167,7 +160,6 @@ export default function ChatView({
     return () => { if (interval) clearInterval(interval); };
   }, [thinking]);
 
-  // Load persisted chat metadata
   useEffect(() => {
     try {
       const p = localStorage.getItem(PERSONA_KEY);
@@ -178,7 +170,6 @@ export default function ChatView({
     } catch (_) {}
   }, []);
 
-  // Load backend history on session change (and auto-restore if current messages are empty/welcome)
   useEffect(() => {
     if (!sessionId) return;
     api.get(`/chat/history?session_id=${sessionId}`)
@@ -225,7 +216,6 @@ export default function ChatView({
     }
   };
 
-  // Persist messages (never overwrite existing stored session if current is only [WELCOME])
   useEffect(() => {
     if (messages.length > 0) {
       const isOnlyWelcome = messages.length === 1 && messages[0].id === 'welcome';
@@ -235,14 +225,12 @@ export default function ChatView({
     }
   }, [messages, sessionId]);
 
-  // Save to backend
   useEffect(() => {
     if (messages.length > 1) {
       api.post('/chat/save', { session_id: sessionId, messages: messages.slice(-20) }).catch(() => {});
     }
   }, [messages, sessionId]);
 
-  // New chat from sidebar signal
   useEffect(() => {
     if (newChatCount.current > 0) {
       setMessages([WELCOME]);
@@ -257,10 +245,7 @@ export default function ChatView({
       if (messagesEndRef.current) {
         messagesEndRef.current.scrollIntoView({ behavior, block: 'end' });
       } else if (scrollRef.current) {
-        scrollRef.current.scrollTo({
-          top: scrollRef.current.scrollHeight,
-          behavior,
-        });
+        scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior });
       }
     });
   }, []);
@@ -273,7 +258,6 @@ export default function ChatView({
     setShowJumpToBottom(distFromBottom > 160);
   }, []);
 
-  // Auto-scroll on new messages or variants: only if user sent message or user is reading near bottom (< 120px)
   useEffect(() => {
     const el = scrollRef.current;
     const distFromBottom = el ? el.scrollHeight - el.scrollTop - el.clientHeight : 0;
@@ -283,7 +267,6 @@ export default function ChatView({
     }
   }, [messages, variants, scrollToBottom]);
 
-  // Artifact → Copilot IDE bridge
   const handleOpenArtifactInCopilot = (art) => {
     try {
       localStorage.setItem('ai_dost_copilot_import', JSON.stringify({
@@ -316,7 +299,6 @@ export default function ChatView({
     userScrolledUpRef.current = false;
     setMessages((prev) => [...prev, userMsg]);
 
-    // Auto-title session if untitled or new
     setSessions((prev) => {
       const titleSnippet = content.length > 32 ? content.slice(0, 32) + '…' : content;
       const exists = prev.some((s) => s.id === sessionId);
@@ -331,23 +313,18 @@ export default function ChatView({
           return s;
         });
       }
-      try {
-        localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated.slice(0, 30)));
-      } catch (_) {}
+      try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated.slice(0, 30))); } catch (_) {}
       return updated;
     });
 
     if (typeof window !== 'undefined') {
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('ai_dost_sessions_updated'));
-      }, 0);
+      setTimeout(() => window.dispatchEvent(new CustomEvent('ai_dost_sessions_updated')), 0);
     }
 
     setThinking(true);
     setThinkingLabel('Thinking…');
     setTimeout(() => scrollToBottom('smooth'), 20);
 
-    // ── File / image / PDF analysis ──
     if (attachment) {
       try {
         const payload = { message: content || 'Is file ka analysis do.' };
@@ -367,7 +344,6 @@ export default function ChatView({
       } catch (_) { setAttachment(null); }
     }
 
-    // ── Image generation ──
     if (IMAGE_CREATE_INTENT.test(content)) {
       setThinkingLabel('Generating image…');
       try {
@@ -386,10 +362,9 @@ export default function ChatView({
           setThinking(false);
           return;
         }
-      } catch (_) { /* fall through */ }
+      } catch (_) {}
     }
 
-    // DOC_CREATE_INTENT: match file creation requests across Hindi/Hinglish/English
     const DOC_CREATE_INTENT = /\b(banao|bana\s*do|bana\s*de|chahiye|taiyar\s*karo|likhdo|draft|export|nikalo|bana\s*kar\s*do)\b|\b(create|generate|make|build|write|draft)\b.*?\b(pdf|docx?|pptx?|csv|xlsx|file|doc|report|document|presentation|slides?)\b/i;
 
     const specificDoc = DOC_CREATE_INTENT.test(content)
@@ -432,7 +407,6 @@ export default function ChatView({
       }
     }
 
-    // ── Resume (sirf tab generate karo jab user clearly CV/resume document BANANA chahta ho) ──
     const RESUME_DOC_CREATE =
       /\b(resume|cv|bio.?data)\b(?!\s*k?ar)[\s\S]{0,40}?\b(banao|bana\s*do|bana\s*de|chahiye|taiyar|likhdo|draft|create|generate\s+(?:my|mera|meri|ek)|make|write)\b|\b(banao|bana\s*do|bana\s*de|chahiye|taiyar\s*karo|likhdo|draft\s*karo|create|generate\s+(?:my|mera|meri|ek)|make\s+(?:my|me\s+a)|write)\b[\s\S]{0,60}?\b(resume|cv|bio.?data)\b/i;
 
@@ -453,10 +427,9 @@ export default function ChatView({
           setThinking(false);
           return;
         }
-      } catch (_) { /* fall through */ }
+      } catch (_) {}
     }
 
-    // ── Navigation intent ──
     const nav = NAV_INTENTS.find((n) => n.re.test(content));
     if (nav) {
       const navReply = {
@@ -474,7 +447,6 @@ export default function ChatView({
       return;
     }
 
-    // ── Web search ──
     if (SEARCH_INTENT.test(content)) {
       setThinkingLabel('Searching…');
       try {
@@ -486,10 +458,9 @@ export default function ChatView({
         setShowFollowUps(true);
         setThinking(false);
         return;
-      } catch (_) { /* fall through */ }
+      } catch (_) {}
     }
 
-    // ── SSE Streaming ──
     const history = messages
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .slice(-20)
@@ -526,53 +497,38 @@ export default function ChatView({
           try {
             const parsed = JSON.parse(dataStr);
             if (parsed.type === 'language_lock') {
-              setMessages((prev) =>
-                prev.map((m) => m.id === aiMsgId ? { ...m, detectedResponseLanguage: parsed.detectedResponseLanguage, languageName: parsed.languageName } : m)
-              );
+              setMessages((prev) => prev.map((m) => m.id === aiMsgId ? { ...m, detectedResponseLanguage: parsed.detectedResponseLanguage, languageName: parsed.languageName } : m));
             }
             if (parsed.type === 'web_search_start') {
               setThinking(true);
               setThinkingLabel(parsed.intent === 'URL_FETCH' ? 'Reading webpage…' : 'Searching the web…');
             }
             if (parsed.type === 'web_search_sources' && parsed.sources) {
-              setMessages((prev) =>
-                prev.map((m) => m.id === aiMsgId ? { ...m, sources: parsed.sources } : m)
-              );
+              setMessages((prev) => prev.map((m) => m.id === aiMsgId ? { ...m, sources: parsed.sources } : m));
             }
-            if (parsed.type === 'web_search_done') {
-              setThinking(false);
-            }
+            if (parsed.type === 'web_search_done') setThinking(false);
             if (parsed.type === 'assessment_creating') {
               setThinking(true);
               setThinkingLabel(parsed.status || 'Preparing assessment...');
             }
             if (parsed.type === 'assessment_created' && parsed.assessment) {
               setThinking(false);
-              setMessages((prev) =>
-                prev.map((m) => m.id === aiMsgId ? { ...m, assessment: parsed.assessment } : m)
-              );
+              setMessages((prev) => prev.map((m) => m.id === aiMsgId ? { ...m, assessment: parsed.assessment } : m));
             }
             if (parsed.done && parsed.assessment) {
-              setMessages((prev) =>
-                prev.map((m) => m.id === aiMsgId ? { ...m, assessment: parsed.assessment } : m)
-              );
+              setMessages((prev) => prev.map((m) => m.id === aiMsgId ? { ...m, assessment: parsed.assessment } : m));
             }
             if (parsed.done && parsed.sources && parsed.sources.length > 0) {
-              setMessages((prev) =>
-                prev.map((m) => m.id === aiMsgId ? { ...m, sources: parsed.sources } : m)
-              );
+              setMessages((prev) => prev.map((m) => m.id === aiMsgId ? { ...m, sources: parsed.sources } : m));
             }
             if (parsed.chunk) {
               accumulated += parsed.chunk;
-              setMessages((prev) =>
-                prev.map((m) => m.id === aiMsgId ? { ...m, content: stripInternalTags(accumulated), isStreaming: true } : m)
-              );
+              setMessages((prev) => prev.map((m) => m.id === aiMsgId ? { ...m, content: stripInternalTags(accumulated), isStreaming: true } : m));
             }
           } catch (_) {}
         }
       }
 
-      // Handle [GENERATE_IMAGE:] tag in response
       let finalReply = accumulated;
       const imageTagRegex = /\[GENERATE_IMAGE:\s*(.*?)\]/i;
       const imageMatch = finalReply.match(imageTagRegex);
@@ -585,16 +541,12 @@ export default function ChatView({
 
       finalReply = stripInternalTags(finalReply);
 
-      setMessages((prev) =>
-        prev.map((m) => m.id === aiMsgId ? { ...m, content: finalReply || 'Kuch response nahi mila.', isStreaming: false } : m)
-      );
+      setMessages((prev) => prev.map((m) => m.id === aiMsgId ? { ...m, content: finalReply || 'Kuch response nahi mila.', isStreaming: false } : m));
       setLastReply(finalReply);
 
-      // Auto-open artifact canvas if HTML detected
       const artifact = extractArtifact(finalReply);
       if (artifact) setActiveArtifact(artifact);
 
-      // IDE bridge suggestion for project intent
       if (PROJECT_INTENT.test(content)) {
         const bridgeMsg = {
           id: Date.now() + 2,
@@ -609,32 +561,27 @@ export default function ChatView({
 
       setShowFollowUps(true);
     } catch (err) {
-      // REST fallback
       console.warn('Stream failed, falling back to REST:', err.message);
       try {
         const res = await api.post('/chat/', { message: content, model: selectedModel === 'auto' ? 'auto' : selectedModel, section: 'chat', history, mode: 'chat', persona });
         const reply0 = stripInternalTags(res.data?.reply || res.data?.message || 'Response nahi mila.');
-        setMessages((prev) =>
-          prev.map((m) => m.id === aiMsgId ? {
-            ...m,
-            content: reply0,
-            detectedResponseLanguage: res.data?.detectedResponseLanguage,
-            languageName: res.data?.languageName,
-            isStreaming: false
-          } : m)
-        );
+        setMessages((prev) => prev.map((m) => m.id === aiMsgId ? {
+          ...m,
+          content: reply0,
+          detectedResponseLanguage: res.data?.detectedResponseLanguage,
+          languageName: res.data?.languageName,
+          isStreaming: false,
+        } : m));
         setLastReply(reply0);
         const artifact = extractArtifact(reply0);
         if (artifact) setActiveArtifact(artifact);
         setShowFollowUps(true);
       } catch (e2) {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === aiMsgId
-              ? { ...m, content: 'Main abhi respond nahi kar paya. Please thoda wait karke dobara try karo.', isStreaming: false }
-              : m
-          )
-        );
+        setMessages((prev) => prev.map((m) => m.id === aiMsgId ? {
+          ...m,
+          content: 'Main abhi respond nahi kar paya. Please thoda wait karke dobara try karo.',
+          isStreaming: false,
+        } : m));
       }
     } finally {
       setThinking(false);
@@ -665,9 +612,7 @@ export default function ChatView({
     setSessions(list);
     try {
       localStorage.setItem(SESSIONS_KEY, JSON.stringify(list));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('ai_dost_sessions_updated'));
-      }
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('ai_dost_sessions_updated'));
     } catch (_) {}
   };
 
@@ -691,9 +636,7 @@ export default function ChatView({
   const switchSession = useCallback((id) => {
     if (!id) return;
     saveCurrentToStorage();
-    try {
-      localStorage.setItem('ai_dost_session_id', id);
-    } catch (_) {}
+    try { localStorage.setItem('ai_dost_session_id', id); } catch (_) {}
     setSessionId(id);
     setShowFollowUps(false);
     setActiveArtifact(null);
@@ -709,17 +652,13 @@ export default function ChatView({
       }
     } catch (_) {}
 
-    if (!loaded) {
-      setMessages([WELCOME]);
-    }
+    if (!loaded) setMessages([WELCOME]);
   }, [saveCurrentToStorage]);
 
   useEffect(() => {
     const handleCustomSwitch = (e) => {
       const targetId = e?.detail;
-      if (targetId && typeof targetId === 'string') {
-        switchSession(targetId);
-      }
+      if (targetId && typeof targetId === 'string') switchSession(targetId);
     };
     window.addEventListener('ai_dost_switch_session', handleCustomSwitch);
     return () => window.removeEventListener('ai_dost_switch_session', handleCustomSwitch);
@@ -727,9 +666,7 @@ export default function ChatView({
 
   const renameSession = (id) => {
     const title = window.prompt('Session ka naam:', sessions.find((s) => s.id === id)?.title || '');
-    if (title && title.trim()) {
-      persistSessions(sessions.map((s) => (s.id === id ? { ...s, title: title.trim() } : s)));
-    }
+    if (title && title.trim()) persistSessions(sessions.map((s) => (s.id === id ? { ...s, title: title.trim() } : s)));
   };
 
   const deleteSession = (id) => {
@@ -761,9 +698,7 @@ export default function ChatView({
         const buf = await file.arrayBuffer();
         let binary = '';
         const bytes = new Uint8Array(buf);
-        for (let i = 0; i < bytes.length; i += 8192) {
-          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
-        }
+        for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
         setAttachment({ name: file.name, type: 'pdf', base64: btoa(binary) });
       } else {
         const text = await file.text();
@@ -776,7 +711,6 @@ export default function ChatView({
   const handlePaste = (e) => {
     const items = e.clipboardData && e.clipboardData.items;
     if (!items) return;
-
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       if (item.type.startsWith('image/')) {
@@ -788,16 +722,9 @@ export default function ChatView({
             const dataUrl = reader.result;
             const mime = file.type || 'image/png';
             const base64 = String(dataUrl).split(',')[1];
-            setAttachment({
-              name: file.name && file.name !== 'image.png' ? file.name : `pasted-image-${Date.now().toString().slice(-4)}.png`,
-              type: 'image',
-              mime,
-              base64,
-            });
+            setAttachment({ name: file.name && file.name !== 'image.png' ? file.name : `pasted-image-${Date.now().toString().slice(-4)}.png`, type: 'image', mime, base64 });
             if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('ai_dost_toast', {
-                detail: { type: 'success', message: 'Image pasted from clipboard 📋' }
-              }));
+              window.dispatchEvent(new CustomEvent('ai_dost_toast', { detail: { type: 'success', message: 'Image pasted from clipboard 📋' } }));
             }
           };
           reader.readAsDataURL(file);
@@ -872,34 +799,22 @@ export default function ChatView({
           onDeleteSession={deleteSession}
         />
 
-        <div
-          ref={scrollRef}
-          onScroll={handleScroll}
-          className="flex-1 overflow-y-auto py-6 px-4 md:px-6 flex flex-col"
-        >
+        <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto py-6 px-4 md:px-6 flex flex-col">
           <div className="max-w-3xl mx-auto w-full flex-1 flex flex-col">
             {isEmpty && !thinking && (
               <div className="flex-1 flex flex-col items-center justify-center min-h-[46vh] w-full max-w-2xl mx-auto px-4 text-center select-none">
                 <div className="w-11 h-11 flex items-center justify-center rounded-2xl bg-canvas-surface border border-border shadow-xs mb-5 transition-transform hover:scale-105 duration-200">
                   <AiDostMark size={24} />
                 </div>
-                <h1 className="text-2xl sm:text-3xl font-semibold text-paper-100 tracking-tight mb-2.5">
-                  Hey. What are we working on today?
-                </h1>
-                <p className="text-sm sm:text-base text-ink-muted max-w-md mx-auto leading-relaxed">
-                  Ask me anything, or give me something to build, research, analyze, or create.
-                </p>
+                <h1 className="text-2xl sm:text-3xl font-semibold text-paper-100 tracking-tight mb-2.5">Hey. What are we working on today?</h1>
+                <p className="text-sm sm:text-base text-ink-muted max-w-md mx-auto leading-relaxed">Ask me anything, or give me something to build, research, analyze, or create.</p>
               </div>
             )}
 
             <div className="space-y-6">
               {isEmpty && backendHistory && backendHistory.length > 0 && (
                 <div className="flex justify-center mb-6">
-                  <button
-                    type="button"
-                    onClick={loadBackendHistory}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-canvas-surface border border-border text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated transition-fast cursor-pointer"
-                  >
+                  <button type="button" onClick={loadBackendHistory} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-canvas-surface border border-border text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated transition-fast cursor-pointer">
                     🕐 Load previous conversation ({backendHistory.length} messages)
                   </button>
                 </div>
@@ -925,13 +840,8 @@ export default function ChatView({
                   <p className="text-xs text-ink-muted">3 alternative responses:</p>
                   <div className="space-y-1.5">
                     {variants.items.map((v, i) => (
-                      <button
-                        key={i}
-                        onClick={() => applyVariant(v)}
-                        className="w-full text-left px-3.5 py-2.5 rounded-xl text-xs transition-fast cursor-pointer hover:bg-canvas-elevated bg-canvas-surface border border-border text-paper-200"
-                      >
-                        <span className="font-semibold mr-1.5 text-accent">Option {i + 1}:</span>
-                        {v.slice(0, 240)}
+                      <button key={i} onClick={() => applyVariant(v)} className="w-full text-left px-3.5 py-2.5 rounded-xl text-xs transition-fast cursor-pointer hover:bg-canvas-elevated bg-canvas-surface border border-border text-paper-200">
+                        <span className="font-semibold mr-1.5 text-accent">Option {i + 1}:</span>{v.slice(0, 240)}
                       </button>
                     ))}
                   </div>
@@ -939,9 +849,7 @@ export default function ChatView({
               )}
 
               <AnimatePresence>
-                {thinking && (
-                  <ThinkingDot key="thinking" label={thinkingLabel} elapsed={thinkingElapsed} />
-                )}
+                {thinking && <ThinkingDot key="thinking" label={thinkingLabel} elapsed={thinkingElapsed} />}
               </AnimatePresence>
 
               <div ref={messagesEndRef} className="h-16 shrink-0" aria-hidden="true" />
@@ -951,19 +859,8 @@ export default function ChatView({
 
         <AnimatePresence>
           {showJumpToBottom && (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 8 }}
-              transition={{ duration: 0.15 }}
-              className="absolute bottom-28 left-1/2 -translate-x-1/2 z-20 pointer-events-auto"
-            >
-              <button
-                type="button"
-                onClick={() => scrollToBottom('smooth')}
-                className="jump-to-bottom-btn"
-                aria-label="Jump to latest message"
-              >
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }} transition={{ duration: 0.15 }} className="absolute bottom-28 left-1/2 -translate-x-1/2 z-20 pointer-events-auto">
+              <button type="button" onClick={() => scrollToBottom('smooth')} className="jump-to-bottom-btn" aria-label="Jump to latest message">
                 <ArrowDown size={13} className="text-accent" />
                 <span>Jump to latest</span>
               </button>
@@ -976,98 +873,28 @@ export default function ChatView({
             {attachment && (
               <div className="flex items-center gap-2.5 mb-2 px-3 py-1.5 rounded-lg text-xs bg-canvas-surface border border-border">
                 {attachment.type === 'image' && attachment.base64 ? (
-                  <img
-                    src={`data:${attachment.mime || 'image/png'};base64,${attachment.base64}`}
-                    alt="Attachment"
-                    className="w-7 h-7 rounded object-cover border border-border shrink-0"
-                  />
-                ) : (
-                  <Paperclip className="w-3.5 h-3.5 text-accent" />
-                )}
+                  <img src={`data:${attachment.mime || 'image/png'};base64,${attachment.base64}`} alt="Attachment" className="w-7 h-7 rounded object-cover border border-border shrink-0" />
+                ) : <Paperclip className="w-3.5 h-3.5 text-accent" />}
                 <span className="truncate flex-1 text-paper-100 font-medium">{attachment.name}</span>
-                <span className="text-[10px] text-ink-muted uppercase font-mono px-1.5 py-0.5 rounded bg-canvas-elevated">
-                  {attachment.type}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setAttachment(null)}
-                  className="p-1 rounded text-ink-muted hover:text-paper-100 cursor-pointer hover:bg-canvas-elevated transition-fast"
-                  aria-label="Remove attachment"
-                  title="Remove attachment"
-                >
-                  ✕
-                </button>
+                <span className="text-[10px] text-ink-muted uppercase font-mono px-1.5 py-0.5 rounded bg-canvas-elevated">{attachment.type}</span>
+                <button type="button" onClick={() => setAttachment(null)} className="p-1 rounded text-ink-muted hover:text-paper-100 cursor-pointer hover:bg-canvas-elevated transition-fast" aria-label="Remove attachment" title="Remove attachment">✕</button>
               </div>
             )}
 
             <div className="relative rounded-xl bg-canvas-surface border border-border focus-within:border-accent/40 focus-within:shadow-sm transition-fast">
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                onPaste={handlePaste}
-                rows={Math.min(5, Math.max(1, input.split('\n').length))}
-                placeholder="Ask AI-Dost anything, or paste an image (Ctrl+V)…"
-                aria-label="Ask AI-Dost anything"
-                className="w-full bg-transparent resize-none text-sm focus:outline-none placeholder:text-ink-muted text-paper-100 leading-relaxed px-4 pt-3.5 pb-2 font-sans"
-              />
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,.pdf,.txt,.md,.js,.jsx,.ts,.tsx,.py,.html,.css,.json,.csv,.xlsx,.java,.c,.cpp,.go,.rs"
-                className="hidden"
-                onChange={handleFileSelect}
-              />
+              <textarea ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} onPaste={handlePaste} rows={Math.min(5, Math.max(1, input.split('\n').length))} placeholder="Ask AI-Dost anything, or paste an image (Ctrl+V)…" aria-label="Ask AI-Dost anything" className="w-full bg-transparent resize-none text-sm focus:outline-none placeholder:text-ink-muted text-paper-100 leading-relaxed px-4 pt-3.5 pb-2 font-sans" />
+              <input ref={fileInputRef} type="file" accept="image/*,.pdf,.txt,.md,.js,.jsx,.ts,.tsx,.py,.html,.css,.json,.csv,.xlsx,.java,.c,.cpp,.go,.rs" className="hidden" onChange={handleFileSelect} />
 
               <div className="flex items-center justify-between px-3 pb-2.5 pt-1 select-none">
                 <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current && fileInputRef.current.click()}
-                    title="Attach file"
-                    aria-label="Attach file"
-                    className="p-1.5 rounded-lg hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 transition-fast cursor-pointer focus-ring"
-                  >
-                    <Paperclip className="w-4 h-4" />
-                  </button>
-                  {onOpenVoice && (
-                    <button
-                      type="button"
-                      onClick={onOpenVoice}
-                      title="Voice input"
-                      aria-label="Voice input"
-                      className="p-1.5 rounded-lg hover:bg-canvas-elevated text-paper-200 hover:text-accent transition-fast cursor-pointer focus-ring"
-                    >
-                      <Mic className="w-4 h-4" />
-                    </button>
-                  )}
+                  <button type="button" onClick={() => fileInputRef.current && fileInputRef.current.click()} title="Attach file" aria-label="Attach file" className="p-1.5 rounded-lg hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 transition-fast cursor-pointer focus-ring"><Paperclip className="w-4 h-4" /></button>
+                  {onOpenVoice && <button type="button" onClick={onOpenVoice} title="Voice input" aria-label="Voice input" className="p-1.5 rounded-lg hover:bg-canvas-elevated text-paper-200 hover:text-accent transition-fast cursor-pointer focus-ring"><Mic className="w-4 h-4" /></button>}
                 </div>
-
                 <div className="flex items-center gap-2">
-                  <select
-                    value={selectedModel}
-                    onChange={handleModelChange}
-                    title="Select model"
-                    aria-label="Select model"
-                    className="px-2.5 py-1 rounded-lg text-[12px] font-medium bg-canvas-elevated border border-border text-paper-100 cursor-pointer focus:outline-none focus:border-accent transition-fast"
-                  >
-                    {MODEL_OPTIONS.map((m) => (
-                      <option key={m.id} value={m.id}>{m.label}</option>
-                    ))}
+                  <select value={selectedModel} onChange={handleModelChange} title="Select model" aria-label="Select model" className="px-2.5 py-1 rounded-lg text-[12px] font-medium bg-canvas-elevated border border-border text-paper-100 cursor-pointer focus:outline-none focus:border-accent transition-fast">
+                    {MODEL_OPTIONS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
                   </select>
-                  <button
-                    type="button"
-                    onClick={() => sendMessage()}
-                    disabled={!input.trim() || thinking}
-                    title="Send (Enter)"
-                    aria-label="Send message"
-                    className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-150 cursor-pointer focus-ring ${
-                      input.trim() && !thinking
-                        ? 'bg-accent text-black hover:bg-accent/90 shadow-sm active:scale-95'
-                        : 'bg-canvas-elevated text-ink-muted opacity-40 cursor-not-allowed'
-                    }`}
-                  >
+                  <button type="button" onClick={() => sendMessage()} disabled={!input.trim() || thinking} title="Send (Enter)" aria-label="Send message" className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-150 cursor-pointer focus-ring ${input.trim() && !thinking ? 'bg-accent text-black hover:bg-accent/90 shadow-sm active:scale-95' : 'bg-canvas-elevated text-ink-muted opacity-40 cursor-not-allowed'}`}>
                     <Send className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -1078,18 +905,10 @@ export default function ChatView({
       </div>
 
       <AnimatePresence>
-        {activeArtifact && (
-          <ChatArtifactsCanvas
-            artifact={activeArtifact}
-            onClose={() => setActiveArtifact(null)}
-            onOpenInCopilot={handleOpenArtifactInCopilot}
-          />
-        )}
+        {activeArtifact && <ChatArtifactsCanvas artifact={activeArtifact} onClose={() => setActiveArtifact(null)} onOpenInCopilot={handleOpenArtifactInCopilot} />}
       </AnimatePresence>
 
-      {lightboxUrl && (
-        <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
-      )}
+      {lightboxUrl && <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
 
       {activeAssessment && (
         <AssessmentRunner
@@ -1097,9 +916,7 @@ export default function ChatView({
           onClose={() => setActiveAssessment(null)}
           onComplete={(res) => {
             if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('ai_dost_toast', {
-                detail: { type: 'success', message: `Assessment complete! Score: ${res.netScore}/${res.totalMarks} (${res.percentage}%)` }
-              }));
+              window.dispatchEvent(new CustomEvent('ai_dost_toast', { detail: { type: 'success', message: `Assessment complete! Score: ${res.netScore}/${res.totalMarks} (${res.percentage}%)` } }));
             }
           }}
         />
