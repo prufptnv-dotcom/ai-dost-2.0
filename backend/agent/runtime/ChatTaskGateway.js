@@ -18,7 +18,7 @@ class ChatTaskGateway {
 
   async run({ projectId, userId, taskPlan, context = {}, signal, maxRepairs = 3, onEvent = null } = {}) {
     if (!projectId || !userId) throw new Error('projectId and userId are required');
-    if (!taskPlan || taskPlan.type !== 'task') throw new Error('ChatTaskGateway requires an autonomous chat task');
+    if (!taskPlan || taskPlan.intent?.type !== 'task') throw new Error('ChatTaskGateway requires an autonomous chat task');
 
     const emit = (event) => {
       if (typeof onEvent === 'function') onEvent({ ...event, taskId: taskPlan.taskId || null });
@@ -36,9 +36,8 @@ class ChatTaskGateway {
       const assembledContext = await this.contextAssembler.assemble(projectId, userId, intent);
       agentPlan = await this.taskPlanner.generatePlan(intent, { ...assembledContext, ...plannerContext });
     } else {
-      agentPlan = this.adapter
-        ? this.adapter.validateAgentPlan(this.adapter.toAgentPlan(taskPlan, context))
-        : taskPlan;
+      if (!this.adapter) throw new Error('ChatTaskGateway requires a canonical TaskPlanner or adapter');
+      agentPlan = this.adapter.validateAgentPlan(this.adapter.toAgentPlan(taskPlan, context));
     }
 
     if (!Array.isArray(agentPlan?.steps) || agentPlan.steps.length === 0) {
