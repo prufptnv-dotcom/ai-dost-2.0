@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('assert');
+const { describe, it } = require('node:test');
 const { AuditSink, redact, createExecutionGuard } = require('./ProductionExecutionGuard');
 
 describe('ProductionExecutionGuard', () => {

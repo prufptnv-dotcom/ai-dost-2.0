@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('assert');
+const { describe, it } = require('node:test');
 const { assertBytes, createBudget } = require('./ResourceGuard');
 
 describe('ResourceGuard', () => {

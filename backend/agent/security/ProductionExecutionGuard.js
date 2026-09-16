@@ -16,8 +16,8 @@ function redact(value, depth = 0) {
 
 class AuditSink {
   constructor({ maxEvents = 5000, retentionMs = 24 * 60 * 60 * 1000, clock = Date } = {}) {
-    this.maxEvents = Math.max(100, Number(maxEvents) || 5000);
-    this.retentionMs = Math.max(1000, Number(retentionMs) || 24 * 60 * 60 * 1000);
+    this.maxEvents = Number.isFinite(Number(maxEvents)) && Number(maxEvents) > 0 ? Number(maxEvents) : 5000;
+    this.retentionMs = Number.isFinite(Number(retentionMs)) && Number(retentionMs) > 0 ? Number(retentionMs) : 24 * 60 * 60 * 1000;
     this.clock = clock;
     this.events = [];
   }
@@ -59,7 +59,16 @@ class AuditSink {
 
 function createExecutionGuard(options = {}) {
   const budget = createBudget({ ...DEFAULTS, ...(options.limits || {}) });
-  const audit = options.audit || new AuditSink(options.auditOptions);
+  const rawAudit = options.audit || new AuditSink(options.auditOptions);
+  const audit = typeof rawAudit.emit === 'function'
+    ? rawAudit
+    : {
+        emit(type, payload) {
+          if (typeof rawAudit.record === 'function') return rawAudit.record({ type, ...payload });
+          return payload;
+        },
+        list: typeof rawAudit.list === 'function' ? rawAudit.list.bind(rawAudit) : () => []
+      };
   const correlationId = options.correlationId || crypto.randomUUID();
 
   return {
