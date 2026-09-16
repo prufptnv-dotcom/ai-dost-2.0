@@ -35,6 +35,11 @@ class ChatTaskGateway {
     const identity = taskId ? { taskId, projectId, userId } : null;
     const durable = identity ? this.durableTaskStore.begin(identity, { runId: context.runId }) : { state: 'untracked' };
 
+    if (durable.state === 'RUNNING' || durable.state === 'WAITING' || durable.state === 'VERIFYING') {
+      const error = new Error(`Task ${taskId} is already active`);
+      error.code = 'TASK_IN_PROGRESS';
+      throw error;
+    }
     if (durable.state === 'RECOVERY_REQUIRED') {
       const error = new Error('Task requires explicit recovery review after process interruption');
       error.code = 'TASK_RECOVERY_REQUIRED';
