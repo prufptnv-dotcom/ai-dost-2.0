@@ -214,6 +214,7 @@ class ExecutionController {
     }
 
     const toolCall = await this.recordToolCall(stepId, toolName, input);
+    const startTime = Date.now();
     const timeoutMs = resolveToolTimeoutMs(context);
     const parentSignal = context && context.signal;
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
