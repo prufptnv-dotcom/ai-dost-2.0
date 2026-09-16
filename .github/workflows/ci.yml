@@ -51,6 +51,8 @@ jobs:
         run: node --test agent/runtime/ChatTaskGateway.test.js
       - name: Run ExecutionController timeout tests
         run: node --test agent/runtime/ExecutionController.test.js
+      - name: Run DurableTaskStore recovery tests
+        run: node --test agent/runtime/DurableTaskStore.test.js
 
   e2e:
     name: E2E (Playwright smoke)
