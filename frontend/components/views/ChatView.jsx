@@ -383,8 +383,41 @@ export default function ChatView({
         const rawTopic = content.replace(docIntent.re, '').trim() || content;
         const topic = rawTopic.replace(/^(?:write|create|generate|make|build|draft|please|kripya)\s+(?:a|an|the|ek)?\s*(?:report|document|presentation|slides?|doc|pdf|csv|sheet|xlsx)?\s*(?:on|about|ke liye|pe)?\s*/i, '').trim() || rawTopic;
         const typeLabel = { docx: 'Word', pptx: 'PowerPoint', csv: 'CSV', xlsx: 'Excel', pdf: 'PDF' }[docIntent.type] || docIntent.type;
+        
+        // Find latest assistant message with real content to preserve research context
+        const lastAssistantMsg = [...messages].reverse().find(
+          (m) => m.role === 'assistant' &&
+                 m.content &&
+                 m.id !== 'welcome' &&
+                 !m.content.startsWith('⏳') &&
+                 !m.content.startsWith('⚠️') &&
+                 m.content.trim().length > 40
+        );
+
+        const isReferencingChat =
+          Boolean(lastAssistantMsg) &&
+          (/\b(is|iska|iski|iske|ye|yeh|upar|above|previous|research|chat|summary|report|yehi|wahi|mera|meri)\b/i.test(content) ||
+           topic.length <= 25 ||
+           /^(?:pdf|docx?|word|document|doc|presentation|slides?|excel|sheet|csv)\b/i.test(topic));
+
+        let payloadContent = null;
+        let finalTitle = topic;
+
+        if (isReferencingChat && lastAssistantMsg) {
+          payloadContent = lastAssistantMsg.content;
+          if (!topic || topic.length < 5 || /\b(is|iska|iski|iske|ye|yeh|upar|above)\b/i.test(topic)) {
+            const firstHeader = lastAssistantMsg.content.match(/^#+\s*(.+)$/m) || lastAssistantMsg.content.match(/^(.+?)(?:\n|$)/);
+            finalTitle = firstHeader ? firstHeader[1].replace(/[*_#`]/g, '').trim().slice(0, 80) : 'Research Report';
+          }
+        }
+
         setMessages((prev) => [...prev, { id: Date.now() + 1, role: 'assistant', content: `⏳ ${typeLabel} file ban rahi hai…`, timestamp: new Date().toISOString() }]);
-        const r = await api.post('/document/generate', { type: docIntent.type, topic, title: topic.slice(0, 80) });
+        const r = await api.post('/document/generate', {
+          type: docIntent.type,
+          topic: finalTitle || topic,
+          title: (finalTitle || topic).slice(0, 80),
+          content: payloadContent,
+        });
         if (r.data?.success && r.data.downloadUrl) {
           const readyMsg = {
             id: Date.now() + 2,

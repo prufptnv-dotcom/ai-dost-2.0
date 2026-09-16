@@ -58,7 +58,8 @@ router.post('/export', async (req, res) => {
         body: JSON.stringify({
           type: cleanFormat,
           topic: `${topic} research analysis`,
-          title: `${topic} - Research Deliverable`
+          title: `${topic} - Research Deliverable`,
+          content: markdownReport
         })
       });
     }
