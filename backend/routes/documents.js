@@ -297,24 +297,68 @@ function extractJson(content) {
 }
 
 
-// Structured prompts with strong guardrails — compact but specific. Keeps LLM on topic.
+// Structured prompts with strong guardrails — generates comprehensive, executive-grade blueprints and reports.
 const PROMPTS = {
-    pdf: `Write a detailed Markdown report ONLY about: {TOPIC}.
-Rules:
-- Title as "# {TOPIC}"
-- Sections with "## " headings: Overview, History/Background, Key Facts, Current Status, Challenges, Conclusion
-- Use "- " bullets with concrete facts, figures, dates, names
-- Language: match topic (Hindi/Hinglish/English). No fluff.
-- DO NOT write about anything else. No generic disclaimers.
-- Length: 800-1500 words. Valid Markdown only.`,
-    docx: `Write a detailed Markdown report ONLY about: {TOPIC}.
-Rules:
-- Title as "# {TOPIC}"
-- Sections with "## " headings: Overview, History/Background, Key Facts, Current Status, Challenges, Conclusion
-- Use "- " bullets with concrete facts, figures, dates, names
-- Language: match topic (Hindi/Hinglish/English). No fluff.
-- DO NOT write about anything else. No generic disclaimers.
-- Length: 800-1500 words. Valid Markdown only.`,
+    pdf: `Generate an exhaustive, highly structured, multi-chapter executive preparation blueprint or authoritative document ONLY about: {TOPIC}.
+
+Structure & Content Requirements:
+1. Title: "# {TOPIC}" followed immediately by an informative subtitle and target audience / scope description.
+2. Callout Instructions / Notice:
+   Use "> [!NOTE] How to use this document: ..." to explain the methodology, prerequisites, or preparation sequence.
+3. Master Roadmap Table:
+   Include a clean markdown table mapping major areas/modules with columns:
+   | Code / Unit | Major Area / Module | Priority | Target Scope & Key Focus |
+   (Use priority values: "Very High", "High", "Medium-High", "Core").
+4. Comprehensive Chapter Breakdown:
+   Break down the topic into lettered or numbered major sections (e.g., "1. Overview & Clarifications", "A. Core Domain 1", "B. Core Domain 2", etc.).
+   Under each section, create detailed sub-units ("A1. Sub-module", "A2. Sub-module", etc.) with bullet points containing concrete, specific technical facts, definitions, tools, protocols, algorithms, or concepts. No fluff or superficial filler.
+5. Practical Skills Checklist:
+   Include a dedicated section with practical checklist items using markdown checkbox syntax:
+   - [ ] Practical task or capability 1
+   - [ ] Practical task or capability 2
+   - [ ] Practical task or capability 3
+6. Phase-wise Implementation Roadmap Table:
+   Include a structured phase table:
+   | Phase / Step | Focus Area | Deliverables & Suggested Outcome |
+7. Critical Cautions & Best Practices:
+   Use "> [!WARNING] Final Caution / Essential Rules: ..." to highlight pitfalls, common mistakes, or critical guidance.
+8. Official References & Resources:
+   Include official portals, documentation links, or authoritative resources.
+
+Formatting Rules:
+- Language: match topic (Hindi / Hinglish / English).
+- Tone: authoritative, deeply informative, professional, actionable.
+- Length: comprehensive and thorough (1200-2500 words). Valid Markdown only.`,
+    docx: `Generate an exhaustive, highly structured, multi-chapter executive preparation blueprint or authoritative document ONLY about: {TOPIC}.
+
+Structure & Content Requirements:
+1. Title: "# {TOPIC}" followed immediately by an informative subtitle and target audience / scope description.
+2. Callout Instructions / Notice:
+   Use "> [!NOTE] How to use this document: ..." to explain the methodology, prerequisites, or preparation sequence.
+3. Master Roadmap Table:
+   Include a clean markdown table mapping major areas/modules with columns:
+   | Code / Unit | Major Area / Module | Priority | Target Scope & Key Focus |
+   (Use priority values: "Very High", "High", "Medium-High", "Core").
+4. Comprehensive Chapter Breakdown:
+   Break down the topic into lettered or numbered major sections (e.g., "1. Overview & Clarifications", "A. Core Domain 1", "B. Core Domain 2", etc.).
+   Under each section, create detailed sub-units ("A1. Sub-module", "A2. Sub-module", etc.) with bullet points containing concrete, specific technical facts, definitions, tools, protocols, algorithms, or concepts. No fluff or superficial filler.
+5. Practical Skills Checklist:
+   Include a dedicated section with practical checklist items using markdown checkbox syntax:
+   - [ ] Practical task or capability 1
+   - [ ] Practical task or capability 2
+   - [ ] Practical task or capability 3
+6. Phase-wise Implementation Roadmap Table:
+   Include a structured phase table:
+   | Phase / Step | Focus Area | Deliverables & Suggested Outcome |
+7. Critical Cautions & Best Practices:
+   Use "> [!WARNING] Final Caution / Essential Rules: ..." to highlight pitfalls, common mistakes, or critical guidance.
+8. Official References & Resources:
+   Include official portals, documentation links, or authoritative resources.
+
+Formatting Rules:
+- Language: match topic (Hindi / Hinglish / English).
+- Tone: authoritative, deeply informative, professional, actionable.
+- Length: comprehensive and thorough (1200-2500 words). Valid Markdown only.`,
     pptx: `Return ONLY valid JSON for an 8-10 slide deck about: {TOPIC}.
 Schema: {"title": "{TOPIC}", "slides": [{"title": "...", "points": ["pt1","pt2","pt3","pt4"]}, ...]}
 Rules:
