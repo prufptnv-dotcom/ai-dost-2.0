@@ -1,5 +1,6 @@
 'use strict';
 
+const path = require('path');
 const crypto = require('crypto');
 const { createExecutionGuard } = require('./ProductionExecutionGuard');
 
@@ -7,10 +8,13 @@ const DEFAULT_CAPABILITY_BY_OPERATION = Object.freeze({
   terminal: 'devops.terminal',
   exec_command: 'devops.terminal',
   run_terminal: 'devops.terminal',
+  execute_command: 'devops.terminal',
   write_file: 'coding.production_code',
   apply_diff: 'coding.production_code',
   read_file: 'coding.code_explanation',
-  list_files: 'coding.code_explanation'
+  list_files: 'coding.code_explanation',
+  list_directory: 'coding.code_explanation',
+  read_file_tree: 'coding.code_explanation'
 });
 
 function stableCapabilities(capabilities = []) {
@@ -30,13 +34,20 @@ function createScope(context = {}) {
 }
 
 function assertWorkspacePath(workspaceManager, value, options = {}) {
-  if (!workspaceManager || typeof workspaceManager.resolvePath !== 'function') return value;
   if (typeof value !== 'string' || !value.trim()) {
     const error = new Error('Workspace path is required');
     error.code = 'WORKSPACE_PATH_REQUIRED';
     throw error;
   }
-  return workspaceManager.resolvePath(value, options);
+  if (!workspaceManager || typeof workspaceManager.resolvePath !== 'function') return value;
+
+  if (path.isAbsolute(value)) {
+    return path.normalize(value);
+  }
+
+  const projectId = options.projectId || options.project_id || 'default';
+  const userId = options.userId || options.user_id || null;
+  return workspaceManager.resolvePath(projectId, value, userId);
 }
 
 function createProductionRuntime({ gatekeeper, workspaceManager, audit, limits, correlationId } = {}) {

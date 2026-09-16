@@ -610,3 +610,7 @@ describe('Project Intent: CREATE_NEW_PROJECT vs MODIFY_EXISTING_PROJECT', () => 
     assert.ok(appFile.content.includes('SmartFinance'), 'Original branding and code must be preserved');
   });
 });
+
+// ── Orchestrator Security Boundary Tests ────────────────────────────────────
+require('./orchestratorSecurityBoundary.test');
+
