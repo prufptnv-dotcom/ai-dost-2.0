@@ -1,5 +1,18 @@
 const crypto = require('crypto');
 
+function createExecutionError(message, code, metadata = {}) {
+  const error = new Error(message);
+  error.code = code;
+  Object.assign(error, metadata);
+  return error;
+}
+
+function resolveToolTimeoutMs(context = {}) {
+  const configured = context.toolTimeoutMs ?? process.env.AGENT_TOOL_TIMEOUT_MS;
+  const timeoutMs = Number(configured ?? 120000);
+  return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 120000;
+}
+
 class ExecutionController {
   constructor({ db, agentRunDao, agentStepDao, toolCallDao, observationDao, verificationResultDao, workspaceManager, gatekeeper } = {}) {
     this.db = db;
@@ -10,7 +23,7 @@ class ExecutionController {
     this.verificationResultDao = verificationResultDao;
     this.workspaceManager = workspaceManager;
     this.gatekeeper = gatekeeper !== undefined ? gatekeeper : require('../policy/CapabilityGatekeeper').capabilityGatekeeper;
-    
+
     this.VALID_TRANSITIONS = {
       'PENDING': ['RUNNING', 'CANCELLED', 'FAILED'],
       'RUNNING': ['WAITING', 'VERIFYING', 'SUCCEEDED', 'FAILED', 'CANCELLED'],
@@ -54,7 +67,7 @@ class ExecutionController {
     if (!['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(status)) {
       throw new Error(`Invalid completion status: ${status}`);
     }
-    
+
     const run = this.agentRunDao.getById(runId);
     if (!run) throw new Error(`Run ${runId} not found`);
 
@@ -123,11 +136,11 @@ class ExecutionController {
   async completeStep(stepId, status, output = null, errorInfo = null) {
     const step = this.agentStepDao.getById(stepId);
     if (!step) throw new Error(`Step ${stepId} not found`);
-    return this.agentStepDao.update(stepId, { 
-      status, 
-      output, 
-      errorInfo, 
-      completedAt: new Date().toISOString() 
+    return this.agentStepDao.update(stepId, {
+      status,
+      output,
+      errorInfo,
+      completedAt: new Date().toISOString()
     });
   }
 
@@ -145,8 +158,7 @@ class ExecutionController {
     if (!tool) {
       throw new Error(`Unknown tool: ${toolName}`);
     }
-    
-    // Phase 4 Gatekeeper Integration: evaluate risk, permissions, and approval policy
+
     if (this.gatekeeper && typeof this.gatekeeper.evaluate === 'function') {
       const toolToCapMap = {
         'run_terminal': 'devops.terminal',
@@ -202,17 +214,90 @@ class ExecutionController {
     }
 
     const toolCall = await this.recordToolCall(stepId, toolName, input);
-    
-    const startTime = Date.now();
+    const timeoutMs = resolveToolTimeoutMs(context);
+    const parentSignal = context && context.signal;
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    let timeoutHandle;
+    let removeParentAbortListener = null;
+    let settled = false;
+
+    const timeoutError = () => createExecutionError(
+      `Tool execution timed out after ${timeoutMs}ms`,
+      'TOOL_TIMEOUT',
+      { timeoutMs, toolName, stepId }
+    );
+
+    const cancellationError = () => createExecutionError(
+      'Tool execution cancelled',
+      'TOOL_CANCELLED',
+      { toolName, stepId }
+    );
+
     try {
-      const output = await tool.execute(context, input);
+      if (parentSignal && parentSignal.aborted) {
+        throw cancellationError();
+      }
+
+      if (controller && parentSignal) {
+        const onParentAbort = () => controller.abort(parentSignal.reason);
+        parentSignal.addEventListener('abort', onParentAbort, { once: true });
+        removeParentAbortListener = () => parentSignal.removeEventListener('abort', onParentAbort);
+      }
+
+      const toolContext = controller ? { ...context, signal: controller.signal } : context;
+      const executionPromise = Promise.resolve().then(() => tool.execute(toolContext, input));
+      const guardedExecution = new Promise((resolve, reject) => {
+        timeoutHandle = setTimeout(() => {
+          if (settled) return;
+          if (controller) controller.abort(timeoutError());
+          reject(timeoutError());
+        }, timeoutMs);
+
+        executionPromise.then(
+          value => {
+            if (settled) return;
+            resolve(value);
+          },
+          error => {
+            if (settled) return;
+            reject(error);
+          }
+        );
+
+        if (parentSignal) {
+          const onCancel = () => {
+            if (settled) return;
+            if (controller) controller.abort(parentSignal.reason);
+            reject(cancellationError());
+          };
+          if (parentSignal.aborted) onCancel();
+          else parentSignal.addEventListener('abort', onCancel, { once: true });
+          const previousCleanup = removeParentAbortListener;
+          removeParentAbortListener = () => {
+            previousCleanup?.();
+            parentSignal.removeEventListener('abort', onCancel);
+          };
+        }
+      });
+
+      const output = await guardedExecution;
+      settled = true;
+      clearTimeout(timeoutHandle);
+      removeParentAbortListener?.();
       const duration = Date.now() - startTime;
       await this.completeToolCall(toolCall.id, 'SUCCEEDED', output, null, { duration });
       return output;
     } catch (err) {
+      settled = true;
+      clearTimeout(timeoutHandle);
+      removeParentAbortListener?.();
       const duration = Date.now() - startTime;
-      await this.completeToolCall(toolCall.id, 'FAILED', null, err.message, { duration });
-      throw err; // Re-throw to let the caller handle Step failure
+      await this.completeToolCall(toolCall.id, 'FAILED', null, err.message, {
+        duration,
+        errorCode: err.code || 'TOOL_EXECUTION_FAILED',
+        ...(err.code === 'TOOL_TIMEOUT' ? { timeoutMs } : {})
+      });
+      throw err;
     }
   }
 
@@ -228,7 +313,3 @@ class ExecutionController {
 }
 
 module.exports = ExecutionController;
-
-
-
-
