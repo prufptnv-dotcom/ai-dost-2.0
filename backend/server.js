@@ -1,3 +1,8 @@
+// Ensure runtime hardening, task cancellation, and route bridges are active even if run without node -r
+try { require('./security-hardening'); } catch (_) {}
+try { require('./taskCancellation'); } catch (_) {}
+try { require('./chatAgentRouteBridge'); } catch (_) {}
+
 const express = require('express');
 const projectAuth = require('./services/projectAuthorization');
 const workspaceManager = require('./services/workspaceManager');
