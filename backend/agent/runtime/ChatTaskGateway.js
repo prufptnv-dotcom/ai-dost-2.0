@@ -60,6 +60,7 @@ class ChatTaskGateway {
 
     if (signal?.aborted) {
       const result = { status: 'CANCELLED', taskId };
+      emit({ type: 'task_canceled', reason: 'canceled_before_planning', durationMs: durationMs(startedAt) });
       if (identity) this.idempotencyStore.complete(identity, result);
       logger.info('[AgentTask] task canceled before planning', { taskId, projectId, durationMs: durationMs(startedAt) });
       throw new Error('Chat task canceled before execution');
@@ -97,14 +98,10 @@ class ChatTaskGateway {
         () => Boolean(signal?.aborted), taskId
       );
 
-      // Validate the result before recording terminal idempotency state. If
-      // validation fails, the catch block marks the task as failed instead of
-      // incorrectly persisting an apparently completed result.
       const validatedResult = this.adapter && typeof this.adapter.validateResult === 'function'
         ? this.adapter.validateResult(result)
         : result;
 
-      if (identity) this.idempotencyStore.complete(identity, validatedResult);
       const elapsed = durationMs(startedAt);
       if (validatedResult?.status === 'SUCCEEDED') {
         emit({ type: 'task_phase', phase: 'success', status: 'Task completed', durationMs: elapsed });
@@ -117,6 +114,7 @@ class ChatTaskGateway {
         logger.warn('[AgentTask] task failed', { taskId, projectId, durationMs: elapsed, status: validatedResult?.status });
       }
 
+      if (identity) this.idempotencyStore.complete(identity, validatedResult);
       return validatedResult;
     } catch (error) {
       if (identity) this.idempotencyStore.fail(identity, error);
