@@ -45,3 +45,12 @@ export function clearWorkspaceState() {
     window.dispatchEvent(new CustomEvent('ai_dost_chat_workspace', { detail: null }));
   } catch (_) {}
 }
+
+export default {
+  CHAT_WORKSPACE_KEY,
+  WORKSPACE_TYPES,
+  createWorkspaceState,
+  persistWorkspaceState,
+  readWorkspaceState,
+  clearWorkspaceState,
+};

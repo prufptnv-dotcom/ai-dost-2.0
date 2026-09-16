@@ -24,6 +24,7 @@ const visualVerifier = require('./verification/VisualVerifier');
 const devServerManager = require('../sandbox/devServerManager');
 const logger = require('../logger');
 const deterministicCodeGuard = require('../services/DeterministicCodeGuard');
+const { createProductionOperationExecutor } = require('./security/ProductionRuntimeIntegration');
 
 class AgentOrchestrator {
 
@@ -47,6 +48,13 @@ class AgentOrchestrator {
     this.arbitrator = options.arbitrator || ArbitratorAgent.shared;
     this.agentId = options.agentId || `orchestrator-${process.pid}`;
     this.codebaseIndexer = options.codebaseIndexer || new CodebaseIndexer();
+    this.productionExecutor = options.productionExecutor || createProductionOperationExecutor({
+      gatekeeper: options.gatekeeper,
+      workspaceManager: options.workspaceManager || require('../services/workspaceManager'),
+      audit: options.audit,
+      limits: options.limits,
+      correlationId: options.correlationId
+    });
     this.contextRetriever = options.contextRetriever || new ContextRetriever({ 
       codebaseIndexer: this.codebaseIndexer,
       legacySearch: async (query) => await this.executeTool('search_codebase', { query, projectPath: this.projectPath })
@@ -214,14 +222,64 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     });
   }
 
-  // Execute a single tool action
-  async executeTool(action, parameters) {
+  // Execute a single tool action via the production runtime security boundary
+  async executeTool(action, parameters = {}, context = {}) {
     const projectFiles = parameters.projectFiles || [];
+    const executionContext = {
+      requestId: parameters.requestId || context.requestId || this.requestId,
+      taskId: parameters.taskId || context.taskId || this.taskId,
+      runId: parameters.runId || context.runId || this.runId,
+      projectId: parameters.projectId || context.projectId || this.projectId,
+      userId: parameters.userId || context.userId || this.userId,
+      workspacePath: parameters.projectPath || this.projectPath,
+      capabilities: context.capabilities || parameters.capabilities,
+      user: context.user || parameters.user,
+      approvalToken: parameters.approvalToken || context.approvalToken,
+      ...context
+    };
+
+    const SENSITIVE_OPERATIONS = new Set([
+      'read_file',
+      'write_file',
+      'apply_diff',
+      'run_terminal',
+      'execute_command',
+      'terminal',
+      'delete_file',
+      'list_directory',
+      'read_file_tree'
+    ]);
+
+    if (this.productionExecutor && SENSITIVE_OPERATIONS.has(action)) {
+      try {
+        return await this.productionExecutor.executeProductionOperation(
+          action,
+          parameters,
+          executionContext,
+          async (scope, input) => {
+            return this._dispatchTool(action, input, scope, projectFiles);
+          }
+        );
+      } catch (err) {
+        return {
+          success: false,
+          code: err.code || 'SECURITY_BLOCKED',
+          error: err.message,
+          evaluation: err.evaluation
+        };
+      }
+    }
+
+    return this._dispatchTool(action, parameters, executionContext, projectFiles);
+  }
+
+  async _dispatchTool(action, parameters = {}, scope = {}, projectFiles = []) {
+    const currentWorkspace = parameters.projectPath || scope.workspacePath || this.projectPath;
     
     switch (action) {
       case 'read_file': {
         try {
-          const filePath = this.resolveSafePath(this.projectPath, parameters.path);
+          const filePath = this.resolveSafePath(currentWorkspace, parameters.path);
           if (!filePath) return { success: false, error: 'Access denied: Invalid or unsafe path' };
           const guard = deterministicCodeGuard.guard(parameters.path, parameters.content || '');
           if (!guard.accepted) return { success: false, error: `Code rejected before persistence: ${guard.reason}`, diagnostics: guard.diagnostics };
@@ -240,9 +298,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 
       case 'write_file': {
         try {
-          this.injectBaseBoilerplate(this.projectPath, projectFiles);
+          this.injectBaseBoilerplate(currentWorkspace, projectFiles);
           
-          const filePath = this.resolveSafePath(this.projectPath, parameters.path);
+          const filePath = this.resolveSafePath(currentWorkspace, parameters.path);
           if (!filePath) return { success: false, error: 'Access denied: Invalid or unsafe path' };
           
           const existsOnDisk = fs.existsSync(filePath);
@@ -294,7 +352,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             return { success: false, code: 'INVALID_PATCH_CONTRACT', error: 'expectedSourceHash must be a string if provided' };
           }
 
-          const filePath = this.resolveSafePath(this.projectPath, parameters.path);
+          const filePath = this.resolveSafePath(currentWorkspace, parameters.path);
           if (!filePath) return { success: false, error: 'Access denied: Invalid or unsafe path' };
           
           let content;
@@ -656,7 +714,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       case 'read_file_tree':
       case 'list_directory': {
         try {
-          const targetPath = parameters.path ? this.resolveSafePath(this.projectPath, parameters.path) : this.projectPath;
+          const targetPath = parameters.path ? this.resolveSafePath(currentWorkspace, parameters.path) : currentWorkspace;
           if (!targetPath) return { success: false, error: 'Access denied: Invalid or unsafe path' };
           
           if (!fs.existsSync(targetPath)) {

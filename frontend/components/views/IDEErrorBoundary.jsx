@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/Button';
+import AutonomousCopilotDirector from './AutonomousCopilotDirector';
 
 export default class IDEErrorBoundary extends React.Component {
   constructor(props) {
@@ -36,6 +37,19 @@ export default class IDEErrorBoundary extends React.Component {
         </div>
       );
     }
-    return this.props.children;
+
+    return (
+      <div className="relative h-full w-full">
+        <AutonomousCopilotDirector
+          projectId="copilot-workspace"
+          projectName="Copilot Workspace"
+          onToast={(message, type = 'success') => {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('ai_dost_toast', { detail: { message, type } }));
+            }
+          }}
+        />
+      </div>
+    );
   }
 }

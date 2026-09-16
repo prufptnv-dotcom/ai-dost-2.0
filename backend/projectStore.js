@@ -21,8 +21,10 @@ function saveProjectFile(projectId, filePath, content) {
     const cleanPath = normalizePath(filePath);
     if (!cleanPath) return false;
     const d = getDb();
-    d.prepare('INSERT OR IGNORE INTO projects (id, name, description, created_at, status) VALUES (?, ?, ?, datetime(\'now\'), \'Active\')')
-      .run(projectId, projectId === 'default' ? 'Copilot Workspace' : projectId, 'Autonomous AI Copilot Workspace');
+    d.prepare(`
+      INSERT OR IGNORE INTO projects (id, user_id, name, slug, description, framework, status, created_at, updated_at)
+      VALUES (?, 'local-user', ?, ?, 'Autonomous AI Copilot Workspace', 'generic', 'active', datetime('now'), datetime('now'))
+    `).run(projectId, projectId === 'default' ? 'Copilot Workspace' : projectId, projectId);
 
     const existing = d.prepare('SELECT id FROM workspace_files WHERE project_id = ? AND (path = ? OR path = ? OR path = ? COLLATE NOCASE)').get(
       projectId, cleanPath, cleanPath.replace(/\//g, '\\'), `./${cleanPath}`

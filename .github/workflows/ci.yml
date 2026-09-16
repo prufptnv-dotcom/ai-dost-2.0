@@ -2,7 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches:
+      - main
+      - master
+      - 'audit/**'
+      - 'feature/**'
   pull_request:
     branches: [main, master]
 
@@ -17,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
@@ -25,7 +29,7 @@ jobs:
       - run: npm test -- --coverage
 
   backend:
-    name: Backend (unit + integration)
+    name: Backend (unit + integration + security + chat-runtime)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -34,12 +38,23 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: node --check server.js
-      - run: node --test tests/unit.test.js tests/integration.test.js
+      - name: Run backend test suite
+        run: node --test tests/unit.test.js tests/integration.test.js tests/mcpClientManager.test.js tests/security-hardening.test.js tests/projectAuthorization.security.test.js tests/ssrf.security.test.js tests/chatTaskEvents.test.js tests/taskCancellation.test.js tests/chatTaskAdapter.test.js tests/chatTaskGateway.identity.test.js tests/chatTaskGateway.idempotency.test.js tests/durableTaskIdempotencyStore.test.js tests/startupParity.test.js
+      - name: Run Copilot Director runtime tests
+        run: node --test agent/runtime/CopilotDirector.test.js
+      - name: Run ChatTaskGateway replay tests
+        run: node --test agent/runtime/ChatTaskGateway.test.js
+      - name: Run ExecutionController timeout tests
+        run: node --test agent/runtime/ExecutionController.test.js
+      - name: Run DurableTaskStore recovery tests
+        run: node --test agent/runtime/DurableTaskStore.test.js
+      - name: Run Production Hardening Security Runtime tests
+        run: node --test agent/security/ProductionExecutionGuard.test.js agent/security/ProductionHardeningRuntime.test.js agent/security/ProductionRuntimeIntegration.test.js agent/security/ResourceGuard.test.js tests/orchestratorSecurityBoundary.test.js
 
   e2e:
     name: E2E (Playwright smoke)
@@ -51,7 +66,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
@@ -78,14 +93,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - name: Start backend server
         run: |
           cd backend
           npm ci
-          node server.js &
+          node -r ./security-hardening.js -r ./taskCancellation.js -r ./chatAgentRouteBridge.js server.js &
           sleep 10
           curl -f http://localhost:5000/health
       - name: Test project generation with sandbox
@@ -96,7 +111,6 @@ jobs:
             -d '{"userPrompt":"create a simple react app with hello world","forceLocal":true}' \
             --output /tmp/agent-result.txt
           cat /tmp/agent-result.txt
-          # Verify sandbox creation works
           if grep -q "sandbox" /tmp/agent-result.txt; then
             echo "Sandbox preview test passed"
           else
@@ -112,15 +126,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Deploy to Vercel (Frontend)
-        if: ${{ secrets.VERCEL_TOKEN != '' }}
+        if: secrets.VERCEL_TOKEN != ''
         uses: amondnet/vercel-action@v25
         with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-token: ${{secrets.VERCEL_TOKEN}}
+          vercel-org-id: ${{secrets.VERCEL_ORG_ID}}
+          vercel-project-id: ${{secrets.VERCEL_PROJECT_ID}}
           working-directory: frontend
       - name: Deploy to Railway/Render (Backend)
-        if: ${{ secrets.RAILWAY_TOKEN != '' }}
+        if: secrets.RAILWAY_TOKEN != ''
         run: |
           echo "Deploy backend to Railway/Render"
           # Add your deployment script here
