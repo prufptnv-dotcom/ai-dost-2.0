@@ -97,21 +97,27 @@ class ChatTaskGateway {
         () => Boolean(signal?.aborted), taskId
       );
 
-      if (identity) this.idempotencyStore.complete(identity, result);
+      // Validate the result before recording terminal idempotency state. If
+      // validation fails, the catch block marks the task as failed instead of
+      // incorrectly persisting an apparently completed result.
+      const validatedResult = this.adapter && typeof this.adapter.validateResult === 'function'
+        ? this.adapter.validateResult(result)
+        : result;
+
+      if (identity) this.idempotencyStore.complete(identity, validatedResult);
       const elapsed = durationMs(startedAt);
-      if (result?.status === 'SUCCEEDED') {
+      if (validatedResult?.status === 'SUCCEEDED') {
         emit({ type: 'task_phase', phase: 'success', status: 'Task completed', durationMs: elapsed });
         logger.info('[AgentTask] task completed', { taskId, projectId, durationMs: elapsed });
-      } else if (result?.status === 'CANCELLED') {
+      } else if (validatedResult?.status === 'CANCELLED') {
         emit({ type: 'task_canceled', reason: 'canceled', durationMs: elapsed });
         logger.info('[AgentTask] task canceled', { taskId, projectId, durationMs: elapsed });
       } else {
-        emit({ type: 'task_phase', phase: 'error', status: result?.reason || 'Task failed', durationMs: elapsed });
-        logger.warn('[AgentTask] task failed', { taskId, projectId, durationMs: elapsed, status: result?.status });
+        emit({ type: 'task_phase', phase: 'error', status: validatedResult?.reason || 'Task failed', durationMs: elapsed });
+        logger.warn('[AgentTask] task failed', { taskId, projectId, durationMs: elapsed, status: validatedResult?.status });
       }
 
-      return this.adapter && typeof this.adapter.validateResult === 'function'
-        ? this.adapter.validateResult(result) : result;
+      return validatedResult;
     } catch (error) {
       if (identity) this.idempotencyStore.fail(identity, error);
       const elapsed = durationMs(startedAt);
