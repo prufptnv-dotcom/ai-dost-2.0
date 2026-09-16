@@ -345,7 +345,7 @@ function sanitizeDocumentTitle(raw) {
     if (!cleaned || cleaned.length < 3) {
         cleaned = raw.replace(/[\[\]]/g, '').trim();
     }
-    cleaned = cleaned.replace(/^[ -_.]+|[ -_.]+$/g, '');
+    cleaned = cleaned.replace(/^[ \-_.]+|[ \-_.]+$/g, '');
     if (!cleaned) cleaned = 'Document';
     return cleaned.charAt(0).toUpperCase() + cleaned.slice(1, 80);
 }
@@ -362,6 +362,22 @@ router.post('/generate', async (req, res) => {
         const safeTitle = sanitizeDocumentTitle(title || topic || 'Research Document');
         const cleanTopic = sanitizeDocumentTitle(topic || safeTitle);
         let content = explicitContent || explicitMarkdown;
+
+        // Guard: Reject any download cards, status updates, or notification snippets passed as content
+        const isDownloadNotification = (txt) => {
+            if (!txt || typeof txt !== 'string') return false;
+            const s = txt.trim();
+            if (s.startsWith('✅') || s.startsWith('⏳') || s.startsWith('⚠️')) return true;
+            if (/\[⬇️?\s*Download\]/i.test(s) || /\/downloads\//i.test(s)) return true;
+            if (/\b(?:PDF|Word|PowerPoint|Excel|CSV)\s*ready!/i.test(s)) return true;
+            if (s.includes('file ban rahi') || s.includes('Koi aur badlaav chahiye to batao')) return true;
+            return false;
+        };
+
+        if (content && typeof content === 'string' && isDownloadNotification(content)) {
+            logger.warn(`📄 Rejected download notification text from explicit content for ${t}. Synthesizing fresh research for "${cleanTopic}".`);
+            content = null;
+        }
 
         if (content && typeof content === 'string' && content.trim().length >= 30) {
             logger.info(`📄 Using explicit content provided in request for ${t} (${content.length} chars)`);

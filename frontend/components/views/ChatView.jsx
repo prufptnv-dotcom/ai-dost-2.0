@@ -381,33 +381,48 @@ export default function ChatView({
       setThinkingLabel('Creating document…');
       try {
         const rawTopic = content.replace(docIntent.re, '').trim() || content;
-        const topic = rawTopic.replace(/^(?:write|create|generate|make|build|draft|please|kripya)\s+(?:a|an|the|ek)?\s*(?:report|document|presentation|slides?|doc|pdf|csv|sheet|xlsx)?\s*(?:on|about|ke liye|pe)?\s*/i, '').trim() || rawTopic;
+        const topic = rawTopic
+          .replace(/^(?:write|create|generate|make|build|draft|please|kripya)\s+(?:a|an|the|ek)?\s*(?:report|document|presentation|slides?|doc|pdf|csv|sheet|xlsx)?\s*(?:on|about|ke liye|pe)?\s*/i, '')
+          .replace(/(\s*(?:or|aur|and|tatha|bhi)?\s*(?:iska|iski|iske)?\s*(?:pdf|docx?|pptx?|csv|xlsx|document|doc|report|presentation|slides?|file)?\s*(?:banao|bana\s*do|bana\s*de|chahiye|likhdo|generate|create|download|export)?)+$/i, '')
+          .replace(/^(?:or|aur|and|tatha|bhi)\s+/i, '')
+          .trim() || rawTopic;
         const typeLabel = { docx: 'Word', pptx: 'PowerPoint', csv: 'CSV', xlsx: 'Excel', pdf: 'PDF' }[docIntent.type] || docIntent.type;
         
-        // Find latest assistant message with real content to preserve research context
-        const lastAssistantMsg = [...messages].reverse().find(
-          (m) => m.role === 'assistant' &&
-                 m.content &&
-                 m.id !== 'welcome' &&
-                 !m.content.startsWith('⏳') &&
-                 !m.content.startsWith('⚠️') &&
-                 m.content.trim().length > 40
-        );
+        // Find latest genuine assistant message with actual research content (ignore cards, progress, errors)
+        const isGenuineResearchMessage = (m) => {
+          if (!m || m.role !== 'assistant' || !m.content) return false;
+          if (m.id === 'welcome') return false;
+          const t = m.content.trim();
+          if (t.startsWith('⏳') || t.startsWith('⚠️') || t.startsWith('✅')) return false;
+          if (/\[⬇️?\s*Download\]/i.test(t) || /\/downloads\//i.test(t)) return false;
+          if (/\b(?:PDF|Word|PowerPoint|Excel|CSV)\s*ready!/i.test(t)) return false;
+          if (t.includes('file ban rahi') || t.includes('dobara try karo') || t.includes('File nahi bani')) return false;
+          return t.length >= 80;
+        };
 
-        const isReferencingChat =
-          Boolean(lastAssistantMsg) &&
-          (/\b(is|iska|iski|iske|ye|yeh|upar|above|previous|research|chat|summary|report|yehi|wahi|mera|meri)\b/i.test(content) ||
-           topic.length <= 25 ||
+        const lastResearchMsg = [...messages].reverse().find(isGenuineResearchMessage);
+
+        const isDirectExportDirective =
+          Boolean(lastResearchMsg) &&
+          (topic.length <= 25 ||
+           /^(?:fir\s*se|firse|dobara|wahi|yehi|is|iska|iski|iske|ye|yeh|upar|above|is\s+research|is\s+report)\b/i.test(topic) ||
            /^(?:pdf|docx?|word|document|doc|presentation|slides?|excel|sheet|csv)\b/i.test(topic));
 
         let payloadContent = null;
         let finalTitle = topic;
 
-        if (isReferencingChat && lastAssistantMsg) {
-          payloadContent = lastAssistantMsg.content;
-          if (!topic || topic.length < 5 || /\b(is|iska|iski|iske|ye|yeh|upar|above)\b/i.test(topic)) {
-            const firstHeader = lastAssistantMsg.content.match(/^#+\s*(.+)$/m) || lastAssistantMsg.content.match(/^(.+?)(?:\n|$)/);
+        if (isDirectExportDirective && lastResearchMsg) {
+          payloadContent = lastResearchMsg.content;
+          if (!topic || topic.length < 5 || /\b(is|iska|iski|iske|ye|yeh|upar|above|firse|fir\s*se|dobara)\b/i.test(topic)) {
+            const firstHeader = lastResearchMsg.content.match(/^#+\s*(.+)$/m) || lastResearchMsg.content.match(/^(.+?)(?:\n|$)/);
             finalTitle = firstHeader ? firstHeader[1].replace(/[*_#`]/g, '').trim().slice(0, 80) : 'Research Report';
+          }
+        } else if (lastResearchMsg && lastResearchMsg.content.length > 300) {
+          // Check if previous research is directly relevant to topic keywords
+          const keywords = topic.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+          const matchCount = keywords.filter((kw) => lastResearchMsg.content.toLowerCase().includes(kw)).length;
+          if (matchCount >= 2 || (keywords.length === 1 && matchCount === 1)) {
+            payloadContent = lastResearchMsg.content;
           }
         }
 
@@ -419,10 +434,11 @@ export default function ChatView({
           content: payloadContent,
         });
         if (r.data?.success && r.data.downloadUrl) {
+          const docTitle = finalTitle || topic || `${typeLabel} Document`;
           const readyMsg = {
             id: Date.now() + 2,
             role: 'assistant',
-            content: `✅ **${typeLabel} ready!**\n\n📄 ${r.data.filename}\n\n[⬇️ Download](${r.data.downloadUrl})\n\nKoi aur badlaav chahiye to batao.`,
+            content: `✅ **${typeLabel} Ready!**\n\n📌 **${docTitle}**\n📄 \`${r.data.filename}\`\n\n[⬇️ Download ${typeLabel}](${r.data.downloadUrl})\n\nAap is document ko download karke dekh sakte hain.`,
             timestamp: new Date().toISOString(),
           };
           setMessages((prev) => [...prev, readyMsg]);
