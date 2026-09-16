@@ -69,7 +69,19 @@ class TaskIdempotencyStore {
   complete(identity, result) {
     const entry = this._get(identity);
     if (!entry) return false;
-    entry.state = result?.status === 'CANCELLED' ? 'canceled' : 'completed';
+
+    const status = String(result?.status || '').toUpperCase();
+    if (status === 'SUCCEEDED') {
+      entry.state = 'completed';
+      entry.error = null;
+    } else if (status === 'CANCELLED') {
+      entry.state = 'canceled';
+      entry.error = null;
+    } else {
+      entry.state = 'failed';
+      entry.error = String(result?.reason || 'Task failed');
+    }
+
     entry.updatedAt = Date.now();
     entry.result = result || null;
     return true;
