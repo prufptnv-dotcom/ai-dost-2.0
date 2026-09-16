@@ -111,9 +111,8 @@ const PHASE_MAP = {
 export function normalizeProcessingPhase(phase) {
   if (!phase || typeof phase !== 'string') return null;
   const normalized = phase.trim().toLowerCase();
-  return PHASE_MAP[normalized]
-    ? normalized
-    : PHASE_ALIASES[normalized]?.key || null;
+  const state = PHASE_ALIASES[normalized] || PHASE_MAP[normalized];
+  return state ? state.key : null;
 }
 
 /**

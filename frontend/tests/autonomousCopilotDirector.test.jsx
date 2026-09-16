@@ -5,7 +5,7 @@ describe('Autonomous Copilot Director contract', () => {
   const source = fs.readFileSync(
     path.join(process.cwd(), 'components/views/AutonomousCopilotDirector.jsx'),
     'utf8'
-  );
+  ).replace(/\r\n/g, '\n');
 
   it('accepts a single user outcome and submits an autonomous chat task plan', () => {
     expect(source).toContain('const [input, setInput] = useState(\'\');');

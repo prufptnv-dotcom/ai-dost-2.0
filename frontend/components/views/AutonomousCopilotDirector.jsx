@@ -60,12 +60,22 @@ export default function AutonomousCopilotDirector({ projectId = 'copilot-workspa
     setEvents([]);
     log('Director received the outcome. Inspecting workspace and selecting the optimal execution path…', 'plan');
 
+    const plan = {
+      taskId,
+      intent: {
+        type: 'task',
+        requiresTool: true,
+        originalMessage: `${DIRECTOR_INSTRUCTION}\n\nUSER OUTCOME REQUEST:\n${request}`,
+      },
+    };
+
     try {
       const response = await fetch('/api/agent/run', {
         method: 'POST',
         signal: controller.signal,
         headers: { 'Content-Type': 'application/json', 'X-AI-Dost-Task-Id': taskId },
         body: JSON.stringify({
+          chatTaskPlan: plan,
           copilotDirector: true,
           taskId,
           projectId,

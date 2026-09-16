@@ -115,10 +115,10 @@ export default function VoiceView({ onClose, onTranscript, onToast }) {
     if (!text || thinking) return;
     setManualInput('');
     setConversation((prev) => [...prev, { role: 'user', content: text }]);
+    if (typeof onTranscript === 'function') onTranscript(text);
 
     const intent = classifyUniversalIntent(text);
     if (intent.kind === 'command' && intent.confidence >= 0.9) {
-      if (typeof onTranscript === 'function') onTranscript(text);
       const commandReply = intent.action === 'new-chat'
         ? 'New conversation open kar raha hoon.'
         : intent.action === 'delete-chat'
