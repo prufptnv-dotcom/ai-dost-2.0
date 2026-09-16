@@ -53,6 +53,8 @@ jobs:
         run: node --test agent/runtime/ExecutionController.test.js
       - name: Run DurableTaskStore recovery tests
         run: node --test agent/runtime/DurableTaskStore.test.js
+      - name: Run Production Hardening Security Runtime tests
+        run: node --test agent/security/ProductionExecutionGuard.test.js agent/security/ProductionHardeningRuntime.test.js agent/security/ProductionRuntimeIntegration.test.js agent/security/ResourceGuard.test.js tests/orchestratorSecurityBoundary.test.js
 
   e2e:
     name: E2E (Playwright smoke)
