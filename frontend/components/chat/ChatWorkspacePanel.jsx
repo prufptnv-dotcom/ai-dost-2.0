@@ -9,10 +9,12 @@ function getPayloadItems(state) {
 }
 
 export default function ChatWorkspacePanel({ onClose, onOpenInCopilot }) {
-  const [state, setState] = useState(() => readWorkspaceState());
+  const [mounted, setMounted] = useState(false);
+  const [state, setState] = useState(null);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
+    setMounted(true);
+    setState(readWorkspaceState());
     const sync = (event) => setState(event?.detail || readWorkspaceState());
     window.addEventListener('ai_dost_chat_workspace', sync);
     const handleStorage = (event) => {
@@ -25,7 +27,7 @@ export default function ChatWorkspacePanel({ onClose, onOpenInCopilot }) {
     };
   }, []);
 
-  if (!state?.open) return null;
+  if (!mounted || !state?.open) return null;
 
   const plan = state.payload?.plan;
   const steps = getPayloadItems(state);
@@ -61,12 +63,18 @@ export default function ChatWorkspacePanel({ onClose, onOpenInCopilot }) {
             <p className="text-sm text-paper-100 leading-relaxed">{plan.intent?.label || plan.intent?.target || 'Planned task'}</p>
             {steps.length > 0 && (
               <ol className="mt-3 space-y-2">
-                {steps.map((step, index) => (
-                  <li key={`${index}-${step}`} className="flex gap-2 text-xs text-ink-muted">
-                    <span className="w-5 h-5 rounded-full border border-border flex items-center justify-center shrink-0 text-[10px] text-accent">{index + 1}</span>
-                    <span className="pt-0.5">{step?.label || step?.title || step}</span>
-                  </li>
-                ))}
+                {steps.map((step, index) => {
+                  const label = typeof step === 'object' && step !== null
+                    ? (step.label || step.title || step.action || step.id || 'Processing')
+                    : String(step);
+                  const keyStr = typeof step === 'object' && step !== null ? (step.id || index) : step;
+                  return (
+                    <li key={`${index}-${keyStr}`} className="flex gap-2 text-xs text-ink-muted">
+                      <span className="w-5 h-5 rounded-full border border-border flex items-center justify-center shrink-0 text-[10px] text-accent">{index + 1}</span>
+                      <span className="pt-0.5">{label}</span>
+                    </li>
+                  );
+                })}
               </ol>
             )}
           </section>
