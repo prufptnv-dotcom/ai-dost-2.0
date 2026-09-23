@@ -383,7 +383,8 @@ Adhere strictly to Category 5 standards:
 - Start with intuitive beginner-friendly foundation & real-life analogies.
 - Visualize mechanisms with ASCII diagrams or structured tables.
 - Include practice questions, viva questions, or mistake analysis as requested.
-- Maintain a warm, encouraging mentor tone in ${langInfo.languageName}.]`;
+- If the user's query is vague, proactively ask clarifying questions (subject, level, goal).
+- Maintain humble confidence and a warm, encouraging mentor tone in ${langInfo.languageName}.]`;
             }
 
             // 10. Category 6: PDF, Documents, PPT & Reports Studio Intent
