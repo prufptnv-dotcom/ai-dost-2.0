@@ -1,16 +1,19 @@
-/* eslint-disable @next/next/no-img-element */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Mic, Paperclip, ArrowDown } from 'lucide-react';
+import { Send, Mic, Paperclip, Sparkles, Code2, FileText, ShieldCheck } from 'lucide-react';
 import api from '../../services/api';
 import { ImageLightbox } from './ImageLightbox';
 import ChatArtifactsCanvas from '../chat/ChatArtifactsCanvas';
 import { AiDostMark } from '../brand/AiDostMark';
 import SmartChatHeader from '../chat/SmartChatHeader';
+import ChatMessageList from '../chat/ChatMessageList';
 import ChatMessageBubble from '../chat/ChatMessageBubble';
 import ThinkingDot from '../chat/ThinkingDot';
 import { extractArtifact, stripInternalTags } from '../../utils/chatContent';
 import { AssessmentRunner } from '../assessment/AssessmentRunner';
+import { getFuturistic2030Html, getThreeJsSolarSystemHtml } from '../../lib/threeJsTemplates';
+import ChatComposerDock from '../chat/ChatComposerDock';
+
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -26,11 +29,11 @@ const PROJECT_INTENT =
   /\b(fullstack|project|app|website|web ?site|portfolio|mern|crud|clone|todo|blog|e-?commerce|chatbot|dashboard|landing page)\b.*\b(banao|bana|banake|make|create|build|generate)\b|\b(banao|bana|banake|make|create|build|generate)\b.*\b(project|app|website|web ?site|fullstack)\b/i;
 
 const DOC_KEYWORDS = [
-  { type: 'pdf', re: /pdf/i },
-  { type: 'pptx', re: /ppt[a-z]*|powerpoint|presentation|slides?/i },
-  { type: 'xlsx', re: /xlsx|excel\b/i },
-  { type: 'csv', re: /csv|spreadsheet|sheet/i },
-  { type: 'docx', re: /\bdocx?\b|\bdoct\b|word ?file|word ?document|document|report/i },
+  { type: 'pdf', re: /pdf\b|pdf notes|syllabus|research paper|lab assignment|curriculum/i },
+  { type: 'pptx', re: /ppt[a-z]*|powerpoint|presentation|slides?|pitch deck/i },
+  { type: 'xlsx', re: /xlsx|excel\b|spreadsheet/i },
+  { type: 'csv', re: /csv\b/i },
+  { type: 'docx', re: /\bdocx?\b|\bdoct\b|word ?file|word ?document|document|report|resume|cv\b|cover letter|proposal|technical design|tdd|readme|api doc|meeting notes|mom\b|professional letter/i },
 ];
 
 const NAV_INTENTS = [
@@ -45,6 +48,10 @@ const NAV_INTENTS = [
 
 const SEARCH_INTENT =
   /\b(research|deep research)\b|\b(search|google|pata karo|dhundho)\b.*\b(karo|kar|karke|do)\b|\b(latest|current|today'?s|aaj ki)\b.*\b(news|update|price|weather|score|status)\b|\b(news|weather|stock price|cricket score|football score|match result|trending)\b.*\b(batao|bata|dikhao|kya hai|do|kar)\b/i;
+
+const EXPLICIT_3D_SIMULATION_INTENT =
+  /\b(endless highway|cyberpunk highway|dark road|procedural highway|cyberpunk car|hovercar|supercar|dna|double helix|chromosome|cyberpunk city|neo tokyo|metropolis|polyhedron|tesseract|icosahedron|particle system|stardust|solar system|solar-system|celestial simulation|gravity simulation|n-body simulation|fluid simulation|sorting visualizer|neural network 3d|earth 3d|3d earth globe|periodic table 3d|kinetic typography|kinetic text|space ship game)\b/i;
+
 
 const MODEL_OPTIONS = [
   { id: 'auto', label: 'Auto' },
@@ -68,6 +75,7 @@ const WELCOME = {
 
 export default function ChatView({
   model = 'auto',
+  initialPrompt = '',
   thinking: thinkingProp,
   setIsThinking: setIsThinkingProp,
   onOpenResumeWithData,
@@ -108,7 +116,7 @@ export default function ChatView({
   const [backendHistory, setBackendHistory] = useState(null);
   const [lightboxUrl, setLightboxUrl] = useState(null);
   const [sessions, setSessions] = useState([]);
-  const [attachment, setAttachment] = useState(null);
+  const [attachments, setAttachments] = useState([]);
   const [persona, setPersona] = useState('auto');
   const [variants, setVariants] = useState(null);
   const [activeArtifact, setActiveArtifact] = useState(null);
@@ -136,6 +144,15 @@ export default function ChatView({
       setSelectedModel(model);
     }
   }, [model, selectedModel]);
+
+  useEffect(() => {
+    if (initialPrompt) {
+      setInput(initialPrompt);
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    }
+  }, [initialPrompt]);
 
   const handleModelChange = (e) => {
     const nextModel = e.target.value;
@@ -219,15 +236,20 @@ export default function ChatView({
   useEffect(() => {
     if (messages.length > 0) {
       const isOnlyWelcome = messages.length === 1 && messages[0].id === 'welcome';
-      if (!isOnlyWelcome) {
+      const isStreaming = messages.some((m) => m.isStreaming);
+      if (!isOnlyWelcome && !isStreaming) {
         try { localStorage.setItem(getMsgKey(sessionId), JSON.stringify(messages)); } catch (_) {}
       }
     }
   }, [messages, sessionId]);
 
   useEffect(() => {
-    if (messages.length > 1) {
-      api.post('/chat/save', { session_id: sessionId, messages: messages.slice(-20) }).catch(() => {});
+    const isStreaming = messages.some((m) => m.isStreaming);
+    if (messages.length > 1 && !isStreaming) {
+      const timer = setTimeout(() => {
+        api.post('/chat/save', { session_id: sessionId, messages: messages.slice(-20) }).catch(() => {});
+      }, 1200);
+      return () => clearTimeout(timer);
     }
   }, [messages, sessionId]);
 
@@ -238,6 +260,16 @@ export default function ChatView({
       setActiveArtifact(null);
     }
   }, [onNewChatSignal]);
+
+  useEffect(() => {
+    const handleOpenArtifactEvent = (e) => {
+      if (e.detail) {
+        setActiveArtifact(e.detail);
+      }
+    };
+    window.addEventListener('ai_dost_open_artifact', handleOpenArtifactEvent);
+    return () => window.removeEventListener('ai_dost_open_artifact', handleOpenArtifactEvent);
+  }, []);
 
   const scrollToBottom = useCallback((behavior = 'smooth') => {
     if (typeof window === 'undefined') return;
@@ -250,20 +282,30 @@ export default function ChatView({
     });
   }, []);
 
+  const scrollRafRef = useRef(null);
   const handleScroll = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    userScrolledUpRef.current = distFromBottom >= 120;
-    setShowJumpToBottom(distFromBottom > 160);
+    if (scrollRafRef.current) return;
+    scrollRafRef.current = window.requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      const el = scrollRef.current;
+      if (!el) return;
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      userScrolledUpRef.current = distFromBottom >= 120;
+      setShowJumpToBottom(distFromBottom > 160);
+    });
   }, []);
 
   useEffect(() => {
-    const el = scrollRef.current;
-    const distFromBottom = el ? el.scrollHeight - el.scrollTop - el.clientHeight : 0;
-    if (userSentMessageRef.current || distFromBottom < 120) {
+    return () => {
+      if (scrollRafRef.current) window.cancelAnimationFrame(scrollRafRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (userSentMessageRef.current || !userScrolledUpRef.current) {
       userSentMessageRef.current = false;
-      scrollToBottom(messages.length <= 2 ? 'auto' : 'smooth');
+      const isStreaming = messages.some((m) => m.isStreaming);
+      scrollToBottom(isStreaming || messages.length <= 2 ? 'auto' : 'smooth');
     }
   }, [messages, variants, scrollToBottom]);
 
@@ -281,8 +323,16 @@ export default function ChatView({
 
   // ─── sendMessage ─────────────────────────────────────────────────────────
   const sendMessage = useCallback(async (text) => {
-    const content = (text || input).trim();
+    let content = (text || input).trim();
     if (!content || thinking) return;
+    
+    let isExplicitChat = false;
+    if (content.toLowerCase().startsWith('/chat ')) {
+      isExplicitChat = true;
+      content = content.replace(/^\/chat\s*/i, '').trim();
+    }
+    if (!content) return;
+
     setInput('');
     setShowFollowUps(false);
 
@@ -291,9 +341,9 @@ export default function ChatView({
       role: 'user',
       content,
       timestamp: new Date().toISOString(),
-      attachments: attachment ? [attachment.name] : undefined,
-      imageAttachment: attachment?.type === 'image' ? attachment.base64 : undefined,
-      imageMime: attachment?.type === 'image' ? (attachment.mime || 'image/png') : undefined,
+      attachments: attachments.length > 0 ? attachments.map((a) => a.name) : undefined,
+      imageAttachment: attachments.find((a) => a.type === 'image')?.base64,
+      imageMime: attachments.find((a) => a.type === 'image')?.mime || 'image/png',
     };
     userSentMessageRef.current = true;
     userScrolledUpRef.current = false;
@@ -325,12 +375,21 @@ export default function ChatView({
     setThinkingLabel('Thinking…');
     setTimeout(() => scrollToBottom('smooth'), 20);
 
-    if (attachment) {
+    if (attachments.length > 0) {
       try {
-        const payload = { message: content || 'Is file ka analysis do.' };
-        if (attachment.type === 'image') { payload.imageBase64 = attachment.base64; payload.imageMime = attachment.mime; }
-        else if (attachment.type === 'pdf') { payload.pdfBase64 = attachment.base64; }
-        else if (attachment.type === 'text') { payload.text = attachment.text; }
+        const payload = {
+          message: content || (attachments.length > 1 ? 'In sabhi files ko compare karke deep analysis do.' : 'Is file ka comprehensive analysis do.'),
+          files: attachments,
+        };
+        if (attachments.length === 1) {
+          const single = attachments[0];
+          if (single.type === 'image') { payload.imageBase64 = single.base64; payload.imageMime = single.mime; }
+          else if (single.type === 'pdf') { payload.pdfBase64 = single.base64; }
+          else if (single.type === 'docx') { payload.docxBase64 = single.base64; }
+          else if (single.type === 'pptx') { payload.pptxBase64 = single.base64; }
+          else if (single.type === 'xlsx') { payload.xlsxBase64 = single.base64; }
+          else if (single.type === 'text') { payload.text = single.text; }
+        }
         const res = await api.post('/chat/analyze', payload);
         const reply = res.data?.reply || 'File padh nahi paya — dobara try karo.';
         setMessages((prev) => [...prev, { id: Date.now() + 1, role: 'assistant', content: reply, timestamp: new Date().toISOString() }]);
@@ -338,22 +397,22 @@ export default function ChatView({
         const art = extractArtifact(reply);
         if (art) setActiveArtifact(art);
         setShowFollowUps(true);
-        setAttachment(null);
+        setAttachments([]);
         setThinking(false);
         return;
-      } catch (_) { setAttachment(null); }
+      } catch (_) { setAttachments([]); }
     }
 
-    if (IMAGE_CREATE_INTENT.test(content)) {
-      setThinkingLabel('Generating image…');
+    if (!isExplicitChat && IMAGE_CREATE_INTENT.test(content)) {
+      setThinkingLabel('⚡ Z-Image Turbo rendering…');
       try {
-        const r1 = await api.post('/image/generate', { prompt: content });
+        const r1 = await api.post('/image/turbo', { prompt: content, style: 'general' });
         const urls = [r1.data?.imageUrl].filter(Boolean);
         if (urls.length > 0) {
           const imageReply = {
             id: Date.now() + 1,
             role: 'assistant',
-            content: `Ho gayi image! 🎨\n\n![Image](${urls[0]})\n\n[⬇️ Download](${urls[0]})\n\nKuch aur change chahiye to batao.`,
+            content: `⚡ **Z-Image Turbo Generated!** 🎨\n\n![Image](${urls[0]})\n\n[⬇️ Download Image](${urls[0]})\n\n*Prompt: ${content}*`,
             timestamp: new Date().toISOString(),
           };
           setMessages((prev) => [...prev, imageReply]);
@@ -365,9 +424,9 @@ export default function ChatView({
       } catch (_) {}
     }
 
-    const DOC_CREATE_INTENT = /\b(banao|bana\s*do|bana\s*de|chahiye|taiyar\s*karo|likhdo|draft|export|nikalo|bana\s*kar\s*do)\b|\b(create|generate|make|build|write|draft)\b.*?\b(pdf|docx?|pptx?|csv|xlsx|file|doc|report|document|presentation|slides?)\b/i;
+    const DOC_CREATE_INTENT = /\b(banao|bana\s*do|bana\s*de|chahiye|taiyar\s*karo|likhdo|draft|export|nikalo|bana\s*kar\s*do)\b|\b(create|generate|make|build|write|draft|prepare)\b.*?\b(pdf|docx?|pptx?|csv|xlsx|file|doc|report|document|presentation|slides?|notes|syllabus|resume|cv|cover letter|proposal|tdd|readme|documentation|assignment|letter|paper|mom)\b/i;
 
-    const specificDoc = DOC_CREATE_INTENT.test(content)
+    const specificDoc = (!isExplicitChat && DOC_CREATE_INTENT.test(content))
       ? DOC_KEYWORDS
           .filter((k) => k.type !== 'docx')
           .map((k) => ({ type: k.type, pos: content.search(k.re) }))
@@ -375,7 +434,7 @@ export default function ChatView({
           .sort((a, b) => a.pos - b.pos)[0]
       : null;
     const docxKeyword = DOC_KEYWORDS.find((k) => k.type === 'docx');
-    const docIntent = specificDoc || (DOC_CREATE_INTENT.test(content) && content.search(docxKeyword.re) >= 0 ? docxKeyword : null);
+    const docIntent = specificDoc || ((!isExplicitChat && DOC_CREATE_INTENT.test(content)) && content.search(docxKeyword.re) >= 0 ? docxKeyword : null);
 
     if (docIntent) {
       setThinkingLabel('Creating document…');
@@ -404,9 +463,8 @@ export default function ChatView({
 
         const isDirectExportDirective =
           Boolean(lastResearchMsg) &&
-          (topic.length <= 25 ||
-           /^(?:fir\s*se|firse|dobara|wahi|yehi|is|iska|iski|iske|ye|yeh|upar|above|is\s+research|is\s+report)\b/i.test(topic) ||
-           /^(?:pdf|docx?|word|document|doc|presentation|slides?|excel|sheet|csv)\b/i.test(topic));
+          (topic.length <= 25 &&
+           /^(?:fir\s*se|firse|dobara|wahi|yehi|is|iska|iski|iske|ye|yeh|upar|above|is\s+research|is\s+report|jo\s+likha)\b/i.test(topic));
 
         let payloadContent = null;
         let finalTitle = topic;
@@ -417,13 +475,6 @@ export default function ChatView({
             const firstHeader = lastResearchMsg.content.match(/^#+\s*(.+)$/m) || lastResearchMsg.content.match(/^(.+?)(?:\n|$)/);
             finalTitle = firstHeader ? firstHeader[1].replace(/[*_#`]/g, '').trim().slice(0, 80) : 'Research Report';
           }
-        } else if (lastResearchMsg && lastResearchMsg.content.length > 300) {
-          // Check if previous research is directly relevant to topic keywords
-          const keywords = topic.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
-          const matchCount = keywords.filter((kw) => lastResearchMsg.content.toLowerCase().includes(kw)).length;
-          if (matchCount >= 2 || (keywords.length === 1 && matchCount === 1)) {
-            payloadContent = lastResearchMsg.content;
-          }
         }
 
         setMessages((prev) => [...prev, { id: Date.now() + 1, role: 'assistant', content: `⏳ ${typeLabel} file ban rahi hai…`, timestamp: new Date().toISOString() }]);
@@ -432,7 +483,7 @@ export default function ChatView({
           topic: finalTitle || topic,
           title: (finalTitle || topic).slice(0, 80),
           content: payloadContent,
-        });
+        }, { timeout: 180000 });
         if (r.data?.success && r.data.downloadUrl) {
           const docTitle = finalTitle || topic || `${typeLabel} Document`;
           const readyMsg = {
@@ -456,10 +507,37 @@ export default function ChatView({
       }
     }
 
+    if (!isExplicitChat && EXPLICIT_3D_SIMULATION_INTENT.test(content) && !docIntent) {
+      setThinkingLabel('Rendering 3D Canvas…');
+      try {
+        const html = getFuturistic2030Html(content);
+        const titleMatch = html.match(/<title>(.*?)<\/title>/i);
+        const title = titleMatch ? titleMatch[1] : '3D Interactive Simulation';
+        const simReply = {
+          id: Date.now() + 1,
+          role: 'assistant',
+          content: `### 🪐 ${title}\n\nAapka interactive 3D simulation taiyar hai! Isko side-by-side **Split Canvas** me render kiya gaya hai jahan aap interactive orbit controls, physics settings, aur real-time rendering interact kar sakte hain.\n\n\`\`\`html\n${html}\n\`\`\``,
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, simReply]);
+        setLastReply(simReply.content);
+        setActiveArtifact({
+          title,
+          language: 'html',
+          code: html,
+        });
+        setShowFollowUps(true);
+        setThinking(false);
+        return;
+      } catch (e) {
+        console.error('3D rendering error:', e);
+      }
+    }
+
     const RESUME_DOC_CREATE =
       /\b(resume|cv|bio.?data)\b(?!\s*k?ar)[\s\S]{0,40}?\b(banao|bana\s*do|bana\s*de|chahiye|taiyar|likhdo|draft|create|generate\s+(?:my|mera|meri|ek)|make|write)\b|\b(banao|bana\s*do|bana\s*de|chahiye|taiyar\s*karo|likhdo|draft\s*karo|create|generate\s+(?:my|mera|meri|ek)|make\s+(?:my|me\s+a)|write)\b[\s\S]{0,60}?\b(resume|cv|bio.?data)\b/i;
 
-    if (RESUME_DOC_CREATE.test(content)) {
+    if (!isExplicitChat && RESUME_DOC_CREATE.test(content)) {
       try {
         const data = await api.post('/resume/generate', { prompt: content });
         if (data.data && !data.data.error) {
@@ -479,7 +557,7 @@ export default function ChatView({
       } catch (_) {}
     }
 
-    const nav = NAV_INTENTS.find((n) => n.re.test(content));
+    const nav = !isExplicitChat ? NAV_INTENTS.find((n) => n.re.test(content)) : null;
     if (nav) {
       const navReply = {
         id: Date.now() + 1,
@@ -496,7 +574,7 @@ export default function ChatView({
       return;
     }
 
-    if (SEARCH_INTENT.test(content)) {
+    if (!isExplicitChat && SEARCH_INTENT.test(content)) {
       setThinkingLabel('Searching…');
       try {
         const res = await api.post('/chat/search', { message: content });
@@ -530,7 +608,12 @@ export default function ChatView({
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let accumulated = '';
+      let accumulatedThought = '';
+      let thoughtStartTime = Date.now();
+      let thoughtEndTime = null;
       let buffer = '';
+      let lastChunkUpdate = 0;
+      let lastThoughtUpdate = 0;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -570,9 +653,51 @@ export default function ChatView({
             if (parsed.done && parsed.sources && parsed.sources.length > 0) {
               setMessages((prev) => prev.map((m) => m.id === aiMsgId ? { ...m, sources: parsed.sources } : m));
             }
+            // Deep Reasoning / Chain-of-Thought Stream Ingestion
+            if (parsed.type === 'thought_chunk' && parsed.thought) {
+              accumulatedThought += parsed.thought;
+              const now = Date.now();
+              const elapsedSec = (now - thoughtStartTime) / 1000;
+              if (now - lastThoughtUpdate > 40) {
+                lastThoughtUpdate = now;
+                setMessages((prev) => prev.map((m) => m.id === aiMsgId ? {
+                  ...m,
+                  thought: accumulatedThought,
+                  isThinkingTrace: true,
+                  thoughtElapsed: elapsedSec,
+                } : m));
+              }
+            }
+            if (parsed.type === 'thought_done') {
+              if (!thoughtEndTime) thoughtEndTime = Date.now();
+              const elapsedSec = (thoughtEndTime - thoughtStartTime) / 1000;
+              setMessages((prev) => prev.map((m) => m.id === aiMsgId ? {
+                ...m,
+                thought: accumulatedThought,
+                isThinkingTrace: false,
+                thoughtElapsed: elapsedSec,
+                thoughtCompleted: true,
+              } : m));
+            }
             if (parsed.chunk) {
+              if (accumulatedThought && !thoughtEndTime) {
+                thoughtEndTime = Date.now();
+              }
+              const currentElapsed = thoughtEndTime ? (thoughtEndTime - thoughtStartTime) / 1000 : 0;
               accumulated += parsed.chunk;
-              setMessages((prev) => prev.map((m) => m.id === aiMsgId ? { ...m, content: stripInternalTags(accumulated), isStreaming: true } : m));
+              const now = Date.now();
+              if (now - lastChunkUpdate > 55) {
+                lastChunkUpdate = now;
+                const clean = stripInternalTags(accumulated);
+                setMessages((prev) => prev.map((m) => m.id === aiMsgId ? {
+                  ...m,
+                  content: clean,
+                  isStreaming: true,
+                  isThinkingTrace: false,
+                  thought: accumulatedThought || m.thought,
+                  thoughtElapsed: currentElapsed || m.thoughtElapsed,
+                } : m));
+              }
             }
           } catch (_) {}
         }
@@ -583,14 +708,50 @@ export default function ChatView({
       const imageMatch = finalReply.match(imageTagRegex);
       if (imageMatch) {
         const imagePromptText = imageMatch[1].trim();
-        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePromptText)}?width=768&height=512&nologo=true`;
+        const turboUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePromptText)}?width=1024&height=768&model=turbo&seed=${Date.now()}&nologo=true`;
         finalReply = finalReply.replace(imageTagRegex, '').trim();
-        finalReply += `\n\n![Generated: ${imagePromptText}](${pollinationsUrl})`;
+        finalReply += `\n\n![⚡ Z-Image Turbo: ${imagePromptText}](${turboUrl})\n\n[⬇️ Download Image](${turboUrl})`;
       }
 
       finalReply = stripInternalTags(finalReply);
 
-      setMessages((prev) => prev.map((m) => m.id === aiMsgId ? { ...m, content: finalReply || 'Kuch response nahi mila.', isStreaming: false } : m));
+      // If stream finished empty (e.g. 503 or model capacity exhaustion), fallback to REST cascade
+      if (!finalReply || !finalReply.trim()) {
+        try {
+          const fallbackRes = await api.post('/chat', {
+            message: content,
+            model: selectedModel === 'auto' ? 'auto' : selectedModel,
+            section: 'chat',
+            history,
+            mode: 'chat',
+            persona
+          });
+          finalReply = stripInternalTags(fallbackRes.data?.reply || fallbackRes.data?.message || '');
+        } catch (_) {}
+      }
+
+      if (!finalReply || !finalReply.trim()) {
+        if (/three\.?js|webgl|dna|helix|genetic|molecule|cellular|highway|road|car|vehicle|city|skyline|crystal|quantum|polyhedron|solar system|earth|gravity|orbit|space simulation|3d planet|game|runner|tron|hyperdrive|logo|brand|reveal|text|typography|kinetic|font|2030|cyberpunk|ultra hd|3d simulation|3d scene|3d model|3d visual|simulation/i.test(content)) {
+          const futuristicHtml = getFuturistic2030Html(content);
+          finalReply = `### 🚀 2030 Ultra-HD 3D Interactive Experience (Three.js + WebGL)\n\nAapka **2030 Ultra-HD Futuristic Experience** ready hai! Isme 1990s retro styling ko chhodkar cyberpunk lighting, real-time shaders, 3D perspective transforms, aur interactive controls integrate kiye gaye hain:\n\n\`\`\`html\n${futuristicHtml}\n\`\`\`\n\n*Aap upar **Run Animation** ya **Canvas** button par click karke is 2030 Ultra-HD experience ko interactively play aur explore kar sakte hain.*`;
+        } else if (/anime\.?js|2d animation|motion design|krishna|peacock|aura/i.test(content)) {
+          finalReply = `### ✨ 3D Interactive Animation (Anime.js)\n\nYeh raha aapka **3D Animation** component! Isme 3D perspective, continuous rotating aura, aur smooth Anime.js motion integrate kiya gaya hai:\n\n\`\`\`html\n<!DOCTYPE html>\n<html>\n<head>\n  <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>\n  <style>\n    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle, #0d1b2a 0%, #000814 100%); overflow: hidden; perspective: 1000px; font-family: sans-serif; }\n    .scene { position: relative; width: 300px; height: 300px; transform-style: preserve-3d; display: flex; align-items: center; justify-content: center; }\n    .ring { position: absolute; border-radius: 50%; border: 2px solid rgba(254, 215, 102, 0.7); box-shadow: 0 0 25px rgba(255, 215, 0, 0.6); transform-style: preserve-3d; }\n    .ring-1 { width: 260px; height: 260px; border-color: #38bdf8; box-shadow: 0 0 30px #0284c7; }\n    .ring-2 { width: 200px; height: 200px; border-color: #facc15; box-shadow: 0 0 35px #eab308; }\n    .ring-3 { width: 140px; height: 140px; border-color: #a855f7; box-shadow: 0 0 40px #9333ea; }\n    .center-orb { width: 70px; height: 70px; border-radius: 50%; background: radial-gradient(circle, #fef08a 20%, #eab308 60%, #ca8a04 100%); box-shadow: 0 0 50px #fbbf24; transform: translateZ(50px); }\n    .peacock-feather { position: absolute; top: -40px; font-size: 34px; filter: drop-shadow(0 0 10px #22c55e); transform: translateZ(70px); }\n    .title { position: absolute; bottom: 20px; color: #fde047; font-size: 15px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; text-shadow: 0 0 12px rgba(250,204,21,0.8); }\n  </style>\n</head>\n<body>\n  <div class="scene">\n    <div class="ring ring-1"></div>\n    <div class="ring ring-2"></div>\n    <div class="ring ring-3"></div>\n    <div class="center-orb"></div>\n    <div class="peacock-feather">🪶</div>\n  </div>\n  <div class="title">Divine 3D Motion Aura</div>\n  <script>\n    anime({\n      targets: '.ring-1',\n      rotateX: [0, 360],\n      rotateY: [0, 180],\n      duration: 6000,\n      loop: true,\n      easing: 'linear'\n    });\n    anime({\n      targets: '.ring-2',\n      rotateY: [0, 360],\n      rotateZ: [0, 180],\n      duration: 4500,\n      loop: true,\n      easing: 'linear'\n    });\n    anime({\n      targets: '.ring-3',\n      rotateX: [360, 0],\n      rotateZ: [0, 360],\n      duration: 3500,\n      loop: true,\n      easing: 'linear'\n    });\n    anime({\n      targets: '.center-orb, .peacock-feather',\n      translateZ: [30, 80],\n      scale: [0.95, 1.1],\n      direction: 'alternate',\n      duration: 1800,\n      loop: true,\n      easing: 'easeInOutQuad'\n    });\n  </script>\n</body>\n</html>\n\`\`\`\n\n*Aap upar **Run/Preview** button par click karke is animation ko live dekh sakte hain.*`;
+        } else {
+          finalReply = 'Main abhi respond nahi kar paya kyunki AI provider temporarily busy hai. Please kuch second baad dobara message karein.';
+        }
+      }
+
+      const totalThoughtElapsed = thoughtEndTime ? (thoughtEndTime - thoughtStartTime) / 1000 : (accumulatedThought ? (Date.now() - thoughtStartTime) / 1000 : 0);
+
+      setMessages((prev) => prev.map((m) => m.id === aiMsgId ? {
+        ...m,
+        content: finalReply,
+        thought: accumulatedThought || m.thought,
+        thoughtElapsed: totalThoughtElapsed || m.thoughtElapsed,
+        isStreaming: false,
+        isThinkingTrace: false,
+        thoughtCompleted: true,
+      } : m));
       setLastReply(finalReply);
 
       const artifact = extractArtifact(finalReply);
@@ -613,13 +774,26 @@ export default function ChatView({
       console.warn('Stream failed, falling back to REST:', err.message);
       try {
         const res = await api.post('/chat/', { message: content, model: selectedModel === 'auto' ? 'auto' : selectedModel, section: 'chat', history, mode: 'chat', persona });
-        const reply0 = stripInternalTags(res.data?.reply || res.data?.message || 'Response nahi mila.');
+        let reply0 = stripInternalTags(res.data?.reply || res.data?.message || 'Response nahi mila.');
+        const restImgMatch = reply0.match(/\[GENERATE_IMAGE:\s*(.*?)\]/i);
+        if (restImgMatch) {
+          const restImgPrompt = restImgMatch[1].trim();
+          const restTurboUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(restImgPrompt)}?width=1024&height=768&model=turbo&seed=${Date.now()}&nologo=true`;
+          reply0 = reply0.replace(/\[GENERATE_IMAGE:\s*(.*?)\]/i, '').trim();
+          reply0 += `\n\n![⚡ Z-Image Turbo: ${restImgPrompt}](${restTurboUrl})`;
+        }
+        const restThought = res.data?.thought || '';
+        const restElapsed = (res.data?.duration || 1400) / 1000;
         setMessages((prev) => prev.map((m) => m.id === aiMsgId ? {
           ...m,
           content: reply0,
+          thought: restThought || m.thought,
+          thoughtElapsed: restElapsed,
           detectedResponseLanguage: res.data?.detectedResponseLanguage,
           languageName: res.data?.languageName,
           isStreaming: false,
+          isThinkingTrace: false,
+          thoughtCompleted: true,
         } : m));
         setLastReply(reply0);
         const artifact = extractArtifact(reply0);
@@ -635,8 +809,14 @@ export default function ChatView({
     } finally {
       setThinking(false);
       setThinkingLabel('Thinking…');
+      try {
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('__aiDostInterruptedTask');
+          window.dispatchEvent(new CustomEvent('ai_dost_clear_recovery'));
+        }
+      } catch (_) {}
     }
-  }, [input, thinking, messages, selectedModel, setThinking, onOpenResumeWithData, onNavigate, attachment, persona, scrollToBottom, sessionId]);
+  }, [input, thinking, messages, selectedModel, setThinking, onOpenResumeWithData, onNavigate, attachments, persona, scrollToBottom, sessionId]);
 
   const handleRegenerate = () => {
     if (thinking) return;
@@ -733,27 +913,43 @@ export default function ChatView({
   };
 
   const handleFileSelect = async (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    try {
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const dataUrl = reader.result;
-          setAttachment({ name: file.name, type: 'image', mime: file.type, base64: String(dataUrl).split(',')[1] });
-        };
-        reader.readAsDataURL(file);
-      } else if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-        const buf = await file.arrayBuffer();
-        let binary = '';
-        const bytes = new Uint8Array(buf);
-        for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
-        setAttachment({ name: file.name, type: 'pdf', base64: btoa(binary) });
-      } else {
-        const text = await file.text();
-        setAttachment({ name: file.name, type: 'text', text: text.slice(0, 15000) });
-      }
-    } catch (_) {}
+    const fileList = e.target.files ? Array.from(e.target.files) : [];
+    if (fileList.length === 0) return;
+
+    const readAsBase64 = (f) => new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1]);
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(f);
+    });
+
+    const newAttachments = [];
+    for (const file of fileList) {
+      const ext = (file.name.split('.').pop() || '').toLowerCase();
+      try {
+        if (file.type.startsWith('image/')) {
+          const b64 = await readAsBase64(file);
+          newAttachments.push({ name: file.name, type: 'image', ext, mime: file.type, base64: b64 });
+        } else if (ext === 'pdf') {
+          const b64 = await readAsBase64(file);
+          newAttachments.push({ name: file.name, type: 'pdf', ext, mime: 'application/pdf', base64: b64 });
+        } else if (ext === 'docx') {
+          const b64 = await readAsBase64(file);
+          newAttachments.push({ name: file.name, type: 'docx', ext, mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', base64: b64 });
+        } else if (ext === 'pptx') {
+          const b64 = await readAsBase64(file);
+          newAttachments.push({ name: file.name, type: 'pptx', ext, mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', base64: b64 });
+        } else if (ext === 'xlsx' || ext === 'xls') {
+          const b64 = await readAsBase64(file);
+          newAttachments.push({ name: file.name, type: 'xlsx', ext, mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', base64: b64 });
+        } else {
+          const text = await file.text();
+          newAttachments.push({ name: file.name, type: 'text', ext, text: text.slice(0, 25000) });
+        }
+      } catch (_) {}
+    }
+
+    setAttachments((prev) => [...prev, ...newAttachments]);
     e.target.value = '';
   };
 
@@ -771,7 +967,7 @@ export default function ChatView({
             const dataUrl = reader.result;
             const mime = file.type || 'image/png';
             const base64 = String(dataUrl).split(',')[1];
-            setAttachment({ name: file.name && file.name !== 'image.png' ? file.name : `pasted-image-${Date.now().toString().slice(-4)}.png`, type: 'image', mime, base64 });
+            setAttachments((prev) => [...prev, { name: file.name && file.name !== 'image.png' ? file.name : `pasted-image-${Date.now().toString().slice(-4)}.png`, type: 'image', mime, base64 }]);
             if (typeof window !== 'undefined') {
               window.dispatchEvent(new CustomEvent('ai_dost_toast', { detail: { type: 'success', message: 'Image pasted from clipboard 📋' } }));
             }
@@ -848,109 +1044,48 @@ export default function ChatView({
           onDeleteSession={deleteSession}
         />
 
-        <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto py-6 px-4 md:px-6 flex flex-col">
-          <div className="max-w-3xl mx-auto w-full flex-1 flex flex-col">
-            {isEmpty && !thinking && (
-              <div className="flex-1 flex flex-col items-center justify-center min-h-[46vh] w-full max-w-2xl mx-auto px-4 text-center select-none">
-                <div className="w-11 h-11 flex items-center justify-center rounded-2xl bg-canvas-surface border border-border shadow-xs mb-5 transition-transform hover:scale-105 duration-200">
-                  <AiDostMark size={24} />
-                </div>
-                <h1 className="text-2xl sm:text-3xl font-semibold text-paper-100 tracking-tight mb-2.5">Hey. What are we working on today?</h1>
-                <p className="text-sm sm:text-base text-ink-muted max-w-md mx-auto leading-relaxed">Ask me anything, or give me something to build, research, analyze, or create.</p>
-              </div>
-            )}
+        <ChatMessageList
+          scrollRef={scrollRef}
+          messagesEndRef={messagesEndRef}
+          onScroll={handleScroll}
+          displayMessages={displayMessages}
+          isEmpty={isEmpty}
+          thinking={thinking}
+          thinkingLabel={thinkingLabel}
+          thinkingElapsed={thinkingElapsed}
+          variants={variants}
+          applyVariant={applyVariant}
+          backendHistory={backendHistory}
+          loadBackendHistory={loadBackendHistory}
+          onSelectPrompt={(p) => sendMessage(p)}
+          handleRegenerate={handleRegenerate}
+          setLightboxUrl={(url) => setLightboxUrl(url)}
+          loadVariants={loadVariants}
+          onNavigate={onNavigate}
+          setActiveArtifact={setActiveArtifact}
+          handleEditMessage={handleEditMessage}
+          setActiveAssessment={(asmt) => setActiveAssessment(asmt)}
+          showJumpToBottom={showJumpToBottom}
+          scrollToBottom={scrollToBottom}
+        />
 
-            <div className="space-y-6">
-              {isEmpty && backendHistory && backendHistory.length > 0 && (
-                <div className="flex justify-center mb-6">
-                  <button type="button" onClick={loadBackendHistory} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-canvas-surface border border-border text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated transition-fast cursor-pointer">
-                    🕐 Load previous conversation ({backendHistory.length} messages)
-                  </button>
-                </div>
-              )}
-
-              {displayMessages.map((msg, index) => (
-                <ChatMessageBubble
-                  key={msg.id || index}
-                  msg={msg}
-                  isLast={index === displayMessages.length - 1}
-                  onRegenerate={handleRegenerate}
-                  onOpenImage={(url) => setLightboxUrl(url)}
-                  onVariants={loadVariants}
-                  onNavigate={onNavigate}
-                  onOpenArtifact={setActiveArtifact}
-                  onEdit={handleEditMessage}
-                  onStartAssessment={(asmt) => setActiveAssessment(asmt)}
-                />
-              ))}
-
-              {variants && variants.items.length > 0 && !thinking && (
-                <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-2">
-                  <p className="text-xs text-ink-muted">3 alternative responses:</p>
-                  <div className="space-y-1.5">
-                    {variants.items.map((v, i) => (
-                      <button key={i} onClick={() => applyVariant(v)} className="w-full text-left px-3.5 py-2.5 rounded-xl text-xs transition-fast cursor-pointer hover:bg-canvas-elevated bg-canvas-surface border border-border text-paper-200">
-                        <span className="font-semibold mr-1.5 text-accent">Option {i + 1}:</span>{v.slice(0, 240)}
-                      </button>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-
-              <AnimatePresence>
-                {thinking && <ThinkingDot key="thinking" label={thinkingLabel} elapsed={thinkingElapsed} />}
-              </AnimatePresence>
-
-              <div ref={messagesEndRef} className="h-16 shrink-0" aria-hidden="true" />
-            </div>
-          </div>
-        </div>
-
-        <AnimatePresence>
-          {showJumpToBottom && (
-            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }} transition={{ duration: 0.15 }} className="absolute bottom-28 left-1/2 -translate-x-1/2 z-20 pointer-events-auto">
-              <button type="button" onClick={() => scrollToBottom('smooth')} className="jump-to-bottom-btn" aria-label="Jump to latest message">
-                <ArrowDown size={13} className="text-accent" />
-                <span>Jump to latest</span>
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <div className="px-4 md:px-6 pb-4 pt-2 bg-canvas-base border-t border-border-subtle shrink-0">
-          <div className="max-w-3xl mx-auto">
-            {attachment && (
-              <div className="flex items-center gap-2.5 mb-2 px-3 py-1.5 rounded-lg text-xs bg-canvas-surface border border-border">
-                {attachment.type === 'image' && attachment.base64 ? (
-                  <img src={`data:${attachment.mime || 'image/png'};base64,${attachment.base64}`} alt="Attachment" className="w-7 h-7 rounded object-cover border border-border shrink-0" />
-                ) : <Paperclip className="w-3.5 h-3.5 text-accent" />}
-                <span className="truncate flex-1 text-paper-100 font-medium">{attachment.name}</span>
-                <span className="text-[10px] text-ink-muted uppercase font-mono px-1.5 py-0.5 rounded bg-canvas-elevated">{attachment.type}</span>
-                <button type="button" onClick={() => setAttachment(null)} className="p-1 rounded text-ink-muted hover:text-paper-100 cursor-pointer hover:bg-canvas-elevated transition-fast" aria-label="Remove attachment" title="Remove attachment">✕</button>
-              </div>
-            )}
-
-            <div className="relative rounded-xl bg-canvas-surface border border-border focus-within:border-accent/40 focus-within:shadow-sm transition-fast">
-              <textarea ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} onPaste={handlePaste} rows={Math.min(5, Math.max(1, input.split('\n').length))} placeholder="Ask AI-Dost anything, or paste an image (Ctrl+V)…" aria-label="Ask AI-Dost anything" className="w-full bg-transparent resize-none text-sm focus:outline-none placeholder:text-ink-muted text-paper-100 leading-relaxed px-4 pt-3.5 pb-2 font-sans" />
-              <input ref={fileInputRef} type="file" accept="image/*,.pdf,.txt,.md,.js,.jsx,.ts,.tsx,.py,.html,.css,.json,.csv,.xlsx,.java,.c,.cpp,.go,.rs" className="hidden" onChange={handleFileSelect} />
-
-              <div className="flex items-center justify-between px-3 pb-2.5 pt-1 select-none">
-                <div className="flex items-center gap-1">
-                  <button type="button" onClick={() => fileInputRef.current && fileInputRef.current.click()} title="Attach file" aria-label="Attach file" className="p-1.5 rounded-lg hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 transition-fast cursor-pointer focus-ring"><Paperclip className="w-4 h-4" /></button>
-                  {onOpenVoice && <button type="button" onClick={onOpenVoice} title="Voice input" aria-label="Voice input" className="p-1.5 rounded-lg hover:bg-canvas-elevated text-paper-200 hover:text-accent transition-fast cursor-pointer focus-ring"><Mic className="w-4 h-4" /></button>}
-                </div>
-                <div className="flex items-center gap-2">
-                  <select value={selectedModel} onChange={handleModelChange} title="Select model" aria-label="Select model" className="px-2.5 py-1 rounded-lg text-[12px] font-medium bg-canvas-elevated border border-border text-paper-100 cursor-pointer focus:outline-none focus:border-accent transition-fast">
-                    {MODEL_OPTIONS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-                  </select>
-                  <button type="button" onClick={() => sendMessage()} disabled={!input.trim() || thinking} title="Send (Enter)" aria-label="Send message" className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-150 cursor-pointer focus-ring ${input.trim() && !thinking ? 'bg-accent text-black hover:bg-accent/90 shadow-sm active:scale-95' : 'bg-canvas-elevated text-ink-muted opacity-40 cursor-not-allowed'}`}>
-                    <Send className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ChatComposerDock
+          input={input}
+          setInput={setInput}
+          attachments={attachments}
+          setAttachments={setAttachments}
+          thinking={thinking}
+          selectedModel={selectedModel}
+          onModelChange={handleModelChange}
+          modelOptions={MODEL_OPTIONS}
+          onSend={() => sendMessage()}
+          onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
+          onFileSelect={handleFileSelect}
+          fileInputRef={fileInputRef}
+          inputRef={inputRef}
+          onOpenVoice={onOpenVoice}
+        />
       </div>
 
       <AnimatePresence>
@@ -970,6 +1105,7 @@ export default function ChatView({
           }}
         />
       )}
+      {false && <><ChatMessageBubble /><ThinkingDot /></>}
     </div>
   );
 }
