@@ -16,9 +16,14 @@ const phaseIcon = (status) => {
 function mergeEvent(prev, event) {
   if (!event?.taskId) return prev;
   const current = prev[event.taskId] || { taskId: event.taskId, items: [], phase: 'idle', terminal: false };
+  const labelRaw = event.label || event.phase || 'Processing';
+  const safeLabel = typeof labelRaw === 'object' && labelRaw !== null
+    ? (labelRaw.label || labelRaw.title || labelRaw.action || labelRaw.id || 'Processing')
+    : String(labelRaw);
+    
   const item = {
     id: event.id,
-    label: event.label || event.phase || 'Processing',
+    label: safeLabel,
     phase: event.phase || 'processing',
     ts: event.ts || Date.now(),
     status: event.type === 'task_canceled'
@@ -103,8 +108,24 @@ export default function TaskActivityOverlay() {
       }
       if (detail.type === 'task_error') setRecovery(readRecovery());
     };
+    const handleClearRecovery = () => {
+      setRecovery(null);
+    };
+
+    const handleStorage = (e) => {
+      if (e.key === RECOVERY_KEY && !e.newValue) {
+        setRecovery(null);
+      }
+    };
+
     window.addEventListener('ai_dost_task_event', handle);
-    return () => window.removeEventListener('ai_dost_task_event', handle);
+    window.addEventListener('ai_dost_clear_recovery', handleClearRecovery);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('ai_dost_task_event', handle);
+      window.removeEventListener('ai_dost_clear_recovery', handleClearRecovery);
+      window.removeEventListener('storage', handleStorage);
+    };
   }, []);
 
   useEffect(() => {
@@ -180,10 +201,10 @@ export default function TaskActivityOverlay() {
         </div>
       </div>
       <div className="space-y-1.5">
-        {active.items.slice(-5).map((item) => {
+        {active.items.slice(-5).map((item, idx) => {
           const Icon = phaseIcon(item.status);
           return (
-            <div key={item.id} className="flex items-center gap-2 text-[11px] text-paper-200">
+            <div key={`${item.id || item.label || 'phase'}-${item.ts || ''}-${idx}`} className="flex items-center gap-2 text-[11px] text-paper-200">
               <Icon className={`w-3.5 h-3.5 shrink-0 ${item.status === 'running' ? 'animate-spin' : ''}`} />
               <span className="truncate">{item.label}</span>
             </div>
