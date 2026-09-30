@@ -143,7 +143,7 @@ test('AI-Dost 2.0 Code Diff Enforcement Hardening (Grade B -> Grade A)', async (
     assert.strictEqual(res.code, 'WRITE_FORBIDDEN_ON_EXISTING');
   });
 
-  await t.test('Write: allowOverwrite explicit flag permits legitimate replacement (e.g. rollback/scaffold)', async () => {
+  await t.test('Write: LLM-supplied allowOverwrite flag cannot bypass existing-file protection (P2 #59)', async () => {
     const filePath = path.join(tempWs, 'src/app.js');
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, 'const v1 = 1;', 'utf-8');
@@ -154,8 +154,11 @@ test('AI-Dost 2.0 Code Diff Enforcement Hardening (Grade B -> Grade A)', async (
       content: 'const v2 = 2;',
       allowOverwrite: true
     });
-    assert.strictEqual(res.success, true);
-    assert.strictEqual(fs.readFileSync(filePath, 'utf-8'), 'const v2 = 2;');
+    // allowOverwrite was an LLM-controlled bypass — removed; full replacement
+    // of existing files must go through apply_diff, flag or no flag.
+    assert.strictEqual(res.success, false);
+    assert.strictEqual(res.code, 'WRITE_FORBIDDEN_ON_EXISTING');
+    assert.strictEqual(fs.readFileSync(filePath, 'utf-8'), 'const v1 = 1;');
   });
 
   // ── GROUP 3: SECURITY & SAFE PATH PARITY ──────────────────────────────────

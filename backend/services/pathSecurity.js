@@ -16,9 +16,15 @@ const BLOCKED_SECRET_PATTERNS = [
   /credentials(?:\.json)?$/i,  // cloud credentials
 ];
 
+// Scaffold templates carry PLACEHOLDER values only (never real secrets) —
+// blocking them broke generate_project_from_prompt whenever the LLM/golden
+// scaffold emitted a standard `.env.example`.
+const ENV_TEMPLATE_ALLOWLIST = /^\.env\.(?:example|sample|template)$/i;
+
 function isProtectedSecretFile(targetPath) {
   if (!targetPath || typeof targetPath !== 'string') return true;
   const basename = path.basename(targetPath).toLowerCase();
+  if (ENV_TEMPLATE_ALLOWLIST.test(basename)) return false;
   return BLOCKED_SECRET_PATTERNS.some(regex => regex.test(basename));
 }
 

@@ -632,8 +632,14 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
         const targetDir = safeJoin(projectPath, requestedDir);
 
         const isExplicitNew = /\b(new project|naya project|scratch se|brand new|create a new (?:app|project|website)|build a new (?:app|project|website)|generate a new (?:app|project|website)|scaffold a new)\b/i.test(prompt);
+        // Ephemeral agent workspace (agent-ws-* under %TEMP%) is scratch by
+        // design — repeat scaffolds there must not be treated as "existing
+        // project" (they blocked every run after the first one).
+        const targetResolved = path.resolve(String(targetDir));
+        const isScratchWorkspace = /agent-ws-/i.test(targetResolved)
+          && targetResolved.startsWith(path.resolve(os.tmpdir()));
         const hasExisting = (projectFiles && Array.isArray(projectFiles) && projectFiles.length > 0) || (fs.existsSync(targetDir) && fs.readdirSync(targetDir).filter(f => f !== 'node_modules' && !f.startsWith('.')).length > 0);
-        if (hasExisting && !isExplicitNew) {
+        if (hasExisting && !isExplicitNew && !isScratchWorkspace) {
           logger.warn(`[Agent] Blocked generate_project_from_prompt on existing project: "${prompt}"`);
           return {
             success: false,
@@ -748,7 +754,12 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
           const writtenFiles = [];
           for (let i = 0; i < parsedData.files.length; i++) {
             const file = parsedData.files[i];
-            const safePath = safeJoin(targetDir, file.path);
+            let safePath;
+            try {
+              safePath = safeJoin(targetDir, file.path);
+            } catch (_) {
+              continue; // one protected/invalid path must not abort the whole scaffold
+            }
             try {
               fs.mkdirSync(path.dirname(safePath), { recursive: true });
               fs.writeFileSync(safePath, file.content || '', 'utf-8');
@@ -2552,16 +2563,26 @@ router.post('/run', async (req, res) => {
           thought: 'Architecting and generating complete production full-stack project scaffold...'
         });
         const toolResult = await executeTool('generate_project_from_prompt', { prompt: userPrompt, targetDir: workspacePath }, workspacePath, existingProjectFiles, send, projectId || 'default');
+        const scaffoldOk = toolResult?.success !== false;
         const stepLog = {
           step: 1,
           taskId: activeTaskId,
-          thought: 'Project scaffold generated successfully',
+          thought: scaffoldOk ? 'Project scaffold generated successfully' : `Scaffold failed: ${toolResult?.error || 'unknown error'}`,
           action: 'generate_project_from_prompt',
           parameters: { prompt: userPrompt, targetDir: workspacePath },
           result: toolResult
         };
         steps.push(stepLog);
         send({ type: 'step', stepLog });
+        if (!scaffoldOk) {
+          // Propagate REAL failure — previously this reported fake success and
+          // marked every plan task completed even when the tool was blocked.
+          const failMsg = String(toolResult?.error || toolResult?.message || 'Scaffold failed');
+          send({ type: 'error', message: `Scaffold failed: ${failMsg}` });
+          send({ type: 'done', message: `❌ Scaffold failed: ${failMsg}`, steps, plan });
+          try { res.end(); } catch (_) {}
+          return;
+        }
         plan.tasks.forEach(t => t.status = 'completed');
         send({ type: 'plan', plan });
         send({
