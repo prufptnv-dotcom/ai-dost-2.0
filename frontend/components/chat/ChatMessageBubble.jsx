@@ -3,11 +3,13 @@ import { motion } from 'framer-motion';
 import {
   ArrowRight,
   Check,
+  ClipboardList,
   Copy,
   ExternalLink,
   Eye,
   Globe,
   LayoutTemplate,
+  Loader2,
   Paperclip,
   Pencil,
   RefreshCw,
@@ -140,6 +142,34 @@ function ChatMessageBubble({
               isThinking={msg.isThinkingTrace}
               elapsed={msg.thoughtElapsed || 0}
             />
+          )}
+
+          {!isUser && Array.isArray(msg.agentPlan) && msg.agentPlan.length > 0 && (
+            <div className="mb-2 rounded-lg border border-border bg-canvas-elevated/60 px-2.5 py-2" data-testid="bubble-plan">
+              <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
+                <ClipboardList className="w-3 h-3" /> Plan
+              </div>
+              <ol className="space-y-1">
+                {msg.agentPlan.slice(0, 8).map((task, idx) => {
+                  const status = String(task?.status || '').toLowerCase();
+                  const done = ['done', 'completed', 'success'].includes(status);
+                  const active = status === 'in_progress' || status === 'running';
+                  const title = String(task?.title || task?.label || task?.action || '').trim() || `Step ${idx + 1}`;
+                  return (
+                    <li key={task?.id || idx} className="flex items-center gap-1.5 text-[11px] text-paper-200">
+                      {done ? (
+                        <Check className="w-3 h-3 shrink-0 text-emerald-400" data-testid="bubble-plan-done" />
+                      ) : active ? (
+                        <Loader2 className="w-3 h-3 shrink-0 animate-spin text-accent" data-testid="bubble-plan-active" />
+                      ) : (
+                        <span className="w-3 shrink-0 text-center text-[9px] text-ink-muted">{idx + 1}</span>
+                      )}
+                      <span className={`truncate ${done ? 'text-ink-muted line-through' : ''}`} title={title}>{title}</span>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
           )}
 
           {isStreaming && (!msg.content || msg.content.length === 0) ? (
@@ -338,6 +368,7 @@ function areMessagePropsEqual(prev, next) {
   if (prev.msg.content !== next.msg.content) return false;
   if (Boolean(prev.msg.isStreaming) !== Boolean(next.msg.isStreaming)) return false;
   if (prev.msg.meta !== next.msg.meta) return false;
+  if (prev.msg.agentPlan !== next.msg.agentPlan) return false;
   if (prev.isLast !== next.isLast) return false;
   if (prev.msg.imageAttachment !== next.msg.imageAttachment) return false;
   if (prev.msg.role !== next.msg.role) return false;

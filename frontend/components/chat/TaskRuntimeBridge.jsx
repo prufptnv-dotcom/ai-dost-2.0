@@ -341,6 +341,12 @@ export default function TaskRuntimeBridge() {
             const emit = (payload) => {
               const event = normalizeServerEvent(taskId, payload);
               if (!event) return;
+              // Plan snapshots live on the marker so useChatStream (which
+              // attaches its listener only after the body drains) can render
+              // the checklist in the chat bubble without missing early events.
+              if (Array.isArray(event.tasks) && event.tasks.length && task.agentMarker) {
+                task.agentMarker.agentPlan = event.tasks;
+              }
               if (event.type === TASK_EVENT_TYPES.APPROVAL) {
                 task.approvalPending = true;
                 task.paused = false;

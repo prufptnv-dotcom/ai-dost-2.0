@@ -725,6 +725,16 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
           }
 
           // Clean out stale files from sqlite and workspace disk for this project
+          // Snapshot BEFORE the DELETE below — the UI renders per-file diffs
+          // (Devin-style patch view) against the pre-regeneration content.
+          const PREV_CAP = 120000;
+          const previousByPath = new Map();
+          try {
+            for (const row of getProjectFiles(projectId || 'default')) {
+              const content = typeof row.content === 'string' ? row.content : '';
+              previousByPath.set(row.path, content.length <= PREV_CAP ? content : null);
+            }
+          } catch (_) {}
           try {
             const { getDatabase } = require('../db');
             // P3 #7: keep dotfile rows (.env, .gitignore, .dockerignore …) in
@@ -792,10 +802,16 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
             }
 
             if (onProgress) {
+              const hadPrevious = previousByPath.has(file.path);
+              const prevContent = hadPrevious ? previousByPath.get(file.path) : null;
               onProgress({ 
                 type: 'file_written', 
                 file: file.path, 
                 content: file.content,
+                // Diff data for the patch view: null previous + isNew means a
+                // brand-new file; a too-large previous is treated as new too.
+                previous: hadPrevious ? prevContent : null,
+                isNew: !hadPrevious || prevContent === null,
                 progress: `${i + 1}/${parsedData.files.length}` 
               });
             }

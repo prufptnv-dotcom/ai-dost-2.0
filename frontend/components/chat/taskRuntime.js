@@ -103,7 +103,11 @@ export function normalizeServerEvent(taskId, payload) {
   }
   if (type === 'plan') {
     const tasks = payload.plan?.tasks || [];
-    return { ...base, type: TASK_EVENT_TYPES.PHASE, phase: 'planning', label: `Plan taiyar — ${tasks.length} step${tasks.length === 1 ? '' : 's'}` };
+    return { ...base, type: TASK_EVENT_TYPES.PHASE, phase: 'planning', label: `Plan taiyar — ${tasks.length} step${tasks.length === 1 ? '' : 's'}`, ...(tasks.length ? { tasks } : {}) };
+  }
+  if (type === 'plan_tasks') {
+    const tasks = Array.isArray(payload.tasks) ? payload.tasks : [];
+    return { ...base, type: TASK_EVENT_TYPES.PHASE, phase: 'planning', label: `Plan update — ${tasks.length} step${tasks.length === 1 ? '' : 's'}`, ...(tasks.length ? { tasks } : {}) };
   }
   if (type === 'agent_status') {
     return { ...base, type: TASK_EVENT_TYPES.PHASE, phase: 'processing', label: firstLine(payload.message, 140) };

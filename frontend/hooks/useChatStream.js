@@ -177,6 +177,19 @@ export async function streamChatResponse({
     if (!finalReply || !finalReply.trim()) {
       const marker = typeof window !== 'undefined' ? window[BLOCK_FALLBACK_KEY] : null;
       if (marker && marker.kind === 'agent') {
+        // Live plan checklist in the chat bubble while the run executes
+        // (marker.agentPlan covers events fired before this listener attached).
+        const applyPlan = (tasks) => {
+          if (!Array.isArray(tasks) || !tasks.length) return;
+          setMessages((prev) => prev.map((m) => (m.id === aiMsgId ? { ...m, agentPlan: tasks } : m)));
+        };
+        if (Array.isArray(marker.agentPlan)) applyPlan(marker.agentPlan);
+        const onTaskEvent = (evt) => {
+          const detail = evt?.detail;
+          if (!detail || (marker.taskId && detail.taskId && detail.taskId !== marker.taskId)) return;
+          applyPlan(detail.tasks);
+        };
+        window.addEventListener('ai_dost_task_event', onTaskEvent);
         try {
           if (marker.settled) {
             finalReply = marker.reply || '';
@@ -209,6 +222,8 @@ export async function streamChatResponse({
         } catch (err) {
           if (err?.name === 'AbortError' || signal?.aborted) throw err;
           finalReply = '';
+        } finally {
+          window.removeEventListener('ai_dost_task_event', onTaskEvent);
         }
       } else {
         try {

@@ -102,12 +102,37 @@ describe('task runtime', () => {
 
   test('normalizes plan, agent_status, step and gate_approved events', () => {
     expect(normalizeServerEvent('task-1', { type: 'plan', plan: { tasks: [1, 2, 3] } }))
-      .toMatchObject({ type: TASK_EVENT_TYPES.PHASE, phase: 'planning', label: 'Plan taiyar — 3 steps' });
+      .toMatchObject({ type: TASK_EVENT_TYPES.PHASE, phase: 'planning', label: 'Plan taiyar — 3 steps', tasks: [1, 2, 3] });
     expect(normalizeServerEvent('task-1', { type: 'agent_status', agent: 'Coder', message: 'Writing files' }))
       .toMatchObject({ type: TASK_EVENT_TYPES.PHASE, label: 'Writing files' });
     expect(normalizeServerEvent('task-1', { type: 'step', stepLog: { action: 'Scaffold project' } }))
       .toMatchObject({ type: TASK_EVENT_TYPES.PHASE, label: 'Scaffold project' });
     expect(normalizeServerEvent('task-1', { type: 'gate_approved', message: 'verified' }))
       .toMatchObject({ type: TASK_EVENT_TYPES.PHASE, phase: 'resuming', resumed: true });
+  });
+
+  test('plan_tasks carries the updated task list for live checklists', () => {
+    const tasks = [
+      { id: 'task-1', title: 'Scaffold app', status: 'completed', files: ['package.json'] },
+      { id: 'task-2', title: 'Wire API', status: 'in_progress' },
+    ];
+    const event = normalizeServerEvent('task-1', { type: 'plan_tasks', tasks });
+    expect(event).toMatchObject({ type: TASK_EVENT_TYPES.PHASE, tasks });
+    expect(event.payload.tasks).toBe(tasks);
+  });
+
+  test('file_written keeps diff payload (content/previous/isNew) accessible via payload', () => {
+    const event = normalizeServerEvent('task-1', {
+      type: 'file_written',
+      file: 'src/App.jsx',
+      content: 'new content',
+      previous: 'old content',
+      isNew: false,
+      progress: '3/12',
+    });
+    expect(event.filePath).toBe('src/App.jsx');
+    expect(event.payload.content).toBe('new content');
+    expect(event.payload.previous).toBe('old content');
+    expect(event.payload.isNew).toBe(false);
   });
 });

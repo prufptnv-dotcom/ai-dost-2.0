@@ -5,6 +5,7 @@ import {
   ChevronUp,
   CircleAlert,
   ClipboardList,
+  FileDiff,
   FilePlus2,
   Loader2,
   RotateCcw,
@@ -12,8 +13,11 @@ import {
   Square,
   XCircle,
 } from 'lucide-react';
+import { diffLines, diffStats } from '../../lib/lineDiff';
 
 const MAX_ITEMS = 10;
+const MAX_FILE_CHARS = 200000;
+const MAX_DIFF_LINES = 400;
 const RECOVERY_KEY = '__aiDostInterruptedTask';
 const RECOVERY_TTL_MS = 15 * 60 * 1000;
 const TERMINAL_CLEANUP_MS = 6000;
@@ -41,11 +45,57 @@ function emptyTask(taskId) {
   };
 }
 
-function upsertFile(files, filePath, kind) {
+function upsertFile(files, filePath, kind, extra = {}) {
   if (!filePath) return files;
+  const base = { path: filePath, kind };
+  if (typeof extra.content === 'string') base.content = extra.content.slice(0, MAX_FILE_CHARS);
+  if (extra.previous !== undefined) {
+    base.previous = typeof extra.previous === 'string' ? extra.previous.slice(0, MAX_FILE_CHARS) : null;
+  }
+  if (typeof extra.isNew === 'boolean') base.isNew = extra.isNew;
   const existing = files.find((f) => f.path === filePath);
-  if (existing) return files.map((f) => (f.path === filePath ? { ...f, kind: f.kind === 'create' ? 'create' : kind } : f));
-  return [...files, { path: filePath, kind }].slice(-20);
+  if (existing) {
+    return files.map((f) => (f.path === filePath ? { ...f, ...base, kind: f.kind === 'create' ? 'create' : kind } : f));
+  }
+  return [...files, base].slice(-20);
+}
+
+function FileDiffView({ file }) {
+  const ops = useMemo(() => diffLines(file.isNew ? '' : file.previous || '', file.content || ''), [file.isNew, file.previous, file.content]);
+  const stats = useMemo(() => diffStats(ops), [ops]);
+  const shown = ops.slice(0, MAX_DIFF_LINES);
+  const hidden = ops.length - shown.length;
+  return (
+    <div className="mt-1 mb-1 overflow-hidden rounded-md border border-border bg-black/40" data-testid="file-diff">
+      <div className="flex items-center gap-2 border-b border-border px-2 py-1 text-[9px] text-ink-muted">
+        <FileDiff className="w-3 h-3 shrink-0" />
+        <span className="min-w-0 flex-1 truncate font-mono" title={file.path}>{file.path}</span>
+        <span className="text-emerald-400">+{stats.added}</span>
+        <span className="text-red-400">-{stats.removed}</span>
+        <span className={`rounded px-1 ${file.isNew ? 'bg-emerald-500/15 text-emerald-300' : 'bg-sky-500/15 text-sky-300'}`}>
+          {file.isNew ? 'NEW' : 'MODIFIED'}
+        </span>
+      </div>
+      <div className="max-h-48 overflow-auto px-1 py-1 font-mono text-[10px] leading-[1.35]">
+        {shown.map((op, idx) => (
+          <div
+            key={idx}
+            className={
+              op.type === 'add'
+                ? 'bg-emerald-500/10 text-emerald-200 whitespace-pre-wrap break-all'
+                : op.type === 'del'
+                  ? 'bg-red-500/10 text-red-200 whitespace-pre-wrap break-all'
+                  : 'text-ink-muted whitespace-pre-wrap break-all'
+            }
+          >
+            {op.type === 'add' ? '+ ' : op.type === 'del' ? '- ' : '  '}
+            {op.text || ' '}
+          </div>
+        ))}
+        {hidden > 0 ? <div className="px-1 pt-1 text-ink-muted">... {hidden} more lines</div> : null}
+      </div>
+    </div>
+  );
 }
 
 function planStepTitle(step) {
@@ -114,7 +164,12 @@ function mergeEvent(prev, event) {
     next.plan = payload.plan;
   }
   if (event.serverType === 'file_written') {
-    next.files = upsertFile(current.files, payload.file || payload.path, 'create');
+    const isNew = payload.isNew !== false;
+    next.files = upsertFile(current.files, payload.file || payload.path, isNew ? 'create' : 'modify', {
+      content: typeof payload.content === 'string' ? payload.content : null,
+      previous: payload.previous,
+      isNew,
+    });
   }
   if (event.serverType === 'tool_call') {
     const tool = String(payload.action || payload.tool || '');
@@ -180,6 +235,7 @@ export default function TaskActivityOverlay() {
   const [recovery, setRecovery] = useState(null);
   const [expanded, setExpanded] = useState(false);
   const [approving, setApproving] = useState(false);
+  const [openFile, setOpenFile] = useState(null);
   // Last task (including a just-terminated one — the cleanup timer removes it
   // after TERMINAL_CLEANUP_MS so the completion summary/error stays readable).
   const active = useMemo(() => Object.values(tasks).at(-1), [tasks]);
@@ -234,6 +290,10 @@ export default function TaskActivityOverlay() {
     if (activeHasApproval) setExpanded(true);
     if (!activeHasApproval) setApproving(false);
   }, [activeHasApproval]);
+
+  useEffect(() => {
+    setOpenFile(null);
+  }, [active?.taskId]);
 
   useEffect(() => {
     const newTimers = [];
@@ -419,14 +479,32 @@ export default function TaskActivityOverlay() {
             <FilePlus2 className="w-3 h-3" /> Files changed
           </div>
           <div className="space-y-1">
-            {active.files.slice(-8).map((file) => (
-              <div key={file.path} className="flex items-center gap-1.5 text-[11px] text-paper-200">
-                <span className={`shrink-0 rounded px-1 text-[9px] ${file.kind === 'create' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-sky-500/15 text-sky-300'}`}>
-                  {file.kind === 'create' ? 'new' : 'edit'}
-                </span>
-                <span className="truncate font-mono" title={file.path}>{file.path}</span>
-              </div>
-            ))}
+            {active.files.slice(-8).map((file) => {
+              const canDiff = typeof file.content === 'string';
+              const isOpen = openFile === file.path;
+              return (
+                <div key={file.path}>
+                  <button
+                    type="button"
+                    onClick={canDiff ? () => setOpenFile(isOpen ? null : file.path) : undefined}
+                    disabled={!canDiff}
+                    aria-expanded={canDiff ? isOpen : undefined}
+                    data-testid={canDiff ? 'file-row' : undefined}
+                    className="flex w-full items-center gap-1.5 text-[11px] text-paper-200 hover:text-white disabled:cursor-default text-left"
+                    title={canDiff ? `${isOpen ? 'Hide' : 'Show'} diff — ${file.path}` : file.path}
+                  >
+                    <span className={`shrink-0 rounded px-1 text-[9px] ${file.kind === 'create' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-sky-500/15 text-sky-300'}`}>
+                      {file.kind === 'create' ? 'new' : 'edit'}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate font-mono" title={file.path}>{file.path}</span>
+                    {canDiff ? (
+                      isOpen ? <ChevronUp className="w-3 h-3 shrink-0 text-ink-muted" /> : <ChevronDown className="w-3 h-3 shrink-0 text-ink-muted" />
+                    ) : null}
+                  </button>
+                  {isOpen && canDiff ? <FileDiffView file={file} /> : null}
+                </div>
+              );
+            })}
           </div>
         </div>
       ) : null}

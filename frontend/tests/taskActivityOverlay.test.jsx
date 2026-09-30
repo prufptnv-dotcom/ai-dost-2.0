@@ -127,4 +127,63 @@ describe('TaskActivityOverlay', () => {
     expect(await screen.findByTestId('completion-summary')).toBeInTheDocument();
     expect(screen.getByText(/Project ban gaya — 3 files/)).toBeInTheDocument();
   });
+
+  it('renders a per-file diff view for written files with previous content', async () => {
+    const taskId = 'chat-diff';
+    render(<TaskActivityOverlay />);
+
+    fireEvent(window, new CustomEvent('ai_dost_task_event', {
+      detail: { id: `${taskId}-start`, taskId, type: 'task_started', phase: 'planning', label: 'Planning', ts: Date.now() },
+    }));
+    // modified file: previous + content + isNew false
+    fireEvent(window, new CustomEvent('ai_dost_task_event', {
+      detail: {
+        id: `${taskId}-file-edit`,
+        taskId,
+        type: 'task_tool',
+        phase: 'processing',
+        label: 'Likh diya: App.jsx',
+        serverType: 'file_written',
+        payload: { file: 'src/App.jsx', previous: 'const a = 1;', content: 'const a = 2;', isNew: false, progress: '1/2' },
+        ts: Date.now(),
+      },
+    }));
+    // brand-new file
+    fireEvent(window, new CustomEvent('ai_dost_task_event', {
+      detail: {
+        id: `${taskId}-file-new`,
+        taskId,
+        type: 'task_tool',
+        phase: 'processing',
+        label: 'Likh diya: server.js',
+        serverType: 'file_written',
+        payload: { file: 'server.js', previous: null, content: 'const express = require("express");', isNew: true, progress: '2/2' },
+        ts: Date.now(),
+      },
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand task session' }));
+    expect(await screen.findByTestId('files-list')).toBeInTheDocument();
+
+    const rows = screen.getAllByTestId('file-row');
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+
+    fireEvent.click(rows[0]);
+    const diff = await screen.findByTestId('file-diff');
+    expect(diff).toBeInTheDocument();
+    expect(diff.textContent).toContain('src/App.jsx');
+    expect(diff.textContent).toContain('MODIFIED');
+    expect(diff.textContent).toContain('- const a = 1;');
+    expect(diff.textContent).toContain('+ const a = 2;');
+    // stats strip
+    expect(diff.textContent).toMatch(/\+1/);
+    expect(diff.textContent).toMatch(/-1/);
+
+    // toggle closes, then NEW file shows all-add diff
+    fireEvent.click(screen.getAllByTestId('file-row')[0]);
+    fireEvent.click(screen.getAllByTestId('file-row')[1]);
+    const newDiff = await screen.findByTestId('file-diff');
+    expect(newDiff.textContent).toContain('NEW');
+    expect(newDiff.textContent).toContain('+ const express');
+  });
 });

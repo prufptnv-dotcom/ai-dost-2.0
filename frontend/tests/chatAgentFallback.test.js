@@ -94,6 +94,7 @@ describe('streamChatResponse — agent-run marker vs REST fallback', () => {
     marker.settled = true;
     marker.reply = '⚠️ Scaffold failed: quota exhausted';
     marker._settle(marker.reply);
+    marker.agentPlan = [{ id: 'task-1', title: 'Scaffold app', status: 'completed' }];
     window[BLOCK_FALLBACK_KEY] = marker;
 
     const h = makeHarness();
@@ -102,6 +103,46 @@ describe('streamChatResponse — agent-run marker vs REST fallback', () => {
     expect(api.post).not.toHaveBeenCalled();
     const finalMsg = h.state.messages.find((m) => m.id === 1);
     expect(finalMsg.content).toBe('⚠️ Scaffold failed: quota exhausted');
+    expect(finalMsg.agentPlan).toHaveLength(1);
+    expect(finalMsg.agentPlan[0].title).toBe('Scaffold app');
+  });
+
+  test('live plan events during the run attach checklist and survive finalization', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, body: makeStream([]) });
+    const marker = makeAgentMarker();
+    marker.agentPlan = [{ id: 'task-1', title: 'Scaffold app', status: 'in_progress' }];
+    window[BLOCK_FALLBACK_KEY] = marker;
+
+    const h = makeHarness();
+    const promise = streamChatResponse(h.args);
+
+    // plan_tasks update arrives while the hook awaits the terminal event
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('ai_dost_task_event', {
+        detail: {
+          taskId: 't1',
+          type: 'task_phase',
+          tasks: [
+            { id: 'task-1', title: 'Scaffold app', status: 'completed' },
+            { id: 'task-2', title: 'Wire API', status: 'pending' },
+          ],
+        },
+      }));
+    }, 10);
+    setTimeout(() => {
+      marker.settled = true;
+      marker.reply = '🚀 Project Generated & Verified';
+      marker._settle(marker.reply);
+    }, 30);
+
+    await promise;
+
+    expect(api.post).not.toHaveBeenCalled();
+    const finalMsg = h.state.messages.find((m) => m.id === 1);
+    expect(finalMsg.content).toBe('🚀 Project Generated & Verified');
+    // checklist applied live AND preserved by the finalization pass
+    expect(finalMsg.agentPlan).toHaveLength(2);
+    expect(finalMsg.agentPlan[1].title).toBe('Wire API');
   });
 
   test('no marker: genuine empty stream still uses the REST fallback', async () => {
