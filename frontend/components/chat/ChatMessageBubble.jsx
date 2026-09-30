@@ -1,5 +1,4 @@
-/* eslint-disable @next/next/no-img-element */
-import { useEffect, useRef, useState } from 'react';
+import React, { memo, useEffect, useRef, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowRight,
@@ -24,8 +23,10 @@ import { AiDostMark } from '../brand/AiDostMark';
 import { AssessmentCard } from '../assessment/AssessmentCard';
 import { extractImages, extractArtifact } from '../../utils/chatContent';
 import ParsedMarkdown from './ParsedMarkdown';
+import FeedbackModal from './FeedbackModal';
+import ThoughtProcessDrawer from './ThoughtProcessDrawer';
 
-export default function ChatMessageBubble({
+function ChatMessageBubble({
   msg,
   onOpenImage,
   onRegenerate,
@@ -40,11 +41,13 @@ export default function ChatMessageBubble({
   const [copied, setCopied] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [feedback, setFeedback] = useState(null);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [feedbackModalType, setFeedbackModalType] = useState('negative');
   const audioRef = useRef(null);
   const isUser = msg.role === 'user';
   const isStreaming = !!msg.isStreaming;
-  const images = isUser ? [] : extractImages(msg.content);
-  const detectedArtifact = !isUser && !isStreaming ? extractArtifact(msg.content) : null;
+  const images = useMemo(() => (isUser ? [] : extractImages(msg.content)), [isUser, msg.content]);
+  const detectedArtifact = useMemo(() => (!isUser && !isStreaming ? extractArtifact(msg.content) : null), [isUser, isStreaming, msg.content]);
 
   useEffect(() => {
     if (!isUser && !isStreaming) {
@@ -53,11 +56,16 @@ export default function ChatMessageBubble({
     }
   }, [msg.id, isUser, isStreaming]);
 
+  const copyTimeoutRef = useRef(null);
+  // P3 #124: clear the copied-reset timer on unmount (setState after unmount)
+  useEffect(() => () => { if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current); }, []);
+
   const copyText = async () => {
     try {
       await navigator.clipboard.writeText(msg.content);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = setTimeout(() => setCopied(false), 1500);
     } catch (_) {}
   };
 
@@ -122,13 +130,26 @@ export default function ChatMessageBubble({
       )}
 
       <div className={`flex flex-col min-w-0 ${isUser ? 'items-end max-w-[80%] ml-auto' : 'items-start w-full max-w-2xl'}`}>
-        <div className={`${isUser ? 'chat-user-message' : 'text-sm leading-relaxed text-paper-100 w-full'}`}>
-          {isStreaming && msg.content.length === 0 ? (
-            <span className="inline-block w-2 h-4 bg-accent animate-pulse align-middle rounded-sm" />
+        <div
+          className={`${isUser ? 'chat-user-message' : 'text-sm leading-relaxed text-paper-100 w-full'}`}
+          style={isUser ? { color: 'var(--chat-user-color, var(--paper-100, #0f172a))' } : undefined}
+        >
+          {!isUser && (msg.thought || msg.isThinkingTrace) && (
+            <ThoughtProcessDrawer
+              thought={msg.thought}
+              isThinking={msg.isThinkingTrace}
+              elapsed={msg.thoughtElapsed || 0}
+            />
+          )}
+
+          {isStreaming && (!msg.content || msg.content.length === 0) ? (
+            !msg.isThinkingTrace && <span className="inline-block w-2 h-4 bg-accent animate-pulse align-middle rounded-sm" />
           ) : (
             <>
               {isUser ? (
-                <div className="whitespace-pre-wrap">{msg.content}</div>
+                <div className="whitespace-pre-wrap select-text" style={{ color: 'inherit' }}>
+                  {msg.content}
+                </div>
               ) : (
                 <ParsedMarkdown
                   content={msg.content}
@@ -150,9 +171,9 @@ export default function ChatMessageBubble({
               <span className="text-xs text-ink-muted flex-1">Interactive canvas ready</span>
               <button
                 onClick={() => onOpenArtifact && onOpenArtifact(detectedArtifact)}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-accent-subtle border border-accent-border text-paper-200 hover:bg-canvas-elevated transition-fast cursor-pointer"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent/15 hover:bg-accent border border-accent/30 hover:border-accent text-accent hover:text-white shadow-xs transition-all duration-150 cursor-pointer"
               >
-                <Eye className="w-3 h-3" />
+                <Eye className="w-3.5 h-3.5" />
                 Open canvas
               </button>
             </div>
@@ -172,6 +193,7 @@ export default function ChatMessageBubble({
 
           {msg.imageAttachment && (
             <div className="mt-2.5 rounded-xl overflow-hidden border border-border max-w-xs shadow-sm bg-black/40">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={msg.imageAttachment.startsWith('data:') ? msg.imageAttachment : `data:${msg.imageMime || 'image/png'};base64,${msg.imageAttachment}`}
                 alt="Attached reference"
@@ -231,6 +253,20 @@ export default function ChatMessageBubble({
           )}
         </div>
 
+        {!isUser && !isStreaming && msg.meta && (
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] leading-none text-ink-muted/80 font-mono select-none" title="Response transparency — kaunsa model, kitni der">
+            <span className="inline-block w-1 h-1 rounded-full bg-accent animate-pulse" aria-hidden="true" />
+            <span className="text-accent/90">{msg.meta.provider || 'AI-Dost'}</span>
+            {typeof msg.meta.totalMs === 'number' && msg.meta.totalMs > 0 && (
+              <span>· {(msg.meta.totalMs / 1000).toFixed(1)}s</span>
+            )}
+            {typeof msg.meta.ttfbMs === 'number' && msg.meta.ttfbMs > 0 && (
+              <span title="Time to first token">· 1st token {(msg.meta.ttfbMs / 1000).toFixed(1)}s</span>
+            )}
+            {msg.meta.stopped && <span className="text-amber-400/90">· stopped by you</span>}
+          </div>
+        )}
+
         {!isUser && !isStreaming && (
           <div className="chat-response-actions" role="toolbar" aria-label="Message actions">
             <button type="button" onClick={copyText} aria-label={copied ? 'Copied to clipboard' : 'Copy response'} title={copied ? 'Copied!' : 'Copy'} className={`transition-colors ${copied ? 'text-accent' : ''}`}>
@@ -247,12 +283,12 @@ export default function ChatMessageBubble({
             <button
               type="button"
               onClick={() => {
-                const next = feedback === 'positive' ? null : 'positive';
-                setFeedback(next);
-                if (next) api.post('/learning/feedback', { type: 'positive', message: msg.content }).catch(() => {});
+                setFeedback('positive');
+                setFeedbackModalType('positive');
+                setShowFeedbackModal(true);
               }}
               aria-label="Good response"
-              title="Good response"
+              title="Give feedback / Good response"
               className={`transition-colors ${feedback === 'positive' ? 'text-accent' : ''}`}
             >
               <ThumbsUp size={14} className={feedback === 'positive' ? 'fill-accent/20 text-accent' : ''} />
@@ -260,12 +296,12 @@ export default function ChatMessageBubble({
             <button
               type="button"
               onClick={() => {
-                const next = feedback === 'negative' ? null : 'negative';
-                setFeedback(next);
-                if (next) api.post('/learning/feedback', { type: 'negative', message: msg.content }).catch(() => {});
+                setFeedback('negative');
+                setFeedbackModalType('negative');
+                setShowFeedbackModal(true);
               }}
-              aria-label="Bad response"
-              title="Bad response"
+              aria-label="Bad response / Suggest correction"
+              title="Suggest correction / Teach AI"
               className={`transition-colors ${feedback === 'negative' ? 'text-red-400' : ''}`}
             >
               <ThumbsDown size={14} className={feedback === 'negative' ? 'fill-red-500/20 text-red-400' : ''} />
@@ -280,7 +316,32 @@ export default function ChatMessageBubble({
             </button>
           </div>
         )}
+
+        {showFeedbackModal && (
+          <FeedbackModal
+            isOpen={showFeedbackModal}
+            onClose={() => setShowFeedbackModal(false)}
+            initialType={feedbackModalType}
+            messageContent={msg.content}
+            onSuccess={(data) => {
+              setFeedback(data.type);
+            }}
+          />
+        )}
       </div>
     </motion.div>
   );
 }
+
+function areMessagePropsEqual(prev, next) {
+  if (prev.msg.id !== next.msg.id) return false;
+  if (prev.msg.content !== next.msg.content) return false;
+  if (Boolean(prev.msg.isStreaming) !== Boolean(next.msg.isStreaming)) return false;
+  if (prev.msg.meta !== next.msg.meta) return false;
+  if (prev.isLast !== next.isLast) return false;
+  if (prev.msg.imageAttachment !== next.msg.imageAttachment) return false;
+  if (prev.msg.role !== next.msg.role) return false;
+  return true;
+}
+
+export default memo(ChatMessageBubble, areMessagePropsEqual);

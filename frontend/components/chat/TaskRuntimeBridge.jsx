@@ -70,11 +70,18 @@ function clearRecoveryTask(taskId = null) {
   if (typeof window === 'undefined') return;
   try {
     const raw = localStorage.getItem(RECOVERY_KEY);
-    if (!raw) return;
+    if (!raw) {
+      window.dispatchEvent(new CustomEvent('ai_dost_clear_recovery'));
+      return;
+    }
     const saved = JSON.parse(raw);
-    if (!taskId || saved?.taskId === taskId) localStorage.removeItem(RECOVERY_KEY);
+    if (!taskId || saved?.taskId === taskId) {
+      localStorage.removeItem(RECOVERY_KEY);
+      window.dispatchEvent(new CustomEvent('ai_dost_clear_recovery'));
+    }
   } catch (_) {
     localStorage.removeItem(RECOVERY_KEY);
+    window.dispatchEvent(new CustomEvent('ai_dost_clear_recovery'));
   }
 }
 
@@ -99,9 +106,12 @@ function augmentStreamRequest(args) {
   }
 }
 
+let _agentTaskSeq = 0;
+
 function agentTaskEvent(taskId, phase, status, type = TASK_EVENT_TYPES.PHASE) {
+  _agentTaskSeq = (_agentTaskSeq + 1) % 100000;
   return {
-    id: `${taskId}:${type}:${Date.now()}`,
+    id: `${taskId}:${type}:${Date.now()}:${_agentTaskSeq}:${Math.random().toString(36).slice(2, 6)}`,
     taskId,
     ts: Date.now(),
     type,
@@ -179,6 +189,14 @@ export default function TaskRuntimeBridge() {
       const taskId = createTaskId('chat');
       const controller = new AbortController();
       const requestInit = getRequestInit(args);
+      // Propagate the CALLER's abort signal (e.g. Stop button / Esc in chat) —
+      // the bridge replaces init.signal with its own controller below, so a
+      // caller abort must forward or the real fetch would never cancel.
+      const callerSignal = requestInit && requestInit.signal;
+      if (callerSignal) {
+        if (callerSignal.aborted) controller.abort();
+        else callerSignal.addEventListener('abort', () => controller.abort(), { once: true });
+      }
       let requestBody = null;
       try {
         requestBody = typeof requestInit.body === 'string' ? JSON.parse(requestInit.body) : null;
@@ -197,7 +215,17 @@ export default function TaskRuntimeBridge() {
       };
       tasks.set(taskId, task);
       window[ACTIVE_KEY] = taskId;
-      writeRecoveryTask(task);
+
+      // Cleanup must NOT run in a finally around the fetch — the stream pump is
+      // still consuming the response after we return. finishTask() is idempotent
+      // and runs on every terminal path (body missing, pump done/fail, error).
+      let taskFinished = false;
+      const finishTask = () => {
+        if (taskFinished) return;
+        taskFinished = true;
+        if (tasks.get(taskId) === task) tasks.delete(taskId);
+        if (window[ACTIVE_KEY] === taskId) delete window[ACTIVE_KEY];
+      };
 
       const requestArgs = augmentStreamRequest(args);
       const effectiveBody = (() => {
@@ -248,15 +276,24 @@ export default function TaskRuntimeBridge() {
           }));
 
           const response = await originalFetch(AGENT_RUN_PATH, agentInit);
-          if (!response?.body) return response;
+          if (!response?.body) {
+            finishTask();
+            return response;
+          }
 
           const cloned = response.clone();
           const reader = cloned.body.getReader();
           const decoder = new TextDecoder();
           let buffer = '';
+          let terminalEmitted = false;
           const emit = (payload) => {
             const event = normalizeServerEvent(taskId, payload);
-            if (event) window.dispatchEvent(new CustomEvent('ai_dost_task_event', { detail: event }));
+            if (event) {
+              if (event.type === TASK_EVENT_TYPES.COMPLETE || event.type === TASK_EVENT_TYPES.CANCELED || event.type === TASK_EVENT_TYPES.ERROR) {
+                terminalEmitted = true;
+              }
+              window.dispatchEvent(new CustomEvent('ai_dost_task_event', { detail: event }));
+            }
           };
           const pump = async () => {
             try {
@@ -268,10 +305,17 @@ export default function TaskRuntimeBridge() {
               }
               buffer += decoder.decode();
               if (buffer.trim()) parseSseLines(`${buffer}\n`, emit);
+              clearRecoveryTask(taskId);
             } catch (error) {
-              if (controller.signal.aborted) return;
-              writeRecoveryTask(task);
-              emit({ error: error?.message || 'Agent task stream interrupted' });
+              if (!controller.signal.aborted) {
+                writeRecoveryTask(task);
+                emit({ error: error?.message || 'Agent task stream interrupted' });
+              }
+            } finally {
+              if (!terminalEmitted) {
+                emit({ error: 'Task stream ended unexpectedly' });
+              }
+              finishTask();
             }
           };
           void pump();
@@ -281,7 +325,10 @@ export default function TaskRuntimeBridge() {
         const [, init] = args;
         const nextInit = { ...(augmentStreamRequest(args)[1] || init || {}), signal: controller.signal };
         const response = await originalFetch(augmentStreamRequest(args)[0], nextInit);
-        if (!response?.body) return response;
+        if (!response?.body) {
+          finishTask();
+          return response;
+        }
 
         try {
           const cloned = response.clone();
@@ -289,11 +336,13 @@ export default function TaskRuntimeBridge() {
           const decoder = new TextDecoder();
           let buffer = '';
 
+          let terminalEmitted = false;
           const emit = (payload) => {
             const event = normalizeServerEvent(taskId, payload);
             if (!event) return;
-            if (event.type === TASK_EVENT_TYPES.COMPLETE || event.type === TASK_EVENT_TYPES.CANCELED) {
+            if (event.type === TASK_EVENT_TYPES.COMPLETE || event.type === TASK_EVENT_TYPES.CANCELED || event.type === TASK_EVENT_TYPES.ERROR) {
               clearRecoveryTask(taskId);
+              terminalEmitted = true;
             }
             if (event.type === TASK_EVENT_TYPES.ERROR && !task.canceled) {
               writeRecoveryTask(task);
@@ -311,12 +360,21 @@ export default function TaskRuntimeBridge() {
               }
               buffer += decoder.decode();
               if (buffer.trim()) parseSseLines(`${buffer}\n`, emit);
+              clearRecoveryTask(taskId);
             } catch (error) {
-              if (controller.signal.aborted) return;
-              writeRecoveryTask(task);
-              window.dispatchEvent(new CustomEvent('ai_dost_task_event', {
-                detail: normalizeServerEvent(taskId, { error: error?.message || 'Task stream interrupted' }),
-              }));
+              if (!controller.signal.aborted) {
+                writeRecoveryTask(task);
+                window.dispatchEvent(new CustomEvent('ai_dost_task_event', {
+                  detail: normalizeServerEvent(taskId, { error: error?.message || 'Task stream interrupted' }),
+                }));
+              }
+            } finally {
+              if (!terminalEmitted) {
+                window.dispatchEvent(new CustomEvent('ai_dost_task_event', {
+                  detail: normalizeServerEvent(taskId, { error: 'Task stream ended unexpectedly' }),
+                }));
+              }
+              finishTask();
             }
           };
           void pump();
@@ -327,14 +385,14 @@ export default function TaskRuntimeBridge() {
               detail: normalizeServerEvent(taskId, { error: error?.message || 'Unable to inspect task stream' }),
             }));
           }
+          // pump never started (throw happened during reader setup) — clean up here
+          finishTask();
         }
         return response;
       } catch (error) {
         if (!controller.signal.aborted) writeRecoveryTask(task);
+        finishTask();
         throw error;
-      } finally {
-        if (tasks.get(taskId) === task) tasks.delete(taskId);
-        if (window[ACTIVE_KEY] === taskId) delete window[ACTIVE_KEY];
       }
     };
 
