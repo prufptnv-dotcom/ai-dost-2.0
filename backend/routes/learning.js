@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const logger = require('../logger');
 const router = express.Router();
 const GroqService = require('../services/groqService');
@@ -16,9 +16,9 @@ router.post('/feedback', async (req, res) => {
         const targetProjectId = projectId || 'default';
         const userId = req.user?.id || req.headers['x-user-id'] || 'local-user';
 
-        const auth = projectAuth.verifyOwnership(targetProjectId, userId);
+        const auth = projectAuth.authorize(targetProjectId, req, { autoCreateIfMissing: true });
         if (!auth.authorized) {
-            return res.status(auth.status).json({ success: false, error: auth.error });
+            return res.status(auth.status || 403).json({ success: false, error: auth.error });
         }
 
         const db = getDatabase();
@@ -35,11 +35,19 @@ router.post('/feedback', async (req, res) => {
 
         // Sync with Python AI Engine Long-Term Vector Memory (ChromaDB)
         if (correction) {
-            fetch('http://127.0.0.1:8001/ai/agent/learn', {
+            const { engineHeaders } = require('../services/engineAuth');
+            // P2 FIX (#177): respect AI_ENGINE_URL — the hard-coded
+            // 127.0.0.1:8001 made agent auto-learn dead inside Docker.
+            const engineUrl = (process.env.AI_ENGINE_URL || process.env.PYTHON_AI_ENGINE_URL || 'http://127.0.0.1:8001').replace(/\/+$/, '');
+            fetch(`${engineUrl}/ai/agent/learn`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: engineHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ text: `Rule: ${correction}` })
             }).catch(err => console.error("Failed to sync memory with Python AI Engine:", err));
+            
+            // Sync with Neo4j Graph DB for relationship building
+            const graphRagService = require('../services/graphRagService');
+            graphRagService.addRelationship('User', 'CORRECTED_AI_WITH', correction, { category, originalMessage: message });
         }
 
         const stats = memoryService.getProjectStats(targetProjectId);
@@ -66,9 +74,9 @@ router.get('/stats', (req, res) => {
         const targetProjectId = req.query.projectId || 'default';
         const userId = req.user?.id || req.headers['x-user-id'] || 'local-user';
 
-        const auth = projectAuth.verifyOwnership(targetProjectId, userId);
+        const auth = projectAuth.authorize(targetProjectId, req, { autoCreateIfMissing: true });
         if (!auth.authorized) {
-            return res.status(auth.status).json({ success: false, error: auth.error });
+            return res.status(auth.status || 403).json({ success: false, error: auth.error });
         }
 
         const db = getDatabase();
@@ -98,9 +106,9 @@ router.post('/chat', async (req, res) => {
         const targetProjectId = projectId || 'default';
         const userId = req.user?.id || req.headers['x-user-id'] || 'local-user';
 
-        const auth = projectAuth.verifyOwnership(targetProjectId, userId);
+        const auth = projectAuth.authorize(targetProjectId, req, { autoCreateIfMissing: true });
         if (!auth.authorized) {
-            return res.status(auth.status).json({ success: false, error: auth.error });
+            return res.status(auth.status || 403).json({ success: false, error: auth.error });
         }
 
         const db = getDatabase();
@@ -113,7 +121,7 @@ You have "Aakh" (Vision/File Scanning capabilities) and continuously analyze use
 
 Current Learning Memory Summary for Project "${targetProjectId}":
 - Total User Feedbacks Logged: ${stats.totalFeedback} (${stats.positiveCount} Thumbs Up ðŸ‘, ${stats.negativeCount} Thumbs Down ðŸ‘Ž)
-- Scanned Workspace Files: ${stats.scannedFiles.join(', ')}
+- Scanned Workspace Files: ${(stats.scannedFiles || []).join(', ')}
 - Accumulated Learned Rules & Corrections:
 ${learnedContext || "No custom corrections logged yet."}
 

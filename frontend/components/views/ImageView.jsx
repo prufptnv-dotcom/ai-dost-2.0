@@ -10,8 +10,31 @@ import { EmptyState } from '../ui/EmptyState';
 
 const HISTORY_KEY = 'ai_dost_images_history';
 
+export const IMAGE_CATEGORIES = [
+  { id: 'all', label: 'All Presets', ratio: '1:1', sample: 'Futuristic AI assistant hologram in modern studio' },
+  { id: 'logo', label: 'Logo', ratio: '1:1', sample: 'Minimalist geometric cyber emblem logo for AI startup, clean lines' },
+  { id: 'youtube-banner', label: 'YouTube Banner', ratio: '16:9', sample: 'Futuristic gaming and tech studio channel art banner, 16:9' },
+  { id: 'poster', label: 'Poster', ratio: '3:4', sample: 'Vertical theatrical sci-fi movie poster, dramatic key lighting, 8k' },
+  { id: 'thumbnail', label: 'Thumbnail', ratio: '16:9', sample: 'High-CTR YouTube thumbnail, expressive excited face, neon rim lighting' },
+  { id: 'character-design', label: 'Character Design', ratio: '3:4', sample: 'Full body futuristic cybernetic warrior, concept art turnaround' },
+  { id: 'anime-artwork', label: 'Anime Artwork', ratio: '16:9', sample: 'Luminous anime city in rain, Makoto Shinkai aesthetic, vibrant sky' },
+  { id: 'realistic-portrait', label: 'Realistic Portrait', ratio: '1:1', sample: '8k studio portrait photography, 85mm lens, natural skin texture' },
+  { id: 'infographic', label: 'Infographic', ratio: '3:4', sample: 'Clean modern isometric 3D data pipeline workflow infographic' },
+  { id: 'concept-art', label: 'Concept Art', ratio: '16:9', sample: 'Epic sci-fi planetary citadel, matte painting, Unreal Engine 5' },
+  { id: 'product-mockup', label: 'Product Mockup', ratio: '1:1', sample: 'Minimalist smart device on acrylic pedestal, studio lightbox' },
+  { id: 'ui-design', label: 'UI Design Concept', ratio: '16:9', sample: '2030 futuristic dashboard interface, dark glassmorphism, glowing cards' },
+  { id: 'book-cover', label: 'Book Cover', ratio: '3:4', sample: 'Bestselling sci-fi novel cover, dramatic cosmic gate, room for typography' },
+  { id: 'social-media-post', label: 'Social Media Post', ratio: '1:1', sample: 'Viral modern social media post, bold typography, vibrant gradients' },
+  { id: 'background-change', label: 'Background Removal/Change', ratio: '1:1', sample: 'Subject with background replaced by cyberpunk neon city street' },
+  { id: 'object-add-remove', label: 'Object Add/Remove', ratio: '1:1', sample: 'Modern living room with a glowing holographic AI globe added on table' },
+  { id: 'style-transformation', label: 'Style Transformation', ratio: '1:1', sample: 'Urban street photograph transformed into vibrant anime cel-shading' },
+  { id: 'image-enhancement', label: 'Image Enhancement', ratio: '1:1', sample: 'Remastered 8k ultra-sharp photograph, HDR dynamic range, crystal clear' },
+];
+
 const STYLES = [
   { id: 'default', label: 'Default', suffix: '' },
+  { id: 'anime-3d', label: 'Anime 3D Studio', suffix: ', 3d anime style, studio lighting, Makoto Shinkai aesthetic, octane render' },
+  { id: 'cinematic-bharat', label: 'Cinematic Bharat', suffix: ', majestic Indian aesthetic, golden hour sunlight, royal heritage backdrop, 8k cinematic' },
   { id: 'photo', label: 'Photorealistic', suffix: ', photorealistic, 8k, sharp focus, professional photography' },
   { id: '3d', label: '3D Render', suffix: ', 3d render, octane render, cinematic lighting' },
   { id: 'anime', label: 'Anime / Ghibli', suffix: ', anime style, studio ghibli inspired, vibrant colors' },
@@ -21,8 +44,9 @@ const STYLES = [
 
 const ASPECT_RATIOS = [
   { id: '1:1', label: '1:1 Square', width: 1024, height: 1024 },
-  { id: '16:9', label: '16:9 Cinema', width: 1280, height: 720 },
-  { id: '9:16', label: '9:16 Mobile', width: 720, height: 1280 },
+  { id: '16:9', label: '16:9 Cinema / YT', width: 1280, height: 720 },
+  { id: '9:16', label: '9:16 Mobile / Story', width: 720, height: 1280 },
+  { id: '3:4', label: '3:4 Poster / Cover', width: 768, height: 1024 },
   { id: '4:3', label: '4:3 Classic', width: 1024, height: 768 },
 ];
 
@@ -37,8 +61,10 @@ const SEED_VARIANTS = 2;
 
 export default function ImageView({ onToast }) {
   const [prompt, setPrompt] = useState('');
-  const [style, setStyle] = useState(STYLES[0]);
+  const [selectedCategory, setSelectedCategory] = useState(IMAGE_CATEGORIES[0]);
+  const [style, setStyle] = useState(STYLES[1]); // Default to Anime 3D Studio
   const [aspectRatio, setAspectRatio] = useState(ASPECT_RATIOS[0]);
+  const [isTurbo, setIsTurbo] = useState(true);
   const [images, setImages] = useState([]);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -77,24 +103,41 @@ export default function ImageView({ onToast }) {
     const base = (text || prompt).trim();
     if (!base || loading) return;
     setLoading(true);
-    setProgress(0);
+    setProgress(20);
     const fullPrompt = base + style.suffix;
     const newImages = [];
     try {
-      for (let i = 0; i < SEED_VARIANTS; i++) {
-        const res = await api.post('/image/generate', {
-          prompt: fullPrompt,
+      if (isTurbo) {
+        // Z-Image Turbo mode: Instant sub-second diffusion synthesis
+        const res = await api.post('/image/turbo', {
+          prompt: base,
+          category: selectedCategory.id !== 'all' ? selectedCategory.id : undefined,
+          style: style.id,
           width: aspectRatio.width,
           height: aspectRatio.height,
         });
         const url = res.data?.imageUrl;
-        if (url) newImages.push({ url, prompt: base, style: style.id, seed: Date.now() + i });
-        setProgress(Math.round(((i + 1) / SEED_VARIANTS) * 100));
+        if (url) {
+          newImages.push({ url, prompt: base, category: selectedCategory.id, style: style.id, seed: res.data?.seed || Date.now(), isTurbo: true });
+        }
+        setProgress(100);
+      } else {
+        for (let i = 0; i < SEED_VARIANTS; i++) {
+          const res = await api.post('/image/generate', {
+            prompt: fullPrompt,
+            category: selectedCategory.id !== 'all' ? selectedCategory.id : undefined,
+            width: aspectRatio.width,
+            height: aspectRatio.height,
+          });
+          const url = res.data?.imageUrl;
+          if (url) newImages.push({ url, prompt: base, category: selectedCategory.id, style: style.id, seed: Date.now() + i });
+          setProgress(Math.round(((i + 1) / SEED_VARIANTS) * 100));
+        }
       }
       if (newImages.length === 0) throw new Error('No images returned');
       setImages(newImages);
       saveHistory(newImages);
-      showToast(`${newImages.length} images generated`, 'success');
+      showToast(isTurbo ? '⚡ Z-Image Turbo generated!' : `${newImages.length} images generated`, 'success');
     } catch (e) {
       showToast(`Image generation failed: ${e?.message || 'API error'}`, 'error');
     } finally {
@@ -103,48 +146,103 @@ export default function ImageView({ onToast }) {
     }
   };
 
+  const handleCategorySelect = (cat) => {
+    setSelectedCategory(cat);
+    if (cat.sample && !prompt) {
+      setPrompt(cat.sample);
+    }
+    if (cat.ratio) {
+      const match = ASPECT_RATIOS.find((r) => r.id === cat.ratio);
+      if (match) setAspectRatio(match);
+    }
+  };
+
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const rafId = window.requestAnimationFrame(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(rafId);
   }, [images]);
 
   return (
-    <div className="h-full flex flex-col bg-canvas-base select-none overflow-hidden">
+    <div className="h-full flex flex-col bg-canvas-base overflow-hidden">
       {/* Header Strip */}
       <div className="shrink-0 px-6 py-4 border-b border-border bg-canvas-subtle">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <ImageIcon className="w-5 h-5 text-accent-primary" />
             <div>
-              <h1 className="text-base font-semibold text-paper-100 font-display">
-                Image Generator
-              </h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-base font-semibold text-paper-100 font-display">
+                  Image Generator & Studio
+                </h1>
+                {isTurbo && (
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                    <Sparkles size={11} />
+                    Z-Image Turbo
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-ink-muted mt-0.5">
-                Generate high-resolution visual assets and mockups via Pollinations AI.
+                {isTurbo ? 'Sub-second real-time diffusion synthesis active.' : 'Standard high-resolution Pollinations / Gemini pipeline.'}
               </p>
             </div>
           </div>
-          {history.length > 0 && (
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={Trash2}
-              onClick={clearHistory}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsTurbo(!isTurbo)}
+              className={`px-2.5 py-1 rounded-md text-xs font-mono font-medium transition-all cursor-pointer border ${
+                isTurbo 
+                  ? 'bg-amber-500 text-black border-amber-400 shadow-glow-sm font-bold' 
+                  : 'bg-canvas-surface border-border text-ink-muted hover:text-paper-100'
+              }`}
             >
-              Clear History
-            </Button>
-          )}
+              {isTurbo ? '⚡ Turbo ON' : 'Turbo OFF'}
+            </button>
+            {history.length > 0 && (
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={Trash2}
+                onClick={clearHistory}
+              >
+                Clear History
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* 17 Category Presets Selector */}
+        <div className="flex items-center gap-1.5 mt-3 overflow-x-auto pb-1 scrollbar-thin">
+          <span className="text-[10px] font-mono text-ink-muted uppercase tracking-wider shrink-0 mr-1">Type:</span>
+          {IMAGE_CATEGORIES.map((cat) => (
+            <button
+              key={cat.id}
+              type="button"
+              onClick={() => handleCategorySelect(cat)}
+              className={`shrink-0 px-2.5 py-1 rounded-md text-[11px] font-mono transition-all cursor-pointer border ${
+                selectedCategory.id === cat.id
+                  ? 'bg-accent-primary text-paper-100 font-semibold border-accent-primary shadow-glow-sm'
+                  : 'bg-canvas-surface border-border text-paper-200 hover:text-paper-100 hover:border-border-hover'
+              }`}
+            >
+              {cat.label}
+            </button>
+          ))}
         </div>
 
         {/* Style selector chips */}
-        <div className="flex gap-1.5 mt-3 overflow-x-auto pb-1">
+        <div className="flex gap-1.5 mt-2.5 overflow-x-auto pb-1">
+          <span className="text-[10px] font-mono text-ink-muted uppercase tracking-wider shrink-0 mr-1 self-center">Style:</span>
           {STYLES.map((s) => (
             <button
               key={s.id}
               type="button"
               onClick={() => setStyle(s)}
-              className={`shrink-0 px-2.5 py-1 rounded-xs text-xs font-mono transition-fast cursor-pointer ${
+              className={`shrink-0 px-2.5 py-0.5 rounded-xs text-xs font-mono transition-fast cursor-pointer ${
                 style.id === s.id
-                  ? 'bg-accent-primary text-paper-100 font-medium'
+                  ? 'bg-accent-secondary text-paper-100 font-medium'
                   : 'bg-canvas-surface border border-border text-paper-200 hover:text-paper-100'
               }`}
             >
@@ -154,8 +252,8 @@ export default function ImageView({ onToast }) {
         </div>
 
         {/* Aspect Ratio selector chips */}
-        <div className="flex items-center gap-2 mt-2.5 overflow-x-auto pb-1">
-          <span className="text-[10px] font-mono text-ink-muted uppercase tracking-wider shrink-0">Ratio:</span>
+        <div className="flex items-center gap-2 mt-2 overflow-x-auto pb-1">
+          <span className="text-[10px] font-mono text-ink-muted uppercase tracking-wider shrink-0 mr-1">Ratio:</span>
           {ASPECT_RATIOS.map((r) => (
             <button
               key={r.id}

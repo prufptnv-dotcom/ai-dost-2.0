@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import os
 import logging
 from jose import jwt
+from app.config.secret_key import get_secret_key
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,8 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
         to_encode = data.copy()
         if expires_delta:
             to_encode.update({"exp": datetime.utcnow() + expires_delta})
-        secret = os.getenv("JWT_SECRET_KEY", "ai_dost_super_secret_jwt_key_2026")
+        # #180: unified env-driven secret (hard-coded fallback removed)
+        secret = get_secret_key()
         algorithm = os.getenv("JWT_ALGORITHM", "HS256")
         encoded_jwt = jwt.encode(to_encode, secret, algorithm=algorithm)
         return encoded_jwt

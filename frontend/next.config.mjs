@@ -10,14 +10,18 @@ async function loadPWA() {
     dest: 'public',
     register: true,
     skipWaiting: true,
-    disable: process.env.NODE_ENV === 'development',
-    sw: 'sw.js',
+    disable: true, // Forced disable to prevent cached crashes
+    // P3 #197: if `disable` is ever flipped to false, the plugin must NOT
+    // clobber the hand-written public/sw.js (custom cache/fetch logic) —
+    // give the generated worker its own filename.
+    sw: 'next-pwa-sw.js',
   });
 }
 
 const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',
+  devIndicators: false,
   allowedDevOrigins: ['localhost', '127.0.0.1', 'localhost:3000', 'localhost:5000', '127.0.0.1:3000', '127.0.0.1:5000', '*.aidost.local'],
   // Turbopack root: absolute path to monorepo root (one level above frontend/)
   turbopack: {
@@ -226,8 +230,68 @@ const nextConfig = {
         destination: `${BACKEND_URL}/health`
       },
       {
+        source: '/api/travel',
+        destination: `${BACKEND_URL}/api/travel`
+      },
+      {
+        source: '/api/travel/:path*',
+        destination: `${BACKEND_URL}/api/travel/:path*`
+      },
+      {
+        source: '/api/language',
+        destination: `${BACKEND_URL}/api/language`
+      },
+      {
+        source: '/api/language/:path*',
+        destination: `${BACKEND_URL}/api/language/:path*`
+      },
+      {
+        source: '/api/decision',
+        destination: `${BACKEND_URL}/api/decision`
+      },
+      {
+        source: '/api/decision/:path*',
+        destination: `${BACKEND_URL}/api/decision/:path*`
+      },
+      {
+        source: '/api/security',
+        destination: `${BACKEND_URL}/api/security`
+      },
+      {
+        source: '/api/security/:path*',
+        destination: `${BACKEND_URL}/api/security/:path*`
+      },
+      {
+        source: '/api/catalog',
+        destination: `${BACKEND_URL}/api/catalog`
+      },
+      {
+        source: '/api/catalog/:path*',
+        destination: `${BACKEND_URL}/api/catalog/:path*`
+      },
+      {
         source: '/src/:path*',
         destination: `${BACKEND_URL}/src/:path*`
+      },
+      // Catch-all LAST: fixes dead views (analytics/planning/writing/interpreter/
+      // gemini-live-token/crew/rlhf/bharat/skills/quota/circuit-breaker/voice/...)
+      // and any future /api/* route without editing this list each time.
+      {
+        source: '/api/:path*',
+        destination: `${BACKEND_URL}/api/:path*`
+      },
+    ];
+  },
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          { key: 'Referrer-Policy', value: 'same-origin' },
+          { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+        ],
       },
     ];
   },

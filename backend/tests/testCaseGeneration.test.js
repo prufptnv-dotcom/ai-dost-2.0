@@ -760,9 +760,19 @@ describe('AI-Dost 2.0 — Phase 4C: Automated Test Case Generation Suite', () =>
     }, TypeError);
   });
 
-  test('64. Clean teardown and memory cleanup preserves test runner stability', () => {
-    // Verifies no leaks or unhandled rejection hooks were left behind
-    assert.ok(true);
+  test('64. Clean teardown and memory cleanup preserves test runner stability', async () => {
+    // No dedicated teardown hook is exported by the capability; the nearest
+    // real behavior is that repeated executions complete cleanly without
+    // throwing and without leaking process-level listeners.
+    const exitListenersBefore = process.listenerCount('exit');
+    const mgr = new TestExecutionManager();
+    const r1 = await mgr.execute({ dryRun: true });
+    const r2 = await mgr.execute({ dryRun: true });
+    assert.equal(r1.ok, true);
+    assert.equal(r2.ok, true);
+    assert.equal(r1.status, 'EXECUTION_SUCCESS');
+    assert.equal(r2.status, 'EXECUTION_SUCCESS');
+    assert.equal(process.listenerCount('exit'), exitListenersBefore);
   });
 
 });

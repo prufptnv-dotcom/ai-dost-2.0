@@ -1,6 +1,14 @@
 {
-  "dependencies": {
-    "cors": "^2.8.6",
-    "playwright": "^1.63.0"
+  "name": "ai-dost",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "lint": "npm --prefix frontend run lint",
+    "test": "npm --prefix frontend test && npm --prefix backend run test:all",
+    "test:frontend": "npm --prefix frontend test",
+    "test:backend": "npm --prefix backend run test:all",
+    "test:e2e": "npm --prefix backend exec playwright test"
   }
 }

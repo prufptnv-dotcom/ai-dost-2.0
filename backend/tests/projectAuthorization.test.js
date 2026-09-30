@@ -19,8 +19,14 @@ describe('Phase 1.2 — Milestone 3: Legacy API Route Delegation & SEC-001 Remed
   let projectDao;
   let conversationDao;
   let messageDao;
+  let prevAllowHeader;
 
   before(() => {
+    // These tests exercise the x-user-id escape hatch, which requires the
+    // explicit opt-in flag (same pattern as projectAuthorization.security.test.js).
+    prevAllowHeader = process.env.ALLOW_UNTRUSTED_USER_HEADER;
+    process.env.ALLOW_UNTRUSTED_USER_HEADER = 'true';
+
     testDb = new Database(':memory:');
     testDb.pragma('journal_mode = WAL');
     testDb.pragma('foreign_keys = ON');
@@ -36,6 +42,8 @@ describe('Phase 1.2 — Milestone 3: Legacy API Route Delegation & SEC-001 Remed
   });
 
   after(() => {
+    if (prevAllowHeader === undefined) delete process.env.ALLOW_UNTRUSTED_USER_HEADER;
+    else process.env.ALLOW_UNTRUSTED_USER_HEADER = prevAllowHeader;
     if (testDb) {
       testDb.close();
     }

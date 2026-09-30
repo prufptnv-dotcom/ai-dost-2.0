@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "ai-dost-sqlite": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sqlite", "c:/Users/vikash kumar/Pictures/ai dost 3.0/backend/data/app.db"]
+    },
+    "ai-dost-filesystem-downloads": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "c:/Users/vikash kumar/Pictures/ai dost 3.0/frontend/public/downloads"]
+    },
+    "ai-dost-github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"]
+    },
+    "ai-dost-brave-search": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "dummy_key_to_replace"
+      }
+    },
+    "ai-dost-memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    },
+    "ai-dost-fetch": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-fetch"]
+    }
+  }
+}

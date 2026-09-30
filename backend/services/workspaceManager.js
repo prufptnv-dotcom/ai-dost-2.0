@@ -7,6 +7,14 @@ const ProjectDAO = require('../db/dao/ProjectDAO');
 const WorkspaceDAO = require('../db/dao/WorkspaceDAO');
 const logger = require('../logger');
 
+// Shared projects are intentionally accessible to every local caller —
+// mirrors projectAuthorization.verifyOwnership (keeps chat/workspace flows
+// working for non-local identities like anon-<uuid>, P1 FIX #12/#13).
+const SHARED_PROJECT_IDS = new Set(['default', 'copilot-workspace']);
+function isSharedProject(id) {
+  return SHARED_PROJECT_IDS.has(id);
+}
+
 class WorkspaceManager {
   constructor(db = null) {
     this._db = db;
@@ -32,8 +40,28 @@ class WorkspaceManager {
    * Compute deterministic disk path for a project workspace
    */
   getDefaultDiskPath(projectId) {
-    const safeId = (projectId || 'default').trim();
-    return path.resolve(path.join(this.getBaseWorkspaceDir(), `agent-ws-${safeId}`));
+    // P0 FIX (#5): strip path separators, traversal dots and reserved chars so a
+    // projectId like "foo/../../x" or "..\\..\\evil" cannot escape tmpdir.
+    let safeId = String(projectId == null ? 'default' : projectId).trim();
+    safeId = safeId
+      .replace(/\0/g, '')
+      .replace(/[\\/:*?"<>|]+/g, '-')   // separators + Windows-reserved chars
+      .replace(/\s+/g, '-')             // whitespace → single dash
+      .replace(/^\.+$/, '')             // all-dots ("..", ".") → empty
+      .replace(/^[.-]+/, '')            // no leading dot/dash (hidden dirs, "..")
+      .slice(0, 100);                   // bounded length
+    if (!safeId) safeId = 'default';
+
+    const base = this.getBaseWorkspaceDir();
+    const resolved = path.resolve(path.join(base, `agent-ws-${safeId}`));
+
+    // Final containment guard (defense in depth)
+    if (resolved !== base && !resolved.startsWith(base + path.sep)) {
+      const err = new Error(`Access denied: workspace path escapes base dir for project '${projectId}'`);
+      err.code = 'ERR_UNAUTHORIZED';
+      throw err;
+    }
+    return resolved;
   }
 
   /**
@@ -43,7 +71,7 @@ class WorkspaceManager {
     const targetId = (projectId && typeof projectId === 'string') ? projectId.trim() : 'default';
     const project = this.projects.getById(targetId);
 
-    if (project && userId && project.user_id && project.user_id !== userId) {
+    if (project && userId && project.user_id && project.user_id !== userId && !isSharedProject(targetId)) {
       const err = new Error(`Access denied: User '${userId}' does not own project '${targetId}'`);
       err.code = 'ERR_UNAUTHORIZED';
       throw err;
@@ -79,11 +107,24 @@ class WorkspaceManager {
    * Idempotently ensure workspace exists in Universal DB and on physical disk.
    * Safe under concurrent invocations via per-project lock.
    */
+  // Custom diskPath must stay under base workspace dir (os.tmpdir by default)
+  _assertDiskPath(diskPath) {
+    const resolved = path.resolve(diskPath);
+    const base = this.getBaseWorkspaceDir();
+    if (resolved !== base && !resolved.startsWith(base + path.sep)) {
+      const err = new Error(`Access denied: diskPath must be under ${base}`);
+      err.code = 'ERR_UNAUTHORIZED';
+      throw err;
+    }
+    return resolved;
+  }
+
   async ensureWorkspace(projectId, userId = 'local-user', options = {}) {
     const targetId = (projectId && typeof projectId === 'string') ? projectId.trim() : 'default';
 
-    // Per-project concurrency lock
-    if (this._locks.has(targetId)) {
+    // Per-project concurrency lock — loop until free so second waiter doesn't
+    // race past a just-released lock and double-create
+    while (this._locks.has(targetId)) {
       await this._locks.get(targetId);
     }
 
@@ -106,7 +147,7 @@ class WorkspaceManager {
           description: options.description || `Project ${name}`,
           framework: options.framework || 'generic'
         });
-      } else if (userId && project.user_id && project.user_id !== userId) {
+      } else if (userId && project.user_id && project.user_id !== userId && !isSharedProject(targetId)) {
         const err = new Error(`Access denied: User '${userId}' does not own project '${targetId}'`);
         err.code = 'ERR_UNAUTHORIZED';
         throw err;
@@ -114,7 +155,9 @@ class WorkspaceManager {
 
       // 3. Ensure workspace record in DB
       let workspace = this.workspaces.getByProjectId(targetId);
-      const diskPath = options.diskPath ? path.resolve(options.diskPath) : this.getDefaultDiskPath(targetId);
+      const diskPath = options.diskPath
+        ? this._assertDiskPath(options.diskPath)
+        : this.getDefaultDiskPath(targetId);
 
       if (!workspace) {
         workspace = this.workspaces.create({
@@ -171,7 +214,7 @@ class WorkspaceManager {
         description: options.description || `Project ${name}`,
         framework: options.framework || 'generic'
       });
-    } else if (userId && project.user_id && project.user_id !== userId) {
+    } else if (userId && project.user_id && project.user_id !== userId && !isSharedProject(targetId)) {
       const err = new Error(`Access denied: User '${userId}' does not own project '${targetId}'`);
       err.code = 'ERR_UNAUTHORIZED';
       throw err;
@@ -179,7 +222,9 @@ class WorkspaceManager {
 
     // 3. Ensure workspace in DB
     let workspace = this.workspaces.getByProjectId(targetId);
-    const diskPath = options.diskPath ? path.resolve(options.diskPath) : this.getDefaultDiskPath(targetId);
+    const diskPath = options.diskPath
+      ? this._assertDiskPath(options.diskPath)
+      : this.getDefaultDiskPath(targetId);
 
     if (!workspace) {
       workspace = this.workspaces.create({

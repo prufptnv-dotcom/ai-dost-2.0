@@ -154,7 +154,8 @@ class GeminiGroundingProvider extends BaseSearchProvider {
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.geminiApiKey}`;
+      // #54: key via header, never in the URL (logs)
+      const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
       const payload = {
         contents: [{ role: 'user', parts: [{ text: query }] }],
         tools: [{ googleSearch: {} }],
@@ -163,7 +164,7 @@ class GeminiGroundingProvider extends BaseSearchProvider {
 
       const resp = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiApiKey },
         body: JSON.stringify(payload),
         signal: controller.signal
       });

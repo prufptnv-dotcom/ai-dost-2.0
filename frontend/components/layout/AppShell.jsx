@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { CommandRail } from './CommandRail';
 import { AiDostWordmark } from '../brand/AiDostWordmark';
 import { AiDostMark } from '../brand/AiDostMark';
-import { Search, Bell, ChevronDown, Menu, X, WifiOff, PanelLeftOpen } from 'lucide-react';
+import { Search, Bell, ChevronDown, Menu, X, WifiOff, PanelLeftOpen, Plus, MessageSquare, Code2, Bot } from 'lucide-react';
 
 export function AppShell({
   currentView = 'chat',
@@ -81,6 +81,8 @@ export function AppShell({
       history: 'History',
       settings: 'Settings',
       mcp: 'MCP Integrations',
+      animations: 'Anime.js 3D Studio',
+      bharat: 'Bharat Open APIs Hub',
     }[currentView] || currentView;
 
   const handleSelectView = (view) => {
@@ -95,13 +97,15 @@ export function AppShell({
 
   return (
     <div
+      data-theme={theme}
+      suppressHydrationWarning
       className={
-        'aidost-app h-screen w-screen flex overflow-hidden bg-canvas-base text-paper-100 font-sans ' +
+        `aidost-app ${theme === 'light' ? 'light-theme' : ''} h-screen w-screen flex overflow-hidden bg-canvas-base text-paper-100 font-sans ` +
         className
       }
     >
       {/* Desktop sidebar — visible if not collapsed, hidden on mobile */}
-      {!sidebarCollapsed && (
+      {!sidebarCollapsed ? (
         <div className="hidden sm:block">
           <CommandRail
             currentView={currentView}
@@ -112,6 +116,63 @@ export function AppShell({
             onToggleTheme={onToggleTheme}
             onToggleCollapse={toggleSidebar}
           />
+        </div>
+      ) : (
+        <div className="hidden sm:flex flex-col items-center py-3 px-2 border-r border-border bg-canvas-subtle z-30 shrink-0 w-12 gap-2.5 select-none">
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-ink-muted hover:text-paper-100 hover:bg-canvas-surface transition-fast cursor-pointer"
+            title="Expand sidebar (Ctrl+B)"
+            aria-label="Expand sidebar"
+          >
+            <PanelLeftOpen size={16} />
+          </button>
+
+          <div className="w-5 h-px bg-border my-0.5" />
+
+          <button
+            type="button"
+            onClick={handleNewChat}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-white bg-accent hover:bg-accent-hover transition-fast cursor-pointer shadow-xs"
+            title="New chat"
+            aria-label="New chat"
+          >
+            <Plus size={15} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSelectView('chat')}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-fast cursor-pointer ${
+              currentView === 'chat' ? 'bg-accent/15 text-accent border border-accent/30' : 'text-ink-muted hover:text-paper-100 hover:bg-canvas-surface'
+            }`}
+            title="Chat (Ctrl+1)"
+          >
+            <MessageSquare size={15} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSelectView('copilot')}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-fast cursor-pointer ${
+              currentView === 'copilot' ? 'bg-accent/15 text-accent border border-accent/30' : 'text-ink-muted hover:text-paper-100 hover:bg-canvas-surface'
+            }`}
+            title="Copilot IDE (Ctrl+3)"
+          >
+            <Code2 size={15} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSelectView('agent')}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-fast cursor-pointer ${
+              currentView === 'agent' ? 'bg-accent/15 text-accent border border-accent/30' : 'text-ink-muted hover:text-paper-100 hover:bg-canvas-surface'
+            }`}
+            title="Agent Workbench (Ctrl+2)"
+          >
+            <Bot size={15} />
+          </button>
         </div>
       )}
 
@@ -236,7 +297,7 @@ export function AppShell({
         </header>
         )}
         <div className="flex-1 flex overflow-hidden min-h-0">
-          <main className="flex-1 flex flex-col h-full overflow-hidden min-w-0 bg-canvas-base">
+          <main suppressHydrationWarning className="flex-1 flex flex-col h-full overflow-hidden min-w-0 bg-canvas-base">
             {children}
           </main>
           {inspector}

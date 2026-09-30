@@ -17,12 +17,17 @@ function timeAgo(ts) {
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return 'just now';
   if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
+  const hrs = Math.floor(diff / 3600000);
   if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
+  const days = Math.floor(diff / 86400000);
   if (days < 30) return `${days}d ago`;
   return new Date(ts).toLocaleDateString();
 }
+
+// P2 #79: default session messages live under 'ai_dost_messages_chat'
+// (ChatView.jsx:20-23) — plain `ai_dost_messages_${sid}` interpolation
+// misses them, so default-session local history never merged.
+const getMsgKey = (id) => (id === 'default' ? 'ai_dost_messages_chat' : `ai_dost_messages_${id}`);
 
 export default function HistoryView({ onToast, onOpenSession }) {
   const [sessions, setSessions] = useState([]);
@@ -75,7 +80,7 @@ export default function HistoryView({ onToast, onOpenSession }) {
             for (const s of localSessions) {
               const sid = s.id;
               if (!sid) continue;
-              const msgsRaw = localStorage.getItem(`ai_dost_messages_${sid}`);
+              const msgsRaw = localStorage.getItem(getMsgKey(sid));
               const msgs = msgsRaw ? JSON.parse(msgsRaw) : [];
               if (Array.isArray(msgs) && msgs.length > 0) {
                 if (!grouped[sid]) {
@@ -114,10 +119,11 @@ export default function HistoryView({ onToast, onOpenSession }) {
     setClearing(true);
     try {
       await api.delete('/chat/history', { params: { session_id: 'default' } });
-      setSessions([]);
-      setExpanded(null);
+      // Backend only deletes the 'default' session — keep every other session visible
+      setSessions((prev) => prev.filter((s) => s.session !== 'default'));
+      setExpanded((prev) => (prev === 'default' ? null : prev));
       setShowClearConfirm(false);
-      showToast('History cleared', 'success');
+      showToast('Default session history cleared', 'success');
     } catch (e) {
       showToast('Delete failed', 'error');
     } finally {
@@ -132,7 +138,7 @@ export default function HistoryView({ onToast, onOpenSession }) {
   });
 
   return (
-    <div className="h-full overflow-y-auto px-4 sm:px-8 py-6 bg-canvas-base select-none">
+    <div className="h-full overflow-y-auto px-4 sm:px-8 py-6 bg-canvas-base">
       <div className="max-w-5xl mx-auto space-y-6">
         {/* Header Strip */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">

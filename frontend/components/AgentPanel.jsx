@@ -344,9 +344,12 @@ const AgentPanel = ({
 
   // Auto-scroll to bottom on new content
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    const rafId = window.requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    });
+    return () => window.cancelAnimationFrame(rafId);
   }, [steps, liveMessage, isSelfHealing]);
 
   // Elapsed timer when running

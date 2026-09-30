@@ -1,27 +1,34 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useRef, useEffect, useMemo, useCallback } from 'react';
 
 const ToastContext = createContext(null);
 
 export const ToastProvider = ({ children }) => {
   const [toast, setToast] = useState(null);
+  const timerRef = useRef(null);
 
-  React.useEffect(() => {
+  const showToast = useCallback(({ type, message }) => {
+    if (timerRef.current) window.clearTimeout(timerRef.current);
+    setToast({ type, message });
+    timerRef.current = window.setTimeout(() => {
+      setToast(null);
+    }, 3000);
+  }, []);
+
+  useEffect(() => {
     const handleGlobalToast = (e) => {
       showToast(e.detail);
     };
     window.addEventListener('ai_dost_toast', handleGlobalToast);
-    return () => window.removeEventListener('ai_dost_toast', handleGlobalToast);
-  }, []);
+    return () => {
+      window.removeEventListener('ai_dost_toast', handleGlobalToast);
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+    };
+  }, [showToast]);
 
-  const showToast = ({ type, message }) => {
-    setToast({ type, message });
-    setTimeout(() => {
-      setToast(null);
-    }, 3000);
-  };
+  const value = useMemo(() => ({ showToast }), [showToast]);
 
   return (
-    <ToastContext.Provider value={{ showToast }}>
+    <ToastContext.Provider value={value}>
       {children}
       {toast && (
         <div className={`fixed bottom-4 right-4 z-50 p-4 rounded-xl shadow-lg text-sm transition-all duration-300 ${

@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const logger = require('../logger');
 const router = express.Router();
 const assessmentDAO = require('../db/dao/AssessmentDAO');
+const projectAuth = require('../services/projectAuthorization');
 const { generateAssessment } = require('../services/assessmentGeneratorService');
 const { evaluateAssessment, evaluateShortAnswerWithAi } = require('../services/assessmentEvaluatorService');
 const { sanitizeAssessmentForClient } = require('../services/assessmentSchema');
@@ -16,18 +17,38 @@ const { sanitizeAssessmentForClient } = require('../services/assessmentSchema');
  * Resolve canonical trusted user identity from request context.
  * Priority:
  * 1. req.user.id (from session/JWT if available)
- * 2. req.headers['x-user-id']
- * 3. Fallback to 'default'
+ * 2. req.headers['x-user-id'] ONLY when TRUST_X_USER_ID=1 (explicit opt-in;
+ *    otherwise spoofable ownership bypass)
+ * 3. Shared trusted resolver (P1 FIX #14): production/local legacy 'local-user',
+ *    loopback callers 'local-user', everyone else anon-<uuid> — see
+ *    services/projectAuthorization.resolveUser.
  * SECURITY RULE: Never trust unauthenticated body/query userId over request identity.
  */
 function resolveUser(req) {
   if (req && req.user && typeof req.user.id === 'string' && req.user.id.trim()) {
     return req.user.id.trim();
   }
-  if (req && req.headers && typeof req.headers['x-user-id'] === 'string' && req.headers['x-user-id'].trim()) {
+  if (
+    process.env.TRUST_X_USER_ID === '1' &&
+    req && req.headers && typeof req.headers['x-user-id'] === 'string' && req.headers['x-user-id'].trim()
+  ) {
     return req.headers['x-user-id'].trim();
   }
-  return 'default';
+  return projectAuth.resolveUser(req);
+}
+
+/**
+ * P1 FIX (#14): strict attempt ownership.
+ * - Owner match is strict equality.
+ * - Legacy attempts stored with the migration default 'default' belong to the
+ *   local identity ONLY (the old check let any 'default' caller read any attempt
+ *   and let anyone read 'default' attempts).
+ */
+function ownsAttempt(attempt, userId) {
+  if (!attempt) return false;
+  if (attempt.userId === userId) return true;
+  if (attempt.userId === 'default' && userId === 'local-user') return true;
+  return false;
 }
 
 /**
@@ -131,7 +152,7 @@ router.get('/attempt/:attemptId', (req, res) => {
     }
 
     // Authorization Ownership Check
-    if (attempt.userId !== userId && attempt.userId !== 'default' && userId !== 'default') {
+    if (!ownsAttempt(attempt, userId)) {
       logger.warn(`[AssessmentRoute] Unauthorized attempt access: User "${userId}" tried to access attempt of "${attempt.userId}"`);
       return res.status(403).json({
         success: false,
@@ -228,7 +249,7 @@ router.post('/:id/save-progress', (req, res) => {
     }
 
     // Ownership check
-    if (attempt.userId !== userId && attempt.userId !== 'default' && userId !== 'default') {
+    if (!ownsAttempt(attempt, userId)) {
       return res.status(403).json({ success: false, error: 'Forbidden: You do not own this attempt' });
     }
 
@@ -274,7 +295,7 @@ router.post('/:id/submit', async (req, res) => {
       }
 
       // Ownership check
-      if (attempt.userId !== userId && attempt.userId !== 'default' && userId !== 'default') {
+      if (!ownsAttempt(attempt, userId)) {
         return res.status(403).json({ success: false, error: 'Forbidden: You do not own this attempt' });
       }
 

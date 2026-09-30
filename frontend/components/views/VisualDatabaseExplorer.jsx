@@ -130,7 +130,7 @@ export default function VisualDatabaseExplorer({ projectId = 'copilot-workspace'
   });
 
   return (
-    <div className="h-full flex flex-col bg-canvas-base text-paper-100 font-sans select-none overflow-hidden">
+    <div className="h-full flex flex-col bg-canvas-base text-paper-100 font-sans overflow-hidden">
       {/* Top Controls Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-canvas-surface border-b border-border text-xs shrink-0">
         <div className="flex items-center gap-2">

@@ -1,6 +1,7 @@
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
 const logger = require('../logger');
+const { mcpChildEnv } = require('../services/shellEnv');
 
 /**
  * McpClientManager
@@ -42,8 +43,10 @@ class McpClientManager {
    * Polymorphic:
    *   connect('filesystem') -> connects registered server
    *   connect('npx', ['-y', '@modelcontextprotocol/server-filesystem', '/path']) -> connects ad-hoc
+   * #30: child env is an allowlist (services/shellEnv.mcpChildEnv), never the
+   * backend's full process.env; explicit `env`/config.env merges on top.
    */
-  async connect(target, args = [], env = process.env) {
+  async connect(target, args = [], env = null) {
     // Case 1: Connect to an already registered named server
     if (typeof target === 'string' && this.servers.has(target)) {
       const entry = this.servers.get(target);
@@ -51,7 +54,7 @@ class McpClientManager {
         return entry.tools;
       }
 
-      const { command, args: cfgArgs = [], env: cfgEnv = process.env } = entry.config;
+      const { command, args: cfgArgs = [], env: cfgEnv = null } = entry.config;
       if (!command) {
         logger.warn(`⚠️ MCP server '${target}' has no command configured.`);
         return [];
@@ -59,7 +62,7 @@ class McpClientManager {
 
       try {
         logger.info(`🔌 Connecting to registered MCP server '${target}': ${command} ${cfgArgs.join(' ')}`);
-        const transport = new StdioClientTransport({ command, args: cfgArgs, env: cfgEnv });
+        const transport = new StdioClientTransport({ command, args: cfgArgs, env: mcpChildEnv(cfgEnv) });
         const client = new Client({ name: `ai-dost-${target}`, version: '1.0.0' }, { capabilities: {} });
         await client.connect(transport);
 
@@ -95,7 +98,8 @@ class McpClientManager {
     try {
       const command = typeof target === 'string' ? target : target.command;
       const cmdArgs = Array.isArray(args) ? args : (target.args || []);
-      const cmdEnv = env || target.env || process.env;
+      // #30: allowlist base; explicit env (caller/config) merges on top
+      const cmdEnv = mcpChildEnv(env || target.env);
 
       logger.info(`🔌 Connecting to MCP server via: ${command} ${cmdArgs.join(' ')}`);
       const transport = new StdioClientTransport({
@@ -206,14 +210,22 @@ class McpClientManager {
   async disconnect(serverName) {
     if (serverName && this.servers.has(serverName)) {
       const entry = this.servers.get(serverName);
+      // Capture client ref BEFORE nulling so identity check still works
+      const clientRef = entry.client;
       if (entry.transport) {
-        await entry.transport.close();
+        try {
+          await entry.transport.close();
+        } catch (_) {}
       }
       entry.isConnected = false;
       entry.client = null;
-      if (this.client === entry.client) {
+      // P3 #55: stale tools bound to a dead transport must not stay readable —
+      // callers reading entry.tools after disconnect used to get ghost tools.
+      entry.tools = [];
+      if (this.client === clientRef && clientRef) {
         this.client = null;
         this.isConnected = false;
+        this.availableTools = [];
       }
       logger.info(`🛑 MCP Server '${serverName}' Disconnected`);
       return;
@@ -228,6 +240,7 @@ class McpClientManager {
       }
       entry.isConnected = false;
       entry.client = null;
+      entry.tools = []; // P3 #55
     }
 
     if (this.transport) {
@@ -239,6 +252,7 @@ class McpClientManager {
     this.isConnected = false;
     this.client = null;
     this.transport = null;
+    this.availableTools = []; // P3 #55
     logger.info('🛑 All MCP Servers Disconnected');
   }
 }

@@ -41,8 +41,14 @@ export function normalizeServerEvent(taskId, payload) {
   if (payload.error && !payload.chunk && !payload.done) {
     return { ...base, type: TASK_EVENT_TYPES.ERROR, phase: 'error', label: errorMessage };
   }
-  if (payload.done) {
+  if (payload.done || type === 'task_complete') {
     return { ...base, type: TASK_EVENT_TYPES.COMPLETE, phase: 'success', label: 'Completed' };
+  }
+  if (type === 'task_canceled') {
+    return { ...base, type: TASK_EVENT_TYPES.CANCELED, phase: 'canceled', label: errorMessage || 'Task canceled' };
+  }
+  if (type === 'task_error') {
+    return { ...base, type: TASK_EVENT_TYPES.ERROR, phase: 'error', label: errorMessage || 'Task failed' };
   }
   if (payload.chunk) {
     return { ...base, type: TASK_EVENT_TYPES.CHUNK, phase: 'generating', label: 'Writing' };
@@ -55,6 +61,9 @@ export function normalizeServerEvent(taskId, payload) {
       label: `${payload.sources.length} source${payload.sources.length === 1 ? '' : 's'} found`,
       metadata: { count: payload.sources.length },
     };
+  }
+  if (type === 'task_phase' || type === 'task_tool' || type === 'task_source') {
+    return { ...base, type, phase: payload.phase || 'processing', label: payload.label || payload.status || (type === 'task_tool' ? 'Running tool' : 'Processing') };
   }
   if (PHASE_BY_SERVER_EVENT[type]) {
     const phase = PHASE_BY_SERVER_EVENT[type];

@@ -1,5 +1,6 @@
 const logger = require('../logger');
 const { RobustApiClient } = require('./apiClient');
+const { withQualityStandard } = require('./outputQualityStandard');
 
 class MistralService {
     constructor() {
@@ -39,7 +40,7 @@ class MistralService {
 
             const messages = [];
             if (mode !== 'agent') {
-                messages.push({ role: "system", content: "You are Ai-Dost, a friendly and intelligent AI assistant." });
+                messages.push({ role: "system", content: withQualityStandard("You are Ai-Dost, a friendly and intelligent AI assistant.") });
             }
             messages.push(...formattedHistory);
             messages.push({ role: "user", content: message });
@@ -47,7 +48,8 @@ class MistralService {
             const result = await this.client.post('/chat/completions', {
                 model: "mistral-small-latest",
                 messages: messages,
-                temperature: 0.1
+                temperature: 0.1,
+                max_tokens: 4096
             }, {
                 "Content-Type": "application/json",
                 "Authorization": `Bearer ${apiKey}`

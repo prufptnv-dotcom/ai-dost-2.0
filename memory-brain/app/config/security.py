@@ -2,12 +2,14 @@ from fastapi import Request, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 import os
+from app.config.secret_key import get_secret_key
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token")
 
 def verify_token(token: str):
     try:
-        secret = os.getenv("JWT_SECRET_KEY", "ai_dost_super_secret_jwt_key_2026")
+        # #180: unified env-driven secret (hard-coded fallback removed)
+        secret = get_secret_key()
         algorithm = os.getenv("JWT_ALGORITHM", "HS256")
         payload = jwt.decode(token, secret, algorithms=[algorithm])
         return payload.get("sub")

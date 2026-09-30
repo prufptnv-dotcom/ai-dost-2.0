@@ -37,6 +37,65 @@ function initWorkflowRoutes(db) {
     }
   });
 
+  // GET /api/workflows/domains - Category 13 Automation Domains
+  // NOTE: static paths MUST be registered before /:id or they get swallowed as id='domains'
+  router.get('/domains', (req, res) => {
+    try {
+      const { AUTOMATION_DOMAINS } = require('../services/automationRemindersEngine');
+      return res.json({ success: true, domains: AUTOMATION_DOMAINS });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST /api/workflows/quick-setup - 1-Click Provisioning of any Category 13 Domain
+  router.post('/quick-setup', (req, res) => {
+    try {
+      const { domain, customConfig = {} } = req.body;
+      const { AUTOMATION_DOMAINS } = require('../services/automationRemindersEngine');
+      const domainDef = AUTOMATION_DOMAINS[domain];
+
+      if (!domainDef) {
+        return res.status(400).json({ success: false, error: `Unknown automation domain: ${domain}` });
+      }
+
+      const intervalMinutes = customConfig.intervalMinutes || 1440;
+      const nextRunAt = domainDef.defaultTrigger === 'schedule'
+        ? new Date(Date.now() + intervalMinutes * 60 * 1000).toISOString()
+        : null;
+
+      const created = workflowDao.create({
+        name: customConfig.name || domainDef.name,
+        description: customConfig.description || domainDef.description,
+        triggerType: domainDef.defaultTrigger,
+        triggerConfig: {
+          intervalMinutes,
+          ...domainDef.payloadTemplate,
+          ...customConfig.triggerConfig
+        },
+        actionType: domainDef.actionType,
+        actionConfig: {
+          ...domainDef.payloadTemplate,
+          ...customConfig.actionConfig
+        },
+        notifyChannels: customConfig.notifyChannels || ['in_app'],
+        projectId: customConfig.projectId || 'default',
+        status: 'active',
+        nextRunAt
+      });
+
+      return res.status(201).json({
+        success: true,
+        domain,
+        message: `Successfully provisioned autonomous workflow: ${created.name}`,
+        workflow: created
+      });
+    } catch (err) {
+      logger.error('[WorkflowsRoute] quick-setup error:', err.message);
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // POST /api/workflows - create a new workflow
   router.post('/', (req, res) => {
     try {

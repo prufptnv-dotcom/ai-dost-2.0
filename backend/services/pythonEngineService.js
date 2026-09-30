@@ -3,6 +3,7 @@
  * Hosts Python-only AI: LlamaIndex RAG (semantic Q&A over workspace files)
  * All calls fail-safe: engine down -> return null, caller falls back.
  */
+const { engineHeaders } = require('./engineAuth');
 const BASE = process.env.AI_ENGINE_URL || 'http://127.0.0.1:8001';
 const TIMEOUT_MS = 120000;
 
@@ -12,7 +13,7 @@ async function engineFetch(path, body, timeoutMs = TIMEOUT_MS) {
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
     const res = await fetch(`${BASE}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: engineHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body || {}),
       signal: ctrl.signal,
     });
@@ -29,7 +30,7 @@ async function health() {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 3000);
-    const res = await fetch(`${BASE}/health`, { signal: ctrl.signal });
+    const res = await fetch(`${BASE}/health`, { headers: engineHeaders(), signal: ctrl.signal });
     clearTimeout(t);
     if (!res.ok) return null;
     return await res.json();
@@ -69,10 +70,10 @@ async function runCrew(prompt, opts = {}) {
 async function tts(text, voice = 'en-IN-PrabhatNeural', rate = '+0%') {
   try {
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 60000);
+    const t = setTimeout(() => ctrl.abort(), 1500);
     const res = await fetch(`${BASE}/ai/tts`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: engineHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ text, voice, rate }),
       signal: ctrl.signal,
     });
@@ -91,7 +92,7 @@ async function xlsxGenerate(topic, title = '', options = {}) {
     const t = setTimeout(() => ctrl.abort(), 120000);
     const res = await fetch(`${BASE}/ai/xlsx/generate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: engineHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ topic, title, ...options }),
       signal: ctrl.signal,
     });
@@ -99,6 +100,20 @@ async function xlsxGenerate(topic, title = '', options = {}) {
     if (!res.ok) return { ok: false, error: `engine ${res.status}` };
     const data = await res.json();
     if (!data.ok && data.error) return { ok: false, error: data.error };
+    // P3 #161: the engine no longer returns absolute server paths (path
+    // disclosure) — fetch the artifact by basename over /ai/files/.
+    if (data.filename) {
+      const ctrl2 = new AbortController();
+      const t2 = setTimeout(() => ctrl2.abort(), 60000);
+      const fRes = await fetch(`${BASE}/ai/files/${encodeURIComponent(data.filename)}`, {
+        headers: engineHeaders(),
+        signal: ctrl2.signal,
+      });
+      clearTimeout(t2);
+      if (!fRes.ok) return { ok: false, error: `engine file download ${fRes.status}` };
+      const buffer = Buffer.from(await fRes.arrayBuffer());
+      return { ok: true, data, buffer };
+    }
     return { ok: true, data };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -111,7 +126,7 @@ async function webSearch(query, options = {}) {
     const t = setTimeout(() => ctrl.abort(), 30000);
     const res = await fetch(`${BASE}/ai/web/search`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: engineHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ query, ...options }),
       signal: ctrl.signal,
     });
@@ -131,7 +146,7 @@ async function saveLearning(userId, text) {
     const t = setTimeout(() => ctrl.abort(), 10000);
     const res = await fetch(`${BASE}/ai/agent/learn`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: engineHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ text: `[User:${userId}] ${text}` }),
       signal: ctrl.signal,
     });
@@ -149,7 +164,7 @@ async function retrieveLearning(userId, query, topK = 3) {
     const t = setTimeout(() => ctrl.abort(), 10000);
     const res = await fetch(`${BASE}/ai/agent/memory/retrieve`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: engineHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ query, top_k: topK }),
       signal: ctrl.signal,
     });

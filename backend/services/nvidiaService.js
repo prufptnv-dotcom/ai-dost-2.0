@@ -1,5 +1,6 @@
 const logger = require('../logger');
 const { RobustApiClient } = require('./apiClient');
+const { withQualityStandard } = require('./outputQualityStandard');
 
 class NvidiaService {
     constructor() {
@@ -45,7 +46,7 @@ Key Guidelines:
 
             const messagesPayload = [];
             if (systemPrompt) {
-                messagesPayload.push({ role: 'system', content: systemPrompt });
+                messagesPayload.push({ role: 'system', content: withQualityStandard(systemPrompt) });
             }
             if (history && history.length > 0) {
                 messagesPayload.push(...history);
@@ -53,7 +54,7 @@ Key Guidelines:
             messagesPayload.push({ role: 'user', content: message });
 
             const result = await this.client.post('/chat/completions', {
-                model: 'z-ai/glm-5.2',
+                model: 'meta/llama3-70b-instruct',
                 messages: messagesPayload,
                 temperature: 1,
                 top_p: 1,

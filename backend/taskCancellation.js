@@ -32,6 +32,9 @@ function cancelTask(task, reason = 'client disconnected') {
   if (!task || task.controller.signal.aborted) return false;
   task.canceled = true;
   task.controller.abort(new Error(reason));
+  // P2 #44 companion: a canceled task is no longer active — drop it immediately
+  // instead of waiting for res close/finish (keeps getActiveTask honest).
+  activeTasks.delete(task.taskId);
   return true;
 }
 
@@ -63,9 +66,19 @@ function registerTask(taskId, req, res) {
   return task;
 }
 
+// P2 #44: the client may suggest a task id, but it must never collide with an
+// in-flight task — a second stream re-registering an existing id would silently
+// overwrite the map entry and hijack cancellation of someone else's stream.
+function resolveTaskId(req) {
+  const requested = String(req.get?.('x-ai-dost-task-id') || req.body?.taskId || '').trim();
+  const safeShape = requested.length > 0 && requested.length <= 64 && /^[\w.:-]+$/.test(requested);
+  if (safeShape && !activeTasks.has(requested)) return requested;
+  return `server-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function wrapStreamHandler(handler) {
   return function taskAwareStreamHandler(req, res, next) {
-    const taskId = String(req.get('x-ai-dost-task-id') || req.body?.taskId || `server-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+    const taskId = resolveTaskId(req);
     const task = registerTask(taskId, req, res);
     res.setHeader('X-AI-Dost-Task-Id', taskId);
 
@@ -111,6 +124,38 @@ function installExpressRouterHook(expressFactory) {
   return expressFactory;
 }
 
+// ── P2 #45: cancellation auth ────────────────────────────────────────────────
+// The cancel endpoint is intercepted at the raw http.Server level (before any
+// Express guard), so it enforces its own policy: loopback callers only, and the
+// browser must present an allowlisted frontend Origin. Without this, any local
+// process — or any LAN client — could kill other users' streams.
+function isLoopbackAddress(addr) {
+  return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+}
+
+const ALLOWED_CANCEL_ORIGINS = new Set([
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  ...String(process.env.CORS_ORIGINS || process.env.FRONTEND_URL || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean),
+]);
+
+function cancelRequestAuthorized(req) {
+  if (!isLoopbackAddress(req.socket.remoteAddress)) return false;
+  const origin = req.headers.origin;
+  if (!origin) return false;
+  return ALLOWED_CANCEL_ORIGINS.has(origin);
+}
+
+function sendJson(res, status, payload) {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.end(JSON.stringify(payload));
+}
+
 function installCancellationEndpoint() {
   const originalEmit = http.Server.prototype.emit;
   if (originalEmit[PATCHED]) return;
@@ -122,13 +167,14 @@ function installCancellationEndpoint() {
       const method = String(req.method || '').toUpperCase();
       const pathname = String(req.url || '').split('?')[0];
       if ((method === 'POST' || method === 'DELETE') && pathname.startsWith(CANCEL_PATH_PREFIX)) {
+        if (!cancelRequestAuthorized(req)) {
+          sendJson(res, 403, { success: false, error: 'Task cancellation requires an allowlisted frontend origin' });
+          return true;
+        }
         const taskId = decodeURIComponent(pathname.slice(CANCEL_PATH_PREFIX.length).replace(/\/cancel$/, ''));
         if (taskId && pathname.endsWith('/cancel')) {
           const canceled = cancelActiveTask(taskId, 'task canceled by user');
-          res.statusCode = canceled ? 200 : 404;
-          res.setHeader('Content-Type', 'application/json; charset=utf-8');
-          res.setHeader('Cache-Control', 'no-store');
-          res.end(JSON.stringify({ success: canceled, taskId, canceled }));
+          sendJson(res, canceled ? 200 : 404, { success: canceled, taskId, canceled });
           return true;
         }
       }
@@ -173,4 +219,6 @@ module.exports = {
   cancelActiveTask,
   combineSignals,
   registerTask,
+  resolveTaskId,
+  cancelRequestAuthorized,
 };

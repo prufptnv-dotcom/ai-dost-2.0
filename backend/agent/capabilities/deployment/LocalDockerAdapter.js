@@ -39,7 +39,15 @@ class LocalDockerAdapter extends DeploymentProvider {
     return new Promise((resolve, reject) => {
       const child = spawn(cmd, args, {
         cwd: options.cwd || process.cwd(),
-        env: options.env || process.env,
+        // Minimal env — never pass process.env wholesale (secrets leak into containers)
+        env: {
+          PATH: process.env.PATH,
+          HOME: process.env.HOME || process.env.USERPROFILE,
+          TEMP: process.env.TEMP || process.env.TMP,
+          TMP: process.env.TMP || process.env.TEMP,
+          NODE_ENV: process.env.NODE_ENV || 'development',
+          ...(options.env || {})
+        },
         stdio: 'pipe'
       });
 

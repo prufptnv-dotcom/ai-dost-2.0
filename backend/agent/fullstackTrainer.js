@@ -173,6 +173,13 @@ FILE: src/services/api.js
 \`\`\`
 
 2. ZERO PLACEHOLDERS: Write complete, functional code without "// TODO".
+3. QUALITY BAR (principal-engineer standard):
+   - Every listed file gets its FULL working content — complete imports, complete function bodies, error handling. Never truncate or write "// rest of same".
+   - Frontend: real stateful UI (loading, empty, error states), responsive layout, dark theme, keyboard accessible; no dead buttons.
+   - Backend: working REST routes with validation, JSON errors, CORS, and in-memory/SQLite seed data so the app runs immediately after npm install + npm start.
+   - Security: no hardcoded secrets, no eval/exec on user input, input sanitization where user data is rendered.
+   - Include package.json, README.md (setup + run commands), and .env.example when config is needed.
+   - Ship a realistic minimum feature set for the domain (e.g., CRUD + filter/search + persistence), not a 3-component demo.
 `;
 }
 

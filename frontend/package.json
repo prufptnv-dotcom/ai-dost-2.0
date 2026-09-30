@@ -4,20 +4,23 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "postinstall": "node scripts/apply-next-xff-patch.js",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
     "test": "jest",
     "clean": "node ../backend/scripts/clean_project.js",
-    "prod": "docker compose up --build"
+    "prod": "docker compose -f ../docker-compose.yml up --build"
   },
   "dependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",
+    "@google/genai": "^2.24.0",
     "@monaco-editor/react": "^4.7.0",
     "@webcontainer/api": "^1.6.4",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^6.0.0",
+    "animejs": "^3.2.2",
     "axios": "^1.18.1",
     "dompurify": "^3.4.13",
     "figma-js": "^1.16.1-0",
@@ -26,7 +29,7 @@
     "lucide-react": "^1.27.0",
     "marked": "^18.0.9",
     "monaco-languageclient": "^10.7.0",
-    "next": "^16.2.12",
+    "next": "16.2.12",
     "ot": "^0.0.15",
     "react": "19.2.4",
     "react-dom": "19.2.4",

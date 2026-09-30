@@ -57,17 +57,23 @@ export default function AgentView({ onToast, onOpenFile }) {
     }
   });
 
-  // Elapsed timer
+  // Elapsed timer — P3 #125: always clear the previous handle before
+  // creating one so a stop/resume flip can never leave a stale interval
+  // running against frozen state.
   useEffect(() => {
-    if (running) {
-      timerRef.current = setInterval(() => {
-        setElapsedSeconds((s) => s + 1);
-      }, 1000);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
     }
+    if (!running) return undefined;
+    timerRef.current = setInterval(() => {
+      setElapsedSeconds((s) => s + 1);
+    }, 1000);
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
     };
   }, [running]);
 
@@ -104,9 +110,13 @@ export default function AgentView({ onToast, onOpenFile }) {
     runAgent(`Build this project from spec: ${JSON.stringify(spec)}`);
   };
 
-  const runAgent = async (text, approvalToken = null) => {
+  const runAgent = async (text, approvalToken = null, resume = false) => {
     const prompt = (text || input).trim();
-    if (!prompt || running) return;
+    // P3 #125: `running` in this closure is stale during handleApprove
+    // (setRunning(false) just ran, state still reads true) — the resume path
+    // must bypass the guard or the approved run never restarts and the
+    // elapsed timer keeps showing the stopped run's stale value.
+    if (!prompt || (running && !resume)) return;
 
     setInput('');
     setRunning(true);
@@ -280,9 +290,8 @@ export default function AgentView({ onToast, onOpenFile }) {
     const token = typeof waitingApproval === 'object' ? waitingApproval?.token : null;
     const promptText = typeof waitingApproval === 'object' ? waitingApproval?.prompt : input;
     setWaitingApproval(null);
-    setRunning(false);
     addTimelineEvent('SUPERVISOR', 'User approved pending operation. Resuming with approval token...', 'working');
-    runAgent(promptText, token);
+    runAgent(promptText, token, true); // P3 #125: resume=true bypasses stale running guard
   };
 
   const handleReject = () => {

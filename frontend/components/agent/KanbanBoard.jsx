@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 const STATUS_COLUMNS = [
   { key: 'backlog', label: 'Backlog', color: '#6b7280' },
@@ -10,21 +10,33 @@ const STATUS_COLUMNS = [
   { key: 'done', label: 'Done', color: '#10b981' }
 ];
 
+const MOCK_TASKS = [
+  { id: '1', title: 'Implement agent loop', column: 'backlog', description: 'Design and implement the core agent reasoning loop' },
+  { id: '2', title: 'Add RAG integration', column: 'planned', description: 'Integrate Pinecone/ChromaDB vector search' },
+  { id: '3', title: 'Terminal integration', column: 'running', description: 'Implement sandbox exec and terminal streaming' },
+  { id: '4', title: 'Add live preview', column: 'review', description: 'Implement Yjs real-time collaboration and dev server preview' },
+  { id: '5', title: 'Deploy service', column: 'done', description: 'Implement Vercel/Netlify/CF deployment adapters' }
+];
+
 export function KanbanBoard({ agentId, onTaskUpdate }) {
   const [tasks, setTasks] = useState([]);
   const [dragging, setDragging] = useState(null);
   const [hoveredColumn, setHoveredColumn] = useState(null);
+  const [newTaskText, setNewTaskText] = useState('');
+  const taskSeqRef = useRef(0);
 
   const loadTasks = useCallback(async () => {
-    // In production, fetch from agent backend
-    const mockTasks = [
-      { id: '1', title: 'Implement agent loop', column: 'backlog', description: 'Design and implement the core agent reasoning loop', agentId },
-      { id: '2', title: 'Add RAG integration', column: 'planned', description: 'Integrate Pinecone/ChromaDB vector search', agentId },
-      { id: '3', title: 'Terminal integration', column: 'running', description: 'Implement sandbox exec and terminal streaming', agentId },
-      { id: '4', title: 'Add live preview', column: 'review', description: 'Implement Yjs real-time collaboration and dev server preview', agentId },
-      { id: '5', title: 'Deploy service', column: 'done', description: 'Implement Vercel/Netlify/CF deployment adapters', agentId }
-    ];
-    setTasks(mockTasks);
+    try {
+      const res = await fetch('/api/agent/tasks');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : (Array.isArray(data?.tasks) ? data.tasks : []);
+      if (list.length > 0) {
+        setTasks(list);
+        return;
+      }
+    } catch (_) { /* backend unreachable — fall back to demo tasks */ }
+    setTasks(MOCK_TASKS.map(t => ({ ...t, agentId })));
   }, [agentId]);
 
   useEffect(() => {
@@ -34,11 +46,13 @@ export function KanbanBoard({ agentId, onTaskUpdate }) {
 
   const handleDragStart = (e, task) => {
     setDragging(task.id);
+    try { e.dataTransfer.setData('text/plain', task.id); } catch (_) {}
+    try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {}
   };
 
-  const handleDragOver = (e, column) => {
+  const handleDragOver = (e, columnKey) => {
     e.preventDefault();
-    setHoveredColumn(column.key);
+    setHoveredColumn(columnKey);
   };
 
   const handleDragEnd = () => {
@@ -48,25 +62,37 @@ export function KanbanBoard({ agentId, onTaskUpdate }) {
 
   const handleDrop = (e, columnKey) => {
     e.preventDefault();
-    const task = tasks.find(t => t.id === dragging);
+    let id = dragging;
+    if (!id) {
+      try { id = e.dataTransfer.getData('text/plain'); } catch (_) {}
+    }
+    const task = tasks.find(t => t.id === id);
     if (task && task.column !== columnKey) {
-      onTaskUpdate?.(agentId, { taskId: dragging, fromColumn: task.column, toColumn: columnKey });
-      setTasks(prev => prev.map(t => t.id === dragging ? { ...t, column: columnKey } : t));
+      onTaskUpdate?.(agentId, { taskId: id, fromColumn: task.column, toColumn: columnKey });
+      setTasks(prev => prev.map(t => t.id === id ? { ...t, column: columnKey } : t));
     }
     setDragging(null);
     setHoveredColumn(null);
   };
 
-  const addNewTask = (text) => {
-    if (!text || !text.trim()) return;
+  const addNewTask = (text, column = 'backlog') => {
+    const title = (text || '').trim();
+    if (!title) return false;
     const newTask = {
-      id: Date.now().toString(),
-      title: text,
-      column: 'backlog',
-      description: ''
+      id: `task-${++taskSeqRef.current}`,
+      title,
+      column,
+      description: '',
+      agentId
     };
     setTasks(prev => [...prev, newTask]);
-    onTaskUpdate?.(agentId, { type: 'newTask', task: newTask });
+    onTaskUpdate?.(agentId, { type: 'newTask', task: newTask, column });
+    return true;
+  };
+
+  const handleNewTaskKeyDown = (e) => {
+    if (e.key !== 'Enter') return;
+    if (addNewTask(newTaskText)) setNewTaskText('');
   };
 
   return (
@@ -100,7 +126,7 @@ export function KanbanBoard({ agentId, onTaskUpdate }) {
                 style={{
                   padding: '2px 6px', fontSize: 10, background: 'transparent', color: '#3b82f6', border: '1px solid #3b82f6', borderRadius: '4px', cursor: 'pointer', fontWeight: 500
                 }}
-                onClick={() => onTaskUpdate?.(agentId, { type: 'newTask', column: column.key })}
+                onClick={() => addNewTask('New task', column.key)}
               >
                 Add
               </button>
@@ -112,6 +138,7 @@ export function KanbanBoard({ agentId, onTaskUpdate }) {
                 .map(task => (
                   <div
                     key={task.id}
+                    draggable
                     style={{
                       padding: '8px 12px',
                       marginBottom: '4px',
@@ -144,10 +171,12 @@ export function KanbanBoard({ agentId, onTaskUpdate }) {
         <input
           type="text"
           placeholder="Describe a new task..."
+          value={newTaskText}
+          onChange={(e) => setNewTaskText(e.target.value)}
           style={{
             width: '100%', padding: '8px', background: '#1e293b', border: '1px solid #475569', borderRadius: '4px', color: '#e2e8f0', fontSize: 12
           }}
-          onKeyDown={e => e.key === 'Enter' && addNewTask(e.target.value)}
+          onKeyDown={handleNewTaskKeyDown}
         />
         </div>
     </div>

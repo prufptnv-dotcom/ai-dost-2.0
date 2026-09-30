@@ -9,25 +9,25 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const artifactService = require('../services/artifactService');
+const { detectDocumentRequest, DOCUMENT_TYPES } = require('../services/documentStudioEngine');
+const { sweepDownloads } = require('../services/downloadStore');
 
-// Ensure downloads directory exists; in container or standalone backend, fallback safely to local data/downloads
-const defaultFrontendDownloads = path.join(__dirname, '../../frontend/public/downloads');
-let DOWNLOADS_DIR = process.env.DOWNLOADS_DIR || defaultFrontendDownloads;
-try {
-    fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
-} catch (_err) {
-    DOWNLOADS_DIR = path.join(__dirname, '../data/downloads');
-    try {
-        fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
-    } catch (_err2) {
-        DOWNLOADS_DIR = path.join(require('os').tmpdir(), 'aidost-downloads');
-        try { fs.mkdirSync(DOWNLOADS_DIR, { recursive: true }); } catch (_) {}
-    }
-}
-const BASE = `http://127.0.0.1:${process.env.PORT || 5000}`;
+// P2 #48: sweep expired downloads on every generate request (non-blocking)
+router.use((req, res, next) => {
+    if (req.method === 'POST') setImmediate(() => sweepDownloads(DOWNLOADS_DIR));
+    next();
+});
+
+// Ensure downloads directory exists — shared resolver (P2 #178) so server.js,
+// pdf.js and artifactService all agree on the same dir (env DOWNLOADS_DIR in
+// Docker, frontend/public/downloads in dev, safe fallbacks otherwise).
+const { resolveDownloadsDir } = require('../services/downloadsDir');
+const { selfBaseUrl } = require('../services/selfUrl'); // P3 #66
+const DOWNLOADS_DIR = resolveDownloadsDir();
+const BASE = selfBaseUrl(); // P3 #66 — was hardcoded 127.0.0.1
 
 // ── LLM content via full cascade (2 attempts) ──────────────────────────────
-async function llmContent(systemPrompt, userPrompt, reqHeaders = {}, timeoutMs = 60000) {
+async function llmContent(systemPrompt, userPrompt, reqHeaders = {}, timeoutMs = 90000) {
     // systemPrompt is the template with {TOPIC} placeholder; userPrompt is the actual topic
     const prompt = systemPrompt.replace('{TOPIC}', userPrompt);
     const body = {
@@ -37,7 +37,7 @@ async function llmContent(systemPrompt, userPrompt, reqHeaders = {}, timeoutMs =
         section: 'document',
     };
     for (let attempt = 1; attempt <= 2; attempt++) {
-        const attemptTimeout = attempt === 1 ? Math.min(timeoutMs, 30000) : Math.min(timeoutMs / 2, 15000);
+        const attemptTimeout = attempt === 1 ? Math.min(timeoutMs, 60000) : Math.min(timeoutMs / 2, 30000);
         try {
             const fetchHeaders = { 'Content-Type': 'application/json' };
             if (reqHeaders['x-privacy-mode']) {
@@ -426,19 +426,62 @@ router.post('/generate', async (req, res) => {
         if (content && typeof content === 'string' && content.trim().length >= 30) {
             logger.info(`📄 Using explicit content provided in request for ${t} (${content.length} chars)`);
         } else {
-            try {
-                content = await llmContent(PROMPTS[t], cleanTopic, req.headers);
-                // Quality check: ensure content is actually about the topic
-                const topicKeywords = cleanTopic.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-                const hasTopic = topicKeywords.some(kw => content.toLowerCase().includes(kw));
-                if (!hasTopic && topicKeywords.length > 0) {
-                    logger.warn(`📄 LLM content off-topic (no ${topicKeywords.join(',')} found) → template fallback`);
-                    throw new Error('Content quality check failed');
+            // Detect if this is one of the 17 specialized document types
+            const docReq = detectDocumentRequest(`${cleanTopic} ${title || ''}`);
+            const isSpecializedArtifact = docReq && ['resume', 'cover-letter', 'study-syllabus', 'meeting-notes', 'professional-letter', 'api-documentation', 'technical-design-doc', 'lab-assignment', 'readme', 'business-proposal'].includes(docReq.type);
+
+            if (isSpecializedArtifact && DOCUMENT_TYPES[docReq.type] && (t === 'pdf' || t === 'docx')) {
+                const spec = DOCUMENT_TYPES[docReq.type];
+                logger.info(`📄 Generating specialized Category 6 document: ${spec.name} for "${cleanTopic}"`);
+                const specializedPrompt = `Generate an authoritative, complete, production-grade ${spec.name} ONLY about: {TOPIC}.
+Document Scope & Description: ${spec.description}
+
+Required Sections:
+${spec.sections.map((s, idx) => `${idx + 1}. ${s}`).join('\n')}
+
+Formatting & Quality Rules:
+- Generate complete, professional markdown with headings (# and ##), bullet points, and tables.
+- Do NOT use placeholder tokens (e.g. "Lorem ipsum", "[Insert details here]"). Provide realistic, detailed, high-impact content.
+- Language: match topic (Hindi / Hinglish / English). Valid Markdown only.`;
+                try {
+                    content = await llmContent(specializedPrompt, cleanTopic, req.headers);
+                    logger.info(`📄 Specialized ${spec.name} content ready (${content.length} chars)`);
+                } catch (spErr) {
+                    logger.warn(`📄 Specialized document generation error: ${spErr.message}`);
                 }
-                logger.info(`📄 LLM content ready for ${t} (${content.length} chars)`);
-            } catch (e) {
-                logger.warn(`📄 LLM unavailable/off-topic → template fallback: ${e.message}`);
-                content = templateContent(t, cleanTopic);
+            }
+
+            // For general PDF and Word research reports, generate an autonomous multi-chapter research monograph
+            const isResearchDoc = (t === 'pdf' || t === 'docx');
+
+            if (!content && isResearchDoc && !isSpecializedArtifact) {
+                try {
+                    const researchService = require('../services/researchService');
+                    logger.info(`🔬 Triggering AI-Dost Autonomous Multi-Chapter Research for: "${cleanTopic}"`);
+                    content = await researchService.generateMultiChapterResearch(cleanTopic);
+                    logger.info(`📄 AI-Dost Autonomous Research completed (${content.length} chars across chapters)`);
+                } catch (rErr) {
+                    logger.warn(`🔬 Multi-chapter research error: ${rErr.message}, falling back to single-shot LLM`);
+                }
+            }
+
+            if (!content) {
+                try {
+                    content = await llmContent(PROMPTS[t], cleanTopic, req.headers);
+                    const topicKeywords = cleanTopic.toLowerCase()
+                        .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+                        .split(/\s+/)
+                        .filter(w => w.length > 2);
+                    const hasTopic = topicKeywords.length === 0 || topicKeywords.some(kw => content.toLowerCase().includes(kw));
+                    if (!hasTopic && topicKeywords.length > 0) {
+                        logger.warn(`📄 LLM content off-topic (no ${topicKeywords.slice(0, 5).join(',')} found) → template fallback`);
+                        throw new Error('Content quality check failed');
+                    }
+                    logger.info(`📄 LLM content ready for ${t} (${content.length} chars)`);
+                } catch (e) {
+                    logger.warn(`📄 LLM unavailable/off-topic → template fallback: ${e.message}`);
+                    content = templateContent(t, cleanTopic);
+                }
             }
         }
         const fileId = crypto.randomUUID().substring(0, 8);
@@ -471,10 +514,11 @@ router.post('/generate', async (req, res) => {
             try {
                 const PythonEngine = require('../services/pythonEngineService');
                 const xlsxResult = await PythonEngine.xlsxGenerate(topic, safeTitle);
-                if (xlsxResult.ok && xlsxResult.data && xlsxResult.data.file_path) {
-                    const src = xlsxResult.data.file_path;
+                // P3 #161: engine returns a downloadable buffer now (no
+                // absolute file_path from the Python side).
+                if (xlsxResult.ok && xlsxResult.buffer) {
                     const dest = path.join(DOWNLOADS_DIR, filename);
-                    fs.copyFileSync(src, dest);
+                    fs.writeFileSync(dest, xlsxResult.buffer);
                     finalName = filename;
                     xlsxBuilt = true;
                 }

@@ -14,21 +14,32 @@ const { DatabaseSync: Database } = (() => {
 const DB_PATH = path.join(__dirname, '..', 'data', 'app.db');
 
 function getFileFromDb(projectId, filePath) {
+  // P3 #42: close the handle in `finally` — if prepare/get throws, the old
+  // `db.close()` after the query never ran and leaked a sqlite handle per
+  // failed preview request.
+  let db = null;
   try {
-    const db = new Database(DB_PATH, { readonly: true });
+    db = new Database(DB_PATH, { readonly: true });
     const row = db.prepare('SELECT content FROM workspace_files WHERE project_id = ? AND path = ?').get(projectId, filePath);
-    db.close();
     return row ? (row.content || '') : null;
-  } catch (_) { return null; }
+  } catch (_) {
+    return null;
+  } finally {
+    if (db) { try { db.close(); } catch (_) {} }
+  }
 }
 
 function getAllFilesFromDb(projectId) {
+  let db = null;
   try {
-    const db = new Database(DB_PATH, { readonly: true });
+    db = new Database(DB_PATH, { readonly: true });
     const rows = db.prepare('SELECT path, content FROM workspace_files WHERE project_id = ?').all(projectId);
-    db.close();
     return rows;
-  } catch (_) { return []; }
+  } catch (_) {
+    return [];
+  } finally {
+    if (db) { try { db.close(); } catch (_) {} }
+  }
 }
 
 const MIME = {
@@ -62,6 +73,23 @@ const MIME = {
 
 function workspaceOf(projectId) {
   return workspaceManager.getWorkspacePath(projectId);
+}
+
+// P2 #43: HTML-escape every dynamic value interpolated into preview status pages
+// (server logs / error text / projectId are attacker-influenced via project code).
+function esc(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// For values embedded inside single-quoted JS in an onclick attribute:
+// JSON.stringify for JS safety, then HTML escaping for the attribute context.
+function escJsString(value) {
+  return esc(JSON.stringify(String(value)));
 }
 
 function safeJoin(root, rel) {
@@ -118,8 +146,8 @@ function proxyToDevServer(req, res, server, relPath = '') {
         <head><title>Dev Server Gateway Error</title></head>
         <body style="background:#090a0f;color:#f87171;font-family:sans-serif;padding:30px;">
           <h2>⚠️ Dev Server Gateway Error</h2>
-          <p>Could not proxy request to live dev server on port ${hostPort}.</p>
-          <pre style="background:#18181b;padding:15px;border-radius:8px;color:#cbd5e1;">${err.message}</pre>
+          <p>Could not proxy request to live dev server on port ${esc(hostPort)}.</p>
+          <pre style="background:#18181b;padding:15px;border-radius:8px;color:#cbd5e1;">${esc(err.message)}</pre>
           <button onclick="location.reload()" style="background:#4f46e5;color:white;padding:8px 16px;border:none;border-radius:6px;cursor:pointer;">Retry</button>
         </body>
         </html>
@@ -132,13 +160,13 @@ function proxyToDevServer(req, res, server, relPath = '') {
 
 // ── HTML Rendering for Dev Server States ────────────────────────────────────
 function renderStartingHtml(projectId, server) {
-  const logs = (server?.logs || []).slice(-15).map(l => `<div>[${new Date(l.timestamp).toLocaleTimeString()}] ${l.message}</div>`).join('');
+  const logs = (server?.logs || []).slice(-15).map(l => `<div>[${esc(new Date(l.timestamp).toLocaleTimeString())}] ${esc(l.message)}</div>`).join('');
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="refresh" content="2">
-  <title>Starting Dev Server — ${projectId}</title>
+  <title>Starting Dev Server — ${esc(projectId)}</title>
   <style>
     body { background: #090a0f; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
     .card { background: #11141f; border: 1px solid #27272a; border-radius: 16px; padding: 32px; max-width: 580px; width: 100%; box-shadow: 0 20px 40px rgba(0,0,0,0.5); text-align: center; }
@@ -153,9 +181,9 @@ function renderStartingHtml(projectId, server) {
 <body>
   <div class="card">
     <div class="spinner"></div>
-    <div class="badge">STATE: ${server?.state || 'STARTING'}</div>
+    <div class="badge">STATE: ${esc(server?.state || 'STARTING')}</div>
     <h2>Booting Dev Server...</h2>
-    <p>Starting ${server?.framework || 'Web'} application inside the persistent workspace.</p>
+    <p>Starting ${esc(server?.framework || 'Web')} application inside the persistent workspace.</p>
     <div class="logs">
       ${logs || '<div>Initializing dependencies and runtime...</div>'}
     </div>
@@ -166,12 +194,12 @@ function renderStartingHtml(projectId, server) {
 
 function renderFailedHtml(projectId, server) {
   const errorText = server?.error || 'Dev server crashed during execution';
-  const logs = (server?.logs || []).slice(-20).map(l => `<div>${l.message}</div>`).join('');
+  const logs = (server?.logs || []).slice(-20).map(l => `<div>${esc(l.message)}</div>`).join('');
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Dev Server Failed — ${projectId}</title>
+  <title>Dev Server Failed — ${esc(projectId)}</title>
   <style>
     body { background: #090a0f; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
     .card { background: #11141f; border: 1px solid #ef444440; border-radius: 16px; padding: 32px; max-width: 640px; width: 100%; box-shadow: 0 20px 40px rgba(0,0,0,0.5); }
@@ -188,11 +216,11 @@ function renderFailedHtml(projectId, server) {
 <body>
   <div class="card">
     <h2>⚠️ Dev Server Startup Failed</h2>
-    <p>The dev server encountered an error while starting project <b>${projectId}</b>.</p>
-    <div class="err-box">${errorText}</div>
+    <p>The dev server encountered an error while starting project <b>${esc(projectId)}</b>.</p>
+    <div class="err-box">${esc(errorText)}</div>
     <div class="logs">${logs || 'No additional logs.'}</div>
     <div class="actions">
-      <button class="btn-retry" onclick="fetch('/api/preview/${projectId}/dev/restart', {method:'POST'}).then(() => location.reload())">🔄 Restart Dev Server</button>
+      <button class="btn-retry" onclick="fetch('/api/preview/' + encodeURIComponent(${escJsString(projectId)}) + '/dev/restart', {method:'POST'}).then(() => location.reload())">🔄 Restart Dev Server</button>
     </div>
   </div>
 </body>
@@ -204,7 +232,7 @@ function renderOfflineHtml(projectId) {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Live Preview — ${projectId}</title>
+  <title>Live Preview — ${esc(projectId)}</title>
   <style>
     body { background: #090a0f; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
     .card { background: #11141f; border: 1px solid #27272a; border-radius: 16px; padding: 32px; max-width: 520px; width: 100%; box-shadow: 0 20px 40px rgba(0,0,0,0.5); text-align: center; }
@@ -220,8 +248,8 @@ function renderOfflineHtml(projectId) {
   <div class="card">
     <div class="icon">⚡</div>
     <h2>Live Dev Server Ready</h2>
-    <p>Project <b>${projectId}</b> can be launched in a live isolated development runtime with instant HMR and full proxy mode.</p>
-    <button class="btn-start" onclick="this.disabled=true;this.innerText='Booting Dev Server...';fetch('/api/preview/${projectId}/dev/start', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({projectPath: '.'})}).then(() => location.reload())">🚀 Start Dev Server</button>
+    <p>Project <b>${esc(projectId)}</b> can be launched in a live isolated development runtime with instant HMR and full proxy mode.</p>
+    <button class="btn-start" onclick="this.disabled=true;this.innerText='Booting Dev Server...';fetch('/api/preview/' + encodeURIComponent(${escJsString(projectId)}) + '/dev/start', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({projectPath: '.'})}).then(() => location.reload())">🚀 Start Dev Server</button>
     <div class="note">Tip: You can also toggle preview to In-Browser mode in the top preview toolbar.</div>
   </div>
 </body>
@@ -340,7 +368,7 @@ function buildStandaloneReactHtml(projectId) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Live Preview — ${projectId}</title>
+  <title>Live Preview — ${esc(projectId)}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -452,7 +480,7 @@ router.post('/:projectId/dev/restart', async (req, res) => {
 });
 
 // ── GET /api/preview/:projectId/zip ─────────────────────────────────────────
-router.get('/:projectId/zip', (req, res) => {
+router.get('/:projectId/zip', async (req, res) => {
   const root = workspaceOf(req.params.projectId);
   if (!fs.existsSync(root)) return res.status(404).json({ error: 'Workspace not found' });
 
@@ -508,7 +536,7 @@ npm run dev
     ignore: ['node_modules/**', '.git/**', '.checkpoints/**', '.next/**', 'dist/**', 'build/**', '*.log']
   });
 
-  archive.finalize();
+    await archive.finalize();
 });
 
 // ── GET /api/preview/:projectId and /api/preview/:projectId/* ───────────────

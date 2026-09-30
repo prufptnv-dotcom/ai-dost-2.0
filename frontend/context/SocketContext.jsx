@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
 import { initWebSocket } from '../services/websocket';
 import { logger } from '../utils/logger';
 
@@ -117,23 +117,26 @@ export const SocketProvider = ({ children }) => {
     };
   }, [projectId]);
 
-  const sendMessage = (data) => {
+  const sendMessage = useCallback((data) => {
     if (!socket) return false;
     return socket.send(JSON.stringify(data));
-  };
+  }, [socket]);
+
+  const value = useMemo(
+    () => ({
+      socket,
+      sendMessage,
+      setProjectId,
+      collaborators,
+      remoteCursors,
+      connectionState,
+      connectionMeta,
+    }),
+    [socket, sendMessage, setProjectId, collaborators, remoteCursors, connectionState, connectionMeta]
+  );
 
   return (
-    <SocketContext.Provider
-      value={{
-        socket,
-        sendMessage,
-        setProjectId,
-        collaborators,
-        remoteCursors,
-        connectionState,
-        connectionMeta,
-      }}
-    >
+    <SocketContext.Provider value={value}>
       {children}
     </SocketContext.Provider>
   );

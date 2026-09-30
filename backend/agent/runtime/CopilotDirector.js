@@ -131,7 +131,8 @@ class CopilotDirector {
   }
 
   async executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs }) {
-    const workerPlan = await this.taskPlanner.generatePlan(task.objective, { projectId, role: task.role, specialty: task.specialty, directorTaskId: task.id, request, expectedOutput: task.expectedOutput });
+    const objectiveWithDirective = `[SURGICAL_DIRECTIVE: Inspect existing workspace files first. Apply surgical targeted edits to affected files only without wiping or regenerating unrelated code.]\n${task.objective}`;
+    const workerPlan = await this.taskPlanner.generatePlan(objectiveWithDirective, { projectId, role: task.role, specialty: task.specialty, directorTaskId: task.id, request, expectedOutput: task.expectedOutput });
     return this.plannerExecutionLoop.runWithPlan(projectId, userId, workerPlan, maxRepairs, () => Boolean(signal?.aborted), `copilot_${delegated.workerRun.id}`);
   }
 
@@ -176,6 +177,28 @@ class CopilotDirector {
           completed.set(task.id, taskStatus);
           results.push({ task, status: taskStatus, workerRunId: delegated.workerRun.id, result: executionResult });
           onEvent({ type: 'director_task', status: taskStatus, taskId: task.id, specialty: task.specialty, role: task.role, workerRunId: delegated.workerRun.id, result: executionResult });
+
+          // Devin / Cursor Composer 2: Emit multi-file diff telemetry
+          if (Array.isArray(executionResult?.stepLogs)) {
+            for (const step of executionResult.stepLogs) {
+              const act = step?.action || step?.tool || '';
+              const target = step?.params?.path || step?.params?.filePath || step?.params?.TargetFile || step?.params?.file;
+              if (target && (act.includes('write') || act.includes('edit') || act.includes('patch') || act.includes('replace') || act.includes('diff'))) {
+                const fname = String(target).split(/[/\\]/).pop();
+                onEvent({
+                  type: 'director_file_diff',
+                  file: fname,
+                  fullPath: target,
+                  action: act,
+                  taskId: task.id,
+                  specialty: task.specialty,
+                  summary: step?.result?.message || `Surgical edit applied to ${fname}`,
+                  timestamp: Date.now()
+                });
+              }
+            }
+          }
+
           if (taskStatus === 'CANCELLED') return { status: 'CANCELLED', taskId: supervisorTaskId, runId: supervisorRunId, plan, results };
         }
       }

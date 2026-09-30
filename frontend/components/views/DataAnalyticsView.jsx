@@ -33,10 +33,10 @@ export default function DataAnalyticsView({ onToast }) {
   const handleFileSelect = (e) => {
     const selectedFile = e.target.files[0];
     if (selectedFile) {
-      if (selectedFile.name.endsWith('.csv') || selectedFile.name.endsWith('.json')) {
+      if (/\.(csv|json|xlsx|xls)$/i.test(selectedFile.name)) {
         setFile(selectedFile);
       } else {
-        onToast?.('Only CSV and JSON files are supported', 'error');
+        onToast?.('Only CSV, JSON, and Excel (.xlsx/.xls) files are supported', 'error');
         setFile(null);
       }
     }
@@ -84,17 +84,19 @@ export default function DataAnalyticsView({ onToast }) {
         query: userQuery,
         columns: datasetInfo.columns,
         preview: datasetInfo.preview,
-        totalRows: datasetInfo.totalRows
+        totalRows: datasetInfo.totalRows,
+        profile: datasetInfo.profile,
       });
       
       if (res.data.success) {
         const aiResult = res.data.result;
         setResult(aiResult);
-        setHistory(prev => [...prev, {
+        setHistory((prev) => [...prev, {
           role: 'assistant',
           content: aiResult.narrative,
           chartData: aiResult.chartData,
-          chartType: aiResult.chartType
+          chartType: aiResult.chartType,
+          suggestedCode: aiResult.suggestedCode,
         }]);
       }
     } catch (err) {
@@ -239,21 +241,61 @@ export default function DataAnalyticsView({ onToast }) {
           </div>
 
           <div className="bg-accent-primary/10 border border-accent-primary/20 rounded-md p-3">
-            <h4 className="text-xs font-medium text-accent-primary mb-1 flex items-center">
+            <h4 className="text-xs font-semibold text-accent-primary mb-2 flex items-center">
               <Sparkles className="w-3.5 h-3.5 mr-1.5" />
-              Example Questions
+              Category 8 Analytical Tools
             </h4>
-            <ul className="space-y-1.5 mt-2">
-              <li className="text-[11px] text-paper-100 cursor-pointer hover:text-accent-primary transition-colors" onClick={() => setQuery('What is the distribution of values in this dataset?')}>
-                &quot;What is the distribution of values?&quot;
-              </li>
-              <li className="text-[11px] text-paper-100 cursor-pointer hover:text-accent-primary transition-colors" onClick={() => setQuery('Show me the top 5 categories by count as a pie chart.')}>
-                &quot;Show me top 5 categories (Pie Chart)&quot;
-              </li>
-              <li className="text-[11px] text-paper-100 cursor-pointer hover:text-accent-primary transition-colors" onClick={() => setQuery('Are there any outliers or trends in this data?')}>
-                &quot;Are there any outliers or trends?&quot;
-              </li>
-            </ul>
+            <div className="space-y-1 mt-1">
+              <button
+                type="button"
+                className="w-full text-left px-2 py-1.5 rounded text-[11px] text-paper-100 hover:bg-canvas-elevated hover:text-accent-primary transition-colors block cursor-pointer"
+                onClick={() => setQuery('Provide a full statistical summary (Mean, Median, Std Dev, Min, Max, Quartiles) for the numerical columns in this dataset.')}
+              >
+                📊 Statistical Summary
+              </button>
+              <button
+                type="button"
+                className="w-full text-left px-2 py-1.5 rounded text-[11px] text-paper-100 hover:bg-canvas-elevated hover:text-accent-primary transition-colors block cursor-pointer"
+                onClick={() => setQuery('Identify missing values, duplicates, and outliers using the IQR method. Outline a complete data cleaning plan.')}
+              >
+                🧹 Data Cleaning & Outliers
+              </button>
+              <button
+                type="button"
+                className="w-full text-left px-2 py-1.5 rounded text-[11px] text-paper-100 hover:bg-canvas-elevated hover:text-accent-primary transition-colors block cursor-pointer"
+                onClick={() => setQuery('Analyze key trends and seasonality in this data. Explain how to forecast future metrics using ARIMA / Moving Averages.')}
+              >
+                📈 Trend & Forecasting
+              </button>
+              <button
+                type="button"
+                className="w-full text-left px-2 py-1.5 rounded text-[11px] text-paper-100 hover:bg-canvas-elevated hover:text-accent-primary transition-colors block cursor-pointer"
+                onClick={() => setQuery('Perform correlation analysis across the numeric columns and highlight the strongest relationships.')}
+              >
+                🔗 Correlation Analysis
+              </button>
+              <button
+                type="button"
+                className="w-full text-left px-2 py-1.5 rounded text-[11px] text-paper-100 hover:bg-canvas-elevated hover:text-accent-primary transition-colors block cursor-pointer"
+                onClick={() => setQuery('Write production-grade SQL queries with CTEs and window functions to aggregate and analyze this dataset.')}
+              >
+                🐬 Generate SQL Queries
+              </button>
+              <button
+                type="button"
+                className="w-full text-left px-2 py-1.5 rounded text-[11px] text-paper-100 hover:bg-canvas-elevated hover:text-accent-primary transition-colors block cursor-pointer"
+                onClick={() => setQuery('Provide clean, vectorized Python code using Pandas and Polars LazyFrames to transform and analyze this data.')}
+              >
+                🐼 Pandas / Polars Code
+              </button>
+              <button
+                type="button"
+                className="w-full text-left px-2 py-1.5 rounded text-[11px] text-paper-100 hover:bg-canvas-elevated hover:text-accent-primary transition-colors block cursor-pointer"
+                onClick={() => setQuery('Plan an executive dashboard layout and North Star KPI framework for this dataset.')}
+              >
+                🎯 KPI & Dashboard Plan
+              </button>
+            </div>
           </div>
         </div>
 
@@ -293,6 +335,14 @@ export default function DataAnalyticsView({ onToast }) {
 
                       {/* Render Chart if available */}
                       {msg.chartData && msg.chartType !== 'none' && renderChart(msg.chartType, msg.chartData)}
+
+                      {/* Render Suggested Code if available */}
+                      {msg.suggestedCode && (
+                        <div className="mt-3 bg-black/50 border border-border rounded p-3 overflow-x-auto">
+                          <div className="text-[10px] text-accent font-mono mb-1 font-semibold">Generated Code (SQL / Python):</div>
+                          <pre className="text-xs font-mono text-paper-100 whitespace-pre-wrap">{msg.suggestedCode}</pre>
+                        </div>
+                      )}
                     </div>
                   </motion.div>
                 ))}

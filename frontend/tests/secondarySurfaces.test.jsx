@@ -63,7 +63,8 @@ describe('Phase 3.7 — Secondary Product Surfaces Rebuild', () => {
 
       const saveBtn = screen.getByText('Save Changes');
       fireEvent.click(saveBtn);
-      expect(onToast).toHaveBeenCalledWith('Settings saved locally', 'success');
+      // #102: keys now save to the server store, prefs stay local — copy updated
+      expect(onToast).toHaveBeenCalledWith('Settings saved', 'success');
     });
 
     it('renders sandbox security card and triggers diagnostic health check', async () => {

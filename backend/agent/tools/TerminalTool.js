@@ -15,10 +15,11 @@ class TerminalTool extends Tool {
     this.validateInput(input);
     const { command } = input;
     
-    // Explicit safety block matching legacy Phase 1 constraints
-    const BLOCKED = ['rm -rf /', 'format c:', 'del /f /s /q c:\\', 'shutdown', 'rmdir /s /q c:'];
-    if (BLOCKED.some(b => command.toLowerCase().includes(b))) {
-      throw new Error('Command blocked for safety.');
+    // P3 #35: shared SandboxManager policy instead of the old 5-string list
+    // (rm -rf /, format c:, …) which trivial escapes bypassed.
+    const policy = sandboxManager.validateCommandPolicy(command);
+    if (!policy.allowed) {
+      throw new Error(policy.reason || 'Command blocked for safety.');
     }
 
     const ws = context.workspaceManager.getWorkspacePath(context.projectId, context.userId);

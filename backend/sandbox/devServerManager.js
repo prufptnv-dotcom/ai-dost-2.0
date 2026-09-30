@@ -99,6 +99,22 @@ class DevServerManager extends EventEmitter {
     return workspaceManager.getWorkspacePath(projectId);
   }
 
+  // Reject absolute / traversal projectPath (was joined raw → path escape)
+  _safeProjectPath(projectPath) {
+    const raw = String(projectPath || '.').trim();
+    if (!raw || raw.includes('\0')) return null;
+    if (path.isAbsolute(raw) || /^[a-zA-Z]:[\\/]/.test(raw)) return null;
+    if (raw.split(/[\\/]/).some(seg => seg === '..')) return null;
+    return raw;
+  }
+
+  // Reject shell metacharacters in user-supplied customCommand
+  _safeCustomCommand(cmd) {
+    if (!cmd || typeof cmd !== 'string') return null;
+    if (/[;&|`$()<>\n\r]/.test(cmd)) return null;
+    return cmd.slice(0, 300);
+  }
+
   async detectFramework(targetId, projectPath = '.') {
     const sandbox = sandboxManager.getSandbox(targetId);
     if (sandbox) {
@@ -182,6 +198,9 @@ class DevServerManager extends EventEmitter {
   }
 
   async installDependencies(targetId, projectPath = '.') {
+    const safeRel = this._safeProjectPath(projectPath);
+    if (safeRel === null) return { success: false, error: 'Invalid projectPath (absolute/.. blocked)' };
+    projectPath = safeRel;
     const sandbox = sandboxManager.getSandbox(targetId);
     const pkg = await this.readPackageJson(targetId, projectPath);
     if (!pkg) return { success: false, error: 'No package.json found' };
@@ -190,7 +209,7 @@ class DevServerManager extends EventEmitter {
     this.emitLog(targetId, `📦 Installing dependencies with: ${cmd}`, 'info');
 
     if (sandbox) {
-      const result = await sandboxManager.exec(targetId, `cd ${projectPath} && ${cmd}`, {
+      const result = await sandboxManager.exec(targetId, `cd '${projectPath.replace(/'/g, '')}' && ${cmd}`, {
         timeout: 180000
       });
       if (!result.success) {
@@ -201,8 +220,12 @@ class DevServerManager extends EventEmitter {
       return { success: true };
     }
 
-    // Host execution fallback
-    const wsDir = path.join(this._workspaceDir(targetId), projectPath);
+    // Host execution fallback — path.join with validated relative projectPath only
+    const wsRoot = path.resolve(this._workspaceDir(targetId));
+    const wsDir = path.resolve(wsRoot, projectPath);
+    if (wsDir !== wsRoot && !wsDir.startsWith(wsRoot + path.sep)) {
+      return { success: false, error: 'projectPath escapes workspace root' };
+    }
     try {
       if (require('fs').existsSync(path.join(wsDir, 'node_modules'))) {
         this.emitLog(targetId, '⚡ Existing node_modules found, skipping npm install', 'info');
@@ -216,7 +239,7 @@ class DevServerManager extends EventEmitter {
 
       const child = spawn(npmCmd, ['install'], {
         cwd: wsDir,
-        shell: true,
+        shell: false,
         env: { ...process.env, NODE_ENV: 'development' }
       });
 
@@ -238,6 +261,18 @@ class DevServerManager extends EventEmitter {
   }
 
   async startDevServer(targetId, projectPath = '.', options = {}) {
+    const safeRel = this._safeProjectPath(projectPath);
+    if (safeRel === null) {
+      return { success: false, error: 'Invalid projectPath (absolute/.. blocked)' };
+    }
+    projectPath = safeRel;
+    if (options.customCommand) {
+      const safeCmd = this._safeCustomCommand(options.customCommand);
+      if (!safeCmd) {
+        return { success: false, error: 'customCommand contains blocked shell characters' };
+      }
+      options = { ...options, customCommand: safeCmd };
+    }
     const existing = this.getServer(targetId);
     if (existing && existing.state === 'READY') {
       return { success: true, url: existing.url, hostPort: existing.hostPort, framework: existing.framework, state: 'READY' };
@@ -306,7 +341,7 @@ class DevServerManager extends EventEmitter {
       serverInfo.url = `http://127.0.0.1:${finalHostPort}`;
 
       const devCommand = options.customCommand || config.devCommand;
-      const fullCmd = `cd ${projectPath} && ${devCommand}`;
+      const fullCmd = `cd '${projectPath.replace(/'/g, '')}' && ${devCommand}`;
       this.emitLog(targetId, `🚀 Starting ${config.framework} dev server on port ${containerPort} (Host :${finalHostPort})...`, 'info');
 
       sandboxManager.exec(targetId, fullCmd, {
@@ -331,7 +366,12 @@ class DevServerManager extends EventEmitter {
       serverInfo.hostPort = hostPort;
       serverInfo.url = `http://127.0.0.1:${hostPort}`;
 
-      const rawWsDir = path.join(this._workspaceDir(projectId), projectPath);
+      const rawWsDir = path.resolve(this._workspaceDir(projectId), projectPath);
+      const wsRoot = path.resolve(this._workspaceDir(projectId));
+      if (rawWsDir !== wsRoot && !rawWsDir.startsWith(wsRoot + path.sep)) {
+        this.emitState(serverInfo, 'FAILED', 'projectPath escapes workspace');
+        return { success: false, error: 'projectPath escapes workspace root' };
+      }
       let wsDir = rawWsDir;
       try {
         wsDir = require('fs').realpathSync(rawWsDir);

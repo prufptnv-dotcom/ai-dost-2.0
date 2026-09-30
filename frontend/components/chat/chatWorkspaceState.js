@@ -46,7 +46,7 @@ export function clearWorkspaceState() {
   } catch (_) {}
 }
 
-export default {
+const chatWorkspaceState = {
   CHAT_WORKSPACE_KEY,
   WORKSPACE_TYPES,
   createWorkspaceState,
@@ -54,3 +54,6 @@ export default {
   readWorkspaceState,
   clearWorkspaceState,
 };
+
+export default chatWorkspaceState;
+

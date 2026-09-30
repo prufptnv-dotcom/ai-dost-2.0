@@ -26,6 +26,25 @@ const DEPTH_OPTIONS = [
   { id: 'competitive', label: 'Market & Tech Matrix', desc: 'Comparative landscape & trends' }
 ];
 
+export const RESEARCH_DOMAINS = [
+  { id: 'all', label: 'All Domains' },
+  { id: 'tech', label: 'Latest Tech', sample: 'Latest semiconductor 2nm fabrication nodes and commercial roadmap 2026' },
+  { id: 'schemes', label: 'Gov Schemes', sample: 'PM Surya Ghar Muft Bijli Yojana eligibility, subsidy amount, and application portal' },
+  { id: 'exams', label: 'Exams & Syllabus', sample: 'UPSC CSE 2026 preliminary and mains syllabus breakdown with booklist' },
+  { id: 'jobs', label: 'Jobs & Eligibility', sample: 'AI/ML Engineer role requirements, tech stack, eligibility, and salary in India 2026' },
+  { id: 'comparison', label: 'Product Comparisons', sample: 'M4 MacBook Pro vs Dell XPS 15 2026 comparison for software development' },
+  { id: 'hardware', label: 'Laptops & Mobiles', sample: 'Best laptops under 80,000 INR for coding, battery life, and display quality' },
+  { id: 'apis', label: 'APIs & Tools', sample: 'Top open-source vector databases 2026: Qdrant vs Milvus vs Chroma benchmarks' },
+  { id: 'ai-models', label: 'Latest AI Models', sample: 'DeepSeek R1 vs Claude 3.7 Sonnet vs GPT-4.5 benchmarks, context window, and pricing' },
+  { id: 'docs', label: 'Documentation', sample: 'Next.js 16 App Router caching and Server Actions official documentation guide' },
+  { id: 'startups', label: 'Companies & Startups', sample: 'Anthropic company profile, valuation, funding rounds, and Claude ecosystem' },
+  { id: 'science', label: 'Scientific Topics', sample: 'James Webb Space Telescope latest discoveries on early galaxy formation' },
+  { id: 'news', label: 'News & Events', sample: 'Global AI safety regulation treaties and updates 2026' },
+  { id: 'travel', label: 'Travel Information', sample: '7-day Japan itinerary for first-time travelers: Tokyo, Kyoto, Osaka costs' },
+  { id: 'local', label: 'Local Businesses', sample: 'Coworking spaces in Bengaluru Indiranagar with day-pass pricing and amenities' },
+  { id: 'pricing', label: 'Prices & Availability', sample: 'Sony WH-1000XM5 current market price, discounts, and availability across stores' },
+];
+
 const SUGGESTED_TOPICS = [
   { title: 'Global Semiconductor Foundry Landscape 2026', query: 'Global semiconductor foundries market share 2026 advanced nodes' },
   { title: 'Autonomous AI Agents in Enterprise', query: 'Autonomous AI agents enterprise adoption trends 2026' },
@@ -113,7 +132,7 @@ export default function ResearchView({ onToast, onNavigate }) {
   };
 
   return (
-    <div className="h-full flex flex-col bg-canvas-base text-txt-primary overflow-hidden select-none">
+    <div className="h-full flex flex-col bg-canvas-base text-txt-primary overflow-hidden">
       {/* Top Header Bar */}
       <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-canvas-subtle flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -203,6 +222,24 @@ export default function ResearchView({ onToast, onNavigate }) {
                 </>
               )}
             </Button>
+          </div>
+
+          {/* 15 Domain Preset Chips */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+            <span className="text-[10px] font-mono text-ink-muted uppercase tracking-wider shrink-0 mr-1">Domain:</span>
+            {RESEARCH_DOMAINS.map((dom) => (
+              <button
+                key={dom.id}
+                type="button"
+                onClick={() => {
+                  if (dom.sample) setTopic(dom.sample);
+                }}
+                disabled={isResearching}
+                className="shrink-0 px-2.5 py-1 rounded-md text-[11px] font-mono transition-all cursor-pointer border bg-canvas-base border-border text-paper-200 hover:text-paper-100 hover:border-accent-primary"
+              >
+                {dom.label}
+              </button>
+            ))}
           </div>
 
           {/* Depth Preset Chips */}

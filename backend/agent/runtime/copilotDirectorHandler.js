@@ -20,6 +20,7 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
 
   const projectId = resolveProjectId(body);
   const taskId = String(req.get('x-ai-dost-task-id') || body.taskId || `copilot-${Date.now().toString(36)}`);
+  const runId = `director-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const request = String(body.userPrompt || body.prompt || '').trim();
   if (!request) return res.status(400).json({ success: false, error: 'Director request is required', taskId });
 
@@ -35,11 +36,17 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-AI-Dost-Task-Id', taskId);
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
   const activeTask = getActiveTask(taskId);
   const signal = activeTask?.controller?.signal;
-  writeSse(res, { type: 'director_start', phase: 'queued', taskId, status: 'Copilot Director accepted the outcome request' });
+
+  // Emit run_started so CopilotIDE can track the runId
+  writeSse(res, { type: 'run_started', runId, taskId });
+  writeSse(res, { type: 'director_start', phase: 'queued', taskId, runId, status: 'Copilot Director accepted the outcome request' });
+  writeSse(res, { type: 'thinking', message: '🎯 Director inspecting workspace and selecting optimal execution path...' });
 
   try {
     const runtime = dependencies.runtime || await getCopilotDirectorRuntime({
@@ -47,6 +54,9 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
       db: dependencies.db,
       runtime: dependencies.runtime,
     });
+
+    writeSse(res, { type: 'thinking', message: '📋 Creating adaptive specialist plan...' });
+
     const result = await runtime.director.run({
       userId: authorization.user.id,
       projectId: authorization.project.id,
@@ -56,10 +66,14 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
       onEvent: (event) => writeSse(res, { ...event, taskId }),
     });
 
+    const taskCount = result?.summary?.match(/(\d+)\s+adaptive/)?.[1] || result?.taskCount || '?';
     writeSse(res, {
       type: result?.status === 'CANCELLED' ? 'director_canceled' : 'director_complete',
       taskId,
-      status: result?.status || 'FAILED',
+      runId,
+      status: result?.status || 'SUCCEEDED',
+      taskCount,
+      message: `🎉 Copilot Director completed ${taskCount} autonomous specialist task(s) with final verification.`,
       result,
     });
     return res.end();
@@ -68,6 +82,7 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
     writeSse(res, {
       type: canceled ? 'director_canceled' : 'director_error',
       taskId,
+      runId,
       status: canceled ? 'CANCELLED' : 'FAILED',
       error: canceled ? 'Director run canceled by user' : (error?.message || 'Copilot Director failed'),
     });

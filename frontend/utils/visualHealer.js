@@ -446,6 +446,7 @@ export function initObserver(targetNode, config = {}) {
     }
     if (debounceTimer) clearTimeout(debounceTimer);
     if (windowResetTimer) clearTimeout(windowResetTimer);
+    disposeRuntimeErrorCapture();
   };
   return cleanup;
 }
@@ -877,10 +878,16 @@ export function checkResponsiveIssues(doc) {
 
 // ─── Phase 7: Runtime Error Telemetry ────────────────────────────────────────
 
+let runtimeErrorInstalled = false;
+let runtimeErrorHandler = null;
+let runtimeRejectionHandler = null;
+let originalConsoleError = null;
+
 export function initRuntimeErrorCapture() {
   if (typeof window === 'undefined') return;
+  if (runtimeErrorInstalled) return;
 
-  window.addEventListener('error', (event) => {
+  runtimeErrorHandler = (event) => {
     addRuntimeError({
       type: 'runtime-error',
       severity: 'error',
@@ -891,9 +898,9 @@ export function initRuntimeErrorCapture() {
       colno: event.colno,
       timestamp: Date.now()
     });
-  });
+  };
 
-  window.addEventListener('unhandledrejection', (event) => {
+  runtimeRejectionHandler = (event) => {
     addRuntimeError({
       type: 'unhandled-promise-rejection',
       severity: 'error',
@@ -902,9 +909,12 @@ export function initRuntimeErrorCapture() {
       source: 'promise',
       timestamp: Date.now()
     });
-  });
+  };
 
-  const originalConsoleError = console.error;
+  window.addEventListener('error', runtimeErrorHandler);
+  window.addEventListener('unhandledrejection', runtimeRejectionHandler);
+
+  originalConsoleError = console.error;
   console.error = (...args) => {
     const message = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
     addRuntimeError({
@@ -917,6 +927,19 @@ export function initRuntimeErrorCapture() {
     });
     originalConsoleError.apply(console, args);
   };
+
+  runtimeErrorInstalled = true;
+}
+
+export function disposeRuntimeErrorCapture() {
+  if (typeof window === 'undefined' || !runtimeErrorInstalled) return;
+  if (runtimeErrorHandler) window.removeEventListener('error', runtimeErrorHandler);
+  if (runtimeRejectionHandler) window.removeEventListener('unhandledrejection', runtimeRejectionHandler);
+  if (originalConsoleError) console.error = originalConsoleError;
+  runtimeErrorHandler = null;
+  runtimeRejectionHandler = null;
+  originalConsoleError = null;
+  runtimeErrorInstalled = false;
 }
 
 function addRuntimeError(error) {
@@ -1702,6 +1725,8 @@ const visualHealerModule = {
   applySafeFixes,
   getRuntimeErrors,
   clearRuntimeErrors,
+  initRuntimeErrorCapture,
+  disposeRuntimeErrorCapture,
   getPendingSuggestions,
   getPendingEscalations,
   fingerprintFinding,

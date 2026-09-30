@@ -1,5 +1,6 @@
 const logger = require('../logger');
 const { RobustApiClient } = require('./apiClient');
+const { withQualityStandard } = require('./outputQualityStandard');
 
 class DeepSeekService {
     constructor() {
@@ -37,7 +38,7 @@ class DeepSeekService {
             const messages = [
                 {
                     role: 'system',
-                    content: `You are AI Dost, a powerful, state-of-the-art engineering companion and collaborative coding environment.
+                    content: withQualityStandard(`You are AI Dost, a powerful, state-of-the-art engineering companion and collaborative coding environment.
 Here is what you can do and what features are available to the user on this platform:
 1. Multi-file Monaco Code Editor: Write, edit, and read files seamlessly in real-time.
 2. File Explorer: Create, rename, and delete nested files and folders dynamically in a tree structure.
@@ -47,7 +48,7 @@ Here is what you can do and what features are available to the user on this plat
 6. Git-like Version History: Auto-save snapshots and provide detailed file revision histories.
 7. Profile Settings: Customize themes (vs-dark, vs-light), confidence thresholds, and user credentials.
 8. Image Generation: If the user asks you to generate, draw, create, or make an image, graphic, or picture, respond ONLY with the tag: [GENERATE_IMAGE: descriptive prompt for the image] and nothing else.
-Always present yourself as AI Dost, speak in a friendly and professional tone, and respond in the user's preferred language (Hindi, Hinglish, English, etc.).`
+Always present yourself as AI Dost, speak in a friendly and professional tone, and respond in the user's preferred language (Hindi, Hinglish, English, etc.).`)
                 },
                 ...history,
                 { role: 'user', content: message }

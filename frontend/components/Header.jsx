@@ -5,6 +5,7 @@ import { Settings, X, Key, Save, ChevronDown, Mic, Music, Bot, Folder, LayoutDas
 import { useMode } from '../context/ModeContext';
 import { useToast } from '../context/ToastContext';
 import PersonalBrainModal from './PersonalBrainModal';
+import { saveSecret, migrateLegacySecrets } from '../services/secretSettings';
 
 /* ─── Tooltip ─── */
 function Tooltip({ children, label }) {
@@ -61,6 +62,9 @@ const Header = ({ sidebarPadding = 0 }) => {
   const [customNvidiaKey, setCustomNvidiaKey] = useState('');
   const [customOpenRouterKey, setCustomOpenRouterKey] = useState('');
 
+  // #103: masked status of server-stored secrets (raw values never reach the browser)
+  const [secretStatus, setSecretStatus] = useState({});
+
   // Load client-only localStorage settings after mount
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -68,13 +72,17 @@ const Header = ({ sidebarPadding = 0 }) => {
       if (localStorage.getItem('theme') === 'light') setIsLightTheme(true);
       if (localStorage.getItem('autoSave')) setAutoSaveInterval(localStorage.getItem('autoSave'));
       if (localStorage.getItem('autocomplete') === 'false') setAutocompleteOn(false);
-      if (localStorage.getItem('customGeminiKey')) setCustomGeminiKey(localStorage.getItem('customGeminiKey'));
-      if (localStorage.getItem('customGroqKey')) setCustomGroqKey(localStorage.getItem('customGroqKey'));
-      if (localStorage.getItem('customDeepSeekKey')) setCustomDeepSeekKey(localStorage.getItem('customDeepSeekKey'));
-      if (localStorage.getItem('customNvidiaKey')) setCustomNvidiaKey(localStorage.getItem('customNvidiaKey'));
-      if (localStorage.getItem('customOpenRouterKey')) setCustomOpenRouterKey(localStorage.getItem('customOpenRouterKey'));
     }, 0);
     return () => clearTimeout(timer);
+  }, []);
+
+  // #103: purge legacy plaintext keys → server store, then show masked status
+  useEffect(() => {
+    let cancelled = false;
+    migrateLegacySecrets().then((status) => {
+      if (!cancelled && status) setSecretStatus(status);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   // Secret 7-tap brain
@@ -132,15 +140,28 @@ const Header = ({ sidebarPadding = 0 }) => {
   }, [menuOpen, showSettings]);
 
   const toggleTheme = () => {
-    if (isLightTheme) {
-      document.body.classList.remove('light-theme');
-      localStorage.setItem('theme', 'dark');
-      setIsLightTheme(false);
-    } else {
-      document.body.classList.add('light-theme');
-      localStorage.setItem('theme', 'light');
-      setIsLightTheme(true);
+    // P2 #95: mirror dashboard's 4-theme manager (dashboard.jsx:160-176) —
+    // keys `ai_dost_theme` + `theme`, the four *-theme classes on BOTH body
+    // and documentElement, and the data-theme attribute. The old light-only
+    // `theme` write + body class fought the dashboard manager → desync.
+    const current =
+      document.documentElement.getAttribute('data-theme') ||
+      localStorage.getItem('ai_dost_theme') ||
+      (document.body.classList.contains('light-theme') ? 'light' : 'dark');
+    const nextTheme = current === 'dark' ? 'light' : 'dark';
+    try {
+      localStorage.setItem('ai_dost_theme', nextTheme);
+      localStorage.setItem('theme', nextTheme);
+    } catch (_) {}
+
+    document.body.classList.remove('light-theme', 'dark-theme', 'hacker-theme', 'ocean-theme');
+    document.documentElement.classList.remove('light-theme', 'dark-theme', 'hacker-theme', 'ocean-theme');
+    if (nextTheme !== 'dark') {
+      document.body.classList.add(`${nextTheme}-theme`);
+      document.documentElement.classList.add(`${nextTheme}-theme`);
     }
+    document.documentElement.setAttribute('data-theme', nextTheme);
+    setIsLightTheme(nextTheme === 'light');
   };
 
   const handleSettingsClick = () => {
@@ -154,18 +175,44 @@ const Header = ({ sidebarPadding = 0 }) => {
       showToast?.({ type: 'success', message: '🔓 Secret Developer Brain Mode Unlocked!' });
     } else {
       if (newCount >= 3) showToast?.({ type: 'info', message: `Tap ${7 - newCount} more times to unlock Secret Developer Brain Mode...` });
-      clickTimerRef.current = setTimeout(() => { setSettingsClicks(0); setShowSettings(true); setShowSettingsModal(true); }, 350);
+      // #73: debounce only opens the normal settings panel — the secret
+      // PersonalBrainModal is reachable exclusively via the 7-tap branch above.
+      clickTimerRef.current = setTimeout(() => { setSettingsClicks(0); setShowSettings(true); }, 350);
     }
   };
 
-  const saveSettings = () => {
+  // #73: never leave a pending settings timer running after unmount
+  useEffect(() => () => { if (clickTimerRef.current) clearTimeout(clickTimerRef.current); }, []);
+
+  const saveSettings = async () => {
     localStorage.setItem('autoSave', autoSaveInterval);
     localStorage.setItem('autocomplete', autocompleteOn ? 'true' : 'false');
-    localStorage.setItem('customGeminiKey', customGeminiKey);
-    localStorage.setItem('customGroqKey', customGroqKey);
-    localStorage.setItem('customDeepSeekKey', customDeepSeekKey);
-    localStorage.setItem('customNvidiaKey', customNvidiaKey);
-    localStorage.setItem('customOpenRouterKey', customOpenRouterKey);
+    // #103: keys go to the server store (plaintext localStorage removed);
+    // empty inputs mean "keep whatever is stored".
+    const entered = [
+      ['gemini', customGeminiKey],
+      ['groq', customGroqKey],
+      ['deepseek', customDeepSeekKey],
+      ['nvidia', customNvidiaKey],
+      ['openrouter', customOpenRouterKey],
+    ].filter(([, v]) => v && v.trim());
+    if (entered.length) {
+      try {
+        let status = null;
+        for (const [provider, value] of entered) {
+          status = await saveSecret(provider, value.trim());
+        }
+        if (status) setSecretStatus(status);
+        setCustomGeminiKey('');
+        setCustomGroqKey('');
+        setCustomDeepSeekKey('');
+        setCustomNvidiaKey('');
+        setCustomOpenRouterKey('');
+      } catch {
+        showToast?.({ type: 'error', message: '⚠️ API keys could not be saved to server' });
+        return;
+      }
+    }
     setShowSettings(false);
     showToast?.({ type: 'success', message: '✅ Settings saved!' });
   };
@@ -401,12 +448,12 @@ const Header = ({ sidebarPadding = 0 }) => {
               </div>
               <div className="space-y-2.5">
                 {[
-                  { label: 'Gemini', val: customGeminiKey, set: setCustomGeminiKey, color: '#4285f4' },
-                  { label: 'Groq', val: customGroqKey, set: setCustomGroqKey, color: '#f7971e' },
-                  { label: 'DeepSeek', val: customDeepSeekKey, set: setCustomDeepSeekKey, color: '#06b6d4' },
-                  { label: 'NVIDIA', val: customNvidiaKey, set: setCustomNvidiaKey, color: '#76b900' },
-                  { label: 'OpenRouter', val: customOpenRouterKey, set: setCustomOpenRouterKey, color: '#8b5cf6' },
-                ].map(({ label, val, set, color }) => (
+                  { label: 'Gemini', provider: 'gemini', val: customGeminiKey, set: setCustomGeminiKey, color: '#4285f4' },
+                  { label: 'Groq', provider: 'groq', val: customGroqKey, set: setCustomGroqKey, color: '#f7971e' },
+                  { label: 'DeepSeek', provider: 'deepseek', val: customDeepSeekKey, set: setCustomDeepSeekKey, color: '#06b6d4' },
+                  { label: 'NVIDIA', provider: 'nvidia', val: customNvidiaKey, set: setCustomNvidiaKey, color: '#76b900' },
+                  { label: 'OpenRouter', provider: 'openrouter', val: customOpenRouterKey, set: setCustomOpenRouterKey, color: '#8b5cf6' },
+                ].map(({ label, provider, val, set, color }) => (
                   <div key={label} className="flex flex-col gap-1">
                     <label className="text-[11px] font-medium" style={{ color }}>
                       {label} API Key
@@ -414,7 +461,9 @@ const Header = ({ sidebarPadding = 0 }) => {
                     <input
                       type="password"
                       autoComplete="off"
-                      placeholder="Leave empty to use AI-Dost default key"
+                      placeholder={secretStatus[provider]?.configured
+                        ? `Saved on server (${secretStatus[provider].masked}) — type to replace`
+                        : 'Leave empty to use AI-Dost default key'}
                       value={val}
                       onChange={e => set(e.target.value)}
                       className="rounded-xl px-3 py-2 text-xs text-[#e2e8f0] placeholder-[#334155] focus:outline-none transition-all"

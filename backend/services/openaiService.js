@@ -1,5 +1,6 @@
 const logger = require('../logger');
 const { RobustApiClient } = require('./apiClient');
+const { withQualityStandard } = require('./outputQualityStandard');
 
 class OpenAIService {
     constructor() {
@@ -77,7 +78,7 @@ When the user asks a complex algorithmic, mathematical, distributed systems, com
 
             const messagesPayload = [];
             if (systemPrompt) {
-                messagesPayload.push({ role: 'system', content: systemPrompt });
+                messagesPayload.push({ role: 'system', content: withQualityStandard(systemPrompt) });
             }
 
             if (Array.isArray(history) && history.length > 0) {

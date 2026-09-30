@@ -1,56 +1,105 @@
-version: '3.8'
-
 services:
-  mongodb:
-    image: mongo:6.0
-    container_name: ai_dost_mongodb
-    restart: always
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongodb_data:/data/db
-
-  redis:
-    image: redis:7.0-alpine
-    container_name: ai_dost_redis
-    restart: always
-    ports:
-      - "6379:6379"
-
   backend:
     build:
-      context: ./memory-brain
+      context: ./backend
       dockerfile: Dockerfile
     container_name: ai_dost_backend
     restart: always
     ports:
-      - "5005:5005"
-    depends_on:
-      - mongodb
-      - redis
+      - "5000:5000"
     environment:
-      - MONGODB_URL=mongodb://mongodb:27017
-      - REDIS_URL=redis://redis:6379
-      - FRONTEND_URL=http://localhost:3001,http://127.0.0.1:3001
-      # IMPORTANT: To use AI features, provide keys in a .env file or uncomment below
-      # - GROQ_API_KEY=your_key
-      # - GEMINI_API_KEY=your_key
+      - PORT=5000
+      - FRONTEND_URL=http://localhost:3000
+      - AI_ENGINE_URL=http://ai-engine:8001
+      # P3 #190: the container is a production deployment — the dev
+      # NODE_ENV=development in .env (meant for running `node server.js` on the
+      # host) must not flip it. `environment:` beats `env_file:`, and
+      # BACKEND_NODE_ENV is not shipped in .env, so the default sticks.
+      - NODE_ENV=${BACKEND_NODE_ENV:-production}
+      # P2 FIX (#178): one writable, mounted dir for generated documents —
+      # frontend/public/downloads doesn't exist in the backend image, so every
+      # downloadUrl 404'd until writers + /downloads static server shared this.
+      - DOWNLOADS_DIR=/app/data/downloads
+      # Opt-in: uncomment together with the docker.sock volume below to let
+      # backend spawn sandbox containers (grants host root via docker.sock —
+      # local trusted use only). Sandbox API degrades gracefully to 503 otherwise.
+      # - DOCKER_HOST=unix:///var/run/docker.sock
+    # P3 #186: required:false — .env.example explicitly allows keeping keys
+    # only in backend/.env; unconditional env_file hard-failed `compose up`
+    # for that documented setup.
+    env_file:
+      - path: .env
+        required: false
+    # P3 #194: gate startup order on actual health (was plain depends_on →
+    # frontend could serve 500s before :5000/health answered).
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:5000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    volumes:
+      # Opt-in: uncomment to let backend spawn sandbox containers (grants host root via docker.sock, local trusted use only)
+      # - /var/run/docker.sock:/var/run/docker.sock
+      # Mount host path for sandboxes so paths align
+      - ./backend/temp/sandboxes:/app/temp/sandboxes
+      # P2 #178: persist generated documents (see DOWNLOADS_DIR above)
+      - ./backend/data/downloads:/app/data/downloads
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - BACKEND_INTERNAL_URL=http://backend:5005
+        # NEXT_PUBLIC_* are inlined at build time — pass as build args only.
+        # Never inject the full .env (API keys) into the frontend container.
+        # P3 #184: pass the names the code actually reads — NEXT_PUBLIC_APP_URL
+        # and NEXT_PUBLIC_WS_URL are read by nothing (#207, removed).
+        NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://localhost:5000}
+        NEXT_PUBLIC_GO_WS_URL: ${NEXT_PUBLIC_GO_WS_URL:-ws://localhost:5000}
+        # P3 #185: rewrites are baked into .next/routes-manifest.json at BUILD
+        # time — the old runtime `environment: BACKEND_INTERNAL_URL` was a
+        # no-op. This is the real wiring.
+        BACKEND_INTERNAL_URL: http://backend:5000
     container_name: ai_dost_frontend
     restart: always
     ports:
-      - "3001:3001"
+      - "3000:3000"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     environment:
-      - BACKEND_INTERNAL_URL=http://backend:5005
-      - NEXT_PUBLIC_EXPRESS_BACKEND_URL=http://localhost:5005
+      - PORT=3000
+      # P3 #185: BACKEND_INTERNAL_URL deliberately NOT here — runtime override
+      # of baked rewrites does nothing and only created a false sense of
+      # configurability.
+
+  ai-engine:
+    build:
+      context: ./ai-engine
+      dockerfile: Dockerfile
+    container_name: ai_dost_ai_engine
+    restart: always
+    ports:
+      # P0 FIX (#127): bind published port to loopback only — ai-engine has no
+      # auth by default (optional AI_ENGINE_API_KEY middleware), so it must not
+      # be reachable from the LAN. Containers still reach it via ai-engine:8001.
+      - "127.0.0.1:8001:8001"
+    # P3 #186: required:false — same documented setup as backend (keys may
+    # live only in backend/.env).
+    env_file:
+      - path: .env
+        required: false
+    # P3 #194
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    volumes:
+      # Persist Chroma DB vector data
+      - ai_engine_data:/app/chroma_db
 
 volumes:
-  mongodb_data:
+  ai_engine_data:

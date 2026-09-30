@@ -29,13 +29,14 @@ export default function ChatWorkspaceBridge() {
     };
 
     const openForAttachments = (event) => {
-      const count = Array.isArray(event.detail?.attachments) ? event.detail.attachments.length : 0;
+      const attachments = Array.isArray(event.detail?.attachments) ? event.detail.attachments : [];
+      const count = attachments.length;
       if (count < 1) return;
       persistWorkspaceState(createWorkspaceState({
         type: 'files',
         title: `${count} file${count === 1 ? '' : 's'} in workspace`,
         source: 'composer',
-        payload: { count },
+        payload: { count, attachments },
       }));
     };
 

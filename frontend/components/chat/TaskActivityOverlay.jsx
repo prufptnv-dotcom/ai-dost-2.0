@@ -43,7 +43,7 @@ function mergeEvent(prev, event) {
       ...current,
       items,
       phase: event.phase || current.phase,
-      terminal: event.type === 'task_complete' || event.type === 'task_error' || event.type === 'task_canceled',
+      terminal: current.terminal || event.type === 'task_complete' || event.type === 'task_error' || event.type === 'task_canceled',
     },
   };
 }
@@ -129,16 +129,28 @@ export default function TaskActivityOverlay() {
   }, []);
 
   useEffect(() => {
-    const timers = Object.values(tasks)
-      .filter((task) => task.terminal)
-      .map((task) => window.setTimeout(() => {
-        setTasks((prev) => {
-          const next = { ...prev };
-          delete next[task.taskId];
-          return next;
-        });
-      }, 3500));
-    return () => timers.forEach(window.clearTimeout);
+    const newTimers = [];
+    Object.values(tasks).forEach((task) => {
+      if (task.terminal && !window[`__aiDostCleanup_${task.taskId}`]) {
+        window[`__aiDostCleanup_${task.taskId}`] = true;
+        const timer = window.setTimeout(() => {
+          setTasks((prev) => {
+            const next = { ...prev };
+            delete next[task.taskId];
+            return next;
+          });
+          delete window[`__aiDostCleanup_${task.taskId}`];
+        }, 3500);
+        newTimers.push({ id: task.taskId, timer });
+      }
+    });
+
+    return () => {
+      newTimers.forEach(({ id, timer }) => {
+        window.clearTimeout(timer);
+        delete window[`__aiDostCleanup_${id}`];
+      });
+    };
   }, [tasks]);
 
   const cancel = () => {

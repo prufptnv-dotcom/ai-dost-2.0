@@ -14,10 +14,15 @@ export default function UniversalCommandBridge({ onNavigate, onNewChat, onDelete
 
       const intent = classifyUniversalIntent(target.value);
       if (intent.kind !== 'command' || intent.confidence < 0.9) return;
+      // P3 #121: a misclassified long sentence must still send as a chat
+      // message — real command phrases are short ("open projects", "delete
+      // chat"), so only intercept short inputs. Also dropped the capture-phase
+      // stopImmediatePropagation (it silenced unrelated document listeners).
+      const wordCount = target.value.trim().split(/\s+/).filter(Boolean).length;
+      if (wordCount > 6) return;
 
       event.preventDefault();
       event.stopPropagation();
-      event.stopImmediatePropagation?.();
 
       if (intent.action === 'new-chat') {
         onNewChat?.();

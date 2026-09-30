@@ -1,5 +1,6 @@
 const logger = require('../logger');
 const { RobustApiClient } = require('./apiClient');
+const { withQualityStandard } = require('./outputQualityStandard');
 
 class GroqService {
     constructor() {
@@ -20,14 +21,27 @@ class GroqService {
         });
     }
 
-    static async chat(message, history = [], mode = 'project', customApiKey = null) {
+    static async chat(message, history = [], mode = 'project', customApiKey = null, options = {}) {
         const instance = new GroqService();
-        return instance._chat(message, history, mode, customApiKey);
+        return instance._chat(message, history, mode, customApiKey, options);
     }
 
-    async _chat(message, history = [], mode = 'project', customApiKey = null) {
+    async _chat(message, history = [], mode = 'project', customApiKey = null, options = {}) {
+        let opts = options || {};
+        let actualHistory = Array.isArray(history) ? history : [];
+        let actualMode = mode;
+        let apiKeyOverride = customApiKey;
+
+        // Support polymorphic call: chat(prompt, options)
+        if (history && !Array.isArray(history) && typeof history === 'object') {
+            opts = history;
+            actualHistory = opts.history || [];
+            actualMode = opts.mode || 'project';
+            apiKeyOverride = opts.apiKey || customApiKey;
+        }
+
         try {
-            const API_KEY = customApiKey || process.env.GROQ_API_KEY;
+            const API_KEY = apiKeyOverride || process.env.GROQ_API_KEY;
 
             if (!API_KEY || API_KEY === 'gsk_your_key_here') {
                 logger.error('❌ GROQ API Key not found or still default!');
@@ -116,7 +130,7 @@ Key Response Guidelines:
             };
 
             if (systemPrompt) {
-                messagesPayload.push({ role: 'system', content: systemPrompt });
+                messagesPayload.push({ role: 'system', content: withQualityStandard(systemPrompt) });
             }
             if (history && history.length > 0) {
                 history.forEach(h => {
@@ -125,11 +139,11 @@ Key Response Guidelines:
             }
             messagesPayload.push({ role: 'user', content: processContent(message) });
 
-            let primaryModel = 'qwen/qwen3.8-27b';
+            let primaryModel = opts.model || 'qwen/qwen3.8-27b';
             if (hasImage) {
                 primaryModel = 'qwen/qwen3.8-27b';
             }
-            const fallbackModel = 'openai/gpt-oss-20b';
+            const fallbackModel = primaryModel === 'openai/gpt-oss-20b' ? 'qwen/qwen3.8-27b' : 'openai/gpt-oss-20b';
 
             const MAX_OUTPUT_TOKENS = {
                 'openai/gpt-oss-20b': 4096,
@@ -145,7 +159,7 @@ Key Response Guidelines:
                         model,
                         messages: messagesPayload,
                         temperature: 0.1,
-                        max_tokens: maxTokensFor(model)
+                        max_tokens: opts.max_tokens ? Math.min(Number(opts.max_tokens), maxTokensFor(model)) : maxTokensFor(model)
                     }, {
                         'Authorization': `Bearer ${API_KEY}`
                     });

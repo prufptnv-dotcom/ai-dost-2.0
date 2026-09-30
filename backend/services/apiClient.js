@@ -181,11 +181,13 @@ class RobustApiClient {
                                                  errorText.includes('RESOURCE_EXHAUSTED') ||
                                                  errorText.includes('quota exhausted') ||
                                                  errorText.includes('Quota exceeded') ||
-                                                 // Daily token budgets (e.g. Groq TPD) won't recover for hours —
-                                                 // fail fast so the failover chain moves to the next provider now.
                                                  errorText.includes('tokens per day') ||
                                                  errorText.includes('(TPD)') ||
-                                                 errorText.includes('tokens per day (TPD)');
+                                                 errorText.includes('tokens per day (TPD)') ||
+                                                 errorText.includes('output tokens per minute') ||
+                                                 errorText.includes('(OTPM)') ||
+                                                 errorText.includes('tokens per minute (TPM)') ||
+                                                 errorText.includes('rate_limit_exceeded');
                         
                         const retryAfter = response.headers.get('Retry-After');
                         const retryAfterMs = retryAfter ? parseInt(retryAfter) * 1000 : NaN;
@@ -265,11 +267,13 @@ class RobustApiClient {
     }
 
     async post(endpoint, body, headers) {
-        return this.request(endpoint, { method: 'POST', body, headers });
+        const actualHeaders = headers && typeof headers === 'object' && headers.headers ? headers.headers : headers;
+        return this.request(endpoint, { method: 'POST', body, headers: actualHeaders });
     }
 
     async get(endpoint, headers) {
-        return this.request(endpoint, { method: 'GET', headers });
+        const actualHeaders = headers && typeof headers === 'object' && headers.headers ? headers.headers : headers;
+        return this.request(endpoint, { method: 'GET', headers: actualHeaders });
     }
 
     getCircuitBreakerState() {

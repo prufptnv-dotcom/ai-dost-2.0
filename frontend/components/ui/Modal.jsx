@@ -2,6 +2,11 @@ import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
 import { IconButton } from './Button';
 
+// P2 #96: shared modal stack — Escape must close only the TOPMOST modal.
+// Every Modal registering its own unconditional listener closed the whole
+// stack at once.
+const modalStack = [];
+
 export function Modal({
   isOpen,
   onClose,
@@ -11,14 +16,22 @@ export function Modal({
   maxWidth = 'max-w-lg',
   className = '',
 }) {
-  // ESC key listener
+  // ESC key listener (topmost modal only)
   useEffect(() => {
     if (!isOpen) return;
+    const id = Symbol('modal');
+    modalStack.push(id);
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape') onClose && onClose();
+      if (e.key !== 'Escape') return;
+      if (modalStack[modalStack.length - 1] !== id) return;
+      onClose && onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      const idx = modalStack.lastIndexOf(id);
+      if (idx !== -1) modalStack.splice(idx, 1);
+    };
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;

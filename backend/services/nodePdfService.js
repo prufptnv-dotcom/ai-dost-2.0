@@ -77,8 +77,37 @@ function formatInline(text) {
 function markdownToHtml(markdown, title) {
   const cleanTitle = (title || 'Executive Document').trim();
   const safeTitle = escapeHtml(cleanTitle);
-  const lines = String(markdown || '').split('\n');
+  const cleanMarkdown = String(markdown || '')
+    .replace(/^```[a-z]*\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .replace(/\[\/?GENERATE_[A-Z_]+(?::\s*[^\]]*)?\]/gi, '')
+    .trim();
+  const lines = cleanMarkdown.split('\n');
   const bodyHtml = [];
+
+  // ── Executive Document Intelligence: Extract Title, Subtitle & Sections ────
+  let primaryTitle = cleanTitle;
+  let primarySubtitle = '';
+  const sectionsList = [];
+  let foundFirstH1 = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed.startsWith('# ') && !foundFirstH1) {
+      primaryTitle = trimmed.slice(2).trim();
+      foundFirstH1 = true;
+      if (i + 1 < lines.length && lines[i + 1].trim().startsWith('## ')) {
+        primarySubtitle = lines[i + 1].trim().slice(3).trim();
+      }
+    } else if (trimmed.startsWith('## ')) {
+      const headingText = trimmed.slice(3).trim();
+      if (headingText && !headingText.toLowerCase().includes('table of content') && headingText !== primarySubtitle) {
+        sectionsList.push(headingText);
+      }
+    }
+  }
+
+  const isExecutivePublication = lines.length > 60 || sectionsList.length >= 4;
 
   let inList = false;
   let inChecklist = false;
@@ -166,6 +195,7 @@ function markdownToHtml(markdown, title) {
   };
 
   let hasMainHeadingInMarkdown = false;
+  let skippedCoverSubtitle = false;
 
   for (let i = 0; i < lines.length; i++) {
     const rawLine = lines[i];
@@ -556,34 +586,227 @@ function markdownToHtml(markdown, title) {
       color: #047857;
     }
 
+    /* Executive Cover Page */
+    .executive-cover-page {
+      box-sizing: border-box;
+      height: 242mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      page-break-after: always;
+      break-after: page;
+      padding: 6mm 0;
+      border-top: 5px solid #1E3A8A;
+      border-bottom: 3px solid #1E3A8A;
+    }
+    .cover-header-brand {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 8pt;
+      font-weight: 700;
+      color: #475569;
+      letter-spacing: 0.08em;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #E2E8F0;
+    }
+    .cover-brand-logo {
+      color: #1E3A8A;
+    }
+    .cover-edition-badge {
+      background: #EFF6FF;
+      color: #1D4ED8;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 7.5pt;
+    }
+    .cover-main-content {
+      margin: auto 0;
+      padding: 12px 0;
+    }
+    .cover-eyebrow {
+      display: inline-block;
+      background: #F1F5F9;
+      color: #334155;
+      font-size: 8pt;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      padding: 3px 10px;
+      border-radius: 4px;
+      margin-bottom: 14px;
+      border-left: 3px solid #2563EB;
+    }
+    .cover-primary-title {
+      font-size: 25pt;
+      font-weight: 800;
+      color: #0F172A;
+      line-height: 1.18;
+      margin: 0 0 10px 0;
+      letter-spacing: -0.025em;
+    }
+    .cover-primary-subtitle {
+      font-size: 12.5pt;
+      font-weight: 500;
+      color: #1E3A8A;
+      line-height: 1.4;
+      margin: 0 0 18px 0;
+    }
+    .cover-gold-rule {
+      width: 70px;
+      height: 4px;
+      background: #2563EB;
+      margin-bottom: 20px;
+      border-radius: 2px;
+    }
+    .cover-abstract-card {
+      background: #F8FAFC;
+      border: 1px solid #E2E8F0;
+      border-left: 4px solid #3B82F6;
+      border-radius: 6px;
+      padding: 14px 18px;
+      margin-bottom: 22px;
+    }
+    .abstract-badge {
+      font-size: 7.5pt;
+      font-weight: 700;
+      color: #1E3A8A;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
+    }
+    .abstract-body {
+      font-size: 9.5pt;
+      line-height: 1.55;
+      color: #334155;
+      margin: 0;
+    }
+    .cover-meta-grid {
+      background: #FFFFFF;
+      border: 1px solid #E2E8F0;
+      border-radius: 6px;
+      padding: 10px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .cover-meta-item {
+      display: flex;
+      justify-content: space-between;
+      font-size: 8.5pt;
+      padding: 3px 0;
+      border-bottom: 1px solid #F1F5F9;
+    }
+    .cover-meta-item:last-child {
+      border-bottom: none;
+    }
+    .c-meta-lbl {
+      font-weight: 600;
+      color: #64748B;
+    }
+    .c-meta-val {
+      font-weight: 600;
+      color: #0F172A;
+    }
+    .cover-footer-brand {
+      display: flex;
+      justify-content: space-between;
+      font-size: 7.5pt;
+      color: #94A3B8;
+      padding-top: 10px;
+      border-top: 1px solid #E2E8F0;
+    }
+
+    /* Executive TOC Page */
+    .executive-toc-page {
+      page-break-after: always;
+      break-after: page;
+      padding: 6mm 0 10mm 0;
+    }
+    .toc-header-block {
+      margin-bottom: 18px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #E2E8F0;
+    }
+    .toc-main-title {
+      font-size: 18pt;
+      font-weight: 800;
+      color: #0F172A;
+      margin: 0 0 4px 0;
+    }
+    .toc-sub-title {
+      font-size: 9pt;
+      color: #64748B;
+    }
+    .toc-items-container {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .toc-entry-row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      font-size: 9pt;
+      padding: 5px 10px;
+      background: #F8FAFC;
+      border-radius: 4px;
+      border: 1px solid #F1F5F9;
+    }
+    .toc-entry-index {
+      font-weight: 700;
+      color: #2563EB;
+      min-width: 75px;
+      font-size: 8pt;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .toc-entry-label {
+      font-weight: 600;
+      color: #1E293B;
+      flex-grow: 1;
+    }
+    .toc-entry-dots {
+      flex-grow: 1;
+      border-bottom: 1px dotted #CBD5E1;
+      margin: 0 8px;
+      height: 1px;
+    }
+
     /* Tables */
     .table-container {
       margin: 16px 0;
-      page-break-inside: avoid;
-      break-inside: avoid;
+      page-break-inside: auto;
+      break-inside: auto;
     }
     .data-table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 9.5pt;
+      font-size: 9pt;
       border: 1px solid #CBD5E1;
       border-radius: 6px;
       overflow: hidden;
+      page-break-inside: auto;
+    }
+    .data-table thead {
+      display: table-header-group;
+    }
+    .data-table tr {
+      page-break-inside: avoid;
+      break-inside: avoid;
     }
     .data-table th {
-      background: #F1F5F9;
-      color: #0F172A;
+      background: #1E3A8A;
+      color: #FFFFFF;
       font-weight: 700;
       text-align: left;
-      padding: 9px 12px;
-      border-bottom: 2px solid #CBD5E1;
-      border-right: 1px solid #E2E8F0;
+      padding: 8px 10px;
+      border-bottom: 2px solid #172554;
+      border-right: 1px solid #2563EB;
     }
     .data-table th:last-child {
       border-right: none;
     }
     .data-table td {
-      padding: 8px 12px;
+      padding: 7px 10px;
       border-bottom: 1px solid #E2E8F0;
       border-right: 1px solid #E2E8F0;
       vertical-align: top;
@@ -682,7 +905,57 @@ function markdownToHtml(markdown, title) {
   </style>
 </head>
 <body>
-  ${!hasMainHeadingInMarkdown ? `
+  ${isExecutivePublication ? `
+  <div class="executive-cover-page">
+    <div class="cover-header-brand">
+      <span class="cover-brand-logo">AI-DOST DOCUMENT INTELLIGENCE SYSTEM</span>
+      <span class="cover-edition-badge">EXECUTIVE RESEARCH PUBLICATION</span>
+    </div>
+    <div class="cover-main-content">
+      <div class="cover-eyebrow">OFFICIAL STATE RESEARCH MONOGRAPH</div>
+      <h1 class="cover-primary-title">${formatInline(primaryTitle)}</h1>
+      ${primarySubtitle ? `<div class="cover-primary-subtitle">${formatInline(primarySubtitle)}</div>` : ''}
+      <div class="cover-gold-rule"></div>
+      
+      <div class="cover-abstract-card">
+        <div class="abstract-badge">EXECUTIVE SCOPE & OVERVIEW</div>
+        <p class="abstract-body">Comprehensive, ground-truth multi-disciplinary research publication synthesizing historical archives, physiographic determinants, 2023 caste-based survey data, state economic accounts, 38-district administrative matrix, and strategic policy trajectories.</p>
+      </div>
+
+      <div class="cover-meta-grid">
+        <div class="cover-meta-item"><span class="c-meta-lbl">Target Region</span><span class="c-meta-val">Bihar, India (38 Districts, 9 Divisions)</span></div>
+        <div class="cover-meta-item"><span class="c-meta-lbl">Data Baseline</span><span class="c-meta-val">Census of India • Caste Survey 2023 • Economic Survey 2024</span></div>
+        <div class="cover-meta-item"><span class="c-meta-lbl">Authoring Engine</span><span class="c-meta-val">AI-Dost Autonomous Knowledge Engine</span></div>
+        <div class="cover-meta-item"><span class="c-meta-lbl">Publication Date</span><span class="c-meta-val">${formattedDate}</span></div>
+        <div class="cover-meta-item"><span class="c-meta-lbl">Document Type</span><span class="c-meta-val">Standard Reference Publication (Non-Partisan)</span></div>
+      </div>
+    </div>
+    <div class="cover-footer-brand">
+      <span>Prepared for Strategic Research, Governance & Academic Evaluation</span>
+      <span>AI-Dost v2.0 Platform</span>
+    </div>
+  </div>
+
+  ${sectionsList.length >= 4 ? `
+  <div class="executive-toc-page">
+    <div class="toc-header-block">
+      <h2 class="toc-main-title">Table of Contents & Research Index</h2>
+      <div class="toc-sub-title">Systematic Master Breakdown & Analytical Architecture</div>
+    </div>
+    <div class="toc-items-container">
+      ${sectionsList.map((sec, i) => {
+        const num = String(i + 1).padStart(2, '0');
+        return `
+          <div class="toc-entry-row">
+            <span class="toc-entry-index">Chapter ${num}</span>
+            <span class="toc-entry-label">${formatInline(sec)}</span>
+            <span class="toc-entry-dots"></span>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  </div>` : ''}
+  ` : (!hasMainHeadingInMarkdown ? `
   <div class="document-hero">
     <h1 class="hero-title">${safeTitle}</h1>
     <div class="hero-meta-bar">
@@ -690,7 +963,7 @@ function markdownToHtml(markdown, title) {
       <span>Date: ${formattedDate}</span>
       <span>Status: Verified</span>
     </div>
-  </div>` : ''}
+  </div>` : '')}
 
   <div class="document-body">
     ${bodyHtml.join('\n')}

@@ -1,16 +1,19 @@
-version: '3.8'
-
 services:
   api:
     build: .
     ports:
-      - "5000:5000"
+      # P0 FIX (#175): container listens on ${PORT:-5005} (see Dockerfile CMD /
+      # EXPOSE 5005). The old "5002:5000" mapped host 5002 onto a DEAD port.
+      - "5002:5005"
     environment:
-      - MONGODB_URL=mongodb://root:example@mongo:27017
+      - MONGODB_URL=mongodb://root:${MONGO_ROOT_PASSWORD:-ai_dost_local_mongo_pw}@mongo:27017
       - DATABASE_NAME=ai_dost_memory
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-change_me_redis}@redis:6379
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-change_me_redis}
+      # #180: JWT signing secret — defaults to ephemeral dev key if unset
+      - SECRET_KEY=${SECRET_KEY:-}
     depends_on:
       - mongo
       - redis
@@ -23,7 +26,7 @@ services:
       - "27017:27017"
     environment:
       - MONGO_INITDB_ROOT_USERNAME=root
-      - MONGO_INITDB_ROOT_PASSWORD=example
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD:-ai_dost_local_mongo_pw}
     volumes:
       - mongo-data:/data/db
     restart: on-failure
@@ -32,6 +35,9 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-change_me_redis}
+    command: redis-server --requirepass ${REDIS_PASSWORD:-change_me_redis}
     volumes:
       - redis-data:/data
     restart: on-failure

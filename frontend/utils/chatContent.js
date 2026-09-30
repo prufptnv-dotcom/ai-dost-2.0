@@ -1,4 +1,4 @@
-const INTERNAL_TAG_RE = /\[GENERATE_(?:PDF|PPTX|PPT|DOC|DOCX|CSV|XLSX|CODE|FILE|ACTION|TOOL)(?::\s*[^\]]*)?\]|\[TOOL_CALL:[^\]]*\]/gi;
+const INTERNAL_TAG_RE = /\[GENERATE_(?:PDF|PPTX|PPT|DOC|DOCX|CSV|XLSX|CODE|FILE|ACTION|TOOL)(?::\s*[^\]]*)?\]|\[TOOL_CALL:[^\]]*\]|<thought>[\s\S]*?<\/thought>|<\/?think>/gi;
 const IMAGE_MARKDOWN_RE = /!\[([^\]]*)\]\(([^)]+)\)/g;
 const CODE_BLOCK_RE = /```([a-zA-Z0-9_-]*)\s*\n([\s\S]*?)```/g;
 

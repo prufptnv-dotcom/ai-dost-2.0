@@ -59,7 +59,9 @@ const QUICK_PRESETS = [
   'Audit codebase security, dependency vulnerabilities, and error handling',
 ];
 
-export function CrewPanel({ BACKEND = 'http://localhost:5000', onToast, onCompleteProject }) {
+// P2 #107: relative default — crew/plan fetches go through the Next /api
+// rewrite when the parent omits the BACKEND prop (localhost default broke prod).
+export function CrewPanel({ BACKEND = '', onToast, onCompleteProject }) {
   const [agents, setAgents] = useState(DEFAULT_AGENTS);
   const [taskPrompt, setTaskPrompt] = useState('');
   const [executionMode, setExecutionMode] = useState('fullstack');

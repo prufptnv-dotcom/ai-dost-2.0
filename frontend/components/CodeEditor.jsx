@@ -41,6 +41,21 @@ function detectLanguage(filename) {
   }
 }
 
+// P2 #93: never fall back to hardcoded ws://localhost:5000 (broken in
+// production — points at the user's own machine). Prefer env; otherwise
+// derive from the page origin (direct :5000 only for plain-http dev/LAN).
+const resolveLspWsBase = () => {
+  if (process.env.NEXT_PUBLIC_BACKEND_URL) {
+    return process.env.NEXT_PUBLIC_BACKEND_URL.replace(/^http/, 'ws');
+  }
+  if (typeof window === 'undefined') return 'ws://localhost:5000';
+  const { protocol, hostname, port } = window.location;
+  if (protocol === 'https:') {
+    return `wss://${hostname}${port && port !== '443' ? `:${port}` : ''}`;
+  }
+  return `ws://${hostname}:5000`;
+};
+
 const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', projectFiles = [], language = 'python', onExecutionStart, onExecutionEnd, onChange }, ref) => {
   const [code, setCode] = useState(initialCode);
   const [executionResult, setExecutionResult] = useState('');
@@ -131,6 +146,19 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
   const suggestionTimeoutRef = useRef(null);
+  // P2 #92: LSP socket tracked so it can be closed on unmount/remount
+  // (was created in handleEditorDidMount and never released → socket leak).
+  const lspSocketRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      const lsp = lspSocketRef.current;
+      if (lsp) {
+        try { lsp.close(); } catch (_) {}
+        lspSocketRef.current = null;
+      }
+    };
+  }, []);
 
   const handleOpenAiEdit = () => {
     if (!editorRef.current) {
@@ -255,10 +283,13 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'document_update' && data.changes) {
-          const updatedText = applyOperations(code, data.changes);
-          if (updatedText !== code) {
-            setCode(updatedText);
-          }
+          // P2 #91: functional update — reading `code` from the closure forced
+          // this listener to be torn down/re-added on every keystroke
+          // (deps included `code`).
+          setCode((prev) => {
+            const updatedText = applyOperations(prev, data.changes);
+            return updatedText !== prev ? updatedText : prev;
+          });
         }
       } catch (e) {
         console.error('Failed processing inbound socket message:', e);
@@ -269,7 +300,7 @@ const CodeEditor = React.forwardRef(({ initialCode = '', currentFile = '', proje
     return () => {
       socket.removeEventListener('message', handleMessage);
     };
-  }, [socket, code]);
+  }, [socket]);
 
   const triggerSuggestions = (content) => {
     if (!editorRef.current) return;
@@ -378,8 +409,15 @@ const handleEditorChange = (newContent) => {
 
     // Connect to LSP Proxy via WebSocket for true LSP diagnostics
     try {
-      const wsUrl = process.env.NEXT_PUBLIC_BACKEND_URL ? process.env.NEXT_PUBLIC_BACKEND_URL.replace('http', 'ws') : 'ws://localhost:5000';
+      // P2 #92: close any previous LSP socket before opening a new one
+      // (handleEditorDidMount can run again on remount).
+      if (lspSocketRef.current) {
+        try { lspSocketRef.current.close(); } catch (_) {}
+        lspSocketRef.current = null;
+      }
+      const wsUrl = resolveLspWsBase(); // P2 #93
       const lspSocket = new WebSocket(`${wsUrl}/lsp`);
+      lspSocketRef.current = lspSocket;
       
       lspSocket.onopen = () => {
         console.log('🔗 LSP Connected');
@@ -734,6 +772,8 @@ const handleEditorChange = (newContent) => {
                 setGitModalOpen(true);
                 showToast({ type: 'success', message: 'Git panel opened - create commit or browse history' });
               } catch (e) {
+                // keep error visible via toast if needed
+              } finally {
                 setIsThinking(false);
               }
             }}
@@ -909,7 +949,7 @@ const handleEditorChange = (newContent) => {
               srcDoc={getPreviewDoc()} 
               title="Live Code Preview Frame"
               className="w-full h-full border-none bg-white"
-              sandbox="allow-scripts"
+              sandbox="allow-scripts allow-same-origin"
             />
           </div>
         )}

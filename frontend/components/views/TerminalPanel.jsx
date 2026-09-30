@@ -6,7 +6,15 @@ import { io } from 'socket.io-client';
 import { Loader2, Wifi, WifiOff } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+// P2 #105: no hardcoded http://localhost:5000 default — same pattern as
+// useCanvasCollaboration: env opt-in, direct :5000 only on local hosts,
+// otherwise same-origin ('') so non-local deploys aren't dead.
+const BACKEND_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  (typeof window !== 'undefined' &&
+  ['localhost', '127.0.0.1'].includes(window.location.hostname)
+    ? 'http://localhost:5000'
+    : '');
 
 const THEME = {
   background: '#090a0f',
@@ -102,6 +110,21 @@ const TerminalPanel = forwardRef(({ projectId, projectPath, className = '', onCo
     termRef.current = term;
     fitRef.current = fit;
     term.focus();
+
+    term.attachCustomKeyEventHandler((event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key && event.key.toLowerCase() === 'c') {
+        const sel = term.getSelection();
+        if (sel && sel.length > 0) {
+          try {
+            if (navigator?.clipboard?.writeText) {
+              navigator.clipboard.writeText(sel);
+            }
+          } catch (_) {}
+          return false;
+        }
+      }
+      return true;
+    });
 
     const resizeObserver = new ResizeObserver(() => {
       try { fit.fit(); } catch (e) {}

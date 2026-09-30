@@ -4,18 +4,18 @@
 
 ```powershell
 # 1. Start Backend Server
-cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\backend"
+cd "C:\Users\vikash kumar\Pictures\ai dost 3.0\backend"
 node server.js
 # Server runs on: http://localhost:5000
 
 # 2. Start Frontend (Next.js 16 + Turbopack)
-cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\frontend"
+cd "C:\Users\vikash kumar\Pictures\ai dost 3.0\frontend"
 npm run dev
 # Frontend runs on: http://localhost:3000 (verified — NOT 3001)
 # /api/* rewrites proxy to backend :5000 (chat, agent, sandbox, figma, deploy, document, eval, ...)
 
 # 3. Start Python AI Engine (LlamaIndex RAG, optional)
-cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\ai-engine"
+cd "C:\Users\vikash kumar\Pictures\ai dost 3.0\ai-engine"
 start_ai_engine.bat
 # AI Engine runs on: http://127.0.0.1:8001
 # Node backend auto-falls back if engine is down
@@ -138,9 +138,9 @@ start_ai_engine.bat
 
 ### 8. PWA / Mobile Install
 - **Manifest**: `frontend/public/manifest.json` — name "AI-Dost", icons, shortcuts
-- **Service Worker**: `frontend/public/sw.js` — offline shell caching, cache-first for static, network-first for API
+- **Service Worker**: `frontend/public/sw.js` — offline shell caching, cache-first for static, network-first for API/navigation
 - **Install Prompt**: Browser "Install AI-Dost" on mobile/desktop
-- **Next.js Integration**: `@ducanh2912/next-pwa` with auto-register in production
+- **Next.js Integration**: `@ducanh2912/next-pwa` — **currently force-disabled** in `frontend/next.config.mjs` (`disable: true`) to prevent cached crashes; PWA install/service-worker registration is therefore OFF until re-enabled
 
 ### 9. Agent Memory & Learning
 - **Persistent Memory**: ai-engine `/ai/agent/learn` + `/ai/agent/memory/retrieve`
@@ -180,7 +180,9 @@ start_ai_engine.bat
 | Shortcut | Action |
 |----------|--------|
 | `Ctrl+Shift+S` | Toggle sidebar collapse/expand |
-| `Ctrl+Shift+P` | Open agent planner mode |
+| `Ctrl+Shift+P` | Open agent planner mode (Chat view) / Command Palette (CopilotIDE) |
+| `Ctrl+P` | CopilotIDE: Quick Open fuzzy file picker |
+| `Ctrl+Shift+F` | CopilotIDE: Find in Files overlay |
 | `Ctrl+Shift+G` | Open Git control panel |
 | `Mod+C` | Open voice command palette |
 | `Ctrl+Shift+V` | Toggle voice input |
@@ -211,6 +213,11 @@ start_ai_engine.bat
 - **Eval harness**: `GET /api/eval/status` (5 scenarios); `POST /api/eval` `{scenario|all, verbose}` → per-scenario score/feedback. Runs real agent via `/api/agent/run` (LLM-dependent pass rates).
 - **Deploy**: `GET /api/deploy/targets` → vercel/netlify/cloudflare/static; `POST /api/deploy`; `POST /api/deploy/validate`.
 - **Docs**: `POST /api/document/generate` (docx/pptx/csv/pdf/xlsx) — files in `frontend/public/downloads/`.
+- **Travel & Local Business (Category 14)**: `GET /api/travel/domains` (10 travel domains); `POST /api/travel/generate` `{domain, location, preferences, budget, days}`; `POST /api/travel/budget-calculator` `{destination, days, travelers, tier}`; `POST /api/travel/packing-checklist` `{destination, duration, weather, activities}`. Full UI in `TravelAssistantView.jsx`, chat intent matcher #17.
+- **Language & Translation Hub (Category 15)**: `GET /api/language/capabilities` (9 languages, 7 modes); `POST /api/language/process` `{text, mode, sourceLanguage, targetLanguage, context}`; `POST /api/language/grammar` `{text}`; `POST /api/language/vocab` `{word, targetAudience}`. Full UI in `LanguageHubView.jsx`, chat intent matcher #18.
+- **Problem Solving & Decision Support (Category 16)**: `GET /api/decision/domains` (10 decision domains); `POST /api/decision/analyze` `{domain, options, primaryGoal, budget, constraints, userContext}`; `POST /api/decision/rice` `{features: [{name, reach, impact, confidence, effort}]}`. Full UI in `DecisionSupportView.jsx`, chat intent matcher #19.
+- **Security & Cybersecurity Hub (Category 17)**: `GET /api/security/domains` (12 security domains); `POST /api/security/audit` `{code, language, domain, context}`; `POST /api/security/headers` `{framework}`; `POST /api/security/threat-model` `{systemDescription, components}`. Full UI in `SecurityHubView.jsx`, chat intent matcher #20.
+- **50-Domain Master Capability Catalog & Hub**: `GET /api/catalog/capabilities` (all 50 domains with metadata & sample prompts); `GET /api/catalog/clusters` (6 logical clusters); `GET /api/catalog/capabilities/:idOrSlug`; `POST /api/catalog/detect` `{message}`. Full UI in `MasterCapabilitiesView.jsx`, chat intent matcher #21 (`masterCapabilityCatalog.js`).
 - Frontend proxies all of the above via rewrites in `frontend/next.config.mjs` (keep in sync when adding new `/api/*` routes!).
 
 ## 🐛 Troubleshooting
@@ -271,27 +278,28 @@ ai-dost version 2.o/
 
 ```powershell
 # Frontend: unit + component (Jest 30 + RTL, jsdom, 0 LLM calls)
-cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\frontend"
-npm test                    # 24 tests / 5 suites
-npm test -- --coverage      # coverage thresholds enforced (4% baseline, grows as suites expand)
+cd "C:\Users\vikash kumar\Pictures\ai dost 3.0\frontend"
+npm test                    # 196 tests / 33 suites
+npm test -- --coverage      # coverage thresholds enforced (statements 18 / branches 15 / functions 14 / lines 19)
 
 # Frontend: real-browser VisualHealer suite (Playwright + Chromium, file:// fixtures)
-cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\frontend"
+cd "C:\Users\vikash kumar\Pictures\ai dost 3.0\frontend"
 npx playwright test         # 13 tests — real geometry, computed styles, MutationObserver, iframe, responsive
 # NOTE: tests/browser/* is Playwright-only; Jest ignores it via testPathIgnorePatterns.
 
 # Backend: unit + integration (node:test, 0 LLM calls, ephemeral port)
-cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\backend"
-npm run test:unit           # 58 tests total (unit+integration)
-npm run test:integration
+cd "C:\Users\vikash kumar\Pictures\ai dost 3.0\backend"
+npm run test:unit           # 98 tests / 13 suites (unit + project/auth/settings/cache)
+npm run test:integration    # 53 tests (real Express app on port 0)
+npm run test:all            # everything: unit(98) + integration(53) + security(14) + mcp(5) + api(12) + chat(13)
 node --test tests/unit.test.js tests/integration.test.js
 
 # E2E smoke (Playwright, needs both servers on :3000 + :5000; config reuses them)
-cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\backend"
+cd "C:\Users\vikash kumar\Pictures\ai dost 3.0\backend"
 npx playwright test         # 16 flows — pages, sidebar nav, chat send, Ctrl+K, voice, agent, docs
 
 # ESLint check (0 errors / 0 warnings expected)
-cd "C:\Users\vikash kumar\Desktop\ai-dost version 2.o\frontend"
+cd "C:\Users\vikash kumar\Pictures\ai dost 3.0\frontend"
 npm run lint
 
 # CI: .github/workflows/ci.yml runs all of the above (frontend lint+test+cov, backend node:test, E2E)
@@ -301,8 +309,9 @@ npm run lint
 - `backend/tests/unit.test.js` — agent `parseLLMAction`, RAG search, CircuitBreaker/RateLimiter/RobustApiClient, `utils/errors`, sandbox path-traversal guard. Zero network.
 - `backend/tests/integration.test.js` — boots real Express app on port 0 (no listener, no Telegram): health, error envelopes (BAD_JSON/404), chat validation, chat history save/load round-trip, agent plan/tasks, eval status + bad ID, document validation, figma 503, deploy targets, sandbox 404s, root redirect. Zero LLM.
 - `backend/tests/e2e/smoke.spec.js` + `backend/playwright.config.js` — UI-deterministic; LLM replies asserted softly so free-tier rate limits don't flake CI.
-- `frontend/tests/` — Sidebar (10 nav items — regression for the 5 dead items fix), KanbanBoard (add-task + TDZ crash regression), ProjectsView (api mocked via jest.mock), useWebContainer (boot lifecycle + retry + runCommand contract, `@webcontainer/api` mocked virtual), AICompanion.
+- `frontend/tests/` — 33 suites / 196 tests total: KanbanBoard (add-task + TDZ crash regression), ProjectsView (api mocked via jest.mock), AICompanion, chatContent (internal-tag + image-command stripping), copilotIde, SmartChatHeader bridge, agent/task timeline+planner+runtime, universal intent, accessibility audit, public website smoke, design system (live primitives), chatStreamStop (SSE stream abort/meta regression), etc.
 - `jest.setup.js` polyfills TextEncoder/TextDecoder/Streams (jsdom lacks them).
+- **Dead-code purge (2026-09-30)**: 41 unreferenced frontend modules + their 10 orphaned test suites were deleted (BFS import-graph verified from `pages/` entry points; live shell = `layout/AppShell` + `layout/CommandRail`, live chat = `views/ChatView`). Removed: legacy `Sidebar`/`TopBar`, old chat stack (`ActionSpine|ActionTimeline|ChatComposer|ChatExperienceLayerV4|ChatProcessingState|ComposerDock|MessageStream|QuickActionGrid|SessionInspector|SmartChatMessage|SmartComposer|TaskServerCancelBridge|ThinkingRail`), `HistoryModal|ProjectCard|ResumeBuilder|SettingsModal|TerminalModal`, `ui/{BrandLogo,ConfirmDialog,Input,Panel,ProjectSwitcher}`, `layout/{ContextInspector,SplitPane}`, `views/{AutonomousCopilotDirector,AutonomousCopilotWorkspace,ChatPromptBox,Header,TemplateHubModal}`, `sandbox/*`, `editor/*`, `CopilotWorkspace`, `agent/AgentDashboard`, `ide/CursorComposerHud`, `hooks/useWebContainer`, `lib/clientVisualHeuristics`, `services/FigmaMCPClient`, `public/audio-processor`. Also purged one-off scripts: frontend root `extract_*|refactor_*|test_overlay*`, `scripts/{e2e_full_project_test,run_1st_2nd_3rd_test,run_ui_test,verify_ui_live,visual_healer_test}`, `pages/dashboard.jsx.bak`, lighthouse report JSONs, backend root `copilottest*|debug_p1*|fix_*|patch*|test_*|verify_*|cascade_check|rag_run_check|aiServices|refactor*|chaos_*|inject_rules|extractChatLogic|broken_script|scratch_eval|news.txt`, `backend/sandbox_test_app/`, `backend/services/{refactorIntents,transformIntents}`, root `apply_patch|audit_codebase|fix_ollama*|fix_*|patch_*|test_*|notes.md|vs_BuildTools.exe`, ai-engine `{clean_main,fix,inspect_chroma,dummy_mcp_server}.py`. Kept (live): `scripts/apply-next-xff-patch.js` (postinstall), `public/sw.js` (registered in `_app.js`), `ecosystem.config.js`, `logger.js`, `projectStore.js`, `temp_test_workspace` (test fixture), `calculator_live_preview.html` (preview-server fixture).
 - `eslint.config.mjs` ignores `coverage/`, `test-results/`, `playwright-report/`, `downloads/`.
 - npm audit residual (non-exploitable here): backend 2×high via pptxgenjs→image-size (only if user-supplied images parsed — none in doc flow); frontend 1×high serialize-javascript via workbox-build (build-time only) + moderates via monaco's internal dompurify 3.3.1 (sanitizes only monaco's own markup; root dompurify is fixed 3.4.13). `npm audit fix` safe path already applied.
 
@@ -311,7 +320,7 @@ npm run lint
 2. `/api/chat/history` + `/api/chat/save` only existed under `/api/v1` — frontend called `/api/chat/*` and got 404 (HistoryView broken). Now registered under both.
 3. `server.js` handle leaks — sandbox cleanup + WS heartbeat `setInterval`s kept Node alive after shutdown → `.unref()`.
 4. `KanbanBoard.jsx` — undefined `draggedTask` + `addNewTask` declared after `return` (TDZ crash on Enter) → fixed + regression test.
-5. `Sidebar.jsx` — only 5 of 10 nav items rendered; Projects/Images/History/Settings/MCP unreachable → now renders all `navItems`.
+5. `Sidebar.jsx` — only 5 of 10 nav items rendered; Projects/Images/History/Settings/MCP unreachable → fixed back then; legacy `Sidebar` since deleted (2026-09-30) — live nav is `layout/CommandRail`.
 6. KanbanBoard "Add" buttons: `Add`/`+` buttons now call addNewTask properly (was dead code).
 7. Socket.IO WebSocket dead — `ws@>=8.18` `WebSocket.Server({ server, path })` aborts NON-matching upgrades with `abortHandshake(400)`, corrupting sockets socket.io already upgraded (101) → sandbox wss switched to `noServer: true` + manual path check (`sandbox/wsServer.js`). Symptom: browser `Invalid frame header` on `ws://:5000/socket.io/`, terminal falls back to REST.
 8. Agent (copilot) one-prompt full-stack generation broken — 4 bugs in `backend/routes/agent.js`, all fixed + regression tests (`parseLLMAction` suite):
@@ -320,6 +329,8 @@ npm run lint
    - Relative `targetDir` resolved against backend cwd (files + `node_modules` landed in `backend/todo-app/`) → now `path.isAbsolute ? requestedDir : safeJoin(projectPath, requestedDir)` (workspace `%TEMP%\agent-ws-default\<project>`).
    - Scaffold LLM hard-wired to Gemini (quota 429) and accepted first non-error response even if garbage → `callScaffoldLLM` mini-cascade (Groq→Gemini→Cerebras→NVIDIA→Together→DeepSeek→Mistral→HuggingFace→OpenRouter→Ollama) with strict `{files:[...]}` JSON validation — invalid JSON skips to next provider. Prompt shortened to reduce free-tier model garbage.
    - Verified E2E: 15-file React+Vite+Express todo app generated + `npm install` + agent continues with `list_directory` self-check. Note: Docker not running → `sandbox_create` fails with 503 (environment, not code).
+9. Chat refactor leftovers (caught by `eslint no-undef`, fixed 2026-09-30): `routes/chat.js` used `ReasoningStreamFilter` 4× without importing it (class lives in `utils/streamUtils.js`) → Ollama stream path would `ReferenceError`; `controllers/chatController.js` assigned `usedModel` without declaration → now `const`.
+10. Stop generation (2026-09-30, R1/R2 chat parity): `useChatStream` ab `signal` leta hai + `meta` attach karta hai (`{provider, totalMs, ttfbMs, stopped}` → bubble chip "groq … · 1.3s · 1st token 1.1s"); Esc/Stop button → AbortController. **Gotcha**: `TaskRuntimeBridge.patchedFetch` (window.fetch monkey-patch) apna controller banake caller ka `init.signal` drop karta tha → caller abort network tak nahi pahunchta tha; fixed by forwarding callerSignal → bridge controller (`TaskRuntimeBridge.jsx`). Regression: `frontend/tests/chatStreamStop.test.js`.
 
 ### Document generation test (all 5 types)
 ```bash
@@ -330,7 +341,51 @@ curl -X POST http://localhost:5000/api/document/generate -H "Content-Type: appli
 curl -X POST http://localhost:5000/api/document/generate -H "Content-Type: application/json" -d '{"type":"xlsx","topic":"test"}'
 ```
 
+### Travel & Local Business test (Category 14)
+```bash
+curl http://localhost:5000/api/travel/domains
+curl -X POST http://localhost:5000/api/travel/generate -H "Content-Type: application/json" -d '{"domain":"restaurant-search","location":"Goa","preferences":"beachside seafood"}'
+curl -X POST http://localhost:5000/api/travel/budget-calculator -H "Content-Type: application/json" -d '{"destination":"Manali","days":4,"travelers":2,"tier":"budget"}'
+curl -X POST http://localhost:5000/api/travel/packing-checklist -H "Content-Type: application/json" -d '{"destination":"Ladakh","duration":"7 days","weather":"cold","activities":"biking"}'
+```
+
+### Language & Translation Hub test (Category 15)
+```bash
+curl http://localhost:5000/api/language/capabilities
+curl -X POST http://localhost:5000/api/language/process -H "Content-Type: application/json" -d '{"text":"Namaste, how are you?","mode":"translate","targetLanguage":"hindi"}'
+curl -X POST http://localhost:5000/api/language/grammar -H "Content-Type: application/json" -d '{"text":"She do not goes to office"}'
+curl -X POST http://localhost:5000/api/language/vocab -H "Content-Type: application/json" -d '{"word":"Pragmatic"}'
+```
+
+### Problem Solving & Decision Support test (Category 16)
+```bash
+curl http://localhost:5000/api/decision/domains
+curl -X POST http://localhost:5000/api/decision/analyze -H "Content-Type: application/json" -d '{"domain":"tech-stack","options":["Next.js","Vite+Express"],"primaryGoal":"Fast MVP"}'
+curl -X POST http://localhost:5000/api/decision/rice -H "Content-Type: application/json" -d '{"features":[{"name":"Feature A","reach":500,"impact":3,"confidence":80,"effort":2}]}'
+```
+
+### Security & Cybersecurity Hub test (Category 17)
+```bash
+curl http://localhost:5000/api/security/domains
+curl -X POST http://localhost:5000/api/security/headers -H "Content-Type: application/json" -d '{"framework":"express"}'
+curl -X POST http://localhost:5000/api/security/threat-model -H "Content-Type: application/json" -d '{"systemDescription":"Fintech payments","components":["Next.js","Express","Postgres"]}'
+curl -X POST http://localhost:5000/api/security/audit -H "Content-Type: application/json" -d '{"code":"const q = \"SELECT * FROM users WHERE id = \" + id;","domain":"sqli-prevention"}'
+```
+
+### 50-Domain Master Capability Catalog test
+```bash
+curl http://localhost:5000/api/catalog/capabilities
+curl http://localhost:5000/api/catalog/clusters
+curl http://localhost:5000/api/catalog/capabilities/9
+curl -X POST http://localhost:5000/api/catalog/detect -H "Content-Type: application/json" -d '{"message":"Explain Hohmann transfer orbit in aerospace"}'
+```
+
 ## 🚀 Deployment
+
+### Docker Compose (local prod-like stack)
+- Root `docker-compose.yml` = **3 services only**: `backend` (:5000, health-gated), `frontend` (:3000), `ai-engine` (:8001) + `ai_engine_data` volume. `docker compose up` from repo root.
+- Redis/Mongo are **NOT** in the root compose — `memory-brain/docker-compose.yml` is a separate stack (bring up only if running the memory-brain service).
+- Sandbox `docker.sock` mount is opt-in (commented out in compose; sandbox API returns 503 otherwise).
 
 ### Vercel (Frontend)
 1. Connect repo to Vercel

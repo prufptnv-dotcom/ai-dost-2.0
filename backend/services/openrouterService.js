@@ -1,5 +1,6 @@
 const logger = require('../logger');
 const { RobustApiClient } = require('./apiClient');
+const { withQualityStandard } = require('./outputQualityStandard');
 
 class OpenRouterService {
     constructor() {
@@ -38,7 +39,7 @@ class OpenRouterService {
             if (mode !== 'agent') {
                 messages.push({
                     role: 'system',
-                    content: `You are AI-Dost, an expert Senior Software Engineer and AI Assistant. Write clean, optimal, production-grade code wrapped inside markdown code blocks.`
+                    content: withQualityStandard(`You are AI-Dost, an expert Senior Software Engineer and AI Assistant. Write clean, optimal, production-grade code wrapped inside markdown code blocks.`)
                 });
             }
             messages.push(...history);
@@ -46,17 +47,13 @@ class OpenRouterService {
 
             // Free models list (2026) with automatic fallback
             const freeModels = [
-                'openai/gpt-oss-20b:free',
-                'deepseek/deepseek-r1:free',
-                'deepseek/deepseek-chat:free',
-                'qwen/qwen-2.5-coder-32b-instruct:free',
-                'meta-llama/llama-3.3-70b-instruct:free',
-                'google/gemini-2.0-flash-exp:free',
-                'cohere/north-mini-code:free',
-                'z-ai/glm-5.2:free',
+                'openrouter/free',
+                'nvidia/nemotron-3.5-lightning:free',
                 'google/gemma-4-31b-it:free',
+                'google/gemma-4-26b-a4b-it:free',
                 'liquid/lfm-2.5-2.6b:free',
-                'mistralai/mistral-7b-instruct:free'
+                'cohere/north-mini-code:free',
+                'z-ai/glm-5.2:free'
             ];
 
             let lastError = null;
@@ -66,7 +63,7 @@ class OpenRouterService {
                         model,
                         messages: messages,
                         temperature: 0.1,
-                        max_tokens: 16384
+                        max_tokens: 4096
                     }, {
                         'Authorization': `Bearer ${API_KEY}`,
                         'HTTP-Referer': 'http://localhost:3000',

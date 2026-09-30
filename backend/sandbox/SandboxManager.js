@@ -1,5 +1,6 @@
 const Docker = require('dockerode');
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { EventEmitter } = require('events');
@@ -19,6 +20,9 @@ class SandboxManager extends EventEmitter {
     this._dockerChecked = false;
     this._dockerAvailable = false;
     this._dockerPingLatency = null;
+    // P3 #37: creates in flight — reserved synchronously before the first
+    // await so concurrent createSandbox calls cannot both pass the limit check.
+    this._pendingCreates = 0;
     this.cleanupInterval = setInterval(() => this.cleanup(), 5 * 60 * 1000);
     this.cleanupInterval.unref();
     this.ensureDir().catch(() => {});
@@ -56,6 +60,30 @@ class SandboxManager extends EventEmitter {
     if (!fullPath.startsWith(sandboxPath + path.sep) && fullPath !== sandboxPath) {
       throw new Error(`Invalid sandbox path: ${relPath} (path traversal blocked)`);
     }
+    // P3 #36: a plain prefix check is fooled by symlinks — a link INSIDE the
+    // sandbox pointing outside would pass the check but read/write elsewhere.
+    // Resolve the real path of the deepest existing ancestor and require it to
+    // stay inside the real sandbox root.
+    try {
+      const realRoot = fsSync.realpathSync(sandboxPath);
+      let probe = fullPath;
+      const missing = [];
+      while (!fsSync.existsSync(probe)) {
+        const parent = path.dirname(probe);
+        if (parent === probe) break;
+        missing.unshift(path.basename(probe));
+        probe = parent;
+      }
+      let realProbe = fsSync.realpathSync(probe);
+      for (const seg of missing) realProbe = path.join(realProbe, seg);
+      const inRoot = realProbe === realRoot || realProbe.startsWith(realRoot + path.sep);
+      if (!inRoot) {
+        throw new Error(`Invalid sandbox path: ${relPath} (symlink escape blocked)`);
+      }
+    } catch (err) {
+      if (err && /symlink escape blocked|path traversal blocked/.test(err.message)) throw err;
+      // realpath failures on exotic filesystems fall back to the prefix check above
+    }
     return fullPath;
   }
 
@@ -66,15 +94,36 @@ class SandboxManager extends EventEmitter {
   // Command policy filter to prevent accidental or malicious destruction in local sandbox fallback
   validateCommandPolicy(cmd) {
     if (!cmd || typeof cmd !== 'string') return { allowed: true };
+    // P3 #35: this denylist is the shared gate for orchestrator + TerminalTool
+    // too (both used a 5-string list before). It is still a denylist — the
+    // P0 #6 exec gate (explicit opt-in) remains the primary control.
     const forbiddenPatterns = [
-      /\brm\s+-[rf]{1,2}\s+[\/\\]/i, // rm -rf / or \
+      /\brm\s+-[rf]{1,2}(\s+--[a-z-]+)*\s+[\/\\]/i, // rm -rf / or \ (incl. --no-preserve-root)
+      /\brm\s+-[rf]{1,2}(\s+--[a-z-]+)*\s+\.\.(\/|\\)?/i, // rm -rf ..
       /\bformat\s+[c-z]:/i,           // format c:
       /\bdiskpart\b/i,                // disk partitioning
-      /\bdel\s+\/f\s+\/s\s+\/q\s+[c-z]:\\/i,
+      /\bdel\s+\/[fdirs]+\s+[a-z]:\\/i, // del /f /s /q <any drive>
       /\bshutdown\b/i,
       /\breboot\b/i,
-      /\b:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, // bash fork bomb
-      /\bpowershell.*Remove-Item\s+-[Rr]ecurse\s+[C-Z]:\\/i
+      /\bpoweroff\b/i,
+      /\bhalt\b/i,
+      /\binit\s+0\b/i,
+      /\b:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, // bash fork bomb (any spacing)
+      /\bpowershell.*Remove-Item\s+-[Rr]ecurse\s+[C-Z]:\\/i,
+      /\bRemove-Item\b/i,             // any PowerShell recursive delete in host fallback
+      /\brmdir\s+\/s\b/i,
+      /\bmkfs\b/i,
+      /\bdd\s+if=/i,
+      /\bdd\s+.*of=\/dev\/(sd|nvme|hd)/i,
+      /\bmount\s+-o\s+remount\b/i,
+      />\s*\/dev\/(sd|nvme|hd)[a-z0-9]*\b/i,   // direct disk writes
+      /\bbcdedit\b/i,
+      /\breg\s+delete\b/i,
+      /\bnet\s+user\b/i,
+      /\bcurl\b[^|]*\|\s*(ba)?sh/i,   // pipe-to-shell
+      /\biwr\b[^|]*\|\s*iex/i,
+      /\bwget\b[^|]*\|\s*(ba)?sh/i,
+      /\bchmod\s+(-R\s+)?(000|777)\b/i
     ];
     for (const pattern of forbiddenPatterns) {
       if (pattern.test(cmd)) {
@@ -122,13 +171,46 @@ class SandboxManager extends EventEmitter {
     return Math.min(bytes, 2 * 1024 * 1024 * 1024);
   }
 
+  /**
+   * P3 #39 — resolve a caller-supplied workdir (host path) that callers
+   * (TerminalTool / orchestrator) always pass as the real project workspace.
+   * Only paths under the workspace base (os.tmpdir()) are honoured so an
+   * HTTP-supplied `options.workdir` can never point the sandbox at e.g. /etc.
+   * Returns null when absent/unsafe → callers fall back to the sandbox dir.
+   */
+  _resolveWorkdir(raw) {
+    if (!raw || typeof raw !== 'string') return null;
+    let resolved;
+    try { resolved = path.resolve(raw.trim()); } catch (_) { return null; }
+    const base = path.resolve(os.tmpdir());
+    if (resolved !== base && !resolved.startsWith(base + path.sep)) return null;
+    if (!fsSync.existsSync(resolved)) return null;
+    return resolved;
+  }
+
   async createSandbox(projectId, options = {}) {
-    if (this.containers.size >= MAX_CONTAINERS) {
+    // P3 #37: reserve a slot synchronously — the check and the increment have
+    // no await between them, so two concurrent createSandbox calls can no
+    // longer both pass the MAX_CONTAINERS check and over-commit.
+    if (this.containers.size + this._pendingCreates >= MAX_CONTAINERS) {
       await this.cleanup();
-      if (this.containers.size >= MAX_CONTAINERS) {
+      if (this.containers.size + this._pendingCreates >= MAX_CONTAINERS) {
         throw new Error(`Sandbox limit reached (${MAX_CONTAINERS}). Destroy an existing sandbox first.`);
       }
     }
+    this._pendingCreates++;
+    try {
+      return await this._createSandboxInner(projectId, options);
+    } finally {
+      this._pendingCreates--;
+    }
+  }
+
+  async _createSandboxInner(projectId, options = {}) {
+    // P3 #39: the real project workspace (host path) — used as the Docker bind
+    // mount and the local exec cwd instead of being silently ignored (which
+    // left agent commands running in an empty temp dir).
+    const hostWorkdir = this._resolveWorkdir(options.workdir);
 
     const available = await this.isDockerAvailable();
     const allowFallback = options.allowFallback !== false && options.fallback !== false;
@@ -151,18 +233,38 @@ class SandboxManager extends EventEmitter {
       portBindings[`${port}/tcp`] = [{ HostPort: '' }];
     }
 
+    // Image/network allowlist — never pull arbitrary client-supplied images
+    // or attach to sensitive Docker networks (host, none custom, etc.)
+    const SAFE_IMAGE = /^(node|python|ubuntu|alpine|nginx)(:[A-Za-z0-9._-]+)?$/;
+    const requestedImage = String(options.image || 'node:22-alpine');
+    const image = SAFE_IMAGE.test(requestedImage) ? requestedImage : 'node:22-alpine';
+    const SAFE_NETWORKS = new Set(['bridge', 'host', 'none']);
+    const network = SAFE_NETWORKS.has(String(options.network || 'bridge')) ? String(options.network || 'bridge') : 'bridge';
+
+    // Sanitize env: strip secrets / NODE_OPTIONS / PATH overrides from client input
+    const SENSITIVE_ENV = new Set(['PATH', 'NODE_OPTIONS', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'HOME', 'SSH_AUTH_SOCK',
+      'GEMINI_API_KEY', 'GROQ_API_KEY', 'OPENAI_API_KEY', 'AWS_SECRET_ACCESS_KEY', 'JWT_SECRET', 'ANTHROPIC_API_KEY']);
+    const clientEnv = {};
+    for (const [k, v] of Object.entries(options.env || {})) {
+      if (!SENSITIVE_ENV.has(String(k).toUpperCase()) && typeof v === 'string' && !v.includes('\0')) {
+        clientEnv[k] = v;
+      }
+    }
+
     const config = {
-      image: options.image || 'node:22-alpine',
+      image,
       workdir: '/workspace',
       memory: options.memory || '1g',
       cpus: options.cpus || 1,
-      network: options.network || 'bridge',
+      network,
       env: {
         NODE_ENV: 'development',
-        ...options.env
+        ...clientEnv
       },
+      // P3 #39: mount the caller's project workspace when provided — the old
+      // code always mounted the (empty) fresh temp dir at /workspace.
       volumes: {
-        [sandboxPath]: { bind: '/workspace', mode: 'rw' }
+        [hostWorkdir || sandboxPath]: { bind: '/workspace', mode: 'rw' }
       }
     };
 
@@ -209,7 +311,13 @@ class SandboxManager extends EventEmitter {
         id: sandboxId,
         projectId,
         container,
-        path: sandboxPath,
+        // P3 #39: file ops (writeFile/readFile/listFiles) target the project
+        // workspace when one was supplied, so host and container views match.
+        path: hostWorkdir || sandboxPath,
+        // P3 #38/#39: ONLY the temp dir we created may ever be rm -rf'd — never
+        // the caller's project workspace.
+        ownedPath: sandboxPath,
+        hostWorkdir,
         isolation: 'docker',
         createdAt: Date.now(),
         lastActivity: Date.now(),
@@ -236,18 +344,25 @@ class SandboxManager extends EventEmitter {
     const sandboxId = crypto.randomUUID().substring(0, 8);
     const sandboxPath = path.join(SANDBOX_DIR, `local-${projectId}-${sandboxId}`);
     await fs.mkdir(sandboxPath, { recursive: true });
+    // P3 #39: run local commands in the caller's real project workspace when
+    // it is a safe path under the workspace base (see _resolveWorkdir).
+    const hostWorkdir = this._resolveWorkdir(options.workdir);
 
     const sandbox = {
       id: sandboxId,
       projectId,
       container: null,
-      path: sandboxPath,
+      path: hostWorkdir || sandboxPath,
+      ownedPath: sandboxPath, // P3 #39: temp dir only — never rm the project
+      hostWorkdir,
       isolation: 'local-fallback',
       createdAt: Date.now(),
       lastActivity: Date.now(),
       ports: new Map(),
       processes: new Map(),
       isLocal: true,
+      // P0 FIX (#6): only explicit opt-in grants host-shell exec (see execLocal)
+      allowHostExec: options.allowHostExec === true || options.allowFallback === true || process.env.SANDBOX_ALLOW_HOST_EXEC === '1',
       options
     };
 
@@ -278,6 +393,23 @@ class SandboxManager extends EventEmitter {
   }
 
   async execLocal(sandbox, cmd, options = {}) {
+    // P0 FIX (#6): host-shell execution is only available when the caller
+    // EXPLICITLY opted into local fallback (allowFallback/allowHostExec === true)
+    // or SANDBOX_ALLOW_HOST_EXEC=1 is set. The denylist below is bypassable, so
+    // it must never be the only line of defence on the host.
+    const hostExecAllowed =
+      sandbox.allowHostExec === true ||
+      options.allowHostExec === true ||
+      process.env.SANDBOX_ALLOW_HOST_EXEC === '1';
+    if (!hostExecAllowed) {
+      return {
+        exitCode: 126,
+        stdout: '',
+        stderr: 'Sandbox exec denied: Docker is unavailable and host execution was not explicitly enabled. Start Docker, or create the sandbox with allowFallback:true (trusted local dev) / set SANDBOX_ALLOW_HOST_EXEC=1.',
+        success: false
+      };
+    }
+
     const policy = this.validateCommandPolicy(cmd);
     if (!policy.allowed) {
       return {
@@ -296,6 +428,8 @@ class SandboxManager extends EventEmitter {
       let proc;
       try {
         proc = spawn(cmd, [], {
+          // P3 #39: default to the caller's project workspace when supplied
+          // (sandbox.path already prefers hostWorkdir), else the sandbox dir.
           cwd: sandbox.path,
           env: sanitizedEnv,
           shell: true,
@@ -362,6 +496,12 @@ class SandboxManager extends EventEmitter {
   async exec(sandboxId, cmd, options = {}) {
     const sandbox = this.containers.get(sandboxId);
     if (!sandbox) throw new Error(`Sandbox ${sandboxId} not found`);
+
+    // Same command policy for Docker + local — was Docker-only before
+    const policy = this.validateCommandPolicy(cmd);
+    if (!policy.allowed) {
+      throw new Error(`Command blocked by policy: ${policy.reason || 'blocked'}`);
+    }
 
     if (sandbox.isLocal) {
       return this.execLocal(sandbox, cmd, options);
@@ -490,11 +630,16 @@ class SandboxManager extends EventEmitter {
     const sandbox = this.containers.get(sandboxId);
     if (!sandbox) return false;
 
+    // P3 #39: remove ONLY the temp dir this manager created. When a caller
+    // supplied its project workspace as `path`, deleting it would wipe the
+    // project — ownedPath keeps that impossible.
+    const ownedDir = sandbox.ownedPath || sandbox.path;
+
     if (sandbox.isLocal) {
       for (const [, proc] of sandbox.processes) {
         try { proc.kill('SIGKILL'); } catch (_) {}
       }
-      await fs.rm(sandbox.path, { recursive: true, force: true }).catch(() => {});
+      await fs.rm(ownedDir, { recursive: true, force: true }).catch(() => {});
       this.containers.delete(sandboxId);
       this.emit('destroyed', sandboxId);
       return true;
@@ -507,7 +652,7 @@ class SandboxManager extends EventEmitter {
       console.error(`Error destroying sandbox ${sandboxId}:`, err.message);
     }
 
-    await fs.rm(sandbox.path, { recursive: true, force: true }).catch(() => {});
+    await fs.rm(ownedDir, { recursive: true, force: true }).catch(() => {});
     this.containers.delete(sandboxId);
     this.emit('destroyed', sandboxId);
     return true;
@@ -595,11 +740,13 @@ class SandboxManager extends EventEmitter {
     }
   }
 
-  shutdown() {
+  // P3 #38: shutdown now AWAITS every destroy — the old fire-and-forget loop
+  // let the process exit while container stop/remove was still in flight,
+  // orphaning containers on disk/Docker.
+  async shutdown() {
     clearInterval(this.cleanupInterval);
-    for (const id of this.containers.keys()) {
-      this.destroy(id);
-    }
+    const ids = Array.from(this.containers.keys());
+    await Promise.allSettled(ids.map(id => this.destroy(id)));
   }
 }
 

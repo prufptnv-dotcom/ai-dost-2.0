@@ -46,6 +46,62 @@ function findSqliteDbFile(projectId) {
   return null;
 }
 
+// ── P2 #15/#16: dbPath containment + HMAC-backed destructive approval ────────
+const os = require('os');
+const crypto = require('crypto');
+
+const ALLOWED_DB_ROOTS = [
+  path.resolve(os.tmpdir()),
+  path.resolve(path.join(__dirname, '../..')), // repo root (agent workspaces)
+  path.resolve(process.cwd()),
+];
+
+// Process-scoped secret: approval tokens are issued and consumed within one
+// server run (dry-run → user confirms → apply), so restarts invalidate them.
+const APPROVAL_SECRET = crypto.randomBytes(32);
+
+function isInsideAllowedRoots(target) {
+  const resolved = path.resolve(String(target));
+  return ALLOWED_DB_ROOTS.some(r => resolved === r || resolved.startsWith(r + path.sep));
+}
+
+// Resolve + validate a client-supplied dbPath. Throws code DBPATH_FORBIDDEN
+// when outside allowed roots. Returns null when nothing resolves.
+function resolveSafeDbPath(dbPath, projectId) {
+  if (dbPath !== undefined && dbPath !== null && String(dbPath).trim() !== '') {
+    const raw = String(dbPath).trim();
+    if (raw === ':memory:') return raw;
+    if (!isInsideAllowedRoots(raw)) {
+      const err = new Error('dbPath outside allowed workspace roots');
+      err.code = 'DBPATH_FORBIDDEN';
+      throw err;
+    }
+    return path.resolve(raw);
+  }
+  return projectId ? findSqliteDbFile(projectId) : null;
+}
+
+// P2 #15: destructive migrations need a token issued for THIS plan — a plain
+// non-empty string no longer approves anything. Bound to plan CONTENT: planId /
+// requestId / createdAt are freshly generated on every DatabaseSchemaPlan()
+// construction, so they must not enter the HMAC or dry-run→apply would mismatch.
+function canonicalPlanForApproval(plan) {
+  if (!plan || typeof plan !== 'object') return '{}';
+  const { planId, requestId, createdAt, ...rest } = plan;
+  return JSON.stringify(rest);
+}
+
+function issueApprovalToken(plan) {
+  return crypto.createHmac('sha256', APPROVAL_SECRET).update(canonicalPlanForApproval(plan)).digest('hex');
+}
+
+function verifyApprovalToken(plan, token) {
+  if (!token || typeof token !== 'string') return false;
+  const expected = Buffer.from(issueApprovalToken(plan), 'utf8');
+  const provided = Buffer.from(token, 'utf8');
+  return expected.length === provided.length && crypto.timingSafeEqual(expected, provided);
+}
+
 // ── GET /api/database/:projectId/tables ──────────────────────────────────────
 router.get('/:projectId/tables', (req, res) => {
   const { projectId } = req.params;
@@ -131,20 +187,41 @@ router.post('/:projectId/query', (req, res) => {
 
   const dbPath = findSqliteDbFile(projectId);
   if (dbPath && Database) {
+    // P2 #17: string-gate BEFORE opening the handle, open read-only for reads,
+    // and close via finally — the old catch() returned 400 while leaking the
+    // read-write handle on every prepare/run error.
+    let db = null;
     try {
-      const db = new Database(dbPath);
-      const isSelect = sql.trim().toUpperCase().startsWith('SELECT') || sql.trim().toUpperCase().startsWith('PRAGMA');
-      if (isSelect) {
-        const rows = db.prepare(sql).all();
-        db.close();
-        return res.json({ success: true, rows, count: rows.length });
-      } else {
-        const info = db.prepare(sql).run();
-        db.close();
-        return res.json({ success: true, changes: info.changes, count: info.changes });
+      // Hardened SQL gate: single statement only; block ATTACH/VACUUM/load_extension
+      // (ATTACH can open arbitrary files; VACUUM TO writes outside workspace)
+      const trimmed = sql.trim();
+      const noTrailingSemi = trimmed.replace(/;\s*$/, '');
+      if (noTrailingSemi.includes(';')) {
+        return res.status(400).json({ success: false, error: 'Multiple SQL statements are not allowed' });
       }
+      if (/\b(attach|detach|vacuum\s+to|load_extension|writable_schema)\b/i.test(trimmed)) {
+        return res.status(400).json({ success: false, error: 'SQL statement blocked for safety' });
+      }
+      const upper = trimmed.toUpperCase();
+      const isSelect = upper.startsWith('SELECT') || upper.startsWith('PRAGMA') || upper.startsWith('WITH');
+      const isWrite = /^(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)\b/.test(upper);
+      if (!isSelect && !isWrite) {
+        return res.status(400).json({ success: false, error: 'Only SELECT/PRAGMA/INSERT/UPDATE/DELETE/CREATE/DROP/ALTER allowed' });
+      }
+
+      db = new Database(dbPath, { readOnly: !isWrite });
+      if (isSelect) {
+        const rows = db.prepare(trimmed).all();
+        return res.json({ success: true, rows, count: rows.length });
+      }
+      const info = db.prepare(trimmed).run();
+      return res.json({ success: true, changes: info.changes, count: info.changes });
     } catch (err) {
       return res.status(400).json({ success: false, error: err.message });
+    } finally {
+      if (db) {
+        try { db.close(); } catch (_) { /* already closed */ }
+      }
     }
   }
 
@@ -279,9 +356,14 @@ router.post('/migration/dry-run', (req, res) => {
     });
 
     const dryRunResult = manager.dryRun();
+    const dryRunDestructive = Boolean(validation.destructiveDetected) ||
+      generated.migrations.some(m => /DROP\s+(?:TABLE|COLUMN|DATABASE)|TRUNCATE/i.test(m.upSql || m.content || ''));
     return res.json({
       ok: dryRunResult.success,
       success: dryRunResult.success,
+      // P2 #15: hand the client a plan-bound approval token when destructive
+      // changes were detected, so apply can verify user confirmation
+      ...(dryRunDestructive ? { approvalToken: issueApprovalToken(plan) } : {}),
       data: dryRunResult
     });
   } catch (err) {
@@ -303,19 +385,44 @@ router.post('/migration/apply', async (req, res) => {
 
     // Check destructive changes policy
     const validation = DatabaseSchemaValidator.validate(plan);
-    if (validation.destructiveDetected && !approvalToken) {
-      return res.status(403).json(
-        DatabaseSchemaResult.approvalRequired(
-          'Destructive database operation requires explicit user approval token',
-          { engine: plan.engine, warnings: validation.warnings }
-        ).toJSON()
-      );
-    }
-
-    const targetDbPath = dbPath || (projectId ? findSqliteDbFile(projectId) : null) || ':memory:';
-
     const generator = new DatabaseSchemaGenerator(plan);
     const generated = generator.generateAll();
+
+    // Route-level detection must match the manager's own gate: declared
+    // destructiveOperations OR destructive SQL inside generated migrations.
+    const managerDestructiveRe = /DROP\s+(?:TABLE|COLUMN|DATABASE)|TRUNCATE/i;
+    const destructiveDetected = Boolean(validation.destructiveDetected) ||
+      generated.migrations.some(m => managerDestructiveRe.test(m.upSql || m.content || ''));
+
+    let verifiedApproval = null;
+    if (destructiveDetected) {
+      // P2 #15: token must be an HMAC issued for THIS plan (dry-run/validate
+      // responses include it) — any arbitrary non-empty string is rejected.
+      if (!verifyApprovalToken(plan, approvalToken)) {
+        return res.status(403).json({
+          ...DatabaseSchemaResult.approvalRequired(
+            'Destructive database operation requires explicit user approval token',
+            { engine: plan.engine, warnings: validation.warnings }
+          ).toJSON(),
+          approvalToken: issueApprovalToken(plan)
+        });
+      }
+      verifiedApproval = approvalToken;
+    }
+
+    // P2 #15: client-supplied dbPath/workspacePath must stay inside allowed roots
+    let targetDbPath;
+    try {
+      targetDbPath = resolveSafeDbPath(dbPath, projectId) || ':memory:';
+    } catch (err) {
+      if (err.code === 'DBPATH_FORBIDDEN') {
+        return sendStructuredError(res, 400, 'DBPATH_FORBIDDEN', 'dbPath outside allowed workspace roots');
+      }
+      throw err;
+    }
+    if (workspacePath && !isInsideAllowedRoots(workspacePath)) {
+      return sendStructuredError(res, 400, 'WORKSPACE_FORBIDDEN', 'workspacePath outside allowed workspace roots');
+    }
 
     const manager = new DatabaseMigrationManager({
       engine: plan.engine,
@@ -324,7 +431,7 @@ router.post('/migration/apply', async (req, res) => {
       migrations: generated.migrations
     });
 
-    const applyResult = manager.apply();
+    const applyResult = manager.apply(verifiedApproval ? { approvalToken: verifiedApproval } : {});
     if (!applyResult.success) {
       return res.status(500).json({
         ok: false,
@@ -352,7 +459,16 @@ router.post('/migration/apply', async (req, res) => {
 router.post('/migration/rollback', (req, res) => {
   try {
     const { plan: rawPlan, targetVersion, steps, dbPath, projectId } = req.body || {};
-    const targetDbPath = dbPath || (projectId ? findSqliteDbFile(projectId) : null) || ':memory:';
+    // P2 #16: same containment as apply
+    let targetDbPath;
+    try {
+      targetDbPath = resolveSafeDbPath(dbPath, projectId) || ':memory:';
+    } catch (err) {
+      if (err.code === 'DBPATH_FORBIDDEN') {
+        return sendStructuredError(res, 400, 'DBPATH_FORBIDDEN', 'dbPath outside allowed workspace roots');
+      }
+      throw err;
+    }
 
     const plan = rawPlan ? new DatabaseSchemaPlan(rawPlan).toJSON() : { engine: 'sqlite' };
     const generator = new DatabaseSchemaGenerator(plan);
@@ -380,9 +496,19 @@ router.post('/migration/rollback', (req, res) => {
 router.get('/migration/history', (req, res) => {
   try {
     const { projectId, dbPath } = req.query;
-    const targetDbPath = dbPath || (projectId ? findSqliteDbFile(projectId) : null);
+    // P2 #16: containment + existing-file requirement — GET history must never
+    // let DatabaseSync create/init a tracking table at an arbitrary path
+    let targetDbPath;
+    try {
+      targetDbPath = resolveSafeDbPath(dbPath, projectId);
+    } catch (err) {
+      if (err.code === 'DBPATH_FORBIDDEN') {
+        return sendStructuredError(res, 400, 'DBPATH_FORBIDDEN', 'dbPath outside allowed workspace roots');
+      }
+      throw err;
+    }
 
-    if (!targetDbPath) {
+    if (!targetDbPath || !fs.existsSync(targetDbPath)) {
       return res.json({ ok: true, success: true, migrations: [] });
     }
 
@@ -407,9 +533,18 @@ router.get('/migration/history', (req, res) => {
 router.get('/schema/drift', (req, res) => {
   try {
     const { projectId, dbPath } = req.query;
-    const targetDbPath = dbPath || (projectId ? findSqliteDbFile(projectId) : null);
+    // P2 #16: containment + existing-file requirement (same as /migration/history)
+    let targetDbPath;
+    try {
+      targetDbPath = resolveSafeDbPath(dbPath, projectId);
+    } catch (err) {
+      if (err.code === 'DBPATH_FORBIDDEN') {
+        return sendStructuredError(res, 400, 'DBPATH_FORBIDDEN', 'dbPath outside allowed workspace roots');
+      }
+      throw err;
+    }
 
-    if (!targetDbPath) {
+    if (!targetDbPath || !fs.existsSync(targetDbPath)) {
       return res.json({ ok: true, success: true, drift: [] });
     }
 

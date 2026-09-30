@@ -1,17 +1,29 @@
-fastapi>=0.110
-uvicorn>=0.29
-llama-index-core>=0.11
-llama-index-embeddings-ollama>=0.2
-llama-index-readers-file>=0.1
-llama-index-llms-ollama>=0.3
-chromadb
-llama-index-vector-stores-chroma
-beautifulsoup4
-requests
-mcp
-langchain
-langchain-ollama
-langgraph
-crewai
-openpyxl>=3.1
-tavily-python>=0.3
+# P3 #206: exact pins for reproducible builds — previously every line was
+# unpinned or loosely bounded (>=/<), so a new crewai/langchain release could
+# break the image without any repo change.
+# Resolved 2026-09-26 from PyPI as the newest final release that still
+# satisfies the original bounds, then cross-checked against each other:
+#   langchain 0.3.30  <-> langgraph 0.3.34   (langchain-core 0.3.x)
+#   langchain-ollama 0.3.10                   (langchain-core >=0.3.76,<2)
+#   llama-index-core 0.14.25                  (all llama-index-* pins in <0.15)
+# Transitives (pydantic, ollama, chromadb deps, ...) still float within the
+# bounds their parents declare — a full lockfile needs pip-compile.
+fastapi==0.141.1
+uvicorn==0.54.0
+llama-index-core==0.14.25
+llama-index-embeddings-ollama==0.10.0
+llama-index-readers-file==0.7.0
+llama-index-llms-ollama==0.11.0
+chromadb~=1.1.0
+llama-index-vector-stores-chroma==0.6.0
+beautifulsoup4==4.15.0
+requests==2.34.2
+mcp~=1.28.1
+langchain==0.3.30
+langchain-ollama==0.3.10
+langgraph==0.3.34
+crewai==1.15.22
+openpyxl==3.1.5
+tavily-python==0.8.4
+edge-tts==7.2.8
+reportlab==5.0.1

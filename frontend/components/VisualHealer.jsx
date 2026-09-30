@@ -92,29 +92,34 @@ export default function VisualHealer({ iframeRef, onFindings, onHealingComplete,
       };
     }
 
-    cleanupRef.current = initVisualHealer();
-    return () => {
-      if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
-    };
+    return undefined;
   }, [iframeRef, showToast, onFindings]);
 
   useEffect(() => {
+    // P3 #86: do NOT bail out before the interval exists — iframeRef is a
+    // stable ref, so a null check at mount time meant the poll never started
+    // when the iframe mounted after this effect (its deps never change).
     const interval = setInterval(() => {
+      if (!iframeRef?.current) return; // iframe not mounted yet — try next tick
       const suggestions = getPendingSuggestions();
-      suggestions.forEach(s => {
-        const msg = typeof s === 'string' ? s : s.message || JSON.stringify(s);
-        showToast({ type: 'info', message: `Suggestion: ${msg}` });
-      });
-      const escalations = getPendingEscalations();
-      escalations.forEach(f => {
-        showToast({
-          type: 'warning',
-          message: `Vision escalation needed: ${f.message || f.type}`,
+      if (suggestions && suggestions.length > 0) {
+        suggestions.forEach(s => {
+          const msg = typeof s === 'string' ? s : s.message || JSON.stringify(s);
+          showToast({ type: 'info', message: `Suggestion: ${msg}` });
         });
-      });
-    }, 3000);
+      }
+      const escalations = getPendingEscalations();
+      if (escalations && escalations.length > 0) {
+        escalations.forEach(f => {
+          showToast({
+            type: 'warning',
+            message: `Vision escalation needed: ${f.message || f.type}`,
+          });
+        });
+      }
+    }, 5000);
     return () => clearInterval(interval);
-  }, [showToast]);
+  }, [iframeRef, showToast]);
 
   const triggerHealing = useCallback(async (onSourceRepair) => {
     if (healingActiveRef.current) return null;
@@ -152,7 +157,10 @@ export default function VisualHealer({ iframeRef, onFindings, onHealingComplete,
 
         if (uncertainFindings.length > 0) {
           try {
-            const healResp = await fetch(`http://localhost:5000/api/agent/heal`, {
+            // P3 #85: relative URL so the Next.js /api rewrite proxies to
+            // whatever backend URL is configured (localhost:5000 hardcoded
+            // broke non-localhost deployments and dev on other ports).
+            const healResp = await fetch('/api/agent/heal', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({

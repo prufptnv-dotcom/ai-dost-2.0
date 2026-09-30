@@ -23,4 +23,7 @@ EXPOSE 5000
 ENV PORT=5000
 ENV NODE_ENV=production
 
-CMD ["node", "server.js"]
+# P2 FIX (#182): preload the same runtime policy modules as npm start —
+# without them the "production" verification container ran unhardened
+# (CORS deny-list / JSON body limits / SSE bridge disabled).
+CMD ["node", "-r", "./security-hardening.js", "-r", "./taskCancellation.js", "-r", "./chatAgentRouteBridge.js", "server.js"]

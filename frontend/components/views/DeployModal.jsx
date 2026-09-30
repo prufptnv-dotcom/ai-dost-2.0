@@ -4,58 +4,64 @@ import { X, Globe, Lock, Loader2, CheckCircle2, AlertTriangle, Cloud, Zap, Arrow
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import api from '../../services/api';
+import { saveSecret, migrateLegacySecrets } from '../../services/secretSettings';
 
 export default function DeployModal({ isOpen, onClose, projectId, projectPath, onToast }) {
   const [target, setTarget] = useState('vercel');
   const [loading, setLoading] = useState(false);
   const [successResult, setSuccessResult] = useState(null);
   
-  // Credentials
+  // Credentials — tokens are server-stored now (#101); inputs only hold typed text
   const [vercelToken, setVercelToken] = useState('');
   const [vercelProjectId, setVercelProjectId] = useState('');
   const [netlifyToken, setNetlifyToken] = useState('');
   const [netlifySiteId, setNetlifySiteId] = useState('');
+  const [secretStatus, setSecretStatus] = useState({});
 
-  // Load saved credentials from localStorage
+  // Load saved (non-secret) credential IDs from localStorage; migrate legacy
+  // plaintext tokens to the server store and show masked status instead.
   useEffect(() => {
     if (isOpen) {
       try {
-        setVercelToken(localStorage.getItem('ai_dost_vercel_token') || '');
         setVercelProjectId(localStorage.getItem('ai_dost_vercel_project_id') || '');
-        setNetlifyToken(localStorage.getItem('ai_dost_netlify_token') || '');
         setNetlifySiteId(localStorage.getItem('ai_dost_netlify_site_id') || '');
+        setVercelToken('');
+        setNetlifyToken('');
         setSuccessResult(null);
       } catch (e) {}
+      migrateLegacySecrets().then((status) => {
+        if (status) setSecretStatus(status);
+      });
     }
   }, [isOpen]);
 
   const handleDeploy = async () => {
     let options = {};
+    const vercelSaved = !!secretStatus?.vercel?.configured;
+    const netlifySaved = !!secretStatus?.netlify?.configured;
     
     if (target === 'vercel') {
-      if (!vercelToken) return onToast('Vercel Token is required', 'error');
-      options = { token: vercelToken, projectId: vercelProjectId, name: projectId };
-      localStorage.setItem('ai_dost_vercel_token', vercelToken);
-      localStorage.setItem('ai_dost_vercel_project_id', vercelProjectId);
+      if (!vercelToken && !vercelSaved) return onToast('Vercel Token is required', 'error');
+      options = { projectId: vercelProjectId, name: projectId };
+      if (vercelToken) options.token = vercelToken; // else: backend falls back to server store
     } else if (target === 'netlify') {
-      if (!netlifyToken || !netlifySiteId) return onToast('Netlify Token and Site ID are required', 'error');
-      options = { token: netlifyToken, siteId: netlifySiteId };
-      localStorage.setItem('ai_dost_netlify_token', netlifyToken);
-      localStorage.setItem('ai_dost_netlify_site_id', netlifySiteId);
+      if (!netlifySiteId) return onToast('Netlify Site ID is required', 'error');
+      if (!netlifyToken && !netlifySaved) return onToast('Netlify Token is required', 'error');
+      options = { siteId: netlifySiteId };
+      if (netlifyToken) options.token = netlifyToken;
     }
 
     setLoading(true);
     setSuccessResult(null);
     try {
-      // In CopilotIDE, projectPath is typically handled by the backend sandbox or workspace.
-      // We will pass projectId and let the backend resolve the exact workspace path if needed, 
-      // or we pass a hardcoded projectPath based on our architecture.
-      // Actually, looking at deploy.js, it expects `projectPath`.
-      // The frontend can send a dummy or backend-resolved path. 
-      // For now, we assume the backend knows where the sandbox is if we send projectId,
-      // but let's pass a standard path or what the component gave us.
-      
-      const res = await api.post('/v1/deploy/deploy', {
+      // Persist newly entered tokens to the server store (never localStorage).
+      if (target === 'vercel' && vercelToken) await saveSecret('vercel', vercelToken.trim());
+      if (target === 'netlify' && netlifyToken) await saveSecret('netlify', netlifyToken.trim());
+      // Project/site IDs are not secrets — they stay local.
+      if (target === 'vercel') localStorage.setItem('ai_dost_vercel_project_id', vercelProjectId || '');
+      else localStorage.setItem('ai_dost_netlify_site_id', netlifySiteId || '');
+
+      const res = await api.post('/deploy/deploy', {
         projectPath: projectPath || `/tmp/ai-dost-sandbox/${projectId}`, // fallback heuristic
         target,
         options
@@ -148,7 +154,9 @@ export default function DeployModal({ isOpen, onClose, projectId, projectPath, o
                     type="password"
                     value={vercelToken}
                     onChange={e => setVercelToken(e.target.value)}
-                    placeholder="Enter your Vercel API token"
+                    placeholder={secretStatus?.vercel?.configured
+                      ? `Saved on server (${secretStatus.vercel.masked}) — type to replace`
+                      : 'Enter your Vercel API token'}
                     className="w-full bg-var-surface border border-white/10 rounded-lg px-3 py-2 text-sm text-var-text focus:outline-none focus:border-var-primary/50"
                   />
                   <a href="https://vercel.com/account/tokens" target="_blank" rel="noopener noreferrer" className="text-[10px] text-var-primary hover:underline">Get a token →</a>
@@ -180,7 +188,9 @@ export default function DeployModal({ isOpen, onClose, projectId, projectPath, o
                     type="password"
                     value={netlifyToken}
                     onChange={e => setNetlifyToken(e.target.value)}
-                    placeholder="Enter your Netlify Personal Access Token"
+                    placeholder={secretStatus?.netlify?.configured
+                      ? `Saved on server (${secretStatus.netlify.masked}) — type to replace`
+                      : 'Enter your Netlify Personal Access Token'}
                     className="w-full bg-var-surface border border-white/10 rounded-lg px-3 py-2 text-sm text-var-text focus:outline-none focus:border-teal-500/50"
                   />
                 </div>
@@ -204,7 +214,9 @@ export default function DeployModal({ isOpen, onClose, projectId, projectPath, o
               <Button variant="ghost" onClick={onClose} disabled={loading}>Cancel</Button>
               <Button 
                 onClick={handleDeploy} 
-                disabled={loading || (target === 'vercel' && !vercelToken) || (target === 'netlify' && (!netlifyToken || !netlifySiteId))}
+                disabled={loading ||
+                  (target === 'vercel' && !vercelToken && !secretStatus?.vercel?.configured) ||
+                  (target === 'netlify' && (!netlifySiteId || (!netlifyToken && !secretStatus?.netlify?.configured)))}
                 className={`text-white font-semibold transition-all ${
                   target === 'vercel' 
                     ? 'bg-zinc-800 hover:bg-black border border-zinc-700 shadow-[0_0_10px_rgba(255,255,255,0.1)]' 

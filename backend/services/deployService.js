@@ -1,6 +1,22 @@
 const fetch = require('node-fetch');
 const fs = require('fs').promises;
 const path = require('path');
+const os = require('os');
+
+// P2 #9: allowed roots for StaticAdapter targetDir — never copy build output
+// to arbitrary host directories.
+function allowedDeployRoots() {
+  return [
+    path.resolve(os.tmpdir()),
+    path.resolve(path.join(__dirname, '../..')), // repo root
+    path.resolve(process.cwd()),
+  ];
+}
+
+function isInsideAllowedRoots(target) {
+  const resolved = path.resolve(String(target));
+  return allowedDeployRoots().some(r => resolved === r || resolved.startsWith(r + path.sep));
+}
 
 class DeployService {
   constructor() {
@@ -84,14 +100,18 @@ class VercelAdapter {
           if (err) {
             return resolve({ success: false, error: stderr || err.message });
           }
-          // Detect output directory
+          // P2 #8: resolve output dir against projectPath — a relative 'dist'
+          // made collectFiles() walk the backend process cwd instead of the project
           const outputDirs = ['dist', 'build', '.next', 'public'];
-          let outputDir = 'dist';
+          let outputDir = null;
           for (const dir of outputDirs) {
             if (require('fs').existsSync(path.join(projectPath, dir))) {
-              outputDir = dir;
+              outputDir = path.join(projectPath, dir);
               break;
             }
+          }
+          if (!outputDir) {
+            return resolve({ success: false, error: `Build succeeded but no output directory (dist/build/.next/public) found in ${projectPath}` });
           }
           resolve({ success: true, outputDir });
         });
@@ -147,7 +167,7 @@ class NetlifyAdapter {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        files: files.map(f => ({ path: f.file, sha: this.hashContent(f.data) })),
+        files: files.map(f => ({ path: f.path || f.file, sha: this.hashContent(f.content || f.data) })),
         draft: false
       })
     });
@@ -174,12 +194,15 @@ class NetlifyAdapter {
             return resolve({ success: false, error: stderr || err.message });
           }
           const outputDirs = ['dist', 'build', '.next', 'public'];
-          let outputDir = 'dist';
+          let outputDir = null;
           for (const dir of outputDirs) {
             if (require('fs').existsSync(path.join(projectPath, dir))) {
-              outputDir = dir;
+              outputDir = path.join(projectPath, dir);
               break;
             }
+          }
+          if (!outputDir) {
+            return resolve({ success: false, error: `Build succeeded but no output directory (dist/build/.next/public) found in ${projectPath}` });
           }
           resolve({ success: true, outputDir });
         });
@@ -237,7 +260,7 @@ class CloudflareAdapter {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        files: files.map(f => ({ path: f.file, content: f.data })),
+        files: files.map(f => ({ path: f.path || f.file, content: (f.content || f.data)?.toString?.('base64') || String(f.content || f.data || '') })),
         branch: 'main',
         commit_message: 'Deployed by AI-Dost'
       })
@@ -265,12 +288,15 @@ class CloudflareAdapter {
             return resolve({ success: false, error: stderr || err.message });
           }
           const outputDirs = ['dist', 'build', '.next', 'public'];
-          let outputDir = 'dist';
+          let outputDir = null;
           for (const dir of outputDirs) {
             if (require('fs').existsSync(path.join(projectPath, dir))) {
-              outputDir = dir;
+              outputDir = path.join(projectPath, dir);
               break;
             }
+          }
+          if (!outputDir) {
+            return resolve({ success: false, error: `Build succeeded but no output directory (dist/build/.next/public) found in ${projectPath}` });
           }
           resolve({ success: true, outputDir });
         });
@@ -302,19 +328,22 @@ class CloudflareAdapter {
 
 class StaticAdapter {
   async validateOptions(options) {
-    return options.targetDir;
+    // P2 #9: targetDir must stay inside allowed roots (tmpdir/repo/cwd)
+    if (!options.targetDir) return false;
+    return isInsideAllowedRoots(options.targetDir);
   }
 
   async deploy(projectPath, options) {
     const { targetDir } = options;
-    
+
     const buildResult = await this.buildProject(projectPath);
     if (!buildResult.success) {
       throw new Error(`Build failed: ${buildResult.error}`);
     }
 
-    const sourceDir = path.join(projectPath, buildResult.outputDir);
-    const targetPath = path.join(targetDir, `deploy-${Date.now()}`);
+    // P2 #8: outputDir is absolute — joining it with projectPath would double-nest
+    const sourceDir = buildResult.outputDir;
+    const targetPath = path.join(path.resolve(targetDir), `deploy-${Date.now()}`);
     
     await this.copyDir(sourceDir, targetPath);
     
@@ -335,12 +364,15 @@ class StaticAdapter {
             return resolve({ success: false, error: stderr || err.message });
           }
           const outputDirs = ['dist', 'build', '.next', 'public'];
-          let outputDir = 'dist';
+          let outputDir = null;
           for (const dir of outputDirs) {
             if (require('fs').existsSync(path.join(projectPath, dir))) {
-              outputDir = dir;
+              outputDir = path.join(projectPath, dir);
               break;
             }
+          }
+          if (!outputDir) {
+            return resolve({ success: false, error: `Build succeeded but no output directory (dist/build/.next/public) found in ${projectPath}` });
           }
           resolve({ success: true, outputDir });
         });

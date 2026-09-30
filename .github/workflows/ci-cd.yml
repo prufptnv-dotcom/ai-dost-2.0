@@ -1,12 +1,13 @@
-name: Ai-Dost CI/CD
+# P3 #214: this workflow only RUNS TESTS (no deploy) and used to fire on the
+# exact same push/pull_request: main events as ci.yml — double runner minutes
+# per push. Kept as a manual/extended suite (memory-brain + runtime tests).
+name: Ai-Dost extended tests (manual)
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
+  schedule:
+    # weekly full run (memory-brain install is multi-GB, don't do it per push)
+    - cron: '0 4 * * 1'
 
 jobs:
   test:
@@ -25,12 +26,12 @@ jobs:
           - 6379:6379
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Run Node runtime tests
         run: node --test backend/agent/runtime/CopilotDirector.test.js
@@ -39,6 +40,10 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+          # P3 #205: cache pip — memory-brain/requirements.txt pulls
+          # torch/sentence-transformers/chromadb (multi-GB) every run.
+          cache: pip
+          cache-dependency-path: memory-brain/requirements.txt
 
       - name: Install dependencies
         run: |

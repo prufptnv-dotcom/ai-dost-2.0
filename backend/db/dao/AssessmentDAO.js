@@ -162,29 +162,49 @@ class AssessmentDAO {
 
   getUserAttempts(userId = 'default', limit = 20) {
     try {
-      const rows = this.db.prepare(`
-        SELECT a.id, a.assessment_id, a.user_id, a.mode, a.started_at, a.submitted_at,
-               a.status, a.time_spent_seconds, a.result_json, asm.title, asm.subject, asm.topic
-        FROM assessment_attempts a
-        LEFT JOIN assessments asm ON a.assessment_id = asm.id
-        WHERE a.user_id = ?
-        ORDER BY a.created_at DESC
-        LIMIT ?
-      `).all(userId, limit);
+      const fetchFor = (uid) => {
+        const rows = this.db.prepare(`
+          SELECT a.id, a.assessment_id, a.user_id, a.mode, a.started_at, a.submitted_at,
+                 a.status, a.time_spent_seconds, a.result_json, asm.title, asm.subject, asm.topic
+          FROM assessment_attempts a
+          LEFT JOIN assessments asm ON a.assessment_id = asm.id
+          WHERE a.user_id = ?
+          ORDER BY a.created_at DESC
+          LIMIT ?
+        `).all(uid, limit);
 
-      return rows.map(r => ({
-        id: r.id,
-        assessmentId: r.assessment_id,
-        title: r.title || 'Assessment',
-        subject: r.subject || 'General',
-        topic: r.topic || 'General',
-        mode: r.mode,
-        startedAt: r.started_at,
-        submittedAt: r.submitted_at,
-        status: r.status,
-        timeSpentSeconds: r.time_spent_seconds,
-        result: r.result_json ? JSON.parse(r.result_json) : null
-      }));
+        return rows.map(r => ({
+          id: r.id,
+          assessmentId: r.assessment_id,
+          title: r.title || 'Assessment',
+          subject: r.subject || 'General',
+          topic: r.topic || 'General',
+          mode: r.mode,
+          startedAt: r.started_at,
+          submittedAt: r.submitted_at,
+          status: r.status,
+          timeSpentSeconds: r.time_spent_seconds,
+          result: r.result_json ? JSON.parse(r.result_json) : null
+        }));
+      };
+
+      let attempts = fetchFor(userId);
+
+      // P1 FIX (#14): legacy attempts stored with the migration default 'default'
+      // belong to the local identity — merge them so history/weak-topics/adaptive
+      // profile don't go empty for local users. Other identities (anon-*) only
+      // ever see their own attempts.
+      if (userId === 'local-user') {
+        const legacy = fetchFor('default');
+        if (legacy.length) {
+          const seen = new Set(attempts.map(a => a.id));
+          attempts = [...attempts, ...legacy.filter(a => !seen.has(a.id))]
+            .sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')))
+            .slice(0, limit);
+        }
+      }
+
+      return attempts;
     } catch (err) {
       logger.error('[AssessmentDAO] getUserAttempts failed:', err.message);
       return [];

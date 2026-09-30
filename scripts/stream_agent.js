@@ -11,7 +11,8 @@ const data = JSON.stringify({
 
 const options = {
   hostname: 'localhost',
-  port: 5000,
+  // P3 #216: honour the backend port (was hard-coded 5000)
+  port: Number(process.env.PORT) || 5000,
   path: '/api/agent/run',
   method: 'POST',
   headers: {

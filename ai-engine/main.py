@@ -11,16 +11,82 @@ Architecture:
   Frontend (Next.js) -> Backend (Node/Express :5000) -> AI Engine (FastAPI :8001)
 """
 
+import asyncio
+import ipaddress
 import os
 import shutil
 import tempfile
+import threading
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import List, Optional
+from urllib.parse import urlparse, urljoin
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
-app = FastAPI(title="AI-Dost AI Engine", version="1.0.0")
+# Global Checkpointer for HITL (initialized in lifespan)
+agent_memory = None
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    global agent_memory
+    from langgraph.checkpoint.memory import MemorySaver
+    agent_memory = MemorySaver()
+    print("[AI-Dost] LangGraph MemorySaver initialized")
+    yield
+
+
+app = FastAPI(title="AI-Dost AI Engine", version="1.0.0", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def origin_guard(request: Request, call_next):
+    # P0 FIX (#127): optional shared-secret auth. When AI_ENGINE_API_KEY is set,
+    # every request must present it (X-API-Key header or Bearer token).
+    api_key = os.environ.get("AI_ENGINE_API_KEY")
+    if api_key and request.url.path not in ("/health", "/docs", "/openapi.json", "/redoc"):
+        import hmac as _hmac
+        provided = request.headers.get("x-api-key") or ""
+        if not provided:
+            auth_hdr = request.headers.get("authorization") or ""
+            if auth_hdr[:7].lower() == "bearer ":
+                provided = auth_hdr[7:].strip()
+        if not provided or not _hmac.compare_digest(provided, api_key):
+            return JSONResponse(status_code=401, content={"detail": "Missing or invalid X-API-Key"})
+
+    if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
+        return JSONResponse(status_code=403, content={"detail": "Cross-site request blocked"})
+    origin = request.headers.get("origin")
+    if origin:
+        origin_host = (urlparse(origin).hostname or "").lower()
+        req_host = (request.headers.get("host") or "").lower()
+        if req_host.startswith("["):
+            req_host = req_host[1:].split("]")[0]
+        else:
+            req_host = req_host.split(":")[0]
+        # P2 FIX (#149): previously `not origin_host` allowed `Origin: null`,
+        # `metadata.google.internal` was explicitly allowlisted, and ANY
+        # private/link-local IP origin passed. Now: non-empty origin, same
+        # host/localhost only, loopback IPs only.
+        allowed = False
+        if origin_host:
+            allowed = (
+                origin_host == req_host
+                or origin_host == "localhost"
+                or origin_host.endswith(".localhost")
+            )
+            if not allowed:
+                try:
+                    ip = ipaddress.ip_address(origin_host)
+                    allowed = bool(ip.is_loopback)
+                except ValueError:
+                    allowed = False
+        if not allowed:
+            return JSONResponse(status_code=403, content={"detail": "Origin not allowed"})
+    return await call_next(request)
 
 # ── Load .env (backend/.env shared) so crew LLM keys work standalone ─────────
 def _load_env():
@@ -40,112 +106,57 @@ def _load_env():
                         key, val = key.strip(), val.strip().strip('"').strip("'")
                         if not os.environ.get(key):
                             os.environ[key] = val
-        except Exception:
-            pass
+        except Exception as e:
+            # P3 #167: was a bare `except: pass` — a missing/misconfigured
+            # secrets file failed silently at startup. Never log file contents.
+            print(f"[AI-Dost] WARNING: could not load env file {env_path}: {type(e).__name__}: {e}", flush=True)
 
 _load_env()
 # Groq `cache_breakpoint` param reject karta hai — litellm ko drop karne do
 if not os.environ.get("LITELLM_DROP_PARAMS"):
     os.environ["LITELLM_DROP_PARAMS"] = "true"
 
+def _ollama_base_url() -> str:
+    return os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+
+
+def _ollama_alive() -> bool:
+    try:
+        import requests
+        return requests.get(f"{_ollama_base_url()}/api/tags", timeout=2).status_code == 200
+    except Exception:
+        return False
+
+
+# P2 FIX (#160): Chroma persistence was opened as CWD-relative "./chroma_db"
+# in three places — launching uvicorn from any other directory silently pointed
+# at a different/empty vector DB than start_ai_engine.bat. One absolute path.
+CHROMA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_db")
+
+
 # ── Lazy imports (so /health works even if llama-index is broken) ─────────────
 def _llm():
     from llama_index.llms.ollama import Ollama
-    return Ollama(model="qwen2.5-coder:7b", request_timeout=300.0)
+    try:
+        return Ollama(model="qwen2.5-coder:7b", request_timeout=300.0, base_url=_ollama_base_url())
+    except TypeError:
+        return Ollama(model="qwen2.5-coder:7b", request_timeout=300.0)
 
 
 def _embeddings():
     from llama_index.embeddings.ollama import OllamaEmbedding
-    return OllamaEmbedding(model_name="nomic-embed-text")
+    try:
+        return OllamaEmbedding(model_name="nomic-embed-text", base_url=_ollama_base_url())
+    except TypeError:
+        return OllamaEmbedding(model_name="nomic-embed-text")
 
 
-def _load_nodes(directory: str):
-    from llama_index.core import SimpleDirectoryReader
-    reader = SimpleDirectoryReader(
-        input_dir=directory,
-        required_exts=[".txt", ".md", ".html", ".htm", ".css", ".js", ".jsx", ".tsx", ".ts", ".json", ".py", ".csv"],
-        recursive=True,
-        exclude_hidden=True,
-        exclude=["**/node_modules/**", "**/.venv/**", "**/venv/**", "**/.git/**", "**/build/**", "**/dist/**", "**/coverage/**"]
-    )
-    return reader.load_data()
-
-
-INDEX_CACHE = {}
-
-
-def _get_index(directory: str, rebuild: bool = False):
-    """Build (or reuse) a LlamaIndex vector index over a directory."""
-    from llama_index.core import VectorStoreIndex, StorageContext
-    import chromadb
-    from llama_index.vector_stores.chroma import ChromaVectorStore
-    import hashlib
-
-    key = os.path.abspath(directory)
-    # Create a valid collection name using md5 hash of the directory path
-    collection_name = "dir_" + hashlib.md5(key.encode()).hexdigest()
-
-    # Use a persistent ChromaDB store locally
-    chroma_client = chromadb.PersistentClient(path="./chroma_db")
-    chroma_collection = chroma_client.get_or_create_collection(collection_name)
-    vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
-    storage_context = StorageContext.from_defaults(vector_store=vector_store)
-
-    if key in INDEX_CACHE and not rebuild:
-        return INDEX_CACHE[key]
-
-    if rebuild:
-        # Rebuilding: Clear existing data and re-index
-        chroma_client.delete_collection(collection_name)
-        chroma_collection = chroma_client.get_or_create_collection(collection_name)
-        vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
-        storage_context = StorageContext.from_defaults(vector_store=vector_store)
-        
-        nodes = _load_nodes(directory)
-        if not nodes:
-            raise HTTPException(404, "Directory me koi readable file nahi mili")
-            
-        index = VectorStoreIndex(
-            nodes,
-            storage_context=storage_context,
-            embed_model=_embeddings(),
-            llm=_llm(),
-            show_progress=False,
-        )
-    else:
-        # Load existing if available, else build
-        if chroma_collection.count() == 0:
-            nodes = _load_nodes(directory)
-            if not nodes:
-                raise HTTPException(404, "Directory me koi readable file nahi mili")
-            index = VectorStoreIndex(
-                nodes,
-                storage_context=storage_context,
-                embed_model=_embeddings(),
-                llm=_llm(),
-                show_progress=False,
-            )
-        else:
-            index = VectorStoreIndex.from_vector_store(
-                vector_store,
-                embed_model=_embeddings(),
-                llm=_llm(),
-            )
-
-    INDEX_CACHE[key] = index
-    return index
-
-
-class RagQuery(BaseModel):
-    directory: str
-    question: str
-    top_k: int = 4
-    rebuild: bool = False
-
-
-class RagResult(BaseModel):
-    answer: str
-    sources: List[dict]
+# P3 #165: dead code removed — `_load_nodes`, `INDEX_CACHE`, `_get_index`,
+# `RagQuery` and `RagResult` were never referenced by any live route (old
+# /ai/rag/query block was deleted by clean_main.py). `_get_index` also had the
+# P3 #166 defect (deleted the Chroma collection BEFORE reloading nodes, so a
+# load failure destroyed the previous index) — deleting the unreachable code
+# fixes both. Live RAG uses get_learning_index()/rag_query below.
 
 
 @app.get("/health")
@@ -155,7 +166,7 @@ def health():
         "status": "ok",
         "service": "ai-dost-ai-engine",
         "llama_index": importlib.util.find_spec("llama_index") is not None,
-        "ollama_running": True,
+        "ollama_running": _ollama_alive(),
     }
 
 
@@ -168,17 +179,88 @@ class ScrapeResult(BaseModel):
     text: str
     url: str
 
+def _validate_scrape_url(url: str):
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(400, "Sirf http/https URLs scrape ho sakte hain")
+    if os.environ.get("ALLOW_INTERNAL_SCRAPING", "").lower() in ("1", "true", "yes"):
+        return
+    host = (parsed.hostname or "").lower()
+    if not host or host in ("localhost", "metadata.google.internal", "0.0.0.0") or host.endswith(".localhost"):
+        raise HTTPException(400, "Internal/private URL scrape karna allowed nahi hai")
+    # P3 #129: old check only handled literal IP strings — hostnames that
+    # RESOLVE to private ranges (localhost.localdomain, nip.io, DNS rebind)
+    # and alternate IP spellings (http://2130706433/) slipped through the
+    # `except ValueError: return`. Resolve and check every address; reject
+    # all-digit hosts outright.
+    if host.isdigit():
+        raise HTTPException(400, "Internal/private URL scrape karna allowed nahi hai")
+    try:
+        ip = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        import socket
+        try:
+            infos = socket.getaddrinfo(
+                host, parsed.port or (443 if parsed.scheme == "https" else 80),
+                proto=socket.IPPROTO_TCP,
+            )
+        except OSError:
+            raise HTTPException(400, "URL ka host resolve nahi ho saka")
+        addrs = {info[4][0] for info in infos}
+        if not addrs:
+            raise HTTPException(400, "URL ka host resolve nahi ho saka")
+        for addr in addrs:
+            try:
+                resolved = ipaddress.ip_address(str(addr).split("%")[0])
+            except ValueError:
+                continue
+            if not resolved.is_global:
+                raise HTTPException(400, "Internal/private URL scrape karna allowed nahi hai")
+        return
+    if not ip.is_global:
+        raise HTTPException(400, "Internal/private URL scrape karna allowed nahi hai")
+
+_MAX_SCRAPE_BYTES = 5_000_000  # P3 #130
+
+def _fetch_scrape_bytes(url: str) -> bytes:
+    """P3 #128/#130: manual redirect loop (requests' auto-follow used to fetch
+    302 targets like 169.254.169.254 WITHOUT validation) with a hard byte cap
+    and connect/read timeouts so huge or slow-streaming pages cannot exhaust
+    memory."""
+    import requests
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    current = url
+    for _hop in range(6):
+        _validate_scrape_url(current)
+        with requests.get(current, headers=headers, stream=True,
+                           timeout=(5, 15), allow_redirects=False) as resp:
+            if resp.status_code in (301, 302, 303, 307, 308):
+                location = resp.headers.get("Location")
+                if not location:
+                    resp.raise_for_status()
+                current = urljoin(current, location)
+                continue
+            resp.raise_for_status()
+            buf = bytearray()
+            for chunk in resp.iter_content(chunk_size=65536):
+                if not chunk:
+                    continue
+                if len(buf) + len(chunk) > _MAX_SCRAPE_BYTES:
+                    buf.extend(chunk[: _MAX_SCRAPE_BYTES - len(buf)])
+                    break
+                buf.extend(chunk)
+            return bytes(buf)
+    raise HTTPException(400, "Too many redirects (max 5)")
+
 @app.post("/ai/research/scrape", response_model=ScrapeResult)
 def scrape_url(req: ScrapeRequest):
     """Scrapes a URL and extracts clean text without relying on external APIs."""
     import requests
     from bs4 import BeautifulSoup
+    _validate_scrape_url(req.url)
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-        response = requests.get(req.url, headers=headers, timeout=10)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.content, "html.parser")
+        content = _fetch_scrape_bytes(req.url)
+        soup = BeautifulSoup(content, "html.parser")
         
         # Remove script and style tags
         for script_or_style in soup(["script", "style", "noscript", "header", "footer", "nav"]):
@@ -192,6 +274,8 @@ def scrape_url(req: ScrapeRequest):
         text = '\n'.join(chunk for chunk in chunks if chunk)
         
         return ScrapeResult(text=text[:15000], url=req.url) # Limit text to prevent massive responses
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Scrape error: {e}")
 
@@ -229,11 +313,19 @@ def tavily_search(req: TavilySearchRequest):
     if not query:
         raise HTTPException(400, "Query khali hai")
 
+    # P2 FIX (#142): max_results/search_depth were forwarded raw to Tavily —
+    # unbounded result counts burned quota and bad search_depth values surfaced
+    # as opaque upstream 400s mapped to generic 500s.
+    if req.max_results < 1 or req.max_results > 20:
+        raise HTTPException(400, "max_results must be between 1 and 20")
+    if req.search_depth not in ("basic", "advanced"):
+        raise HTTPException(400, "search_depth must be 'basic' or 'advanced'")
+
     start_time = time.time()
     try:
         url = "https://api.tavily.com/search"
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
-            "api_key": api_key,
             "query": query,
             "max_results": req.max_results,
             "search_depth": req.search_depth,
@@ -245,7 +337,7 @@ def tavily_search(req: TavilySearchRequest):
         if req.exclude_domains:
             payload["exclude_domains"] = req.exclude_domains
 
-        response = requests.post(url, json=payload, timeout=30)
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
         response.raise_for_status()
         data = response.json()
 
@@ -276,47 +368,116 @@ def tavily_search(req: TavilySearchRequest):
 class AgentRunRequest(BaseModel):
     thread_id: str
     prompt: str
-    mcp_command: str = "python"
-    mcp_args: List[str] = []
+    # mcp_command/mcp_args deprecated — client-supplied process spawn ignored; server-side MCP_COMMAND env only
+
+# P2 FIX (#146): the fallback read_file tool returned fabricated
+# "Mock content of <path>" for ANY path — the agent then acted on invented
+# data. Real reads only, rooted at an engine-controlled directory (env
+# override AI_ENGINE_FILE_ROOT), with traversal containment + size cap.
+AI_ENGINE_FILE_ROOT = os.path.realpath(
+    os.environ.get("AI_ENGINE_FILE_ROOT") or os.path.dirname(os.path.abspath(__file__))
+)
+_MAX_READ_CHARS = 200000
+
+
+def _safe_read_file(path: str) -> str:
+    try:
+        real = os.path.realpath(os.path.join(AI_ENGINE_FILE_ROOT, str(path)))
+        if real != AI_ENGINE_FILE_ROOT and not real.startswith(AI_ENGINE_FILE_ROOT + os.sep):
+            return f"ERROR: path is outside the allowed root ({AI_ENGINE_FILE_ROOT})"
+        if not os.path.isfile(real):
+            return f"ERROR: file not found: {path}"
+        with open(real, "r", encoding="utf-8", errors="replace") as fh:
+            data = fh.read(_MAX_READ_CHARS)
+        if len(data) >= _MAX_READ_CHARS:
+            data += "\n... [truncated at 200000 chars]"
+        return data
+    except Exception as e:
+        return f"ERROR: {e}"
 
 class AgentRunResult(BaseModel):
     status: str
     result: str = ""
-    tool_call: dict = None
+    tool_call: Optional[dict] = None
+    # P3 #135: single-use capability token minted on requires_approval;
+    # /ai/agent/resume must echo it back for that thread.
+    resume_token: Optional[str] = None
 
-# Global Checkpointer for HITL
-agent_memory = None
 
-@app.on_event("startup")
-def startup_event():
-    global agent_memory
-    from langgraph.checkpoint.memory import MemorySaver
-    agent_memory = MemorySaver()
-    print("[AI-Dost] LangGraph MemorySaver initialized")
+def _server_mcp_config():
+    command = os.environ.get("MCP_COMMAND", "").strip()
+    if not command:
+        return None
+    import shlex
+    return command, shlex.split(os.environ.get("MCP_ARGS", ""))
+
+# ── P3 #134/#135: thread validation + resume capability tokens ───────────────
+# thread_id is client-supplied and the MemorySaver checkpointer is shared
+# process-wide — without a token, any caller who could reach /ai/agent/resume
+# could approve/pollute another session's pending interrupt. Each
+# requires_approval response mints a token bound to that thread; resume must
+# present it. (End-user ownership is additionally enforced by the Node
+# backend; the engine sees only its own callers.)
+import re as _re
+import secrets as _secrets
+import time as _time
+
+_PENDING_RESUMES = {}
+_PENDING_TTL_S = 3600
+_THREAD_ID_RE = _re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+# P3 #170: in-process TTS throttle (10/60s) — main.py has no rate limiter and
+# edge_tts is a free shared upstream.
+_TTS_RATE = {"times": [], "window": 60.0, "max": 10, "lock": threading.Lock()}
+
+def _validate_thread_id(thread_id: str) -> str:
+    tid = str(thread_id or "")
+    if not _THREAD_ID_RE.match(tid):
+        raise HTTPException(400, "Invalid thread_id (allowed: A-Z a-z 0-9 . _ : - , max 128 chars)")
+    return tid
+
+def _issue_resume_token(thread_id: str) -> str:
+    now = _time.time()
+    # keep only the newest token per thread + drop expired ones
+    for tok, entry in list(_PENDING_RESUMES.items()):
+        if entry["thread_id"] == thread_id or now - entry["created_at"] > _PENDING_TTL_S:
+            _PENDING_RESUMES.pop(tok, None)
+    tok = _secrets.token_urlsafe(24)
+    _PENDING_RESUMES[tok] = {"thread_id": thread_id, "created_at": now}
+    return tok
+
+def _require_resume_token(token: str, thread_id: str) -> None:
+    key = str(token or "")
+    entry = _PENDING_RESUMES.get(key)
+    if not entry or entry["thread_id"] != thread_id:
+        raise HTTPException(403, "Valid resume_token required (call /ai/agent/run first and use its resume_token)")
+    if _time.time() - entry["created_at"] > _PENDING_TTL_S:
+        _PENDING_RESUMES.pop(key, None)
+        raise HTTPException(403, "resume_token expired")
 
 @app.post("/ai/agent/run", response_model=AgentRunResult)
 async def agent_run(req: AgentRunRequest):
     from mcp_client import MCPClientManager
     from langchain_ollama import ChatOllama
     from langgraph.prebuilt import create_react_agent
-    
+
+    req.thread_id = _validate_thread_id(req.thread_id)  # P3 #135 (outside try — 400 not wrapped as 500)
+    mcp_manager = None
     try:
         tools = []
-        if req.mcp_command:
-            mcp_manager = MCPClientManager(command=req.mcp_command, args=req.mcp_args)
+        mcp_cfg = _server_mcp_config()
+        if mcp_cfg:
+            mcp_manager = MCPClientManager(command=mcp_cfg[0], args=mcp_cfg[1])
             tools = await mcp_manager.get_langchain_tools()
         else:
             from langchain_core.tools import tool
             @tool
             def read_file(path: str) -> str:
-                """Read content of a file"""
-                return "Mock content of " + path
+                """Read content of a file inside the engine's allowed root."""
+                return _safe_read_file(path)
             
             tools = [read_file, create_new_tool] + load_custom_tools()
 
-            mcp_manager = None
-        
-        llm = ChatOllama(model="qwen2.5-coder:7b", temperature=0.1) 
+        llm = ChatOllama(model="qwen2.5-coder:7b", temperature=0.1, base_url=_ollama_base_url())
         
         # Use checkpointer and interrupt_before tools for HITL
         
@@ -324,7 +485,8 @@ async def agent_run(req: AgentRunRequest):
         try:
             learning_index = get_learning_index()
             retriever = learning_index.as_retriever(similarity_top_k=2)
-            learning_nodes = retriever.retrieve(req.prompt)
+            # P2 #138: blocking embedding I/O must not run on the event loop
+            learning_nodes = await asyncio.to_thread(retriever.retrieve, req.prompt)
             learnings_text = "\n".join([n.get_content() for n in learning_nodes])
             system_prompt = f"Relevant Past Learnings:\n{learnings_text}\n\nYou are a helpful AI Assistant."
         except Exception:
@@ -336,26 +498,36 @@ async def agent_run(req: AgentRunRequest):
         
         response = await agent_executor.ainvoke({"messages": [("user", req.prompt)]}, config)
         
-        state = agent_executor.get_state(config)
+        # P2 #138: sync LangGraph state read off the event loop
+        state = await asyncio.to_thread(agent_executor.get_state, config)
         if state.next:
             # Interrupted before tool execution
             last_message = response["messages"][-1]
             tool_call = last_message.tool_calls[0] if hasattr(last_message, "tool_calls") and last_message.tool_calls else None
-            if mcp_manager: await mcp_manager.close()
-            return AgentRunResult(status="requires_approval", tool_call=tool_call)
+            # P3 #135: mint the capability token resume must present
+            return AgentRunResult(status="requires_approval", tool_call=tool_call,
+                                  resume_token=_issue_resume_token(req.thread_id))
             
         final_answer = response["messages"][-1].content
-        if mcp_manager: await mcp_manager.close()
-        
         return AgentRunResult(status="completed", result=final_answer)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Agent run error: {e}")
+    finally:
+        if mcp_manager is not None:
+            try:
+                await mcp_manager.close()
+            except Exception:
+                pass
 
 class AgentResumeRequest(BaseModel):
     thread_id: str
-    mcp_command: str = "python"
-    mcp_args: List[str] = []
     approved: bool
+    prompt: str = ""
+    # P3 #135: capability token minted by the requires_approval response
+    resume_token: str = ""
+    # mcp_command/mcp_args deprecated — ignored; server-side MCP_COMMAND env only
 
 @app.post("/ai/agent/resume", response_model=AgentRunResult)
 async def agent_resume(req: AgentResumeRequest):
@@ -363,33 +535,40 @@ async def agent_resume(req: AgentResumeRequest):
     from langchain_ollama import ChatOllama
     from langgraph.prebuilt import create_react_agent
     from langchain_core.messages import ToolMessage
-    
+
+    # P3 #135: validation outside try so 400/403 aren't re-wrapped as 500
+    req.thread_id = _validate_thread_id(req.thread_id)
+    _require_resume_token(req.resume_token, req.thread_id)
+
+    mcp_manager = None
     try:
         tools = []
-        if req.mcp_command:
-            mcp_manager = MCPClientManager(command=req.mcp_command, args=req.mcp_args)
+        mcp_cfg = _server_mcp_config()
+        if mcp_cfg:
+            mcp_manager = MCPClientManager(command=mcp_cfg[0], args=mcp_cfg[1])
             tools = await mcp_manager.get_langchain_tools()
         else:
             from langchain_core.tools import tool
             @tool
             def read_file(path: str) -> str:
-                """Read content of a file"""
-                return "Mock content of " + path
+                """Read content of a file inside the engine's allowed root."""
+                return _safe_read_file(path)
             
             tools = [read_file, create_new_tool] + load_custom_tools()
 
-            mcp_manager = None
-            
-        llm = ChatOllama(model="qwen2.5-coder:7b", temperature=0.1) 
+        llm = ChatOllama(model="qwen2.5-coder:7b", temperature=0.1, base_url=_ollama_base_url()) 
         
         
-        # Retrieve past learnings
+        # Retrieve past learnings (resume stored context se — prompt optional)
         try:
-            learning_index = get_learning_index()
-            retriever = learning_index.as_retriever(similarity_top_k=2)
-            learning_nodes = retriever.retrieve(req.prompt)
-            learnings_text = "\n".join([n.get_content() for n in learning_nodes])
-            system_prompt = f"Relevant Past Learnings:\n{learnings_text}\n\nYou are a helpful AI Assistant."
+            system_prompt = "You are a helpful AI Assistant."
+            if req.prompt:
+                learning_index = get_learning_index()
+                retriever = learning_index.as_retriever(similarity_top_k=2)
+                # P2 #138: blocking embedding I/O off the event loop
+                learning_nodes = await asyncio.to_thread(retriever.retrieve, req.prompt)
+                learnings_text = "\n".join([n.get_content() for n in learning_nodes])
+                system_prompt = f"Relevant Past Learnings:\n{learnings_text}\n\nYou are a helpful AI Assistant."
         except Exception:
             system_prompt = "You are a helpful AI Assistant."
             
@@ -398,34 +577,65 @@ async def agent_resume(req: AgentResumeRequest):
         config = {"configurable": {"thread_id": req.thread_id}}
         
         if req.approved:
+            # P3 #134: unknown/finished threads get a clear 404 instead of an
+            # opaque ainvoke failure inside the generic 500 handler.
+            state = await asyncio.to_thread(agent_executor.get_state, config)
+            if not (state.values or {}).get("messages"):
+                raise HTTPException(404, "Unknown or empty thread — nothing to resume")
             # Continue execution by invoking with None
             response = await agent_executor.ainvoke(None, config)
         else:
             # Inject a ToolMessage indicating denial to skip actual tool execution
-            state = agent_executor.get_state(config)
-            last_msg = state.values["messages"][-1]
-            tool_call_id = last_msg.tool_calls[0]["id"]
-            denial_msg = ToolMessage(tool_call_id=tool_call_id, name=last_msg.tool_calls[0]["name"], content="User denied this action.")
+            # P2 #138: sync LangGraph state read off the event loop
+            state = await asyncio.to_thread(agent_executor.get_state, config)
+            # P3 #134: the old `state.values["messages"][-1]` +
+            # `last_msg.tool_calls[0]["id"]` threw IndexError/TypeError → opaque
+            # 500 for unknown threads or threads with no pending tool call.
+            messages = (state.values or {}).get("messages") or []
+            if not messages:
+                raise HTTPException(404, "Unknown or empty thread — nothing to resume")
+            last_msg = messages[-1]
+            tool_calls = getattr(last_msg, "tool_calls", None) or []
+            if not tool_calls:
+                raise HTTPException(409, "No pending tool call for this thread — nothing to resume")
+            tc = tool_calls[0]
+            tool_call_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+            tool_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
+            if not tool_call_id:
+                raise HTTPException(409, "Pending tool call has no id — cannot resume")
+            denial_msg = ToolMessage(tool_call_id=tool_call_id, name=tool_name, content="User denied this action.")
             
             # Update state with the denial message to bypass the tool node
-            agent_executor.update_state(config, {"messages": [denial_msg]}, as_node="tools")
+            # P2 #138: sync LangGraph state write off the event loop
+            await asyncio.to_thread(
+                agent_executor.update_state, config, {"messages": [denial_msg]}, as_node="tools"
+            )
             
             # Resume from after the tool node
             response = await agent_executor.ainvoke(None, config)
             
-        state = agent_executor.get_state(config)
+        # P2 #138: sync LangGraph state read off the event loop
+        state = await asyncio.to_thread(agent_executor.get_state, config)
         if state.next:
             last_message = response["messages"][-1]
             tool_call = last_message.tool_calls[0] if hasattr(last_message, "tool_calls") and last_message.tool_calls else None
-            if mcp_manager: await mcp_manager.close()
-            return AgentRunResult(status="requires_approval", tool_call=tool_call)
-            
+            # P3 #135: re-interrupt → fresh token replaces the consumed one
+            return AgentRunResult(status="requires_approval", tool_call=tool_call,
+                                  resume_token=_issue_resume_token(req.thread_id))
+        # P3 #135: run finished — invalidate the token that got us here
+        _PENDING_RESUMES.pop(str(req.resume_token), None)
         final_answer = response["messages"][-1].content
-        if mcp_manager: await mcp_manager.close()
-        
         return AgentRunResult(status="completed", result=final_answer)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Agent resume error: {e}")
+    finally:
+        if mcp_manager is not None:
+            try:
+                await mcp_manager.close()
+            except Exception:
+                pass
 
 
 
@@ -434,12 +644,76 @@ async def agent_resume(req: AgentResumeRequest):
 # ------------------------------------------------------------------------------
 # DYNAMIC TOOLS (Self-Evolution)
 # ------------------------------------------------------------------------------
+import re
 import sys
 import importlib.util
 from langchain_core.tools import tool
 
 CUSTOM_TOOLS_DIR = os.path.join(os.path.dirname(__file__), "custom_tools")
 os.makedirs(CUSTOM_TOOLS_DIR, exist_ok=True)
+
+ENABLE_CUSTOM_TOOLS = os.environ.get("ENABLE_CUSTOM_TOOLS", "").lower() in ("1", "true", "yes")
+_CUSTOM_TOOL_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_CUSTOM_TOOL_BLOCKLIST = ("os.system", "subprocess", "__import__", "eval(", "exec(")
+
+# P0 FIX (#131): substring denylists are bypassable (os.popen, open, eval (,
+# __builtins__ tricks). Replace with AST validation — import allowlist +
+# denied call/name list + dunder-attribute ban.
+import ast as _ast
+_ALLOWED_TOOL_IMPORTS = {
+    "langchain_core", "typing", "re", "json", "math", "datetime", "date",
+    "time", "collections", "itertools", "functools", "string", "random",
+    "statistics", "decimal", "textwrap", "unicodedata", "hashlib", "base64",
+    "uuid", "copy", "enum", "dataclasses", "pprint", "difflib",
+}
+_DENIED_TOOL_NAMES = {
+    # builtins that enable code exec / file IO / reflection — denied as bare
+    # names (any reference, not just calls, so aliasing cannot bypass)
+    "eval", "exec", "compile", "__import__", "open", "input", "breakpoint",
+    "globals", "locals", "vars", "getattr", "setattr", "delattr", "memoryview",
+    "exit", "quit", "__builtins__",
+}
+# dangerous attribute-style calls (would need a banned import to exist anyway;
+# listed defensively against allowlist drift)
+_DENIED_ATTR_CALLS = {
+    "system", "popen", "Popen", "check_output", "check_call", "check_return",
+    "spawn", "spawnl", "spawnle", "spawnlp", "spawnlpe", "spawnv", "spawnve",
+    "spawnvp", "spawnvpe", "fork", "forkpty", "rmtree",
+}
+
+
+def _validate_custom_tool_code(python_code: str):
+    """Return an error string if the code is unsafe, else None."""
+    try:
+        tree = _ast.parse(python_code)
+    except SyntaxError as e:
+        return f"Error: python_code ka syntax invalid hai ({e})."
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root not in _ALLOWED_TOOL_IMPORTS:
+                    return f"Error: import '{alias.name}' allowed nahi hai."
+        elif isinstance(node, _ast.ImportFrom):
+            if node.level and node.level > 0:
+                return "Error: relative imports allowed nahi hain."
+            root = (node.module or "").split(".")[0]
+            if root not in _ALLOWED_TOOL_IMPORTS:
+                return f"Error: import 'from {node.module}' allowed nahi hai."
+        elif isinstance(node, _ast.Call):
+            if isinstance(node.func, _ast.Name):
+                if node.func.id in _DENIED_TOOL_NAMES:
+                    return f"Error: call to '{node.func.id}' blocked hai."
+            elif isinstance(node.func, _ast.Attribute):
+                if node.func.attr in _DENIED_ATTR_CALLS:
+                    return f"Error: call to '.{node.func.attr}()' blocked hai."
+        elif isinstance(node, _ast.Name):
+            if node.id in _DENIED_TOOL_NAMES:
+                return f"Error: '{node.id}' use karna blocked hai."
+        elif isinstance(node, _ast.Attribute):
+            if node.attr.startswith("__") and node.attr.endswith("__"):
+                return f"Error: dunder attribute '{node.attr}' blocked hai."
+    return None
 
 @tool
 def create_new_tool(tool_name: str, python_code: str) -> str:
@@ -453,6 +727,18 @@ def create_new_tool(tool_name: str, python_code: str) -> str:
         '''Description of tool'''
         return text.upper()
     """
+    if not ENABLE_CUSTOM_TOOLS:
+        return "Error: custom tools disabled hai — ENABLE_CUSTOM_TOOLS=1 set karke server restart karo."
+    if not _CUSTOM_TOOL_NAME_RE.match(tool_name):
+        return "Error: invalid tool_name — sirf letters, digits aur underscore use karo (digit se shuru mat karo)."
+    code_l = python_code.lower()
+    if any(bad in code_l for bad in _CUSTOM_TOOL_BLOCKLIST):
+        return "Error: python_code blocked pattern contain karta hai (os.system/subprocess/eval/exec/__import__)."
+    # P0 FIX (#131): AST-level validation — imports allowlisted, dangerous
+    # names/calls and dunder access rejected (substring checks were bypassable).
+    ast_error = _validate_custom_tool_code(python_code)
+    if ast_error:
+        return ast_error
     try:
         # Save to disk
         filepath = os.path.join(CUSTOM_TOOLS_DIR, f"{tool_name}.py")
@@ -465,13 +751,19 @@ def create_new_tool(tool_name: str, python_code: str) -> str:
 def load_custom_tools():
     """Dynamically loads all .py files in custom_tools as Langchain tools."""
     loaded_tools = []
-    if not os.path.exists(CUSTOM_TOOLS_DIR):
+    if not ENABLE_CUSTOM_TOOLS or not os.path.exists(CUSTOM_TOOLS_DIR):
         return loaded_tools
         
     for filename in os.listdir(CUSTOM_TOOLS_DIR):
         if filename.endswith(".py"):
             filepath = os.path.join(CUSTOM_TOOLS_DIR, filename)
-            module_name = filename[:-3]
+            base_name = filename[:-3]
+            # P0 FIX (#132): never register raw filename as module name — a tool
+            # named json.py/os.py would otherwise OVERWRITE the stdlib module
+            # process-wide. Namespace it and skip invalid identifiers.
+            if not _CUSTOM_TOOL_NAME_RE.match(base_name):
+                continue
+            module_name = f"_customtool_{base_name}"
             try:
                 spec = importlib.util.spec_from_file_location(module_name, filepath)
                 if spec and spec.loader:
@@ -504,46 +796,60 @@ class MemoryRetrieveRequest(BaseModel):
 def get_learning_index():
     import chromadb
     from llama_index.vector_stores.chroma import ChromaVectorStore
-    from llama_index.core import VectorStoreIndex, StorageContext, Document
-    
-    chroma_client = chromadb.PersistentClient(path="./chroma_db")
+    from llama_index.core import VectorStoreIndex, StorageContext
+
+    # P2 FIX (#155): no dummy seed document. The old "Initial rule" doc was
+    # returned by EVERY memory query (pollution for all users/threads), and
+    # the count()==0 check-then-insert raced under concurrent first calls.
+    # An empty store simply has no learnings; save_memory's insert
+    # initializes it — no seed, no race. (P2 #160: absolute CHROMA_DIR
+    # instead of CWD-relative "./chroma_db".)
+    chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
     chroma_collection = chroma_client.get_or_create_collection("agent_learnings")
     vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
-    storage_context = StorageContext.from_defaults(vector_store=vector_store)
-    
-    if chroma_collection.count() == 0:
-        # Create empty index with a dummy document so it initializes properly
-        doc = Document(text="Initial rule: Always follow user instructions carefully.")
-        index = VectorStoreIndex.from_documents(
-            [doc],
-            storage_context=storage_context,
-            embed_model=_embeddings(),
-        )
-    else:
-        index = VectorStoreIndex.from_vector_store(
-            vector_store=vector_store,
-            embed_model=_embeddings(),
-        )
-    return index
+    return VectorStoreIndex.from_vector_store(
+        vector_store=vector_store,
+        embed_model=_embeddings(),
+    )
 
 @app.post("/ai/agent/learn")
 async def save_memory(req: MemoryLearnRequest):
     from llama_index.core import Document
-    try:
+
+    def _save():
         index = get_learning_index()
-        doc = Document(text=req.text)
-        index.insert(doc)
+        index.insert(Document(text=req.text))
+
+    try:
+        # P2 #138: chroma open + embedding insert run in a worker thread so
+        # the event loop (health/TTS/agents) never blocks on memory I/O.
+        await asyncio.to_thread(_save)
         return {"status": "success", "message": "Memory saved!"}
     except Exception as e:
         raise HTTPException(500, f"Error saving memory: {e}")
 
 @app.post("/ai/agent/memory/retrieve")
 async def retrieve_memory(req: MemoryRetrieveRequest):
-    try:
+    # P2 FIX (#141): top_k was passed straight to similarity_top_k —
+    # 0/-5/10**7 produced broken or resource-exhausting retrieval queries.
+    if req.top_k < 1 or req.top_k > 50:
+        raise HTTPException(400, "top_k must be between 1 and 50")
+
+    def _retrieve():
+        # P2 FIX (#155): never-used memory store = no learnings. Check the
+        # count before querying (some chroma versions reject n_results > count)
+        # instead of seeding a fake document that polluted every retrieval.
+        import chromadb
+        col = chromadb.PersistentClient(path=CHROMA_DIR).get_or_create_collection("agent_learnings")
+        if col.count() == 0:
+            return []
         index = get_learning_index()
         retriever = index.as_retriever(similarity_top_k=req.top_k)
-        nodes = retriever.retrieve(req.query)
-        results = [n.get_content() for n in nodes]
+        return [n.get_content() for n in retriever.retrieve(req.query)]
+
+    try:
+        # P2 #138: blocking embedding/chroma I/O off the event loop.
+        results = await asyncio.to_thread(_retrieve)
         return {"status": "success", "learnings": results}
     except Exception as e:
         raise HTTPException(500, f"Error retrieving memory: {e}")
@@ -555,32 +861,33 @@ async def retrieve_memory(req: MemoryRetrieveRequest):
 class SwarmRunRequest(BaseModel):
     thread_id: str
     prompt: str
-    mcp_command: str = ""
-    mcp_args: List[str] = []
+    # mcp_command/mcp_args deprecated — ignored; server-side MCP_COMMAND env only
 
 @app.post("/ai/agent/swarm", response_model=AgentRunResult)
 async def swarm_run(req: SwarmRunRequest):
     from mcp_client import MCPClientManager
     from langchain_ollama import ChatOllama
     from langgraph.prebuilt import create_react_agent
-    
+
+    req.thread_id = _validate_thread_id(req.thread_id)  # P3 #135 (outside try)
+    mcp_manager = None
     try:
         tools = []
-        mcp_manager = None
-        if req.mcp_command:
-            mcp_manager = MCPClientManager(command=req.mcp_command, args=req.mcp_args)
+        mcp_cfg = _server_mcp_config()
+        if mcp_cfg:
+            mcp_manager = MCPClientManager(command=mcp_cfg[0], args=mcp_cfg[1])
             tools = await mcp_manager.get_langchain_tools()
         else:
             from langchain_core.tools import tool
             @tool
             def read_file(path: str) -> str:
-                """Read content of a file"""
-                return "Mock content of " + path
+                """Read content of a file inside the engine's allowed root."""
+                return _safe_read_file(path)
             
             tools = [read_file, create_new_tool] + load_custom_tools()
 
             
-        llm = ChatOllama(model="qwen2.5-coder:7b", temperature=0.1) 
+        llm = ChatOllama(model="qwen2.5-coder:7b", temperature=0.1, base_url=_ollama_base_url()) 
         
         # Swarm System Prompt
         
@@ -588,14 +895,14 @@ async def swarm_run(req: SwarmRunRequest):
         try:
             learning_index = get_learning_index()
             retriever = learning_index.as_retriever(similarity_top_k=2)
-            learning_nodes = retriever.retrieve(req.prompt)
+            # P2 #138: blocking embedding I/O off the event loop
+            learning_nodes = await asyncio.to_thread(retriever.retrieve, req.prompt)
             learnings_text = "\n".join([n.get_content() for n in learning_nodes])
             past_context = f"Relevant Past Learnings:\n{learnings_text}\n\n"
         except Exception:
             past_context = ""
             
         swarm_prompt = past_context + """You are the Swarm Manager. You control a team of agents: Researcher, Coder, and Tester.
- You control a team of agents: Researcher, Coder, and Tester.
         You must tackle the user's task by simulating this team.
         1. First, act as the Researcher to gather information using tools.
         2. Then, act as the Coder to write the necessary files.
@@ -608,19 +915,27 @@ async def swarm_run(req: SwarmRunRequest):
         
         response = await agent_executor.ainvoke({"messages": [("user", req.prompt)]}, config)
         
-        state = agent_executor.get_state(config)
+        # P2 #138: sync LangGraph state read off the event loop
+        state = await asyncio.to_thread(agent_executor.get_state, config)
         if state.next:
             last_message = response["messages"][-1]
             tool_call = last_message.tool_calls[0] if hasattr(last_message, "tool_calls") and last_message.tool_calls else None
-            if mcp_manager: await mcp_manager.close()
-            return AgentRunResult(status="requires_approval", tool_call=tool_call)
-            
+            # P3 #135: swarm interrupts also require a resume token
+            return AgentRunResult(status="requires_approval", tool_call=tool_call,
+                                  resume_token=_issue_resume_token(req.thread_id))
+
         final_answer = response["messages"][-1].content
-        if mcp_manager: await mcp_manager.close()
-        
         return AgentRunResult(status="completed", result=final_answer)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Swarm run error: {e}")
+    finally:
+        if mcp_manager is not None:
+            try:
+                await mcp_manager.close()
+            except Exception:
+                pass
 
 
 # ------------------------------------------------------------------------------
@@ -640,8 +955,42 @@ class CrewRunResult(BaseModel):
     files: List[str] = []
     directory: str = ""
 
+def _resolve_work_dir(directory: str) -> str:
+    base = Path(os.environ.get("AI_ENGINE_WORKSPACE") or (Path.cwd() / "workspaces")).resolve()
+    target = (base / directory).resolve() if directory else (base / "default")
+    try:
+        target.relative_to(base)
+    except ValueError:
+        raise HTTPException(400, "Directory workspace base ke bahar hai")
+    return str(target)
+
+
+# P2 FIX (#139): CrewAI kickoff() runs for minutes on the sync route inside
+# FastAPI's ~40-thread anyio pool — unbounded parallel crews exhausted the
+# pool and took the whole service down (health/TTS/xlsx all starved). Cap
+# concurrency; extra requests wait briefly then get an honest 429.
+_CREW_SLOTS = threading.BoundedSemaphore(
+    2 if not str(os.environ.get("AI_ENGINE_CREW_MAX_CONCURRENCY", "2")).strip().isdigit()
+    else max(1, int(os.environ.get("AI_ENGINE_CREW_MAX_CONCURRENCY", "2")))
+)
+try:
+    _CREW_QUEUE_TIMEOUT = max(0.0, float(os.environ.get("AI_ENGINE_CREW_QUEUE_TIMEOUT", "15")))
+except ValueError:
+    _CREW_QUEUE_TIMEOUT = 15.0
+
+
 @app.post("/ai/crew/run", response_model=CrewRunResult)
 def crew_run(req: CrewRunRequest):
+    """Slot-guarded entry point — actual work in _crew_run_locked (P2 #139)."""
+    if not _CREW_SLOTS.acquire(timeout=_CREW_QUEUE_TIMEOUT):
+        raise HTTPException(429, "Crew slots busy — thoda baad me retry karo")
+    try:
+        return _crew_run_locked(req)
+    finally:
+        _CREW_SLOTS.release()
+
+
+def _crew_run_locked(req: CrewRunRequest) -> CrewRunResult:
     """Run a real CrewAI role-based crew (Researcher + Coder + Reviewer).
 
     Free & offline by default: Ollama qwen2.5-coder:7b local LLM.
@@ -653,16 +1002,31 @@ def crew_run(req: CrewRunRequest):
     try:
         from crewai import Agent, Task, Crew, Process
         from crewai.tools import tool
-        import crewai.llms.cache as _cache_mod
 
         # Groq `cache_breakpoint` support nahi karta — marker no-op bana do
-        _cache_mod.mark_cache_breakpoint = lambda msg: msg
+        try:
+            import crewai.llms.cache as _cache_mod
+            _cache_mod.mark_cache_breakpoint = lambda msg: msg
+        except Exception:
+            pass
 
         prompt = req.prompt.strip()
         if not prompt:
             raise HTTPException(400, "Prompt khali hai")
 
-        work_dir = req.directory or os.path.join(os.environ.get("TEMP", "."), "ai-dost-workspace")
+        # P2 FIX (#147): unknown model/mode silently fell through to the
+        # Ollama/dev else-branches — validate the contract with a 400 instead.
+        if req.model not in ("ollama", "gemini", "groq", "nvidia", "cerebras"):
+            raise HTTPException(
+                400,
+                f"Unknown model '{req.model}' — allowed: ollama, gemini, groq, nvidia, cerebras",
+            )
+        if req.mode not in ("dev", "research", "content"):
+            raise HTTPException(
+                400, f"Unknown mode '{req.mode}' — allowed: dev, research, content"
+            )
+
+        work_dir = _resolve_work_dir(req.directory)
         if not os.path.isdir(work_dir):
             try:
                 os.makedirs(work_dir, exist_ok=True)
@@ -675,9 +1039,16 @@ def crew_run(req: CrewRunRequest):
             """Create or overwrite a file inside the project workspace.
             filename ek relative path hota hai (jaise 'src/app.py' ya 'index.html').
             Content pura file content hota hai."""
-            if not filename or filename.startswith(("/", "\\", ".")) or ".." in filename.split("/") + filename.split("\\"):
+            # P3 #171: only traversal is dangerous — the old blanket
+            # `startswith((".", "/", "\\"))` rejected legitimate dotfiles
+            # (.gitignore, .env.example) so they could never be created.
+            if not filename or filename.startswith(("/", "\\")):
                 return "Error: invalid filename — sirf relative path do (jaise 'src/app.py')."
-            safe_name = filename.replace("\\", "/").lstrip("/")
+            safe_name = filename.replace("\\", "/").strip()
+            parts = [p for p in safe_name.split("/") if p not in ("", ".")]
+            if not parts or any(p == ".." for p in parts):
+                return "Error: invalid filename — sirf relative path do (jaise 'src/app.py')."
+            safe_name = "/".join(parts)
             target = os.path.abspath(os.path.join(work_dir, safe_name))
             if os.path.commonpath([target, os.path.abspath(work_dir)]) != os.path.abspath(work_dir):
                 return "Error: path workspace ke bahar jata hai."
@@ -692,16 +1063,22 @@ def crew_run(req: CrewRunRequest):
         @tool("list_project_files")
         def list_project_files(query: str = "") -> str:
             """List files available in the project workspace.
-            query optional hota hai — empty chhodo agar sirf listing chahiye."""
+            query optional hota hai — case-insensitive substring filter lag jata hai."""
             try:
                 out = []
+                # P2 FIX (#157): `query` was documented as a filter but never
+                # read — always returned the first 100 walked files.
+                q = (query or "").strip().lower()
                 for root, _dirs, files in os.walk(work_dir):
                     for f in files:
                         if f.startswith(".") or "node_modules" in root or ".git" in root:
                             continue
                         rel = os.path.relpath(os.path.join(root, f), work_dir)
+                        if q and q not in rel.lower():
+                            continue
                         out.append(rel)
-                return "\n".join(out[:100]) or "(workspace khali hai)"
+                out.sort()
+                return "\n".join(out[:100]) or "(workspace me aisa kuch nahi mila)"
             except Exception as e:
                 return f"Error: {e}"
 
@@ -822,6 +1199,24 @@ def crew_run(req: CrewRunRequest):
             process=Process.sequential,
             verbose=False,
         )
+        # ── Files jo crew ne workspace me likhi (verify) ──
+        # P2 FIX (#159): snapshot BEFORE kickoff so we only report files the
+        # crew actually created — the old full os.walk listed every
+        # pre-existing workspace file as "created".
+        def _file_snapshot():
+            snap = set()
+            try:
+                for root, _dirs, files in os.walk(work_dir):
+                    for f in files:
+                        if f.startswith(".") or "node_modules" in root or ".git" in root:
+                            continue
+                        snap.add(os.path.relpath(os.path.join(root, f), work_dir))
+            except Exception:
+                pass
+            return snap
+
+        files_before = _file_snapshot()
+
         # NVIDIA jaisi backends transient "single tool-call" errors deti hain — retry
         raw = ""
         last_err = None
@@ -836,19 +1231,15 @@ def crew_run(req: CrewRunRequest):
                 if req.model == "nvidia" and attempt < 2:
                     continue
                 raise
-        if not raw.strip() and last_err:
-            raise last_err
+        # P2 FIX (#148): kickoff returning empty output WITHOUT raising used to
+        # slip past (last_err is None) → HTTP 200 with status="completed",
+        # result="" as a fake success. Now it's an honest failure.
+        if not raw.strip():
+            if last_err:
+                raise last_err
+            raise HTTPException(502, "Crew kickoff completed but returned empty output")
 
-        # ── Files jo crew ne workspace me likhi (verify) ──
-        created_files = []
-        try:
-            for root, _dirs, files in os.walk(work_dir):
-                for f in files:
-                    if f.startswith(".") or "node_modules" in root or ".git" in root:
-                        continue
-                    created_files.append(os.path.relpath(os.path.join(root, f), work_dir))
-        except Exception:
-            pass
+        created_files = sorted(_file_snapshot() - files_before)
 
         return CrewRunResult(
             status="completed",
@@ -856,7 +1247,8 @@ def crew_run(req: CrewRunRequest):
             crew_output=raw[:20000],
             agents=[a.role for a in agents],
             files=created_files[:50],
-            directory=work_dir,
+            # P2 FIX (#159): never leak the absolute server-side workspace path.
+            directory=os.path.basename(work_dir),
         )
     except HTTPException:
         raise
@@ -867,6 +1259,30 @@ def crew_run(req: CrewRunRequest):
 # ------------------------------------------------------------------------------
 # XLSX GENERATION — Real Excel with openpyxl
 # ------------------------------------------------------------------------------
+# P2 FIX (#158): generated files pile up in the shared system temp dir forever
+# (unbounded disk growth). Sweep old artifacts of our own naming scheme on
+# every generation; default names are salted with uuid so two requests in the
+# same second can never overwrite each other.
+_GENERATED_FILE_TTL_SECONDS = 24 * 3600
+
+
+def _sweep_generated_files(directory: str, prefixes: tuple, ttl: int = _GENERATED_FILE_TTL_SECONDS) -> None:
+    import time as _time
+    try:
+        now = _time.time()
+        for name in os.listdir(directory):
+            if not any(name.startswith(p) for p in prefixes):
+                continue
+            path = os.path.join(directory, name)
+            try:
+                if os.path.isfile(path) and now - os.path.getmtime(path) > ttl:
+                    os.remove(path)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
 class XLSXRequest(BaseModel):
     topic: str
     title: str = ""
@@ -876,14 +1292,16 @@ class XLSXRequest(BaseModel):
 
 class XLSXResult(BaseModel):
     status: str
-    file_path: str
+    # P3 #161: basename only — absolute server paths must not leak to callers
+    # (download via GET /ai/files/{filename}).
+    filename: str
     rows_written: int
     columns: List[str]
 
 
 @app.post("/ai/xlsx/generate", response_model=XLSXResult)
 def xlsx_generate(req: XLSXRequest):
-    """Generate a real .xlsx file with openpyxl. Returns file path for download."""
+    """Generate a real .xlsx file with openpyxl. Returns filename for download."""
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
     import tempfile
@@ -893,6 +1311,12 @@ def xlsx_generate(req: XLSXRequest):
     topic = req.topic.strip()
     if not topic:
         raise HTTPException(400, "Topic khali hai")
+
+    # P2 FIX (#140): rows was unvalidated — rows=10**9 looped/allocated until
+    # OOM, and negative rows wrote 0 rows while the response claimed
+    # rows_written=req.rows (a negative count).
+    if req.rows < 1 or req.rows > 10000:
+        raise HTTPException(400, "rows must be between 1 and 10000")
 
     # Create workbook
     wb = openpyxl.Workbook()
@@ -962,13 +1386,17 @@ def xlsx_generate(req: XLSXRequest):
 
     # Save to temp file
     temp_dir = tempfile.gettempdir()
-    filename = f"xlsx_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{abs(hash(topic)) % 10000}.xlsx"
+    # P2 #158: uuid salt — hash(topic) alone collided for same-topic requests
+    # in the same second; also sweep stale artifacts from earlier runs.
+    import uuid
+    _sweep_generated_files(temp_dir, ("xlsx_",))
+    filename = f"xlsx_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.xlsx"
     file_path = os.path.join(temp_dir, filename)
     wb.save(file_path)
 
     return XLSXResult(
         status="completed",
-        file_path=file_path,
+        filename=filename,
         rows_written=req.rows,
         columns=columns
     )
@@ -991,9 +1419,29 @@ def tts(req: TTSRequest):
     text = (req.text or "").strip()[:2000]
     if not text:
         raise HTTPException(400, "Text khali hai")
+
+    # P3 #170: validate voice/rate (garbage values surfaced as generic 500s
+    # from edge_tts) and throttle the free upstream (10 requests/minute).
+    voice = (req.voice or "").strip()
+    if not _re.match(r"^[a-z]{2,3}-[A-Z]{2,4}-[A-Za-z]+$", voice):
+        raise HTTPException(400, f"Invalid voice '{voice}' — expected like 'en-IN-PrabhatNeural'")
+    rate = (req.rate or "+0%").strip()
+    if not _re.match(r"^[+-]\d{1,3}%$", rate):
+        raise HTTPException(400, f"Invalid rate '{rate}' — expected like '+0%' or '-10%'")
+    rate_val = int(rate[:-1])
+    if abs(rate_val) > 100:
+        raise HTTPException(400, "rate must be between -100% and +100%")
+    rate = f"{'+' if rate_val >= 0 else ''}{rate_val}%"
+    with _TTS_RATE["lock"]:
+        now = _time.time()
+        _TTS_RATE["times"] = [t for t in _TTS_RATE["times"] if now - t < _TTS_RATE["window"]]
+        if len(_TTS_RATE["times"]) >= _TTS_RATE["max"]:
+            raise HTTPException(429, "TTS rate limit — try again in a minute")
+        _TTS_RATE["times"].append(now)
+
     try:
         async def _run():
-            communicate = edge_tts.Communicate(text, req.voice, rate=req.rate)
+            communicate = edge_tts.Communicate(text, voice, rate=rate)
             audio = _io.BytesIO()
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
@@ -1040,10 +1488,39 @@ def ai_generate(req: GenerateRequest):
     if not prompt:
         raise HTTPException(400, "Prompt cannot be empty")
 
+    # P3 #164: bound the optional fields — an explicit null system_prompt used
+    # to be stringified as "None" into every provider prompt, and unbounded
+    # temperature/max_tokens went straight to upstream APIs.
+    system_prompt = (
+        req.system_prompt
+        if isinstance(req.system_prompt, str) and req.system_prompt.strip()
+        else "You are AI-Dost, an expert AI developer assistant."
+    )[:8000]
+    temperature = 0.7 if req.temperature is None else max(0.0, min(float(req.temperature), 2.0))
+    max_tokens = 2048 if req.max_tokens is None else max(16, min(int(req.max_tokens), 32768))
+
     groq_key = os.environ.get("GROQ_API_KEY")
     gemini_key = os.environ.get("GEMINI_API_KEY")
     nvidia_key = os.environ.get("NVIDIA_API_KEY")
     together_key = os.environ.get("TOGETHER_API_KEY")
+
+    # P2 FIX (#143): unknown models and explicit providers without API keys
+    # used to skip every cascade branch and silently return an Ollama answer.
+    _KNOWN_MODELS = ("auto", "groq", "gemini", "together", "ollama")
+    if req.model not in _KNOWN_MODELS:
+        raise HTTPException(
+            400, f"Unknown model '{req.model}' — allowed: {', '.join(_KNOWN_MODELS)}"
+        )
+    _KEY_FOR = {"groq": groq_key, "gemini": gemini_key, "together": together_key}
+    if req.model in _KEY_FOR and not _KEY_FOR[req.model]:
+        raise HTTPException(
+            400,
+            f"model='{req.model}' requested but its API key is not set — use model='auto' for cascade",
+        )
+
+    # P2 FIX (#144): collect every provider failure — the old cascade discarded
+    # all of them with bare `except: pass`, so the final 503 had no diagnostics.
+    cascade_errors = []
 
     # 1. Groq (Fastest)
     if groq_key and req.model in ["auto", "groq"]:
@@ -1054,11 +1531,11 @@ def ai_generate(req: GenerateRequest):
                 json={
                     "model": "llama-3.3-70b-versatile",
                     "messages": [
-                        {"role": "system", "content": req.system_prompt},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt}
                     ],
-                    "temperature": req.temperature,
-                    "max_tokens": req.max_tokens,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
                 },
                 timeout=15
             )
@@ -1066,19 +1543,20 @@ def ai_generate(req: GenerateRequest):
                 data = res.json()
                 content = data["choices"][0]["message"]["content"]
                 return GenerateResult(status="success", text=content, model_used="groq/llama-3.3-70b", response_time=time.time() - start_time)
-        except Exception:
-            pass
+            cascade_errors.append(f"groq HTTP {res.status_code}: {res.text[:200]}")
+        except Exception as e:
+            cascade_errors.append(f"groq: {e}")
 
     # 2. Gemini
     if gemini_key and req.model in ["auto", "gemini"]:
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
             res = requests.post(
                 url,
-                headers={"Content-Type": "application/json"},
+                headers={"Content-Type": "application/json", "x-goog-api-key": gemini_key},
                 json={
-                    "contents": [{"parts": [{"text": f"{req.system_prompt}\n\n{prompt}"}]}],
-                    "generationConfig": {"temperature": req.temperature, "maxOutputTokens": req.max_tokens}
+                    "contents": [{"parts": [{"text": f"{system_prompt}\n\n{prompt}"}]}],
+                    "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens}
                 },
                 timeout=20
             )
@@ -1086,8 +1564,9 @@ def ai_generate(req: GenerateRequest):
                 data = res.json()
                 content = data["candidates"][0]["content"]["parts"][0]["text"]
                 return GenerateResult(status="success", text=content, model_used="gemini-2.5-flash", response_time=time.time() - start_time)
-        except Exception:
-            pass
+            cascade_errors.append(f"gemini HTTP {res.status_code}: {res.text[:200]}")
+        except Exception as e:
+            cascade_errors.append(f"gemini: {e}")
 
     # 3. Together AI
     if together_key and req.model in ["auto", "together"]:
@@ -1097,31 +1576,39 @@ def ai_generate(req: GenerateRequest):
                 headers={"Authorization": f"Bearer {together_key}", "Content-Type": "application/json"},
                 json={
                     "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-                    "messages": [{"role": "system", "content": req.system_prompt}, {"role": "user", "content": prompt}],
-                    "temperature": req.temperature,
-                    "max_tokens": req.max_tokens
+                    "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
+                    "temperature": temperature,
+                    "max_tokens": max_tokens
                 },
                 timeout=15
             )
             if res.status_code == 200:
                 content = res.json()["choices"][0]["message"]["content"]
                 return GenerateResult(status="success", text=content, model_used="together/llama-3.3-70b", response_time=time.time() - start_time)
-        except Exception:
-            pass
+            cascade_errors.append(f"together HTTP {res.status_code}: {res.text[:200]}")
+        except Exception as e:
+            cascade_errors.append(f"together: {e}")
 
     # 4. Ollama fallback
-    try:
-        res = requests.post(
-            "http://127.0.0.1:11434/api/generate",
-            json={"model": "qwen2.5-coder:7b", "prompt": f"{req.system_prompt}\n\n{prompt}", "stream": False},
-            timeout=30
-        )
-        if res.status_code == 200:
-            return GenerateResult(status="success", text=res.json().get("response", ""), model_used="ollama/qwen2.5-coder", response_time=time.time() - start_time)
-    except Exception:
-        pass
+    # P2 FIX (#143): only for model="auto"/"ollama" — an explicit provider
+    # request must never silently degrade to a local Ollama answer.
+    if req.model in ("auto", "ollama"):
+        try:
+            res = requests.post(
+                f"{_ollama_base_url()}/api/generate",
+                json={"model": "qwen2.5-coder:7b", "prompt": f"{system_prompt}\n\n{prompt}", "stream": False},
+                timeout=30
+            )
+            if res.status_code == 200:
+                return GenerateResult(status="success", text=res.json().get("response", ""), model_used="ollama/qwen2.5-coder", response_time=time.time() - start_time)
+            cascade_errors.append(f"ollama HTTP {res.status_code}: {res.text[:200]}")
+        except Exception as e:
+            cascade_errors.append(f"ollama: {e}")
 
-    raise HTTPException(503, "All AI providers in Python Engine temporarily unavailable")
+    # P2 FIX (#144): surface what actually failed instead of a bare 503.
+    detail = "; ".join(cascade_errors[-5:]) if cascade_errors else "no provider attempted (missing API keys?)"
+    print(f"[AI-GEN] cascade exhausted: {detail}", flush=True)
+    raise HTTPException(503, f"All AI providers in Python Engine temporarily unavailable — {detail}")
 
 
 # ------------------------------------------------------------------------------
@@ -1146,6 +1633,8 @@ def code_complete(req: CodeCompleteRequest):
         gen = ai_generate(GenerateRequest(prompt=prompt, system_prompt=system, temperature=0.1, max_tokens=128))
         cleaned = gen.text.replace("```" + req.language, "").replace("```", "").strip()
         return CodeCompleteResult(completion=cleaned, language=req.language)
+    except HTTPException:
+        raise  # P3 #162: ai_generate's 503 (provider outage) must not become a fake 200 ""
     except Exception:
         return CodeCompleteResult(completion="", language=req.language)
 
@@ -1179,7 +1668,13 @@ def code_analyze(req: CodeAnalyzeRequest):
                 "type": "SyntaxError"
             })
             return CodeAnalyzeResult(valid=False, issues=issues, summary=f"Syntax Error at line {e.lineno}: {e.msg}")
-    return CodeAnalyzeResult(valid=True, issues=[], summary="Code analyzed.")
+    # P3 #163: nothing is checked off-Python — say so instead of the
+    # misleading "Code analyzed." with valid=True.
+    return CodeAnalyzeResult(
+        valid=True,
+        issues=[],
+        summary=f"Not analyzed: this endpoint only checks Python (requested language: {req.language}). No checks were run.",
+    )
 
 
 # ------------------------------------------------------------------------------
@@ -1193,7 +1688,8 @@ class PDFGenerateRequest(BaseModel):
 class PDFGenerateResult(BaseModel):
     status: str
     filename: str
-    file_path: str
+    # P3 #161: absolute file_path removed — server path disclosure; download
+    # via GET /ai/files/{filename} instead.
 
 @app.post("/ai/pdf/generate", response_model=PDFGenerateResult)
 def pdf_generate(req: PDFGenerateRequest):
@@ -1204,7 +1700,25 @@ def pdf_generate(req: PDFGenerateRequest):
 
     fname = req.filename or f"doc_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
     temp_dir = tempfile.gettempdir()
-    out_path = os.path.join(temp_dir, fname)
+    # P2 FIX (#158): default names carried only a per-second timestamp — two
+    # requests in the same second overwrote each other. Salt with uuid and
+    # sweep stale artifacts from earlier runs.
+    if not req.filename:
+        import uuid
+        fname = f"doc_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.pdf"
+    _sweep_generated_files(temp_dir, ("doc_",))
+    # P0 FIX (#126): filename is attacker-controlled. Reduce to basename, force
+    # a safe charset, strip leading dots, ensure .pdf, then assert containment —
+    # os.path.join otherwise happily honours "../..\\..\\evil.pdf" or absolute paths.
+    fname = str(fname).replace("\\", "/").split("/")[-1]
+    fname = re.sub(r"[^A-Za-z0-9._-]", "_", fname).lstrip(".").strip("_")
+    if not fname:
+        fname = "document.pdf"
+    if not fname.lower().endswith(".pdf"):
+        fname = (fname[:80] or "document") + ".pdf"
+    out_path = os.path.abspath(os.path.join(temp_dir, fname))
+    if not out_path.startswith(os.path.abspath(temp_dir) + os.sep):
+        raise HTTPException(400, "Invalid filename")
 
     # Use basic canvas text generation
     try:
@@ -1217,16 +1731,45 @@ def pdf_generate(req: PDFGenerateRequest):
         title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=18, leading=22, spaceAfter=12)
         body_style = ParagraphStyle('Body', parent=styles['Normal'], fontSize=10, leading=14, spaceAfter=8)
 
-        story = [Paragraph(req.title, title_style), Spacer(1, 10)]
+        # Escape title too — Paragraph() parses markup and unescaped < or &
+        # breaks rendering / injects formatting (#154)
+        safe_title = (req.title or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        story = [Paragraph(safe_title, title_style), Spacer(1, 10)]
         for para in req.content.split("\n\n"):
             if para.strip():
                 clean_p = para.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>")
                 story.append(Paragraph(clean_p, body_style))
 
         doc.build(story)
-        return PDFGenerateResult(status="completed", filename=fname, file_path=out_path)
+        return PDFGenerateResult(status="completed", filename=fname)
     except Exception as e:
         raise HTTPException(500, f"PDF generation error: {e}")
+
+
+@app.get("/ai/files/{filename}")
+def get_generated_file(filename: str):
+    """P3 #161: stream a generated artifact by BASENAME — replaces returning
+    absolute server paths in XLSX/PDF responses (internal path disclosure)."""
+    name = os.path.basename(str(filename))  # strips any traversal
+    if not name or name != filename:
+        raise HTTPException(400, "Invalid filename")
+    temp_dir = tempfile.gettempdir()
+    target = os.path.abspath(os.path.join(temp_dir, name))
+    if not target.startswith(os.path.abspath(temp_dir) + os.sep):
+        raise HTTPException(400, "Invalid filename")
+    # only engine-generated artifacts (swept by _sweep_generated_files)
+    if not (name.startswith(("xlsx_", "doc_")) or name.endswith((".xlsx", ".pdf"))):
+        raise HTTPException(404, "File not found")
+    if not os.path.isfile(target):
+        raise HTTPException(404, "File not found")
+    with open(target, "rb") as fh:
+        data = fh.read()
+    if name.endswith(".xlsx"):
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    else:
+        media = "application/pdf"
+    return Response(content=data, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 
@@ -1257,6 +1800,9 @@ class RetrievalResultItem(BaseModel):
 class RetrievalResponse(BaseModel):
     version: str = "1"
     results: List[RetrievalResultItem]
+    # P2 FIX (#150): HYBRID partial results are no longer silently passed off
+    # as complete — callers can tell retrieval was degraded.
+    degraded: bool = False
 
 
 AUTHORITY_SCORES = {
@@ -1316,6 +1862,13 @@ def rag_query(req: RetrievalRequest):
     def add_candidate(meta, chunk_id, sem_score, kw_score):
         src_id = meta.get("source_entity_id")
         if not src_id: return
+        # P2 FIX (#137): the contract advertises per-user isolation but
+        # retrieval only filtered on project_id — knowing a project_id granted
+        # full read. Vectors carrying a user_id must match the caller; legacy
+        # vectors without one stay visible so pre-isolation indexes keep working.
+        vec_user = str(meta.get("user_id") or "")
+        if vec_user and req.user_id and vec_user != str(req.user_id):
+            return
         auth_score = get_authority_score(meta.get("source_type", ""))
         
         # Ranking Formula
@@ -1330,11 +1883,30 @@ def rag_query(req: RetrievalRequest):
                 "chunk_id": chunk_id,
                 "score": final_score,
                 "version_hash": meta.get("version_hash", ""),
-                "metadata": {k: v for k, v in meta.items() if str(k).startswith("custom_")}
+                # P2 FIX (#156): the contract field is a generic `metadata: dict`
+                # — keep ALL keys (source_type/version_hash/chunk_index/user_id/
+                # custom_*) instead of discarding everything except custom_*.
+                "metadata": dict(meta),
             }
 
+    degraded = False
     try:
-        if mode in ["FULL_TEXT", "HYBRID", "EXACT"]:
+        if mode == "EXACT":
+            # P2 FIX (#151): EXACT used to run the identical $contains
+            # full-text query as FULL_TEXT. Now the chunk must contain the
+            # query as an exact (case-sensitive) contiguous phrase, and the
+            # semantic stage never runs for this mode.
+            kw_results = rag_collection.get(
+                where=where_filter,
+                where_document={"$contains": query_text}
+            )
+            if kw_results and kw_results["ids"]:
+                docs = kw_results.get("documents") or [None] * len(kw_results["ids"])
+                for idx, c_id in enumerate(kw_results["ids"]):
+                    if query_text not in (docs[idx] or ""):
+                        continue
+                    add_candidate(kw_results["metadatas"][idx], c_id, sem_score=0.0, kw_score=1.0)
+        elif mode in ("FULL_TEXT", "HYBRID"):
             kw_results = rag_collection.get(
                 where=where_filter,
                 where_document={"$contains": query_text}
@@ -1363,13 +1935,18 @@ def rag_query(req: RetrievalRequest):
                         add_candidate(meta, c_id, sem_score=norm_score, kw_score=kw_score)
                     
     except Exception as e:
-        if mode == "HYBRID":
-            pass # Fallback to whatever candidates we have
+        if mode == "HYBRID" and entity_candidates:
+            # P2 FIX (#150): partial results are useful but never silent —
+            # log the failure and flag the response as degraded instead of
+            # returning a bare 200 that looks complete. (HYBRID with zero
+            # candidates = total failure → honest 500 like other modes.)
+            print(f"[RAG] hybrid retrieval degraded, returning partial results: {e}", flush=True)
+            degraded = True
         else:
             raise HTTPException(500, f"Retrieval failed: {str(e)}")
 
     sorted_results = sorted(entity_candidates.values(), key=lambda x: x["score"], reverse=True)
-    return RetrievalResponse(version=req.version, results=sorted_results[:limit])
+    return RetrievalResponse(version=req.version, results=sorted_results[:limit], degraded=degraded)
 
 
 
@@ -1387,7 +1964,9 @@ from llama_index.core.node_parser import SentenceSplitter
 chroma_client = None
 # Using default embedding function (all-MiniLM-L6-v2) for zero-configuration local execution
 try:
-    chroma_client = chromadb.PersistentClient(path='./chroma_db', settings=Settings(anonymized_telemetry=False))
+    # P2 #160: absolute path — CWD-relative "./chroma_db" silently pointed at
+    # a different vector DB depending on where uvicorn was started.
+    chroma_client = chromadb.PersistentClient(path=CHROMA_DIR, settings=Settings(anonymized_telemetry=False))
     rag_collection = chroma_client.get_or_create_collection(name="ai_dost_derived_index")
 except Exception as e:
     print(f"Warning: Could not initialize Chroma collection: {e}")
@@ -1435,25 +2014,53 @@ def rag_index(req: IndexRequest):
     chunks_created = 0
     chunks_deleted = 0
 
+    # P0 FIX (#136): validate EVERY document before any purge. Previously the
+    # loop purged existing vectors first, then skipped re-add when content was
+    # empty → silent permanent data loss on a bad upsert request.
+    seen_ids = set()  # P3 #172: reject duplicate source_entity_id in one request
+    for doc in req.documents:
+        if not doc.source_entity_id:
+            raise HTTPException(400, "source_entity_id is required")
+        # P3 #172: duplicates in one request used to self-delete — iteration 2's
+        # purge removed iteration 1's just-inserted chunks (silent data loss).
+        if doc.source_entity_id in seen_ids:
+            raise HTTPException(
+                400,
+                f"duplicate source_entity_id '{doc.source_entity_id}' in one request — send each entity once",
+            )
+        seen_ids.add(doc.source_entity_id)
+        if req.action == "upsert" and not (doc.content and str(doc.content).strip()):
+            raise HTTPException(
+                400,
+                f"content is required to upsert '{doc.source_entity_id}' — refusing to purge existing vectors without re-adding"
+            )
+
     for doc in req.documents:
         if not doc.source_entity_id:
             raise HTTPException(400, "source_entity_id is required")
 
         # 1. Always purge existing vectors for this entity to ensure idempotency and stale data removal
+        # P2 FIX (#145): count the real number of chunks removed — the old code
+        # added 1 per document ("we don't know how many were deleted"), so
+        # IndexResponse.chunks_deleted lied about actual chunk counts.
+        delete_filter = {
+            "$and": [
+                {"project_id": {"$eq": req.project_id}},
+                {"source_entity_id": {"$eq": doc.source_entity_id}}
+            ]
+        }
         try:
-            # Chroma delete by metadata
-            rag_collection.delete(where={
-                "$and": [
-                    {"project_id": {"$eq": req.project_id}},
-                    {"source_entity_id": {"$eq": doc.source_entity_id}}
-                ]
-            })
-            # We don't know exactly how many were deleted easily via the API without querying first, 
-            # but idempotency is achieved.
-            chunks_deleted += 1 
+            existing = rag_collection.get(where=delete_filter)
+            n_existing = len(existing.get("ids") or [])
+        except Exception:
+            n_existing = 0
+        try:
+            rag_collection.delete(where=delete_filter)
+            chunks_deleted += n_existing
         except Exception as e:
-            # If nothing to delete, chroma might ignore or throw depending on version. We continue.
-            pass
+            # If nothing to delete, chroma might ignore or throw depending on
+            # version — log it instead of pretending something was removed.
+            print(f"[RAG] delete failed for {doc.source_entity_id}: {e}", flush=True)
 
         # 2. If upsert, chunk and embed
         if req.action == "upsert" and doc.content:
@@ -1472,7 +2079,11 @@ def rag_index(req: IndexRequest):
                     "source_type": doc.source_type,
                     "version_hash": doc.version_hash,
                     "chunk_index": idx,
-                    "embedding_model": "default-minilm-l6-v2"
+                    "embedding_model": "default-minilm-l6-v2",
+                    # P2 FIX (#137): persist user ownership so rag_query can
+                    # actually enforce the contract's per-user isolation.
+                    # Set BEFORE the custom_* merge so it stays a system key.
+                    "user_id": str((doc.metadata or {}).get("user_id") or ""),
                 }
                 
                 # Merge custom metadata securely (ensuring it doesn't overwrite system keys)

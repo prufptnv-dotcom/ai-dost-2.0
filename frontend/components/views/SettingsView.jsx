@@ -7,6 +7,7 @@ import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { Modal } from '../ui/Modal';
 import api from '../../services/api';
+import { saveSecret, deleteSecret, migrateLegacySecrets } from '../../services/secretSettings';
 
 const MODEL_OPTIONS = [
   { value: 'auto', label: 'Auto Multi-Model Cascade (Gemini → Groq → OpenRouter)' },
@@ -30,6 +31,8 @@ export default function SettingsView({ onToast, onModelChange }) {
   const [autosave, setAutosave] = useState(true);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  // #102: masked status of server-stored secrets (raw values never reach the browser)
+  const [secretStatus, setSecretStatus] = useState({});
 
   // Sandbox Security & Isolation Telemetry
   const [sandboxStatus, setSandboxStatus] = useState(null);
@@ -58,41 +61,75 @@ export default function SettingsView({ onToast, onModelChange }) {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    setKeys({
-      GEMINI_API_KEY: localStorage.getItem('GEMINI_API_KEY') || '',
-      GROQ_API_KEY: localStorage.getItem('GROQ_API_KEY') || '',
+    // #102: API keys live server-side now — legacy plaintext is migrated +
+    // purged from localStorage; inputs start empty and show masked placeholders.
+    setKeys((prev) => ({
+      ...prev,
       OLLAMA_MODEL: localStorage.getItem('OLLAMA_MODEL') || 'qwen2.5-coder:7b',
-      TAVILY_API_KEY: localStorage.getItem('TAVILY_API_KEY') || '',
-    });
+    }));
     setModel(localStorage.getItem('ai_dost_model') || 'auto');
     setAutosave(localStorage.getItem('ai_dost_autosave') !== 'false');
+    migrateLegacySecrets().then((status) => {
+      if (status) setSecretStatus(status);
+    });
 
     fetchSandboxStatus();
   }, []);
 
-  const saveSettings = () => {
+  const saveSettings = async () => {
     if (typeof window === 'undefined') return;
-    Object.entries(keys).forEach(([k, v]) => {
-      if (v) localStorage.setItem(k, v.trim());
-      else localStorage.removeItem(k);
-    });
+    const ollamaModel = (keys.OLLAMA_MODEL || '').trim();
+    if (ollamaModel) localStorage.setItem('OLLAMA_MODEL', ollamaModel);
+    else localStorage.removeItem('OLLAMA_MODEL');
     localStorage.setItem('ai_dost_model', model);
     localStorage.setItem('ai_dost_autosave', String(autosave));
+
+    const entered = [
+      ['gemini', keys.GEMINI_API_KEY],
+      ['groq', keys.GROQ_API_KEY],
+      ['tavily', keys.TAVILY_API_KEY],
+    ].filter(([, v]) => v && v.trim());
+    if (entered.length) {
+      try {
+        let status = null;
+        for (const [provider, value] of entered) {
+          status = await saveSecret(provider, value.trim());
+        }
+        if (status) setSecretStatus(status);
+        setKeys((prev) => ({ ...prev, GEMINI_API_KEY: '', GROQ_API_KEY: '', TAVILY_API_KEY: '' }));
+      } catch {
+        if (onToast) onToast('API keys could not be saved to server', 'error');
+        return;
+      }
+    }
 
     if (onModelChange) onModelChange(model);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 2500);
 
-    if (onToast) onToast('Settings saved locally', 'success');
+    if (onToast) onToast('Settings saved', 'success');
   };
 
-  const confirmResetAll = () => {
-    ['GEMINI_API_KEY', 'GROQ_API_KEY', 'OLLAMA_MODEL', 'TAVILY_API_KEY', 'ai_dost_model'].forEach((k) =>
+  const confirmResetAll = async () => {
+    // Close synchronously — async server deletes continue in the background.
+    setShowResetConfirm(false);
+    ['OLLAMA_MODEL', 'ai_dost_model'].forEach((k) =>
       localStorage.removeItem(k)
     );
+    try {
+      await Promise.all([
+        deleteSecret('gemini'),
+        deleteSecret('groq'),
+        deleteSecret('tavily'),
+      ]).then((results) => {
+        const last = results[results.length - 1];
+        if (last) setSecretStatus(last);
+      });
+    } catch {
+      if (onToast) onToast('Could not clear stored keys on server', 'error');
+    }
     setKeys({ GEMINI_API_KEY: '', GROQ_API_KEY: '', OLLAMA_MODEL: 'qwen2.5-coder:7b', TAVILY_API_KEY: '' });
     setModel('auto');
-    setShowResetConfirm(false);
     if (onToast) onToast('Settings reset to defaults', 'success');
   };
 
@@ -118,7 +155,7 @@ export default function SettingsView({ onToast, onModelChange }) {
   };
 
   return (
-    <div className="h-full overflow-y-auto px-4 sm:px-8 py-6 bg-canvas-base select-none">
+    <div className="h-full overflow-y-auto px-4 sm:px-8 py-6 bg-canvas-base">
       <div className="max-w-3xl mx-auto space-y-6">
         {/* Header Strip */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">
@@ -301,7 +338,9 @@ export default function SettingsView({ onToast, onModelChange }) {
                 type={showKeys ? 'text' : 'password'}
                 value={keys.GEMINI_API_KEY}
                 onChange={(e) => setKeys({ ...keys, GEMINI_API_KEY: e.target.value })}
-                placeholder="AIzaSy..."
+                placeholder={secretStatus?.gemini?.configured
+                  ? `Saved on server (${secretStatus.gemini.masked}) — type to replace`
+                  : 'AIzaSy...'}
                 className="w-full px-3 py-2 rounded-xs bg-canvas-base border border-border text-paper-100 text-xs font-mono focus:outline-none focus:border-accent-primary"
               />
             </div>
@@ -314,7 +353,9 @@ export default function SettingsView({ onToast, onModelChange }) {
                 type={showKeys ? 'text' : 'password'}
                 value={keys.GROQ_API_KEY}
                 onChange={(e) => setKeys({ ...keys, GROQ_API_KEY: e.target.value })}
-                placeholder="gsk_..."
+                placeholder={secretStatus?.groq?.configured
+                  ? `Saved on server (${secretStatus.groq.masked}) — type to replace`
+                  : 'gsk_...'}
                 className="w-full px-3 py-2 rounded-xs bg-canvas-base border border-border text-paper-100 text-xs font-mono focus:outline-none focus:border-accent-primary"
               />
             </div>
@@ -327,7 +368,9 @@ export default function SettingsView({ onToast, onModelChange }) {
                 type={showKeys ? 'text' : 'password'}
                 value={keys.TAVILY_API_KEY}
                 onChange={(e) => setKeys({ ...keys, TAVILY_API_KEY: e.target.value })}
-                placeholder="tvly-..."
+                placeholder={secretStatus?.tavily?.configured
+                  ? `Saved on server (${secretStatus.tavily.masked}) — type to replace`
+                  : 'tvly-...'}
                 className="w-full px-3 py-2 rounded-xs bg-canvas-base border border-border text-paper-100 text-xs font-mono focus:outline-none focus:border-accent-primary"
               />
             </div>
@@ -368,7 +411,7 @@ export default function SettingsView({ onToast, onModelChange }) {
       >
         <div className="space-y-4">
           <p className="text-xs text-ink-muted leading-relaxed">
-            Are you sure you want to reset all custom API keys (Gemini, Groq, Tavily) and inference model preferences? Any keys stored in local storage will be cleared.
+            Are you sure you want to reset all custom API keys (Gemini, Groq, Tavily) and inference model preferences? Any keys stored on the server (and legacy localStorage copies) will be cleared.
           </p>
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
             <Button

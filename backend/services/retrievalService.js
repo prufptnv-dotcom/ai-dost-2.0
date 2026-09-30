@@ -1,4 +1,7 @@
 const { RobustApiClient } = require('./apiClient');
+const graphRagService = require('./graphRagService');
+const vectorDbService = require('./vectorDbService');
+const { engineHeaders } = require('./engineAuth');
 
 class RetrievalService {
   /**
@@ -6,8 +9,8 @@ class RetrievalService {
    * @param {string} deps.engineUrl - Base URL of the Python AI engine (e.g., http://127.0.0.1:8001)
    */
   constructor({ engineUrl = 'http://127.0.0.1:8001' } = {}) {
-    this.apiClient = new RobustApiClient({ baseUrl: engineUrl, serviceName: 'ai-engine-retrieval' });
-    this.supportedModes = ['EXACT', 'FULL_TEXT', 'SEMANTIC', 'HYBRID'];
+    this.apiClient = new RobustApiClient({ baseUrl: engineUrl, serviceName: 'ai-engine-retrieval', headers: engineHeaders() });
+    this.supportedModes = ['EXACT', 'FULL_TEXT', 'SEMANTIC', 'HYBRID', 'ADVANCED_HYBRID', 'GRAPH_SEARCH'];
     this.supportedSourceTypes = [
       'workspace_file', 
       'artifact', 
@@ -60,6 +63,31 @@ class RetrievalService {
         limit: limit
       }
     };
+
+    // 2.5 Intercept advanced modes for Node.js orchestration
+    if (mode === 'GRAPH_SEARCH') {
+      const graphData = await graphRagService.queryGraphContext(query, 2);
+      return [{
+        id: 'graph_context',
+        project_id: projectId,
+        source_type: 'context_node',
+        content: graphData.contextString || `(Graph Node) Analyzed relations for: ${query}`,
+        score: 1.0,
+        metadata: { entities: graphData.entities },
+        version_hash: "graph-v1"
+      }];
+    }
+
+    if (mode === 'ADVANCED_HYBRID') {
+      const vectorData = await vectorDbService.hybridSearch(query, limit);
+      // For now, return graceful fallback if offline
+      if (vectorData.length === 0) {
+        mode = 'HYBRID'; // Fallback to python engine
+        payload.mode = 'HYBRID';
+      } else {
+        return vectorData;
+      }
+    }
 
     // 3. Execute safe retrieval via Python AI engine boundary
     try {

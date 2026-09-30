@@ -10,7 +10,9 @@
  */
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { app, server, db } = require('../server.js');
+const { app, server, db, io } = require('../server.js');
+const { getWorkflowEngine } = require('../services/workflowEngine');
+const cacheService = require('../services/cacheService');
 
 let base = '';
 
@@ -19,17 +21,25 @@ before(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
 });
 
-after(() => {
-  try { server.close(); } catch {}
+after(async () => {
+  try { getWorkflowEngine()?.stop(); } catch {}
+  try { io?.close(); } catch {}
+  // Drop keep-alive sockets from fetch so server.close() can finish
+  try { server.closeAllConnections?.(); } catch {}
+  await new Promise((resolve) => {
+    server.close(() => resolve());
+    setTimeout(resolve, 2000);
+  });
+  try { cacheService.redis?.disconnect(); } catch {}
   try { db.close(); } catch {}
 });
 
 /** Minimal fetch helper returning { status, body } */
-async function req(method, path, body) {
+async function req(method, path, body, headers = {}) {
   const hasBody = body !== undefined && body !== null;
   const res = await fetch(base + path, {
     method,
-    headers: hasBody ? { 'Content-Type': 'application/json' } : {},
+    headers: { ...(hasBody ? { 'Content-Type': 'application/json' } : {}), ...headers },
     body: hasBody ? JSON.stringify(body) : undefined,
   });
   let parsed = null;
@@ -99,6 +109,65 @@ test('POST /api/chat/save + GET round-trips messages (no LLM)', async () => {
   assert.equal(status, 200, JSON.stringify(saveBody));
   const { body } = await req('GET', '/api/chat/history?session_id=test-session');
   assert.ok(body.messages.some((m) => m.content === 'integration test message'));
+});
+
+// ── P1 #12/#13: identity + conversation ownership ─────────────────────────
+// The test client connects from loopback, which Express trusts as a proxy
+// (trust proxy = 'loopback'), so an X-Forwarded-For header here simulates a
+// request forwarded by the Next.js proxy from a LAN/remote browser — exactly
+// how identity is derived in production. Direct (non-loopback) clients'
+// XFF is ignored by Express and cannot spoof (verified live: BUG_REPORT #11-#14).
+const ANON_XFF = { 'X-Forwarded-For': '10.99.88.77' };
+
+test('P1#12 anonIdentity mints an ad_uid cookie on API responses', async () => {
+  const { raw } = await req('GET', '/health');
+  const setCookie = raw.headers.get('set-cookie') || '';
+  assert.match(setCookie, /ad_uid=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  assert.match(setCookie, /HttpOnly/i);
+});
+
+test('P1#13 conversation ownership: proxied non-local identity is isolated', async () => {
+  const sid = `p13_it_${Date.now()}`;
+
+  // Local caller (no XFF → loopback → local-user) saves
+  const save = await req('POST', '/api/chat/save', {
+    session_id: sid,
+    messages: [{ role: 'user', content: 'local-only-secret' }],
+  });
+  assert.equal(save.status, 200, JSON.stringify(save.body));
+
+  // Non-local identity (XFF from trusted loopback = forwarded by proxy) → 403
+  const anonRead = await req('GET', `/api/chat/history?session_id=${sid}`, undefined, ANON_XFF);
+  assert.equal(anonRead.status, 403);
+
+  // Non-local identity cannot delete the conversation
+  const anonDelete = await req('DELETE', `/api/chat/history?session_id=${sid}`, undefined, ANON_XFF);
+  assert.equal(anonDelete.status, 403);
+
+  // Local caller still reads it (legacy continuity)
+  const localRead = await req('GET', `/api/chat/history?session_id=${sid}`);
+  assert.equal(localRead.status, 200);
+  assert.ok(localRead.body.messages.some((m) => m.content === 'local-only-secret'));
+
+  // 'all' listing: non-local identity sees no local content
+  const anonAll = await req('GET', '/api/chat/history?session_id=all', undefined, ANON_XFF);
+  assert.equal(anonAll.status, 200);
+  assert.ok(!JSON.stringify(anonAll.body).includes('local-only-secret'),
+    "anon 'all' listing must not leak local-user messages");
+
+  // Local caller owns it → cleanup
+  const del = await req('DELETE', `/api/chat/history?session_id=${sid}`);
+  assert.equal(del.status, 200);
+});
+
+test('P1#12 assessment history identity: loopback=local-user, XFF=anon-<uuid>', async () => {
+  const local = await req('GET', '/api/assessment/history');
+  assert.equal(local.status, 200);
+  assert.equal(local.body.userId, 'local-user');
+
+  const anon = await req('GET', '/api/assessment/history', undefined, ANON_XFF);
+  assert.equal(anon.status, 200);
+  assert.match(anon.body.userId, /^anon-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 });
 
 // ── Agent ───────────────────────────────────────────────────────────────
@@ -420,4 +489,123 @@ test('POST /api/verify/document -> verifies CSV document integrity', async () =>
   assert.equal(body.success, true);
   assert.equal(body.result.valid, true);
   assert.equal(body.result.metadata.rowCount, 2);
+});
+
+// ── P2 #15/#16/#17: database routes (containment, HMAC approval, handles) ────
+const path = require('node:path');
+const fs = require('node:fs');
+const os = require('node:os');
+
+const p2DestructivePlan = {
+  engine: 'sqlite',
+  tables: [{ name: 'p2_users', columns: [{ name: 'id', type: 'INTEGER', primaryKey: true }] }],
+  destructiveOperations: ['DROP TABLE legacy_users'],
+};
+
+test('P2 #15: migration/apply dbPath outside allowed roots -> 400 DBPATH_FORBIDDEN', async () => {
+  const { status, body } = await req('POST', '/api/database/migration/apply', {
+    plan: { engine: 'sqlite', tables: [{ name: 'p2_t', columns: [{ name: 'id', type: 'INTEGER', primaryKey: true }] }] },
+    dbPath: path.join(os.homedir(), 'p2-evil.db'),
+  });
+  assert.equal(status, 400);
+  assert.equal(body.error?.code, 'DBPATH_FORBIDDEN');
+});
+
+test('P2 #16: migration/history dbPath outside allowed roots -> 400 DBPATH_FORBIDDEN', async () => {
+  const outside = encodeURIComponent(path.join(os.homedir(), 'p2-evil.db'));
+  const { status, body } = await req('GET', `/api/database/migration/history?dbPath=${outside}`);
+  assert.equal(status, 400);
+  assert.equal(body.error?.code, 'DBPATH_FORBIDDEN');
+});
+
+test('P2 #16: schema/drift dbPath outside allowed roots -> 400 DBPATH_FORBIDDEN', async () => {
+  const outside = encodeURIComponent(path.join(os.homedir(), 'p2-evil.db'));
+  const { status, body } = await req('GET', `/api/database/schema/drift?dbPath=${outside}`);
+  assert.equal(status, 400);
+  assert.equal(body.error?.code, 'DBPATH_FORBIDDEN');
+});
+
+test('P2 #15: destructive apply without/garbage token -> 403 + plan-bound approvalToken', async () => {
+  const noToken = await req('POST', '/api/database/migration/apply', { plan: p2DestructivePlan });
+  assert.equal(noToken.status, 403);
+  assert.ok(noToken.body.approvalToken, '403 response must issue an approval token');
+
+  const garbage = await req('POST', '/api/database/migration/apply', {
+    plan: p2DestructivePlan,
+    approvalToken: 'i-am-not-an-hmac',
+  });
+  assert.equal(garbage.status, 403, 'arbitrary non-empty token must be rejected');
+});
+
+test('P2 #15: dry-run issues token; apply accepts it and executes', async () => {
+  const dry = await req('POST', '/api/database/migration/dry-run', { plan: p2DestructivePlan });
+  assert.equal(dry.status, 200);
+  assert.ok(dry.body.approvalToken, 'destructive dry-run must issue an approval token');
+
+  const applied = await req('POST', '/api/database/migration/apply', {
+    plan: p2DestructivePlan,
+    approvalToken: dry.body.approvalToken,
+  });
+  assert.equal(applied.status, 200, JSON.stringify(applied.body));
+  assert.equal(applied.body.success, true);
+});
+
+test('P2 #15: non-destructive apply succeeds without any token', async () => {
+  const plan = {
+    engine: 'sqlite',
+    tables: [{ name: 'p2_plain', columns: [{ name: 'id', type: 'INTEGER', primaryKey: true }] }],
+  };
+  const { status, body } = await req('POST', '/api/database/migration/apply', { plan });
+  assert.equal(status, 200, JSON.stringify(body));
+  assert.equal(body.success, true);
+});
+
+test('P2 #17: query endpoint gates SQL, opens read-only for SELECT, stays usable after errors', async () => {
+  const workspaceManager = require('../services/workspaceManager');
+  const wsDir = workspaceManager.getWorkspacePath('p2-db-query');
+  fs.mkdirSync(wsDir, { recursive: true });
+  const dbFile = path.join(wsDir, 'app.db');
+  const { DatabaseSync } = require('node:sqlite');
+  const setup = new DatabaseSync(dbFile);
+  setup.exec('CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT)');
+  setup.exec("INSERT INTO items(name) VALUES ('one')");
+  setup.close();
+
+  try {
+    const ok = await req('POST', '/api/database/p2-db-query/query', { sql: 'SELECT name FROM items' });
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    assert.equal(ok.body.count, 1);
+
+    const multi = await req('POST', '/api/database/p2-db-query/query', { sql: 'SELECT 1; DROP TABLE items' });
+    assert.equal(multi.status, 400);
+
+    const attach = await req('POST', '/api/database/p2-db-query/query', { sql: "ATTACH DATABASE 'x.db' AS x" });
+    assert.equal(attach.status, 400);
+
+    // Error path (old code returned 400 while leaking the read-write handle)
+    const bad = await req('POST', '/api/database/p2-db-query/query', { sql: 'SELECT * FROM does_not_exist' });
+    assert.equal(bad.status, 400);
+
+    const again = await req('POST', '/api/database/p2-db-query/query', { sql: 'SELECT name FROM items' });
+    assert.equal(again.status, 200, 'route must remain usable after a query error');
+    assert.equal(again.body.count, 1);
+  } finally {
+    try { fs.rmSync(wsDir, { recursive: true, force: true }); } catch {}
+  }
+});
+
+test('P2 #9: static deploy validate rejects targetDir outside allowed roots', async () => {
+  const outside = await req('POST', '/api/deploy/validate', {
+    target: 'static',
+    options: { targetDir: path.join(os.homedir(), 'evil-static') },
+  });
+  assert.equal(outside.status, 200);
+  assert.equal(outside.body.valid, false);
+
+  const inside = await req('POST', '/api/deploy/validate', {
+    target: 'static',
+    options: { targetDir: path.join(os.tmpdir(), 'ai-dost-static-ok') },
+  });
+  assert.equal(inside.status, 200);
+  assert.equal(inside.body.valid, true);
 });

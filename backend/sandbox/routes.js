@@ -273,4 +273,21 @@ router.get('/project/:projectId', async (req, res) => {
   }
 });
 
+// ── Autonomous Self-Healing Diagnostic & Code Repair Endpoint ────────────────
+const { diagnoseAndHeal } = require('../services/selfHealingSandboxEngine');
+
+router.post('/heal', async (req, res) => {
+  try {
+    const { code, error, line, stack, language } = req.body;
+    if (!code || !error) {
+      return res.status(400).json({ success: false, error: 'code and error are required' });
+    }
+
+    const result = await diagnoseAndHeal({ code, error, line, stack, language });
+    res.json(result);
+  } catch (err) {
+    sandboxError(res, err);
+  }
+});
+
 module.exports = router;

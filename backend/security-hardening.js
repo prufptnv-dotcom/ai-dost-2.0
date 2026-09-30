@@ -184,14 +184,21 @@ function installChatTaskEventWriter() {
       return originalWrite.call(this, chunk, encoding, callback);
     }
 
-    const state = this.__aiDostTaskEventState || (this.__aiDostTaskEventState = { generatingStarted: false });
+    const state = this.__aiDostTaskEventState || (this.__aiDostTaskEventState = { generatingStarted: false, pending: '' });
     const text = Buffer.isBuffer(chunk)
       ? chunk.toString(typeof encoding === 'string' ? encoding : 'utf8')
       : String(chunk);
 
-    const matches = text.matchAll(/data:\s*(\{[\s\S]*?\})\n\n/g);
+    // P2 #27: accumulate across write() calls — a `data: {...}\n\n` frame split
+    // over two chunks is invisible to a per-chunk matchAll. Only complete frames
+    // are parsed; the unfinished tail stays buffered for the next write.
+    state.pending += text;
     const inserts = [];
-    for (const match of matches) {
+    const frameRe = /data:\s*(\{[\s\S]*?\})\n\n/g;
+    let match;
+    let consumed = 0;
+    while ((match = frameRe.exec(state.pending)) !== null) {
+      consumed = match.index + match[0].length;
       try {
         const payload = JSON.parse(match[1]);
         for (const event of buildTaskRuntimeEvents(payload, state)) {
@@ -201,11 +208,19 @@ function installChatTaskEventWriter() {
         // Ignore malformed/non-JSON SSE frames and preserve legacy stream output.
       }
     }
+    state.pending = state.pending.slice(consumed);
+    // Enrichment-only buffer: never let a delimiter-less stream grow unbounded
+    if (state.pending.length > 262144) {
+      state.pending = state.pending.slice(-262144);
+    }
 
+    // P2 #27: write the source chunk FIRST, then the derived task events —
+    // emitting inserts before their source payload inverted the event order.
+    const written = originalWrite.call(this, chunk, encoding, callback);
     if (inserts.length > 0) {
       originalWrite.call(this, Buffer.from(inserts.join(''), 'utf8'));
     }
-    return originalWrite.call(this, chunk, encoding, callback);
+    return written;
   }
 
   hardenedResponseWrite[TASK_EVENT_WRITE_GUARD] = true;

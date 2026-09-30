@@ -18,6 +18,9 @@ dist/
 __pycache__/
 *.pyc
 chroma_data/
+# P3 #199: the dirs that are ACTUALLY tracked (chroma_data/ matched nothing) —
+# vector-DB binaries must never be committed or touched by every run.
+chroma_db/
 
 # Local Configs & Keys
 .env
@@ -50,7 +53,12 @@ yarn-error.log*
 # Database
 .data/
 backend/data/*.db*
-memory-brain/.data/frontend/public/downloads/
+# Server-side secret store (#101-#103) — never commit keys
+backend/data/local-settings.json
+# P3 #218: this line was one malformed concatenation of two paths
+# (memory-brain/.data/ + frontend/public/downloads/) and matched nothing.
+memory-brain/.data/
+frontend/public/downloads/
 
 # Generated document downloads
 frontend/public/downloads/*
@@ -66,5 +74,12 @@ backend/playwright-report/
 .opencode/
 scratch/
 test_*.png
-test_*.js
+# Debug scripts only (real suites live in *.test.js) — scoped so future
+# tests named test_*.js outside these dirs are NOT ignored.
+/backend/test_*.js
+/backend/tests/test_*.js
 *.png
+# PWA/app icons must stay committable despite the blanket *.png rule
+!frontend/public/icons/*.png
+!frontend/public/**/*.png
+!**/icons/*.png

@@ -5,12 +5,23 @@
  */
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
-let defaultWs = 'ws://localhost:5000';
-
+// P3 #120: only fall back to the literal localhost URL when there is no
+// window at all (SSR string building). In the browser the default is derived
+// from the actual location, so production builds without env vars never emit
+// ws://localhost:5000 URLs in error paths.
+let defaultWs;
 if (apiBase) {
   defaultWs = apiBase.replace(/^http/, 'ws').replace(/\/api\/v1\/?$/, '');
-} else if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
-  defaultWs = `wss://${window.location.host}`;
+} else if (typeof window !== 'undefined') {
+  const isLoopback = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  if (isLoopback) {
+    // dev: Next on :3000, backend WS on :5000
+    defaultWs = `ws://${window.location.hostname}:5000`;
+  } else {
+    defaultWs = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+  }
+} else {
+  defaultWs = 'ws://localhost:5000'; // SSR placeholder — browser paths recompute above
 }
 
 const WS_BASE_URL = process.env.NEXT_PUBLIC_GO_WS_URL || defaultWs;

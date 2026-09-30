@@ -360,7 +360,7 @@ export default function ResumeView({ onToast, onClose }) {
   };
 
   return (
-    <div className="h-full flex flex-col bg-canvas-base select-none overflow-hidden">
+    <div className="h-full flex flex-col bg-canvas-base overflow-hidden">
       {/* Editorial Header Toolbar */}
       <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-canvas-subtle flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -725,7 +725,10 @@ export default function ResumeView({ onToast, onClose }) {
               srcDoc={generatePreviewHtml(resumeData, selectedTemplate)}
               title="Resume Document Preview"
               className="flex-1 w-full rounded-xs shadow-surface-card border border-border bg-white"
-              sandbox="allow-same-origin allow-modals"
+              /* P3 #122: srcDoc built from user fields — drop allow-same-origin so
+                 injected markup can never touch parent origin. contentWindow.print()
+                 stays callable cross-origin. */
+              sandbox="allow-modals"
             />
           </div>
         )}

@@ -14,7 +14,8 @@ export default function TodosPage() {
 
   const fetchTodos = async () => {
     try {
-      const token = localStorage.getItem('ai_dost_token');
+      let token = null;
+      try { token = localStorage.getItem('ai_dost_token'); } catch (_) {}
       const res = await fetch('/api/v1/todos', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -38,7 +39,8 @@ export default function TodosPage() {
     if (!newTask.trim()) return;
     setIsSubmitting(true);
     try {
-      const token = localStorage.getItem('ai_dost_token');
+      let token = null;
+      try { token = localStorage.getItem('ai_dost_token'); } catch (_) {}
       const res = await fetch('/api/v1/todos', {
         method: 'POST',
         headers: {
@@ -63,7 +65,8 @@ export default function TodosPage() {
 
   const toggleTodo = async (todo) => {
     try {
-      const token = localStorage.getItem('ai_dost_token');
+      let token = null;
+      try { token = localStorage.getItem('ai_dost_token'); } catch (_) {}
       // Optimistic update
       setTodos(todos.map(t => t.id === todo.id ? { ...t, completed: !t.completed } : t));
       
@@ -84,7 +87,8 @@ export default function TodosPage() {
 
   const deleteTodo = async (id) => {
     try {
-      const token = localStorage.getItem('ai_dost_token');
+      let token = null;
+      try { token = localStorage.getItem('ai_dost_token'); } catch (_) {}
       // Optimistic delete
       const previousTodos = [...todos];
       setTodos(todos.filter(t => t.id !== id));

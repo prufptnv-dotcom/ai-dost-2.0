@@ -21,7 +21,11 @@ class WriteFileTool extends Tool {
     const resolvedPath = context.workspaceManager.resolvePath(context.projectId, relativePath, context.userId);
 
     // Existing-file write enforcement (GAP-01)
-    if (fs.existsSync(resolvedPath) && !input.allowOverwrite) {
+    // P2 #59: input.allowOverwrite was LLM-supplied — the model could pass
+    // allowOverwrite:true and bypass the protection. No LLM-controlled flag
+    // may enable overwrite; full replacement of existing files always goes
+    // through apply_diff.
+    if (fs.existsSync(resolvedPath)) {
       return {
         success: false,
         code: 'WRITE_FORBIDDEN_ON_EXISTING',

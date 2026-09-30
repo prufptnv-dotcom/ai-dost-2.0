@@ -33,6 +33,10 @@ import { DiffReview } from '../ide/DiffReview';
 import { configureMonacoThemes } from '../ide/MonacoTheme';
 import { PackagesModal } from '../ide/PackagesModal';
 import { SecretsModal } from '../ide/SecretsModal';
+import { PreviewPane } from '../ide/PreviewPane';
+import { IdeHeader } from '../ide/IdeHeader';
+import { IdeFooter } from '../ide/IdeFooter';
+import { generateLiveAppHtml, PREVIEW_TELEMETRY_SCRIPT } from '../ide/PreviewEngine';
 import { syncFileToWebContainer } from '../../lib/webcontainer';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -42,7 +46,10 @@ marked.setOptions({
   gfm: true,
 });
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+// P2 #104: default to relative '' so agent-run goes through the Next /api
+// rewrite — the hardcoded http://localhost:5000 bypassed rewrites and died
+// off-machine. Env opt-in still wins.
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || '';
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 const TerminalPanel = dynamic(() => import('./TerminalPanel'), { ssr: false });
@@ -66,6 +73,14 @@ const STATUS_BY_ACTION = {
   git_commit: '🔀 Creating commit snapshot...',
   git_branch: '🔀 Managing git branch...',
   git_log: '🔀 Reading git logs...',
+  web_search: '🌐 Searching the web for real-time info...',
+  fetch_webpage: '🌍 Fetching webpage content...',
+  sandbox_create: '🐳 Booting up isolated Docker sandbox...',
+  sandbox_exec: '💻 Executing command inside sandbox...',
+  sandbox_dev_start: '🚀 Starting sandbox dev server...',
+  sandbox_write: '📝 Writing file to sandbox...',
+  figma_mcp: '🎨 Fetching Figma designs via MCP...',
+  db_query: '🗄️ Querying database...',
 };
 
 // File extension → brand color
@@ -86,12 +101,15 @@ function AiStudioResponseCard({ message, onSelectFile, onOpenDiff, onRollback, o
   const content = message.content || message.summary || '';
 
   const renderedHtml = useMemo(() => {
+    if (!content) return '';
     try {
-      if (!content) return '';
       const raw = marked.parse(content);
-      return typeof window !== 'undefined' ? DOMPurify.sanitize(raw) : raw;
+      if (typeof window !== 'undefined' && DOMPurify?.isSupported !== false && typeof DOMPurify?.sanitize === 'function') {
+        return DOMPurify.sanitize(raw);
+      }
+      return String(raw).replace(/<[^>]*>/g, '');
     } catch (_) {
-      return content;
+      return String(content).replace(/<[^>]*>/g, '');
     }
   }, [content]);
 
@@ -180,618 +198,6 @@ function AiStudioResponseCard({ message, onSelectFile, onOpenDiff, onRollback, o
   );
 }
 
-// ── In-Browser Instant Live App Compiler with Error Boundary & Inspector ──────
-const PREVIEW_TELEMETRY_SCRIPT = `
-<script>
-(() => {
-  const report = (type, payload) => window.parent.postMessage({ channel: 'ai-dost-preview', type, ...payload }, '*');
-  window.addEventListener('error', (event) => report('RUNTIME_ERROR', { error: event.message || 'Runtime error' }));
-  window.addEventListener('unhandledrejection', (event) => report('RUNTIME_ERROR', { error: String(event.reason?.message || event.reason || 'Unhandled promise') }));
-  const inspect = () => {
-    const body = document.body;
-    if (!body) return;
-    const rect = body.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0 || !body.children.length) report('VISUAL_ERROR', { message: 'Blank preview detected' });
-    else report('PREVIEW_READY', { width: rect.width, height: rect.height });
-  };
-  new MutationObserver(() => requestAnimationFrame(inspect)).observe(document.documentElement, { childList: true, subtree: true });
-  window.addEventListener('load', () => requestAnimationFrame(inspect), { once: true });
-})();
-</script>`;
-
-function generateLiveAppHtml(files = [], contents = {}, inspectorActive = false) {
-  const norm = (p) => (p || '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '').trim();
-
-  // Find index.html if present
-  const indexHtmlFile = (files || []).find(f => norm(f.path) === 'index.html' || norm(f.path).endsWith('/index.html'));
-  const rawIndexHtml = indexHtmlFile ? (contents[indexHtmlFile.path] || contents[norm(indexHtmlFile.path)] || indexHtmlFile.content || '') : (contents['index.html'] || '');
-
-  // Look for primary React component (App.jsx, App.js, App.tsx, or main.jsx)
-  let appCode = contents['src/App.jsx'] || contents['App.jsx'] || contents['src/App.js'] || contents['App.js'] || '';
-  if (!appCode) {
-    const appFile = (files || []).find(f => {
-      const p = norm(f.path);
-      return p.endsWith('App.jsx') || p.endsWith('App.js') || p.endsWith('App.tsx');
-    });
-    if (appFile) appCode = contents[appFile.path] || contents[norm(appFile.path)] || appFile.content || '';
-  }
-
-  if (!appCode) {
-    const mainFile = (files || []).find(f => {
-      const p = norm(f.path);
-      return p.endsWith('main.jsx') || p.endsWith('main.js') || p.endsWith('index.jsx') || p.endsWith('index.js');
-    });
-    if (mainFile) appCode = contents[mainFile.path] || contents[norm(mainFile.path)] || mainFile.content || '';
-  }
-  if (!appCode) {
-    for (const f of (files || [])) {
-      const p = norm(f.path);
-      const code = contents[f.path] || contents[p] || f.content || '';
-      if (code && (p.endsWith('.jsx') || p.endsWith('.tsx') || p.endsWith('.js')) && !p.endsWith('.config.js') && (code.includes('export default') || code.includes('function App') || code.includes('const App'))) {
-        appCode = code;
-        break;
-      }
-    }
-  }
-
-  const isReactOrViteApp = Boolean(
-    appCode ||
-    (rawIndexHtml && (rawIndexHtml.includes('src/main') || rawIndexHtml.includes('src/App'))) ||
-    (files || []).some(f => {
-      const p = norm(f.path);
-      return p.endsWith('.jsx') || p.endsWith('.tsx') || p === 'package.json' || p.endsWith('/package.json');
-    })
-  );
-
-  // If this is a static website (HTML/CSS/JS without React App code, or contains full HTML structure)
-  if (!isReactOrViteApp && rawIndexHtml && rawIndexHtml.includes('<body')) {
-    let injectedHtml = rawIndexHtml;
-    // Inject style.css if present
-    const cssFile = (files || []).find(f => norm(f.path).endsWith('.css'));
-    if (cssFile && !injectedHtml.includes('<style>')) {
-      const cssContent = contents[cssFile.path] || contents[norm(cssFile.path)] || cssFile.content || '';
-      if (cssContent) {
-        injectedHtml = injectedHtml.replace('</head>', `<style>${cssContent}</style></head>`);
-      }
-    }
-    // Inject script.js if present
-    const jsFile = (files || []).find(f => norm(f.path).endsWith('script.js') || norm(f.path).endsWith('main.js'));
-    if (jsFile && !injectedHtml.includes(jsFile.path)) {
-      const jsContent = contents[jsFile.path] || contents[norm(jsFile.path)] || jsFile.content || '';
-      if (jsContent) {
-        injectedHtml = injectedHtml.replace('</body>', `<script>${jsContent}</script></body>`);
-      }
-    }
-    return injectedHtml.replace('</head>', `${PREVIEW_TELEMETRY_SCRIPT}</head>`);
-  }
-
-  if (isReactOrViteApp && !appCode) {
-    return `<!DOCTYPE html>
-<html lang="en" class="dark">
-<head>
-  <meta charset="UTF-8">
-  <title>Loading Application...</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-  <style>body { font-family: 'Inter', sans-serif; background: #090d16; color: #94a3b8; margin: 0; }</style>
-</head>
-<body class="min-h-screen flex flex-col items-center justify-center p-6 text-center">
-  <div class="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-  <h3 class="text-sm font-semibold text-white">Initializing React Application...</h3>
-  <p class="text-xs text-slate-500 mt-1 max-w-xs">Reading workspace components and mounting live runtime.</p>
-</body>
-</html>`;
-  }
-
-  const cleanedCode = (appCode || '')
-    .replace(/import\s+[\s\S]*?from\s+['"].*?['"];?/g, '')
-    .replace(/import\s+['"].*?['"];?/g, '')
-    .replace(/export\s+default\s+function\s*(\w*)/g, (m, name) => name ? `function ${name}` : 'function App')
-    .replace(/export\s+default\s+const\s+(\w+)\s*=/g, 'const $1 =')
-    .replace(/export\s+default\s+async\s+function\s*(\w*)/g, (m, name) => name ? `async function ${name}` : 'async function App')
-    .replace(/export\s+default\s+(\w+);?/g, '')
-    .replace(/export\s+(?:async\s+)?function\s+(\w+)/g, 'async function $1')
-    .replace(/export\s+(?:const|let|var)\s+(\w+)/g, 'const $1')
-    .replace(/export\s+\{[\s\S]*?\};?/g, '');
-
-  // Extract all imported API functions (from ./services/api, ./api, etc.)
-  const apiImports = [];
-  const apiMatches = (appCode || '').matchAll(/import\s+(?:\{([^}]+)\}|(\w+))\s+from\s+['"][^'"]*api[^'"]*['"]/g);
-  for (const m of apiMatches) {
-    if (m[1]) {
-      m[1].split(',').forEach(id => {
-        const clean = id.trim().split(' as ')[0].trim();
-        if (clean) apiImports.push(clean);
-      });
-    }
-    if (m[2]) apiImports.push(m[2].trim());
-  }
-
-  // Load and clean src/services/api.js if available
-  const apiFile = (files || []).find(f => f.path?.endsWith('api.js') || f.path?.endsWith('api.ts'));
-  let apiCode = '';
-  if (apiFile && contents[apiFile.path]) {
-    apiCode = (contents[apiFile.path] || '')
-      .replace(/import\s+[\s\S]*?from\s+['"].*?['"];?/g, '')
-      .replace(/import\s+['"].*?['"];?/g, '')
-      .replace(/export\s+(?:async\s+)?function\s+(\w+)/g, 'async function $1')
-      .replace(/export\s+(?:const|let|var)\s+(\w+)/g, 'const $1')
-      .replace(/export\s+default\s+[\s\S]*?;?/g, '')
-      .replace(/export\s+\{[\s\S]*?\};?/g, '');
-  }
-
-  // Generate fallback stubs for all imported API functions
-  const apiStubs = Array.from(new Set(apiImports)).map(name =>
-    `if (typeof window.${name} === 'undefined' && typeof ${name} === 'undefined') {
-      window.${name} = async function ${name}Stub(payload) {
-        try {
-          const key = 'mock_' + '${name}'.toLowerCase();
-          if (payload && typeof payload === 'object') {
-            const existing = JSON.parse(localStorage.getItem(key) || '[]');
-            const newItem = { id: String(Date.now()), ...payload, createdAt: new Date().toISOString() };
-            existing.unshift(newItem);
-            localStorage.setItem(key, JSON.stringify(existing));
-            return newItem;
-          }
-          return JSON.parse(localStorage.getItem(key) || '[]');
-        } catch(_) { return []; }
-      };
-    }`
-  ).join('\n');
-
-  // Extract all imported Lucide icons + JSX component tags
-  const importedLucide = [];
-  const lucideMatches = (appCode || '').matchAll(/import\s+\{([^}]+)\}\s+from\s+['"]lucide-react['"]/g);
-  for (const m of lucideMatches) {
-    if (m[1]) {
-      m[1].split(',').forEach(id => {
-        const parts = id.trim().split(/\s+as\s+/);
-        if (parts[0]) importedLucide.push(parts[0].trim());
-        if (parts[1]) importedLucide.push(parts[1].trim());
-      });
-    }
-  }
-
-  // Inject sub-components from src/components/*.jsx or *.jsx so App can render them
-  let subComponentsCode = '';
-  (files || []).forEach(f => {
-    if (f.path && f.path.endsWith('.jsx') && !f.path.endsWith('App.jsx') && !f.path.endsWith('main.jsx')) {
-      const subContent = contents[f.path] || f.content || '';
-      if (subContent) {
-        const cleanedSub = subContent
-          .replace(/import\s+[\s\S]*?from\s+['"].*?['"];?/g, '')
-          .replace(/import\s+['"].*?['"];?/g, '')
-          .replace(/export\s+default\s+function\s*(\w*)/g, (m, name) => name ? `function ${name}` : '')
-          .replace(/export\s+default\s+const\s+(\w+)\s*=/g, 'const $1 =')
-          .replace(/export\s+default\s+(\w+);?/g, '')
-          .replace(/export\s+(?:async\s+)?function\s+(\w+)/g, 'function $1')
-          .replace(/export\s+(?:const|let|var)\s+(\w+)/g, 'const $1')
-          .replace(/export\s+\{[\s\S]*?\};?/g, '');
-        subComponentsCode += '\n' + cleanedSub + '\n';
-      }
-    }
-  });
-
-  const declaredComponents = new Set();
-  const declMatches = ((appCode || '') + '\n' + subComponentsCode).matchAll(/(?:function|class|const|let|var)\s+([A-Z][A-Za-z0-9_]*)/g);
-  for (const m of declMatches) {
-    if (m[1]) declaredComponents.add(m[1]);
-  }
-
-  const jsxTags = (appCode || '').match(/<([A-Z][A-Za-z0-9_]*)/g) || [];
-  const tagsList = jsxTags.map(t => t.replace('<', '').trim());
-
-  const ALL_DETECTED_ICONS = Array.from(new Set([
-    'Search', 'ShoppingCart', 'ShoppingBag', 'Kanban', 'BrainCircuit', 'Activity', 'BarChart2', 'BarChart3',
-    'Sparkles', 'Play', 'Layers', 'TrendingUp', 'CheckCircle', 'CheckCircle2', 'Shield', 'ShieldCheck',
-    'GitBranch', 'Plus', 'Minus', 'Zap', 'Box', 'ArrowRight', 'Download', 'X', 'Menu', 'Trash', 'Trash2',
-    'Edit', 'Pencil', 'FolderTree', 'FilePlus2', 'FolderPlus', 'ChevronDown', 'ChevronUp', 'ChevronRight',
-    'ChevronLeft', 'Globe', 'Database', 'Server', 'Code', 'Code2', 'Eye', 'EyeOff', 'Lock', 'User',
-    'Users', 'Clock', 'Mail', 'Phone', 'MapPin', 'Star', 'Heart', 'Filter', 'RefreshCw', 'ExternalLink',
-    'Settings', 'AlertCircle', 'Check', 'Copy', 'Sliders', 'Calendar', 'Camera', 'Image', 'Video',
-    'Hospital', 'Stethoscope', 'Award', 'PhoneCall', 'UserCheck', 'Bed', 'CalendarCheck', 'Pill',
-    'Ticket', 'Film', 'Rocket', 'Mars', 'Info', 'Utensils', 'Coffee', 'DollarSign', 'CreditCard', 'Tag', 'FileText',
-    ...importedLucide,
-    ...tagsList
-  ])).filter(name => !declaredComponents.has(name) && !['App', 'Main', 'Root', 'React', 'ReactDOM', 'GlobalErrorBoundary', 'Fragment'].includes(name));
-
-  const iconDeclarations = ALL_DETECTED_ICONS.map(name =>
-    `if (typeof window.${name} === 'undefined') {
-      window.${name} = function ${name}Icon(props) {
-        const size = props?.size || 18;
-        const className = props?.className || '';
-        return React.createElement('span', {
-          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
-          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
-          title: '${name}'
-        }, '✦');
-      };
-    }
-    var ${name} = window.${name};`
-  ).join('\n');
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script>
-    // ── In-Browser Preview Telemetry ─────────────────────────────────────
-    const report = (type, payload) => window.parent.postMessage({ channel: 'ai-dost-preview', type, ...payload }, '*');
-    window.addEventListener('error', (event) => report('RUNTIME_ERROR', { error: event.message || 'Runtime error' }));
-    window.addEventListener('unhandledrejection', (event) => report('RUNTIME_ERROR', { error: String(event.reason?.message || event.reason || 'Unhandled promise') }));
-    const inspect = () => {
-      const body = document.body;
-      if (!body) return;
-      const rect = body.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0 || !body.children.length) report('VISUAL_ERROR', { message: 'Blank preview detected' });
-      else report('PREVIEW_READY', { width: rect.width, height: rect.height });
-    };
-    new MutationObserver(() => requestAnimationFrame(inspect)).observe(document.documentElement, { childList: true, subtree: true });
-    window.addEventListener('load', () => requestAnimationFrame(inspect), { once: true });
-  </script>
-  <script>
-    // ── Safe In-Memory Storage Polyfill ─────────────────────────────────────
-    const _memoryStorage = {};
-    window.safeStorage = {
-      getItem: (k) => _memoryStorage[k] !== undefined ? _memoryStorage[k] : null,
-      setItem: (k, v) => { _memoryStorage[k] = String(v); },
-      removeItem: (k) => { delete _memoryStorage[k]; },
-      clear: () => { Object.keys(_memoryStorage).forEach(k => delete _memoryStorage[k]); }
-    };
-    try {
-      if (!window.localStorage) window.localStorage = window.safeStorage;
-    } catch(_) {}
-
-    // ── Smart In-Memory REST & Fetch Router for Preview ─────────────────────
-    const _origFetch = window.fetch;
-    const _db = {
-      notes: [
-        { id: '1', title: 'System Architecture', content: '# Core Design\\n\\n- Reactive state management\\n- Zero-latency preview sync\\n- Dark Linear design tokens', tags: ['architecture', 'saas'], createdAt: new Date().toISOString() },
-        { id: '2', title: 'Roadmap & Specs', content: '## Sprint 1 Goals\\n\\n- SQLite REST API: Completed\\n- Split Editor: Active', tags: ['roadmap', 'product'], createdAt: new Date().toISOString() }
-      ],
-      tags: ['architecture', 'saas', 'roadmap', 'product', 'design'],
-      items: [
-        { id: '1', title: 'Primary Item', name: 'Sample Item 1', status: 'Active', count: 10, price: 99, tags: ['general'] }
-      ]
-    };
-
-    window.fetch = async function(url, options = {}) {
-      const rawUrl = String(url || '').split('?')[0];
-      const withoutProto = rawUrl.indexOf('://') !== -1 ? rawUrl.split('://')[1].split('/').slice(1).join('/') : rawUrl;
-      const cleanPath = withoutProto.startsWith('api/') ? withoutProto.slice(4) : (withoutProto.startsWith('/') ? withoutProto.slice(1) : withoutProto);
-      const method = (options.method || 'GET').toUpperCase();
-      const resource = cleanPath.split('/')[0] || 'items';
-
-      if (!_db[resource]) {
-        _db[resource] = [
-          { id: '1', title: 'Sample ' + resource, name: 'Item 1', status: 'Active', count: 5, tags: ['default'], createdAt: new Date().toISOString() }
-        ];
-      }
-
-      if (method === 'GET') {
-        const id = cleanPath.split('/')[1];
-        const data = Array.isArray(_db[resource]) && id
-          ? _db[resource].find(x => x.id === id) || _db[resource][0]
-          : _db[resource];
-        return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-      }
-
-      if (method === 'POST') {
-        let body = {};
-        try { body = JSON.parse(options.body || '{}'); } catch(_) {}
-        const newItem = { id: String(Date.now()), ...body, createdAt: new Date().toISOString() };
-        if (Array.isArray(_db[resource])) _db[resource].unshift(newItem);
-        return new Response(JSON.stringify(newItem), { status: 201, headers: { 'Content-Type': 'application/json' } });
-      }
-
-      if (method === 'PUT' || method === 'PATCH') {
-        let body = {};
-        try { body = JSON.parse(options.body || '{}'); } catch(_) {}
-        const id = cleanPath.split('/')[1];
-        let updatedItem = { id: id || '1', ...body };
-        if (Array.isArray(_db[resource])) {
-          const idx = _db[resource].findIndex(x => x.id === id);
-          if (idx !== -1) {
-            _db[resource][idx] = { ..._db[resource][idx], ...body };
-            updatedItem = _db[resource][idx];
-          }
-        }
-        return new Response(JSON.stringify(updatedItem), { status: 200, headers: { 'Content-Type': 'application/json' } });
-      }
-
-      if (method === 'DELETE') {
-        const id = cleanPath.split('/')[1];
-        if (Array.isArray(_db[resource]) && id) {
-          _db[resource] = _db[resource].filter(x => x.id !== id);
-        }
-        return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-      }
-
-      // Safe local fallback for any unhandled relative or localhost endpoint
-      if (!rawUrl.startsWith('http') || rawUrl.includes('localhost') || rawUrl.includes('127.0.0.1')) {
-        const dynamicPayload = [
-          { id: '1', title: 'Item Active', name: 'Item Alpha', status: 'Active', count: 12, tags: ['general'], createdAt: new Date().toISOString() }
-        ];
-        return new Response(JSON.stringify(dynamicPayload), { status: 200, headers: { 'Content-Type': 'application/json' } });
-      }
-
-      try {
-        return await _origFetch(url, options);
-      } catch(e) {
-        return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } });
-      }
-    };
-
-    // ── Live Iframe Error Telemetry ─────────────────────────────────────────
-    window.onerror = function(msg, url, lineNo, columnNo, error) {
-      const errText = (msg || '').toString() + (lineNo ? ' (Line: ' + lineNo + ':' + columnNo + ')' : '');
-      window.parent.postMessage({
-        channel: 'ai-dost-preview',
-        type: 'AUTO_FIX_ERROR',
-        error: errText,
-        source: 'iframe_window_onerror'
-      }, '*');
-      return false;
-    };
-
-    window.addEventListener('unhandledrejection', function(event) {
-      const reason = event.reason ? (event.reason.message || event.reason) : 'Unhandled promise';
-      window.parent.postMessage({
-        channel: 'ai-dost-preview',
-        type: 'AUTO_FIX_ERROR',
-        error: 'Promise Rejection: ' + String(reason),
-        source: 'iframe_unhandled_rejection'
-      }, '*');
-    });
-
-    const _origConsoleError = console.error;
-    console.error = function(...args) {
-      _origConsoleError.apply(console, args);
-      const text = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
-      if (text.includes('Error') || text.includes('Uncaught') || text.includes('SyntaxError') || text.includes('TypeError')) {
-        window.parent.postMessage({
-          channel: 'ai-dost-preview',
-          type: 'AUTO_FIX_ERROR',
-          error: text.slice(0, 300),
-          source: 'iframe_console_error'
-        }, '*');
-      }
-    };
-
-    // Deterministic preview telemetry replaces screenshot checks for routine QA.
-    const reportPreviewState = () => {
-      const body = document.body;
-      if (!body) return;
-      const rect = body.getBoundingClientRect();
-      window.parent.postMessage({
-        channel: 'ai-dost-preview',
-        type: rect.width === 0 || rect.height === 0 || !body.children.length ? 'VISUAL_ERROR' : 'PREVIEW_READY',
-        message: rect.width === 0 || rect.height === 0 || !body.children.length ? 'Blank preview detected' : undefined,
-        width: rect.width,
-        height: rect.height,
-      }, '*');
-    };
-    new MutationObserver(() => requestAnimationFrame(reportPreviewState)).observe(document.documentElement, { childList: true, subtree: true });
-    window.addEventListener('load', () => requestAnimationFrame(reportPreviewState), { once: true });
-  </script>
-  <style>
-    body { font-family: 'Inter', sans-serif; margin: 0; background: #0b0f19; color: #f8fafc; }
-    ${inspectorActive ? `
-      *:hover { outline: 2px dashed #6366f1 !important; cursor: crosshair !important; }
-    ` : ''}
-  </style>
-</head>
-<body>
-  <div id="root"></div>
-
-  <script type="text/babel">
-    const { useState, useEffect, useRef, useMemo, useCallback, useContext, useReducer, createContext, Fragment } = React;
-
-    // ── API Functions & Stubs ───────────────────────────────────────────────
-    ${apiCode}
-    ${apiStubs}
-
-    // ── Dynamic Icon Component Declarations ─────────────────────────────────
-    ${iconDeclarations}
-
-    class GlobalErrorBoundary extends React.Component {
-      constructor(props) {
-        super(props);
-        this.state = { hasError: false, error: null };
-      }
-      static getDerivedStateFromError(error) {
-        return { hasError: true, error };
-      }
-      componentDidCatch(error, info) {
-        console.error("Preview caught error:", error, info);
-        window.parent.postMessage({
-          type: 'AUTO_FIX_ERROR',
-          error: 'React ErrorBoundary: ' + (error?.message || 'Component Crash'),
-          source: 'react_error_boundary'
-        }, '*');
-      }
-      render() {
-        if (this.state.hasError) {
-          return (
-            <div className="min-h-screen bg-[#0d111a] text-red-400 p-8 flex flex-col items-center justify-center space-y-4">
-              <div className="p-6 max-w-lg w-full bg-red-950/40 border border-red-500/30 rounded-2xl shadow-2xl space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-xl">⚠️</span>
-                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Preview Runtime Error</h3>
-                </div>
-                <pre className="text-xs bg-black/60 p-3 rounded-xl overflow-x-auto text-red-300 font-mono">
-                  {this.state.error?.message || 'Unknown error'}
-                </pre>
-                <button
-                  onClick={() => {
-                    window.parent.postMessage({
-                      type: 'AUTO_FIX_ERROR',
-                      error: this.state.error?.message || 'Runtime crash'
-                    }, '*');
-                  }}
-                  className="w-full py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
-                >
-                  ⚡ Auto-Fix this Error with Copilot AI
-                </button>
-              </div>
-            </div>
-          );
-        }
-        return this.props.children;
-      }
-    }
-
-    try {
-      ${subComponentsCode}
-      ${cleanedCode}
-
-      const RootComp = typeof App !== 'undefined' ? App : (typeof Main !== 'undefined' ? Main : null);
-      if (RootComp) {
-        ReactDOM.createRoot(document.getElementById('root')).render(
-          <GlobalErrorBoundary>
-            <RootComp />
-          </GlobalErrorBoundary>
-        );
-      } else {
-        ReactDOM.createRoot(document.getElementById('root')).render(
-          <div className="min-h-screen flex items-center justify-center text-slate-500 text-xs font-mono">
-            Compiling application preview...
-          </div>
-        );
-      }
-    } catch(err) {
-      document.getElementById('root').innerHTML = '<div style="padding:24px;color:#f87171;font-family:monospace;font-size:12px;"><b>Syntax/Execution Error:</b> ' + err.message + '</div>';
-      window.parent.postMessage({
-        type: 'AUTO_FIX_ERROR',
-        error: 'Babel Compilation Syntax Error: ' + err.message,
-        source: 'babel_compilation_error'
-      }, '*');
-    }
-  </script>
-
-  <script>
-    let _inspectorActive = ${inspectorActive ? 'true' : 'false'};
-    let _hoveredEl = null;
-    let _badge = null;
-
-    function _getBadge() {
-      if (_badge) return _badge;
-      _badge = document.createElement('div');
-      _badge.id = '_aidost_inspector_badge';
-      _badge.style.cssText = 'position:fixed;z-index:999999;display:none;padding:4px 9px;border-radius:6px;background:rgba(15,23,42,0.95);color:#818cf8;border:1px solid #6366f1;font-family:monospace;font-size:11px;font-weight:600;pointer-events:none;box-shadow:0 8px 16px rgba(0,0,0,0.5);white-space:nowrap;backdrop-filter:blur(8px);';
-      document.body.appendChild(_badge);
-      return _badge;
-    }
-
-    window.addEventListener('message', function(e) {
-      if (e.data && e.data.type === 'SET_INSPECTOR_ACTIVE') {
-        _inspectorActive = Boolean(e.data.active);
-        if (!_inspectorActive && _hoveredEl) {
-          _hoveredEl.style.outline = '';
-          _hoveredEl.style.boxShadow = '';
-          if (_badge) _badge.style.display = 'none';
-        }
-      }
-    });
-
-    document.addEventListener('mouseover', function(e) {
-      if (!_inspectorActive) return;
-      const el = e.target;
-      if (el === document.body || el === document.documentElement || el.id === '_aidost_inspector_badge') return;
-      if (_hoveredEl && _hoveredEl !== el) {
-        _hoveredEl.style.outline = '';
-        _hoveredEl.style.boxShadow = '';
-      }
-      _hoveredEl = el;
-      el.style.outline = '2px dashed #6366f1';
-      el.style.outlineOffset = '2px';
-      el.style.boxShadow = '0 0 12px rgba(99,102,241,0.35)';
-
-      const badge = _getBadge();
-      const rect = el.getBoundingClientRect();
-      const tag = el.tagName.toLowerCase();
-      const cls = el.className ? '.' + String(el.className).trim().split(/\\s+/).slice(0, 2).join('.') : '';
-      const text = el.innerText ? ' \"' + el.innerText.trim().slice(0, 20) + '\"' : '';
-      badge.textContent = '<' + tag + cls + '>' + text;
-      badge.style.display = 'block';
-      const topPos = Math.max(8, rect.top - 28);
-      const leftPos = Math.min(window.innerWidth - 180, Math.max(8, rect.left));
-      badge.style.top = topPos + 'px';
-      badge.style.left = leftPos + 'px';
-    }, true);
-
-    document.addEventListener('mouseout', function(e) {
-      if (!_inspectorActive) return;
-      if (e.target && e.target === _hoveredEl) {
-        e.target.style.outline = '';
-        e.target.style.boxShadow = '';
-        if (_badge) _badge.style.display = 'none';
-      }
-    }, true);
-
-    // Generate unique CSS selector for any element
-    function _buildSelector(el) {
-      if (el.id) return '#' + el.id;
-      var path = [];
-      var cur = el;
-      while (cur && cur !== document.body && cur !== document.documentElement) {
-        var tag = cur.tagName.toLowerCase();
-        if (cur.id) { path.unshift(tag + '#' + cur.id); break; }
-        var cls = cur.className ? '.' + String(cur.className).trim().split(/\\s+/).slice(0, 2).join('.') : '';
-        var idx = 1;
-        var sib = cur.previousElementSibling;
-        while (sib) { if (sib.tagName === cur.tagName) idx++; sib = sib.previousElementSibling; }
-        path.unshift(tag + cls + ':nth-of-type(' + idx + ')');
-        cur = cur.parentElement;
-      }
-      return path.join(' > ');
-    }
-
-    document.addEventListener('click', function(e) {
-      if (!_inspectorActive) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const el = e.target;
-      const tag = el.tagName.toLowerCase();
-      const className = el.className || '';
-      const text = (el.innerText || '').trim().slice(0, 60);
-      const id = el.id || '';
-      const selector = _buildSelector(el);
-      const outerHTML = el.outerHTML ? el.outerHTML.slice(0, 500) : '';
-      const computedStyle = window.getComputedStyle(el);
-      const styles = {
-        color: computedStyle.color,
-        background: computedStyle.background,
-        fontSize: computedStyle.fontSize,
-        padding: computedStyle.padding,
-        margin: computedStyle.margin,
-        borderRadius: computedStyle.borderRadius
-      };
-
-      window.parent.postMessage({
-        type: 'INSPECT_ELEMENT',
-        element: { tag, className, text, id, selector, outerHTML, styles }
-      }, '*');
-
-      el.style.outline = '3px solid #10b981';
-      setTimeout(() => {
-        if (el) {
-          el.style.outline = '';
-          el.style.boxShadow = '';
-        }
-      }, 800);
-    }, true);
-  </script>
-</body>
-</html>`;
-}
-
 // ── Super-Advance Modern Starter Framework Templates ───────────────────────
 const STARTER_TEMPLATES = [
   {
@@ -829,10 +235,15 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  // Always-fresh mirror of `sessions` so handlers can run side effects
+  // OUTSIDE setState updaters (updaters may run twice under StrictMode).
+  const sessionsRef = useRef([]);
+  useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
   const projectId = activeSessionId || defaultProjectId;
 
   // Time-Travel Snapshots (Internal Automated Checkpoints)
   const [snapshots, setSnapshots] = useState([]);
+  const [snapshotMenuOpen, setSnapshotMenuOpen] = useState(false);
 
   // Multimodal Pasted / Attached Images for AI Chat
   const [pastedImages, setPastedImages] = useState([]);
@@ -861,6 +272,14 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   const [packagesModalOpen, setPackagesModalOpen] = useState(false);
   const [secretsModalOpen, setSecretsModalOpen] = useState(false);
   const [isReplitRunning, setIsReplitRunning] = useState(false);
+  // IDE overlays — Ctrl+P (Quick Open), Ctrl+Shift+P (Command Palette), Ctrl+Shift+F (Find in Files)
+  const [quickOpenOpen, setQuickOpenOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchCase, setSearchCase] = useState(false);
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
 
   // Left Sidebar & Terminal Collapsible States
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -889,7 +308,8 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   useEffect(() => {
     const checkTheme = () => {
       if (typeof window === 'undefined') return;
-      const light = document.body.classList.contains('light-theme') || localStorage.getItem('ai_dost_theme') === 'light';
+      let light = document.body.classList.contains('light-theme');
+      try { light = light || localStorage.getItem('ai_dost_theme') === 'light'; } catch (_) {}
       setIsLight(light);
     };
     checkTheme();
@@ -933,6 +353,9 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   // Voice Coding State
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef(null);
+  const voiceStreamRef = useRef(null);
+  const silenceTimerRef = useRef(null);
+  const voiceAutoSendTimerRef = useRef(null);
 
   // Ctrl+K Inline AI Edit State
   const [inlineEditOpen, setInlineEditOpen] = useState(false);
@@ -1133,6 +556,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     try {
       // Get microphone stream for waveform visualization
       navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+        voiceStreamRef.current = stream;
         startVoiceWaveform(stream);
 
         const recognition = new SpeechRecognition();
@@ -1142,7 +566,6 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
         recognition.maxAlternatives = 1;
 
         let finalTranscript = '';
-        let silenceTimer = null;
 
         recognition.onstart = () => {
           setIsListening(true);
@@ -1163,8 +586,8 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
           setCopilotInput(finalTranscript + (interim ? ' ' + interim : ''));
 
           // Auto-send after 2s of silence
-          if (silenceTimer) clearTimeout(silenceTimer);
-          silenceTimer = setTimeout(() => {
+          if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+          silenceTimerRef.current = setTimeout(() => {
             if (finalTranscript.trim()) {
               recognition.stop();
             }
@@ -1176,12 +599,16 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
           setIsListening(false);
           stopVoiceWaveform();
           stream.getTracks().forEach(t => t.stop());
+          voiceStreamRef.current = null;
+          if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
         };
 
         recognition.onend = () => {
           setIsListening(false);
           stopVoiceWaveform();
           stream.getTracks().forEach(t => t.stop());
+          voiceStreamRef.current = null;
+          if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
 
           if (finalTranscript.trim()) {
             const lang = detectVoiceLang(finalTranscript);
@@ -1189,7 +616,9 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
             showToast(`🎙️ ${langLabel}: "${finalTranscript.trim().slice(0, 60)}..."`, 'success');
             setCopilotInput(finalTranscript.trim());
             // Auto-send the voice prompt
-            setTimeout(() => {
+            if (voiceAutoSendTimerRef.current) clearTimeout(voiceAutoSendTimerRef.current);
+            voiceAutoSendTimerRef.current = setTimeout(() => {
+              voiceAutoSendTimerRef.current = null;
               handleSendRef.current(finalTranscript.trim());
             }, 300);
           }
@@ -1206,6 +635,20 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
       stopVoiceWaveform();
     }
   }, [isListening, showToast, startVoiceWaveform, stopVoiceWaveform, detectVoiceLang]);
+
+  // Voice coding cleanup on unmount — stop timers, recognition and mic stream
+  useEffect(() => {
+    return () => {
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      if (voiceAutoSendTimerRef.current) clearTimeout(voiceAutoSendTimerRef.current);
+      try { recognitionRef.current?.abort(); } catch (_) {}
+      if (voiceStreamRef.current) {
+        voiceStreamRef.current.getTracks().forEach(t => t.stop());
+        voiceStreamRef.current = null;
+      }
+      stopVoiceWaveform();
+    };
+  }, [stopVoiceWaveform]);
 
   // ── Replit Central Run Engine ──────────────────────────────────────────────
   const handleReplitRun = useCallback(async () => {
@@ -1246,7 +689,17 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   // Global Keyboard Shortcuts (Ctrl+Enter to Run, Ctrl+\ to toggle Split)
   useEffect(() => {
     const handleGlobalKey = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      const key = (e.key || '').toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && key === 'f') {
+        e.preventDefault();
+        setSearchOpen(true);
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && key === 'p') {
+        e.preventDefault();
+        setPaletteOpen(v => !v);
+      } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && key === 'p') {
+        e.preventDefault();
+        setQuickOpenOpen(v => !v);
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         handleReplitRun();
       } else if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
@@ -1268,8 +721,10 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
         return [...prev, { path: 'package.json', content: newContent, lastModified: Date.now() }];
       });
       showToast('📦 package.json updated successfully', 'success');
+      return true;
     } catch (err) {
       showToast(`Package update failed: ${err.message}`, 'error');
+      return false;
     }
   };
 
@@ -1361,9 +816,12 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
 
   // Auto scroll chat messages
   useEffect(() => {
-    if (endRef.current) {
-      endRef.current.scrollTop = endRef.current.scrollHeight;
-    }
+    const rafId = window.requestAnimationFrame(() => {
+      if (endRef.current) {
+        endRef.current.scrollTop = endRef.current.scrollHeight;
+      }
+    });
+    return () => window.cancelAnimationFrame(rafId);
   }, [copilotMessages, copilotStatus, planTasks]);
 
   // Suppress benign Monaco editor unmount cancellation errors
@@ -1461,35 +919,38 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   // 2. Save current session function
   const saveCurrentSession = useCallback((overrides = {}) => {
     if (!activeSessionId || !isHydratedRef.current) return;
-    setSessions(prev => {
-      const idx = prev.findIndex(s => s.id === activeSessionId);
-      const existing = idx !== -1 ? prev[idx] : {};
-      const updated = {
-        ...existing,
-        id: activeSessionId,
-        title: overrides.title !== undefined ? overrides.title : (existing.title || defaultProjectName),
-        promptSummary: overrides.promptSummary !== undefined ? overrides.promptSummary : (existing.promptSummary || ''),
-        updatedAt: Date.now(),
-        messages: overrides.messages !== undefined ? overrides.messages : copilotMessages,
-        files: overrides.files !== undefined ? overrides.files : files,
-        contents: overrides.contents !== undefined ? overrides.contents : contents,
-        openTabs: overrides.openTabs !== undefined ? overrides.openTabs : openTabs,
-        activePath: overrides.activePath !== undefined ? overrides.activePath : activePath,
-        workspaceMode: overrides.workspaceMode !== undefined ? overrides.workspaceMode : workspaceMode,
-        previewDevice: overrides.previewDevice !== undefined ? overrides.previewDevice : previewDevice,
-        planTasks: overrides.planTasks !== undefined ? overrides.planTasks : planTasks,
-        snapshots: overrides.snapshots !== undefined ? overrides.snapshots : (snapshots.length > 0 ? snapshots : (existing.snapshots || [])),
-      };
-      const list = idx !== -1
-        ? prev.map(s => s.id === activeSessionId ? updated : s)
-        : [updated, ...prev];
-      try {
-        localStorage.setItem('copilot_sessions_v2', JSON.stringify(list));
-      } catch (_) {}
+    const prev = sessionsRef.current;
+    const idx = prev.findIndex(s => s.id === activeSessionId);
+    const existing = idx !== -1 ? prev[idx] : {};
+    const updated = {
+      ...existing,
+      id: activeSessionId,
+      title: overrides.title !== undefined ? overrides.title : (existing.title || defaultProjectName),
+      promptSummary: overrides.promptSummary !== undefined ? overrides.promptSummary : (existing.promptSummary || ''),
+      updatedAt: Date.now(),
+      messages: overrides.messages !== undefined ? overrides.messages : copilotMessages,
+      files: overrides.files !== undefined ? overrides.files : files,
+      contents: overrides.contents !== undefined ? overrides.contents : contents,
+      openTabs: overrides.openTabs !== undefined ? overrides.openTabs : openTabs,
+      activePath: overrides.activePath !== undefined ? overrides.activePath : activePath,
+      workspaceMode: overrides.workspaceMode !== undefined ? overrides.workspaceMode : workspaceMode,
+      previewDevice: overrides.previewDevice !== undefined ? overrides.previewDevice : previewDevice,
+      planTasks: overrides.planTasks !== undefined ? overrides.planTasks : planTasks,
+      snapshots: overrides.snapshots !== undefined ? overrides.snapshots : (snapshots.length > 0 ? snapshots : (existing.snapshots || [])),
+    };
+    const list = idx !== -1
+      ? prev.map(s => s.id === activeSessionId ? updated : s)
+      : [updated, ...prev];
+    sessionsRef.current = list;
+    setSessions(list);
+    try {
+      localStorage.setItem('copilot_sessions_v2', JSON.stringify(list));
+    } catch (_) {}
 
-      // Async persist to backend SQLite
-      api.post('/copilot/sessions', updated).catch(() => {});
-      return list;
+    // Async persist to backend SQLite (retry once on failure)
+    api.post('/copilot/sessions', updated).catch((err) => {
+      setTimeout(() => api.post('/copilot/sessions', updated).catch(() => {}), 3000);
+      console.warn('[CopilotIDE] Session persist retry scheduled:', err?.message);
     });
   }, [activeSessionId, copilotMessages, files, contents, openTabs, activePath, workspaceMode, previewDevice, planTasks, snapshots, defaultProjectName]);
 
@@ -1543,12 +1004,14 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     setSelectedInspectorElement(null);
 
     setActiveSessionId(newId);
-    setSessions(prev => [newSession, ...prev]);
-    localStorage.setItem('copilot_current_session_id', newId);
+    const listWithNew = [newSession, ...sessionsRef.current];
+    sessionsRef.current = listWithNew;
+    setSessions(listWithNew);
+    try { localStorage.setItem('copilot_current_session_id', newId); } catch (_) {}
     try {
       const stored = localStorage.getItem('copilot_sessions_v2');
       const list = stored ? JSON.parse(stored) : [];
-      localStorage.setItem('copilot_sessions_v2', JSON.stringify([newSession, ...list]));
+      localStorage.setItem('copilot_sessions_v2', JSON.stringify([newSession, ...(Array.isArray(list) ? list : [])]));
     } catch (_) {}
 
     api.post('/copilot/sessions', newSession).catch(() => {});
@@ -1564,7 +1027,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     if (!target) return;
 
     setActiveSessionId(sessionId);
-    localStorage.setItem('copilot_current_session_id', sessionId);
+    try { localStorage.setItem('copilot_current_session_id', sessionId); } catch (_) {}
 
     setFiles(target.files || []);
     setContents(target.contents || {});
@@ -1586,33 +1049,31 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   }, [activeSessionId, sessions, saveCurrentSession, showToast]);
 
   const handleRenameSession = useCallback((id, newTitle) => {
-    setSessions(prev => {
-      const updated = prev.map(s => s.id === id ? { ...s, title: newTitle, updatedAt: Date.now() } : s);
-      localStorage.setItem('copilot_sessions_v2', JSON.stringify(updated));
-      return updated;
-    });
+    const updated = sessionsRef.current.map(s => s.id === id ? { ...s, title: newTitle, updatedAt: Date.now() } : s);
+    sessionsRef.current = updated;
+    setSessions(updated);
+    try { localStorage.setItem('copilot_sessions_v2', JSON.stringify(updated)); } catch (_) {}
     showToast('Session title updated', 'success');
   }, [showToast]);
 
   const handleDeleteSession = useCallback((id) => {
-    setSessions(prev => {
-      const updated = prev.filter(s => s.id !== id);
-      localStorage.setItem('copilot_sessions_v2', JSON.stringify(updated));
-      api.delete(`/copilot/sessions/${id}`).catch(() => {});
-      if (activeSessionId === id) {
-        if (updated.length > 0) {
-          handleSelectSession(updated[0].id);
-        } else {
-          handleNewSession();
-        }
+    const updated = sessionsRef.current.filter(s => s.id !== id);
+    sessionsRef.current = updated;
+    setSessions(updated);
+    try { localStorage.setItem('copilot_sessions_v2', JSON.stringify(updated)); } catch (_) {}
+    api.delete(`/copilot/sessions/${id}`).catch(() => {});
+    if (activeSessionId === id) {
+      if (updated.length > 0) {
+        handleSelectSession(updated[0].id);
+      } else {
+        handleNewSession();
       }
-      return updated;
-    });
+    }
     showToast('Session deleted', 'info');
   }, [activeSessionId, handleSelectSession, handleNewSession, showToast]);
 
   const handleDuplicateSession = useCallback((id) => {
-    const source = sessions.find(s => s.id === id);
+    const source = sessionsRef.current.find(s => s.id === id);
     if (!source) return;
     const newId = `copilot-session-${Date.now()}`;
     const clone = {
@@ -1622,14 +1083,13 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
-    setSessions(prev => {
-      const updated = [clone, ...prev];
-      localStorage.setItem('copilot_sessions_v2', JSON.stringify(updated));
-      api.post('/copilot/sessions', clone).catch(() => {});
-      return updated;
-    });
+    const updated = [clone, ...sessionsRef.current];
+    sessionsRef.current = updated;
+    setSessions(updated);
+    try { localStorage.setItem('copilot_sessions_v2', JSON.stringify(updated)); } catch (_) {}
+    api.post('/copilot/sessions', clone).catch(() => {});
     showToast(`Cloned session as "${clone.title}"`, 'success');
-  }, [sessions, showToast]);
+  }, [showToast]);
 
   // Load workspace files with path normalization & deduplication
   const loadWorkspaceFiles = useCallback(async (forceSelect = false) => {
@@ -1721,6 +1181,60 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     setWorkspaceMode('code');
   }, [openTabs]);
 
+  // Ctrl+Shift+F find-in-files: synchronous search over loaded workspace contents
+  useEffect(() => {
+    if (!searchOpen) return;
+    const q = searchQuery.trim();
+    if (!q) { setSearchResults([]); return; }
+    setSearching(true);
+    const needle = searchCase ? q : q.toLowerCase();
+    const out = [];
+    for (const f of files) {
+      const text = contents[f.path] ?? f.content ?? '';
+      if (!text) continue;
+      const linesArr = text.split('\n');
+      for (let i = 0; i < linesArr.length; i++) {
+        const hay = searchCase ? linesArr[i] : linesArr[i].toLowerCase();
+        if (hay.includes(needle)) {
+          out.push({ path: f.path, line: i + 1, text: linesArr[i].trim().slice(0, 200) });
+          if (out.length >= 200) break;
+        }
+      }
+      if (out.length >= 200) break;
+    }
+    setSearchResults(out);
+    setSearching(false);
+  }, [searchOpen, searchQuery, searchCase, files, contents]);
+
+  // P3 #118: dashboard's AgentView onOpenFile stores the clicked path in
+  // localStorage before switching view — consume it once workspace files are
+  // loaded (exact path → suffix match → basename fallback).
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('ai_dost_copilot_open');
+      if (!raw) return;
+      const req = JSON.parse(raw);
+      const want = req && req.path ? String(req.path).replace(/\\/g, '/').toLowerCase() : '';
+      if (!want || Date.now() - (req.at || 0) > 60000) {
+        localStorage.removeItem('ai_dost_copilot_open');
+        return;
+      }
+      if (!files.length && loadingFiles) return; // wait for workspace load
+      const wantBase = want.split('/').pop();
+      const norm = (p) => String(p).replace(/\\/g, '/').toLowerCase();
+      const match =
+        files.find(f => norm(f.path) === want) ||
+        files.find(f => norm(f.path).endsWith('/' + want) || want.endsWith('/' + norm(f.path))) ||
+        files.find(f => norm(f.path).split('/').pop() === wantBase);
+      localStorage.removeItem('ai_dost_copilot_open');
+      if (match) {
+        selectFile(match.path);
+      } else if (onToast) {
+        onToast(`File not found in workspace: ${req.path}`, 'error');
+      }
+    } catch (_) { /* malformed request — drop */ }
+  }, [files, loadingFiles, selectFile, onToast]);
+
   const closeTab = useCallback((pathStr) => {
     setOpenTabs(prev => {
       const next = prev.filter(p => p !== pathStr);
@@ -1760,6 +1274,20 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
       showToast(`Save failed: ${err.message}`, 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const formatFile = () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    try {
+      const action = editor.getAction('editor.action.formatDocument');
+      if (action && typeof action.run === 'function') {
+        const result = action.run();
+        if (result && typeof result.catch === 'function') result.catch(() => {});
+      }
+    } catch (_) {
+      showToast('Format failed for the active file', 'warning');
     }
   };
 
@@ -1858,18 +1386,20 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
       setWorkspaceMode(m => m === 'split' ? 'code' : 'split');
     });
 
-    editor.onDidChangeCursorSelection(() => {
+    const mountDisposables = [];
+
+    mountDisposables.push(editor.onDidChangeCursorSelection(() => {
       try {
         const sel = editor.getSelection();
         const text = sel ? editor.getModel()?.getValueInRange(sel) || '' : '';
         setSelectedCode(text);
       } catch (_) {}
-    });
+    }));
 
     try {
       const supportedLangs = ['javascript', 'typescript', 'python', 'html', 'css', 'json'];
       supportedLangs.forEach(langId => {
-        monaco.languages.registerInlineCompletionsProvider(langId, {
+        mountDisposables.push(monaco.languages.registerInlineCompletionsProvider(langId, {
           provideInlineCompletions: async (model, position) => {
             const prefix = model.getValueInRange({
               startLineNumber: Math.max(1, position.lineNumber - 30),
@@ -1904,9 +1434,16 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
             return { items: [] };
           },
           freeInlineCompletions: () => {}
-        });
+        }));
       });
     } catch (_) {}
+
+    // Dispose selection listener + completion providers when editor unmounts
+    editor.onDidDispose(() => {
+      mountDisposables.forEach(d => {
+        try { d?.dispose?.(); } catch (_) {}
+      });
+    });
 
     if (activePath) runDiagnostics(activePath, activeContent);
   };
@@ -1998,7 +1535,14 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
         body: JSON.stringify({
           userPrompt: prompt,
           projectId,
-          projectFiles: files
+          projectFiles: files,
+          chatHistory: copilotMessages.slice(-20).map(m => ({
+            role: m.role,
+            content: (m.content || '').substring(0, 500),
+            kind: m.kind,
+            file: m.file
+          })),
+          copilotDirector: true
         }),
         signal: controller.signal
       });
@@ -2024,9 +1568,109 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
           try {
             const data = JSON.parse(jsonStr);
 
-            if (data.type === 'run_started') {
-              setLatestRunId(data.runId || null);
-              latestRunIdRef.current = data.runId || null;
+            if (data.type === 'run_started' || data.type === 'director_start') {
+              setLatestRunId(data.runId || data.taskId || null);
+              latestRunIdRef.current = data.runId || data.taskId || null;
+              if (data.type === 'director_start') {
+                setCopilotStatus({ label: '🎯 Director accepted — inspecting workspace...', tone: 'work' });
+                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: '🎯 Copilot Director accepted your request. Inspecting workspace and planning optimal execution path...' }]);
+              }
+            }
+            // ── Director Plan: Map to milestone task plan ──
+            else if (data.type === 'director_plan') {
+              const dirTasks = Array.isArray(data.tasks) ? data.tasks : [];
+              if (dirTasks.length > 0) {
+                setPlanTasks(dirTasks.map((t, idx) => ({
+                  id: t.id || `task-${idx + 1}`,
+                  title: t.objective || t.title || `Task ${idx + 1}`,
+                  specialty: t.specialty || 'integration',
+                  role: t.role || 'CODER',
+                  status: idx === 0 ? 'in_progress' : 'pending'
+                })));
+              }
+              const summary = data.summary || `Director planned ${data.taskCount || dirTasks.length} specialist task(s)`;
+              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: `📋 ${summary}` }]);
+              setCopilotStatus({ label: `📋 ${data.taskCount || dirTasks.length} tasks planned`, tone: 'work' });
+            }
+            // ── Director Task: Map specialist activity to thinking/step ──
+            else if (data.type === 'director_task') {
+              const specialty = data.specialty || data.role || 'worker';
+              const taskStatus = data.status || 'running';
+              const taskLabel = `${specialty.toUpperCase()}${data.taskId ? ` [${data.taskId}]` : ''}`;
+              const statusEmoji = taskStatus === 'SUCCEEDED' ? '✅' : taskStatus === 'FAILED' ? '❌' : taskStatus === 'RETRYING' ? '🔄' : '⚙️';
+              const msg = `${statusEmoji} ${taskLabel}: ${taskStatus}${data.error ? ` — ${data.error}` : ''}${data.objective ? ` — ${data.objective.substring(0, 80)}` : ''}`;
+              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: msg, agent: specialty }]);
+              setCopilotStatus({ label: `${statusEmoji} ${taskLabel}: ${taskStatus}`, tone: taskStatus === 'FAILED' ? 'error' : 'work' });
+              // Update plan tasks status
+              if (data.taskId) {
+                setPlanTasks(prev => {
+                  const updated = prev.map(t => {
+                    if (t.id === data.taskId) {
+                      return { ...t, status: taskStatus === 'SUCCEEDED' ? 'completed' : taskStatus === 'FAILED' ? 'error' : 'in_progress', logSnippet: msg.substring(0, 60) };
+                    }
+                    return t;
+                  });
+                  // Advance next pending task to in_progress
+                  if (taskStatus === 'SUCCEEDED') {
+                    let activated = false;
+                    return updated.map(t => {
+                      if (!activated && t.status === 'pending') {
+                        activated = true;
+                        return { ...t, status: 'in_progress' };
+                      }
+                      return t;
+                    });
+                  }
+                  return updated;
+                });
+              }
+            }
+            // ── Director Verification: Show verification gate status ──
+            else if (data.type === 'director_verification') {
+              const vStatus = data.status || 'running';
+              const vEmoji = vStatus === 'SUCCEEDED' ? '✅' : vStatus === 'DELEGATING' ? '🔍' : '⚠️';
+              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: `${vEmoji} Final Verification Gate: ${vStatus}` }]);
+              setCopilotStatus({ label: `${vEmoji} Verification: ${vStatus}`, tone: 'work' });
+            }
+            // ── Director Complete: CRITICAL — Map to done, reset running state ──
+            else if (data.type === 'director_complete') {
+              const taskCount = data.taskCount || '?';
+              setPlanTasks(prev => prev.map(t => ({ ...t, status: 'completed' })));
+              setCopilotStatus({ label: `✅ Director completed — ${taskCount} tasks`, tone: 'success' });
+
+              const finalFiles = createdFilesTracker.length > 0 ? createdFilesTracker : files.map(f => f.path);
+              setCopilotMessages(prev => [
+                ...prev,
+                {
+                  role: 'assistant',
+                  kind: 'aistudio_card',
+                  model: 'Copilot Director (Gemini + Groq Cascade)',
+                  duration: `${Math.max(6, parseInt(taskCount) * 8 || 12)}s`,
+                  files: finalFiles,
+                  content: data.message || `🎉 Copilot Director completed ${taskCount} autonomous specialist task(s) with verification.`,
+                  summary: data.message || `Director completed ${taskCount} tasks`
+                }
+              ]);
+
+              await loadWorkspaceFiles(true);
+              setMilestonesExpanded(false);
+              if (activePathRef.current) {
+                runDiagnostics(activePathRef.current, contents[activePathRef.current] || '');
+              }
+              setWorkspaceMode('preview');
+            }
+            // ── Director Error: Show error and reset running state ──
+            else if (data.type === 'director_error') {
+              const errMsg = data.error || 'Director encountered an error';
+              setCopilotStatus({ label: `❌ ${errMsg.substring(0, 40)}`, tone: 'error' });
+              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: `❌ Director Error: ${errMsg}` }]);
+              setPlanTasks(prev => prev.map(t => t.status === 'in_progress' ? { ...t, status: 'error' } : t));
+            }
+            // ── Director Canceled: Show cancellation and reset ──
+            else if (data.type === 'director_canceled') {
+              setCopilotStatus({ label: '⏹ Director run canceled', tone: 'neutral' });
+              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: '⏹ Director run canceled. Completed changes remain in the workspace.' }]);
+              setPlanTasks(prev => prev.map(t => t.status === 'in_progress' ? { ...t, status: 'pending' } : t));
             }
             else if (data.type === 'plan' || data.type === 'plan_tasks') {
               const tasks = Array.isArray(data.tasks) ? data.tasks : (Array.isArray(data.plan?.tasks) ? data.plan.tasks : []);
@@ -2049,9 +1693,9 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
               const action = data.action;
               const label = STATUS_BY_ACTION[action] || `Executing ${action}...`;
               setCopilotStatus({ label, tone: 'work' });
-              if (data.thought) {
-                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: data.thought }]);
-              }
+              
+              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'tool', action: action, content: data.thought, label: label }]);
+              
               setPlanTasks(prev => {
                 let foundActive = false;
                 return prev.map(t => {
@@ -2062,6 +1706,17 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                   return t;
                 });
               });
+            }
+            else if (data.type === 'director_file_diff') {
+              const filePath = normalizePath(data.file || data.fullPath);
+              setCopilotMessages(prev => [...prev, {
+                role: 'assistant',
+                kind: 'file',
+                file: filePath,
+                content: `⚡ Surgical Diff: ${data.file} (${data.summary || 'modified'})`
+              }]);
+              setCopilotStatus({ label: `⚡ Patched ${data.file}`, tone: 'work' });
+              loadWorkspaceFiles();
             }
             else if (data.type === 'file_written' || data.type === 'file_changed' || data.type === 'file') {
               const rawPath = data.path || data.file;
@@ -2112,7 +1767,10 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
             else if (data.type === 'step') {
               const log = data.stepLog || {};
               if (log.thought || log.action) {
-                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'step', content: log.thought || log.action }]);
+                const safeContent = typeof log.thought === 'object' ? JSON.stringify(log.thought) :
+                                    typeof log.action === 'object' ? JSON.stringify(log.action) :
+                                    (log.thought || log.action || 'Processing step');
+                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'step', content: safeContent }]);
               }
             }
             else if (data.type === 'screenshot') {
@@ -2165,6 +1823,8 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
       }
     } finally {
       setRunning(false);
+      // Force-save session after every agent run completes to prevent data loss
+      setTimeout(() => saveCurrentSession(), 500);
     }
   };
 
@@ -2264,7 +1924,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
 
   const handleInstallMissingPackages = async (packagesToInstall) => {
     if (!Array.isArray(packagesToInstall) || packagesToInstall.length === 0) return;
-    showToast(`📦 Installing ${packagesToInstall.join(', ')} into project environment...`, 'info');
+    showToast(`📦 Adding ${packagesToInstall.join(', ')} to package.json...`, 'info');
     
     try {
       let pkgObj = {
@@ -2287,8 +1947,25 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
       });
 
       const updatedStr = JSON.stringify(pkgObj, null, 2);
-      await handleUpdatePackageJson(updatedStr);
-      showToast(`⚡ Installed ${packagesToInstall.join(', ')} into project environment!`, 'success');
+      const updated = await handleUpdatePackageJson(updatedStr);
+      if (!updated) {
+        showToast('Failed to update package.json — install aborted', 'error');
+        return;
+      }
+
+      // Actually install into the project environment via terminal
+      setTerminalOpen(true);
+      try {
+        await api.post('/terminal/exec', {
+          command: `npm install ${packagesToInstall.join(' ')}`,
+          projectId,
+          projectPath: '.',
+          timeout: 180000,
+        });
+        showToast(`⚡ Installed ${packagesToInstall.join(', ')} into project environment!`, 'success');
+      } catch (execErr) {
+        showToast(`Added to package.json — run npm install to apply (${execErr.message})`, 'warning');
+      }
     } catch (err) {
       showToast(`Failed to install packages: ${err.message}`, 'error');
     }
@@ -2447,7 +2124,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   useEffect(() => {
     const handleMessage = (e) => {
       if (!e.data || typeof e.data !== 'object') return;
-      if (iframeRef.current?.contentWindow && e.source !== iframeRef.current.contentWindow) return;
+      if (!iframeRef.current?.contentWindow || e.source !== iframeRef.current.contentWindow) return;
       if (e.data.channel && e.data.channel !== 'ai-dost-preview') return;
       if (e.data.type === 'RUNTIME_ERROR' || e.data.type === 'AUTO_FIX_ERROR') {
         const err = String(e.data.error || 'Unknown runtime error');
@@ -2638,151 +2315,48 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     }
   };
 
+  // Ctrl+Shift+P command palette (VS Code style)
+  const ideCommands = [
+    { label: 'File: Quick Open…', key: 'Ctrl+P', run: () => setQuickOpenOpen(true) },
+    { label: 'File: Save active file', key: 'Ctrl+S', run: () => saveActiveFile() },
+    { label: 'File: Save all files', run: () => saveAllFiles() },
+    { label: 'View: Find in Files…', key: 'Ctrl+Shift+F', run: () => setSearchOpen(true) },
+    { label: 'View: Toggle Terminal', run: () => setTerminalOpen(v => !v) },
+    { label: 'View: Toggle Sidebar', run: () => setSidebarOpen(v => !v) },
+    { label: 'View: Toggle Inspector', run: () => setInspectorOpen(v => !v) },
+    { label: 'View: Cycle Split / Code / Preview', key: 'Ctrl+\\', run: () => setWorkspaceMode(m => m === 'split' ? 'code' : m === 'code' ? 'preview' : 'split') },
+    { label: 'Run: Start project', key: 'Ctrl+Enter', run: () => handleReplitRun() },
+    { label: 'AI: Inline edit selection', key: 'Ctrl+K', run: () => triggerInlineEdit() },
+    { label: 'AI: New project wizard', run: () => openProjectWizard('') },
+    { label: 'Workspace: Refresh files', run: () => loadWorkspaceFiles(true) },
+    { label: 'Workspace: Packages manager', run: () => setPackagesModalOpen(true) },
+    { label: 'Workspace: Secrets (.env)', run: () => setSecretsModalOpen(true) },
+    { label: 'Workspace: Session history', run: () => setHistoryModalOpen(true) },
+    { label: 'Workspace: Snapshots', run: () => setSnapshotMenuOpen(true) },
+    { label: 'Deploy: Open deploy modal', run: () => setDeployModalOpen(true) },
+    { label: 'Debug: Visual Debugger', run: () => setVisualDebuggerOpen(true) },
+  ];
+
   return (
-    <div className="h-full w-full flex flex-col bg-canvas-base text-paper-100 select-none overflow-hidden font-sans">
+    <div className="h-full w-full flex flex-col bg-canvas-base text-paper-100 overflow-hidden font-sans">
       {/* ── TOP ACTION BAR (Linear/Cursor style header) ────────────────────────── */}
-      <header className="h-13 shrink-0 flex items-center justify-between px-4 bg-canvas-surface border-b border-border z-20">
-        {/* Left: Project identity + New Project button */}
-        <div className="flex items-center gap-3">
-          <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-accent text-white shadow-glow-sm">
-            <Code2 size={15} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xs font-bold text-paper-100 tracking-tight">{projectName}</h1>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-medium">
-                Live
-              </span>
-            </div>
-            <span className="text-[10px] text-ink-muted font-mono">React 19 • Express • Vite • SQLite</span>
-          </div>
-
-          <button
-            onClick={handleNewSession}
-            className="ml-2 flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 border border-border transition-all shadow-xs cursor-pointer"
-            title="Create a fresh new session & project (saves existing project to History)"
-          >
-            <Plus size={12} className="text-accent" /> New Project
-          </button>
-        </div>
-
-        {/* Center: Replit Central Run Button & Segmented Mode Switcher */}
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleReplitRun}
-            disabled={isReplitRunning}
-            className="flex items-center gap-2 px-4 py-1.5 rounded-md text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors cursor-pointer disabled:opacity-50"
-            title="Run Project (Ctrl+Enter)"
-          >
-            {isReplitRunning ? (
-              <>
-                <Loader2 size={13} className="animate-spin text-white" />
-                <span>Running...</span>
-              </>
-            ) : (
-              <>
-                <Play size={12} className="fill-white text-white" />
-                <span>Run</span>
-                <kbd className="text-[9px] font-mono opacity-80 bg-black/20 px-1 py-0.5 rounded">Ctrl+↵</kbd>
-              </>
-            )}
-          </button>
-
-          <div className="flex items-center bg-canvas-base p-1 rounded-lg border border-border shadow-inner">
-            <button
-              onClick={() => setWorkspaceMode('code')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
-                workspaceMode === 'code'
-                  ? 'bg-accent text-white shadow-glow-sm font-semibold'
-                  : 'text-ink-muted hover:text-paper-100'
-              }`}
-            >
-              <Code size={13} /> Code
-            </button>
-
-            <button
-              onClick={() => setWorkspaceMode('split')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
-                workspaceMode === 'split'
-                  ? 'bg-indigo-600 text-white shadow-md font-semibold'
-                  : 'text-ink-muted hover:text-paper-100'
-              }`}
-              title="Split View (Code & Live Preview side-by-side)"
-            >
-              <Columns2 size={13} /> Split
-            </button>
-
-            <button
-              onClick={() => setWorkspaceMode('preview')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
-                workspaceMode === 'preview'
-                  ? 'bg-emerald-600 text-white shadow-md font-semibold'
-                  : 'text-ink-muted hover:text-paper-100'
-              }`}
-            >
-              <Eye size={13} /> Preview
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            </button>
-          </div>
-        </div>
-
-        {/* Right: Quick Launchers */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setHistoryModalOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 border border-border transition-all cursor-pointer shadow-xs"
-            title="Copilot IDE Session History"
-          >
-            <History size={13} className="text-accent" />
-            <span>History</span>
-            <span className="px-1.5 py-0.2 rounded-full text-[9px] font-mono bg-accent/15 text-accent border border-accent/20">
-              {sessions.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setPackagesModalOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 border border-border transition-all cursor-pointer shadow-xs"
-            title="Replit Package Manager (npm dependencies)"
-          >
-            <Package size={13} className="text-indigo-400" /> Packages
-          </button>
-
-          <button
-            onClick={() => setSecretsModalOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 border border-border transition-all cursor-pointer shadow-xs"
-            title="Replit Secrets (.env environment variables)"
-          >
-            <KeyRound size={13} className="text-amber-400" /> Secrets
-          </button>
-
-          <button
-            onClick={() => openProjectWizard()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated text-accent border border-accent/20 hover:border-accent/40 transition-all cursor-pointer shadow-xs"
-            title="Launch Project Architect Wizard"
-          >
-            <Code2 size={13} className="text-accent" /> Project setup
-          </button>
-
-          <button
-            onClick={saveAllFiles}
-            disabled={dirtyPaths.size === 0}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 border border-border transition-all disabled:opacity-40 cursor-pointer"
-            title="Save all modified files"
-          >
-            <SaveAll size={13} className="text-emerald-500" />
-            Save{dirtyPaths.size > 0 ? ` (${dirtyPaths.size})` : ''}
-          </button>
-
-          <a
-            href={`${BACKEND}/api/preview/${projectId}/zip`}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 border border-border transition-all cursor-pointer"
-            title="Download ZIP with Windows & Mac double-click launchers"
-          >
-            <Download size={13} className="text-accent" /> ZIP
-          </a>
-        </div>
-      </header>
+      <IdeHeader
+        projectName={projectName}
+        handleNewSession={handleNewSession}
+        handleReplitRun={handleReplitRun}
+        isReplitRunning={isReplitRunning}
+        workspaceMode={workspaceMode}
+        setWorkspaceMode={setWorkspaceMode}
+        setHistoryModalOpen={setHistoryModalOpen}
+        sessions={sessions}
+        setPackagesModalOpen={setPackagesModalOpen}
+        setSecretsModalOpen={setSecretsModalOpen}
+        openProjectWizard={openProjectWizard}
+        saveAllFiles={saveAllFiles}
+        dirtyPaths={dirtyPaths}
+        projectId={projectId}
+        backendUrl={BACKEND}
+      />
 
       {/* ── 2. MASTER 2-COLUMN SPLIT (Left: AI Copilot | Right: Code/Preview) ───── */}
       <div className="flex-1 flex overflow-hidden min-h-0">
@@ -2945,6 +2519,17 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                   </div>
                 );
               }
+              if (m.kind === 'tool') {
+                return (
+                  <div key={i} className="flex gap-2.5 items-center text-[11px] text-fuchsia-300 font-medium bg-fuchsia-950/30 px-3.5 py-2.5 rounded-xl border border-fuchsia-800/40 shadow-sm animate-pulse">
+                    <Zap size={14} className="text-fuchsia-400 shrink-0" />
+                    <div className="flex flex-col">
+                      <span className="font-bold text-fuchsia-400 text-[10px] uppercase tracking-wider mb-0.5">Autonomous Action</span>
+                      <span className="truncate opacity-90">{typeof m.label === 'object' ? JSON.stringify(m.label) : String(m.label || '')}</span>
+                    </div>
+                  </div>
+                );
+              }
               if (m.kind === 'file') {
                 return (
                   <div key={i} className="flex items-center gap-2 text-xs text-emerald-300 font-mono bg-emerald-950/20 px-3 py-2 rounded-xl border border-emerald-900/30">
@@ -2957,7 +2542,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                 return (
                   <div key={i} className="flex items-center gap-2 text-xs text-indigo-300 font-mono bg-indigo-950/20 px-3 py-2 rounded-xl border border-indigo-900/30">
                     <Zap size={13} className="text-indigo-400 shrink-0" />
-                    <span className="truncate">{m.content}</span>
+                    <span className="truncate">{typeof m.content === 'object' ? JSON.stringify(m.content) : String(m.content || '')}</span>
                   </div>
                 );
               }
@@ -3222,7 +2807,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                     isModified={dirtyPaths.has(activePath)}
                     isSaving={saving}
                     onSave={saveActiveFile}
-                    onFormat={() => formatFile(activePath)}
+                    onFormat={() => formatFile()}
                     onTogglePreview={() => setWorkspaceMode(workspaceMode === 'preview' ? 'code' : 'preview')}
                     showPreview={workspaceMode === 'preview' || workspaceMode === 'split'}
                     onToggleDiff={() => setDiffModalOpen(true)}
@@ -3445,344 +3030,39 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
             );
 
             const renderPreviewPane = () => (
-              <div className="flex-1 flex flex-col overflow-hidden min-h-0 bg-canvas-base w-full h-full">
-                {/* Browser Address Bar & Device Toolbar */}
-                <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-canvas-surface border-b border-border shrink-0">
-                  <div className="flex items-center gap-2">
-                    <span className="flex items-center gap-1 text-xs font-bold text-accent uppercase tracking-wider font-mono">
-                      <Eye size={13} /> Preview
-                    </span>
-
-                    {/* Dev Server Live Status Badge */}
-                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-canvas-base border border-border text-[10px] font-mono">
-                      {devServerStatus.state === 'READY' ? (
-                        <span className="flex items-center gap-1 text-signal-success font-medium">
-                          <span className="w-1.5 h-1.5 rounded-full bg-signal-success animate-pulse" />
-                          Live (:{devServerStatus.hostPort || '5173'})
-                        </span>
-                      ) : devServerStatus.state === 'STARTING' || devServerStatus.state === 'CREATING' ? (
-                        <span className="flex items-center gap-1 text-amber-400 font-medium">
-                          <Loader2 size={11} className="animate-spin" />
-                          Booting...
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-paper-200">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                          In-Browser
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Dev Server Actions */}
-                    <div className="flex items-center gap-1">
-                      {devServerStatus.state !== 'READY' && (
-                        <button
-                          onClick={handleStartDevServer}
-                          disabled={devServerLoading}
-                          className="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-all cursor-pointer flex items-center gap-1"
-                          title="Start Real Dev Server"
-                        >
-                          <Play size={10} className="fill-emerald-500" /> Start
-                        </button>
-                      )}
-                      {devServerStatus.state === 'READY' && (
-                        <>
-                          <button
-                            onClick={handleRestartDevServer}
-                            disabled={devServerLoading}
-                            className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-sky-500/15 text-sky-600 dark:text-sky-300 border border-sky-500/30 hover:bg-sky-500/25 transition-all cursor-pointer flex items-center gap-1"
-                            title="Restart Dev Server"
-                          >
-                            <RotateCcw size={10} />
-                          </button>
-                          <button
-                            onClick={handleStopDevServer}
-                            className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/15 text-red-600 dark:text-red-300 border border-red-500/30 hover:bg-red-500/25 transition-all cursor-pointer flex items-center gap-1"
-                            title="Stop Dev Server"
-                          >
-                            <Square size={10} className="fill-red-500" />
-                          </button>
-                        </>
-                      )}
-                    </div>
-
-                    {/* Responsive Device Switcher */}
-                    <div className="flex items-center bg-canvas-base rounded-md p-0.5 border border-border">
-                      <button
-                        onClick={() => setPreviewDevice('desktop')}
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-medium flex items-center gap-1 transition-all cursor-pointer ${
-                          previewDevice === 'desktop' ? 'bg-accent text-white font-semibold' : 'text-ink-muted hover:text-paper-100'
-                        }`}
-                        title="Desktop View"
-                      >
-                        <Monitor size={11} />
-                      </button>
-                      <button
-                        onClick={() => setPreviewDevice('tablet')}
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-medium flex items-center gap-1 transition-all cursor-pointer ${
-                          previewDevice === 'tablet' ? 'bg-accent text-white font-semibold' : 'text-ink-muted hover:text-paper-100'
-                        }`}
-                        title="Tablet View"
-                      >
-                        <Tablet size={11} />
-                      </button>
-                      <button
-                        onClick={() => setPreviewDevice('mobile')}
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-medium flex items-center gap-1 transition-all cursor-pointer ${
-                          previewDevice === 'mobile' ? 'bg-accent text-white font-semibold' : 'text-ink-muted hover:text-paper-100'
-                        }`}
-                        title="Mobile View"
-                      >
-                        <Smartphone size={11} />
-                      </button>
-                    </div>
-
-                    {/* Zoom Selector */}
-                    <div className="hidden sm:flex items-center bg-canvas-base rounded-md p-0.5 border border-border text-[9px] font-mono">
-                      {[100, 90, 80].map(zoom => (
-                        <button
-                          key={zoom}
-                          onClick={() => setPreviewZoom(zoom)}
-                          className={`px-1.5 py-0.5 rounded transition-all cursor-pointer ${
-                            previewZoom === zoom 
-                              ? 'bg-accent text-white font-bold shadow-xs' 
-                              : 'text-ink-muted hover:text-paper-100'
-                          }`}
-                          title={`Scale preview canvas to ${zoom}%`}
-                        >
-                          {zoom}%
-                        </button>
-                      ))}
-                    </div>
-
-                    <button
-                      onClick={() => {
-                        const next = !inspectorActive;
-                        setInspectorActive(next);
-                        // Tell the iframe about the inspector state change
-                        // eslint-disable-next-line react-hooks/refs
-                        if (iframeRef.current?.contentWindow) {
-                          iframeRef.current.contentWindow.postMessage({ type: 'SET_INSPECTOR_ACTIVE', active: next }, '*');
-                        }
-                        if (next) {
-                          showToast('🔍 Inspector ON — click any element in the preview to edit it with AI', 'info');
-                        } else {
-                          setSelectedInspectorElement(null);
-                        }
-                      }}
-                      className={`px-2 py-0.5 rounded-md text-[10px] font-medium flex items-center gap-1 border transition-all cursor-pointer ${
-                        inspectorActive
-                          ? 'bg-amber-500/20 text-amber-500 dark:text-amber-300 border-amber-500/40 shadow-[0_0_8px_rgba(245,158,11,0.2)]'
-                          : 'bg-canvas-subtle text-ink-muted border-border hover:text-paper-100 hover:border-border-strong'
-                      }`}
-                      title={inspectorActive ? 'Inspector Active — click any element to edit' : 'Enable Visual Inspector'}
-                    >
-                      <Crosshair size={11} /> {inspectorActive ? 'Inspecting...' : 'Inspect'}
-                    </button>
-
-                    <button
-                      onClick={() => setVisualDebuggerOpen((open) => !open)}
-                      className={`px-2 py-0.5 rounded-md text-[10px] font-medium flex items-center gap-1 border transition-all cursor-pointer ${
-                        visualDebuggerOpen
-                          ? 'bg-sky-500/20 text-sky-300 border-sky-500/40'
-                          : 'bg-canvas-subtle text-ink-muted border-border hover:text-paper-100 hover:border-border-strong'
-                      }`}
-                      title="Run zero-token DOM layout diagnostics"
-                    >
-                      <Eye size={11} /> {visualDebuggerOpen ? 'QA Open' : 'Zero-Token QA'}
-                    </button>
-                  </div>
-
-                  {/* Actions: Source Mode, Refresh, Popout & Deploy */}
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => {
-                        setPreviewSourceMode(m => {
-                          if (m === 'auto') return 'live';
-                          if (m === 'live') return 'mock';
-                          return 'auto';
-                        });
-                      }}
-                      className="px-2 py-0.5 rounded text-[9px] font-medium bg-canvas-subtle hover:bg-canvas-elevated text-paper-100 border border-border transition-colors cursor-pointer"
-                      title="Toggle: Auto -> Live Proxy -> In-Browser"
-                    >
-                      {previewSourceMode === 'auto' ? 'Mode: Auto' : previewSourceMode === 'live' ? 'Mode: Proxy' : 'Mode: In-Browser'}
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        if (iframeRef.current) {
-                          if (previewSourceMode === 'live' || (previewSourceMode === 'auto' && devServerStatus.state === 'READY')) {
-                            iframeRef.current.src = `/api/preview/${projectId}?t=${Date.now()}`;
-                          } else {
-                            iframeRef.current.srcdoc = generateLiveAppHtml(files, contents, inspectorActive);
-                          }
-                        }
-                        showToast('Preview refreshed', 'info');
-                      }}
-                      className="p-1 rounded-md bg-canvas-subtle hover:bg-canvas-elevated text-ink-muted hover:text-paper-100 border border-border transition-colors cursor-pointer"
-                      title="Reload Preview"
-                    >
-                      <RefreshCw size={12} />
-                    </button>
-
-                    <button
-                      onClick={() => window.open(`/api/preview/${projectId}`, '_blank')}
-                      className="p-1 rounded-md bg-canvas-subtle hover:bg-canvas-elevated text-ink-muted hover:text-paper-100 border border-border transition-colors cursor-pointer"
-                      title="Open preview in new tab"
-                    >
-                      <ExternalLink size={12} />
-                    </button>
-
-                    <button
-                      onClick={() => setDeployModalOpen(true)}
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/50 shadow-xs transition-all cursor-pointer"
-                      title="Deploy live to Vercel/Netlify"
-                    >
-                      <Zap size={11} className="fill-white" /> Deploy
-                    </button>
-                  </div>
-                </div>
-
-                {/* Visual QA Inspector Drawer */}
-                {visualDebuggerOpen && (
-                  <div className="px-4 py-2 bg-canvas-base border-b border-border animate-in fade-in">
-                    <VisualDebugger
-                      iframeRef={iframeRef}
-                      onTriggerFix={(p) => handleSend(p)}
-                      isRepairing={running}
-                    />
-                  </div>
-                )}
-
-                {/* Preview Viewport Canvas */}
-                <div className="flex-1 min-h-0 w-full h-full p-2 bg-canvas-base overflow-auto flex justify-center items-stretch">
-                  <div
-                    className="h-full bg-canvas-surface rounded-xl overflow-hidden shadow-surface-card border border-border transition-all duration-300 relative flex flex-col"
-                    style={{
-                      width: previewDevice === 'mobile' ? 375 : previewDevice === 'tablet' ? 768 : '100%',
-                      maxWidth: '100%',
-                      margin: '0 auto',
-                    }}
-                  >
-                    <div
-                      className="w-full h-full relative"
-                      style={
-                        previewZoom !== 100
-                          ? {
-                              width: `${100 / (previewZoom / 100)}%`,
-                              height: `${100 / (previewZoom / 100)}%`,
-                              transform: `scale(${previewZoom / 100})`,
-                              transformOrigin: previewDevice === 'desktop' ? 'top left' : 'top center',
-                            }
-                          : { width: '100%', height: '100%' }
-                      }
-                    >
-                      {/* Visual Healer — analyzes the preview iframe for UI issues */}
-                      <VisualHealer iframeRef={iframeRef} />
-                      <iframe
-                        ref={iframeRef}
-                        src={
-                          (previewSourceMode === 'live' || (previewSourceMode === 'auto' && devServerStatus.state === 'READY'))
-                            ? `/api/preview/${projectId}`
-                            : undefined
-                        }
-                        srcDoc={
-                          (previewSourceMode === 'mock' || (previewSourceMode === 'auto' && devServerStatus.state !== 'READY'))
-                            ? generateLiveAppHtml(files, contents, inspectorActive)
-                            : undefined
-                        }
-                        className="w-full h-full border-0 bg-canvas-surface"
-                        title="Live App"
-                        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                      />
-                      {/* Auto-Fix Banner (Low Confidence Heal Suggestion) */}
-                      {autoFixBanner && (
-                        <div className="absolute top-2 left-4 right-4 z-30 bg-[#12172a]/95 border border-amber-500/40 rounded-xl p-3 shadow-2xl backdrop-blur-md animate-in slide-in-from-top-2 duration-200">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-start gap-2.5 min-w-0">
-                              <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
-                                <Wrench size={14} />
-                              </div>
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-semibold text-amber-300">Self-Healing Suggestion</span>
-                                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                                    {Math.round((autoFixBanner.confidence || 0) * 100)}% confidence
-                                  </span>
-                                </div>
-                                <p className="text-[11px] text-amber-200/80 mt-1">{autoFixBanner.explanation}</p>
-                                <p className="text-[10px] text-zinc-400 font-mono mt-0.5 line-clamp-1">
-                                  Error: {String(autoFixBanner.error).slice(0, 100)}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <button
-                                onClick={handleApplyBannerFix}
-                                className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-semibold shadow flex items-center gap-1.5 transition-all cursor-pointer"
-                              >
-                                <Check size={12} /> Apply Fix
-                              </button>
-                              <button
-                                onClick={handleDismissBannerFix}
-                                className="p-1.5 hover:bg-white/10 text-zinc-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-                                title="Dismiss suggestion"
-                              >
-                                <X size={14} />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Runtime Error Overlay */}
-                      {runtimeError && (
-                        <div className="absolute bottom-4 left-4 right-4 z-20 bg-[#1e1014]/95 border border-red-500/40 rounded-xl p-3 shadow-2xl backdrop-blur-md animate-in slide-in-from-bottom-2 duration-200">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-start gap-2.5 min-w-0">
-                              <div className="w-6 h-6 rounded-lg bg-red-500/20 text-red-400 flex items-center justify-center shrink-0 mt-0.5">
-                                <AlertTriangle size={14} />
-                              </div>
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-semibold text-red-300">Preview Runtime Error</span>
-                                  <span className="text-[10px] text-red-400/70 font-mono">Live Crash</span>
-                                  {healingInProgress && (
-                                    <span className="text-[9px] text-amber-400 font-medium flex items-center gap-1 animate-pulse">
-                                      <Loader2 size={10} className="animate-spin" /> Auto-healing...
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-xs text-red-200/90 font-mono mt-0.5 line-clamp-2 break-all">
-                                  {runtimeError.error}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <button
-                                onClick={() => handleAutoFixRuntimeError(runtimeError.error)}
-                                disabled={running || healingInProgress}
-                                className="px-2.5 py-1.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white rounded-lg text-xs font-semibold shadow flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
-                              >
-                                <Sparkles size={12} />
-                                {healingInProgress ? 'Healing...' : 'Auto-Fix with Copilot'}
-                              </button>
-                              <button
-                                onClick={() => setRuntimeError(null)}
-                                className="p-1 hover:bg-white/10 text-zinc-400 hover:text-white rounded-md transition-colors"
-                                title="Dismiss"
-                              >
-                                <X size={14} />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <PreviewPane
+                devServerStatus={devServerStatus}
+                devServerLoading={devServerLoading}
+                handleStartDevServer={handleStartDevServer}
+                handleRestartDevServer={handleRestartDevServer}
+                handleStopDevServer={handleStopDevServer}
+                previewDevice={previewDevice}
+                setPreviewDevice={setPreviewDevice}
+                previewZoom={previewZoom}
+                setPreviewZoom={setPreviewZoom}
+                inspectorActive={inspectorActive}
+                setInspectorActive={setInspectorActive}
+                setSelectedInspectorElement={setSelectedInspectorElement}
+                visualDebuggerOpen={visualDebuggerOpen}
+                setVisualDebuggerOpen={setVisualDebuggerOpen}
+                previewSourceMode={previewSourceMode}
+                setPreviewSourceMode={setPreviewSourceMode}
+                iframeRef={iframeRef}
+                projectId={projectId}
+                files={files}
+                contents={contents}
+                showToast={showToast}
+                setDeployModalOpen={setDeployModalOpen}
+                handleSend={handleSend}
+                running={running}
+                autoFixBanner={autoFixBanner}
+                handleApplyBannerFix={handleApplyBannerFix}
+                handleDismissBannerFix={handleDismissBannerFix}
+                runtimeError={runtimeError}
+                setRuntimeError={setRuntimeError}
+                handleAutoFixRuntimeError={handleAutoFixRuntimeError}
+                healingInProgress={healingInProgress}
+              />
             );
 
             if (workspaceMode === 'code') {
@@ -3906,49 +3186,41 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
         onDuplicateSession={handleDuplicateSession}
       />
 
-      {/* ── 4. STATUS BAR ──────────────────────────────────────────────────────── */}
-      <footer className="h-6 shrink-0 flex items-center justify-between px-4 bg-canvas-surface border-t border-border text-[10px] text-ink-muted font-mono">
-        <div className="flex items-center gap-4">
-          <span className="flex items-center gap-1.5 text-paper-200">
-            <GitBranch size={12} className="text-accent" /> main
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            {activePath ? activePath : 'No active file'}
-          </span>
-          <button
-            onClick={handleAutoFixProblems}
-            disabled={running || problems === 0}
-            className={`flex items-center gap-1.5 px-2 py-0.5 rounded transition-all ${
-              problems > 0 
-                ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 font-bold border border-amber-500/30 cursor-pointer shadow-xs' 
-                : 'text-emerald-400 font-medium cursor-default'
-            }`}
-            title={problems > 0 ? 'Click to auto-fix and verify all problems with Copilot AI' : 'Zero problems detected'}
-          >
-            {problems > 0 ? (
-              <>
-                <AlertCircle size={11} className="text-amber-400" />
-                <span>⚠ {problems} problems</span>
-                <span className="ml-1 px-1.5 py-0.2 rounded bg-amber-500/25 text-[9px] uppercase tracking-wider text-amber-300 border border-amber-500/30">Auto-Fix ⚡</span>
-              </>
-            ) : (
-              <>
-                <Check size={11} className="text-emerald-400" />
-                <span>✓ 0 errors</span>
-              </>
-            )}
-          </button>
-        </div>
+      {/* IDE Overlays — QuickOpen (Ctrl+P), CommandPalette (Ctrl+Shift+P), SearchOverlay (Ctrl+Shift+F) */}
+      {quickOpenOpen && (
+        <QuickOpen
+          files={files}
+          onPick={(f) => { setQuickOpenOpen(false); selectFile(f.path); }}
+          onClose={() => setQuickOpenOpen(false)}
+        />
+      )}
+      {paletteOpen && (
+        <CommandPalette
+          commands={ideCommands}
+          onRun={(c) => { setPaletteOpen(false); if (c && typeof c.run === 'function') c.run(); }}
+          onClose={() => setPaletteOpen(false)}
+        />
+      )}
+      {searchOpen && (
+        <SearchOverlay
+          q={searchQuery}
+          onQueryChange={setSearchQuery}
+          caseSensitive={searchCase}
+          onCaseChange={setSearchCase}
+          results={searchResults}
+          searching={searching}
+          onPick={(r) => { setSearchOpen(false); selectFile(r.path); }}
+          onClose={() => setSearchOpen(false)}
+        />
+      )}
 
-        <div className="flex items-center gap-3">
-          <span className="text-ink-muted flex items-center gap-1">
-            <Zap size={10} className="text-emerald-500" /> Groq + Gemini Cascade
-          </span>
-          <span>UTF-8</span>
-          <span className="text-paper-200">AI-Dost v3.0</span>
-        </div>
-      </footer>
+      {/* ── 4. STATUS BAR ──────────────────────────────────────────────────────── */}
+      <IdeFooter
+        activePath={activePath}
+        handleAutoFixProblems={handleAutoFixProblems}
+        running={running}
+        problems={problems}
+      />
     </div>
   );
 }

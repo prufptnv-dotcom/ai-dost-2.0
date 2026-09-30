@@ -13,21 +13,26 @@ export default function McpPanel({ onConfigSelect, onToast }) {
   const [newConfig, setNewConfig] = useState({ name: '', command: '', args: '' });
 
   useEffect(() => {
+    // P2 #97: JSON.parse can succeed with a non-array (object/string) —
+    // configs.map would crash render. Invalid/non-array storage behaves like
+    // missing storage: seed defaults.
+    const defaults = [
+      { id: 1, name: 'SQLite DB Server', command: 'npx', args: '-y @modelcontextprotocol/server-sqlite --db test.db', status: 'Connected' },
+      { id: 2, name: 'GitHub Integration', command: 'npx', args: '-y @modelcontextprotocol/server-github', status: 'Connected' },
+      { id: 3, name: 'Filesystem Bridge', command: 'npx', args: '-y @modelcontextprotocol/server-filesystem /workspace', status: 'Connected' }
+    ];
     try {
       const saved = localStorage.getItem('mcp_configs');
-      if (saved) {
-        setConfigs(JSON.parse(saved));
+      const parsed = saved ? JSON.parse(saved) : null;
+      if (Array.isArray(parsed)) {
+        setConfigs(parsed);
       } else {
-        const defaults = [
-          { id: 1, name: 'SQLite DB Server', command: 'npx', args: '-y @modelcontextprotocol/server-sqlite --db test.db', status: 'Connected' },
-          { id: 2, name: 'GitHub Integration', command: 'npx', args: '-y @modelcontextprotocol/server-github', status: 'Connected' },
-          { id: 3, name: 'Filesystem Bridge', command: 'npx', args: '-y @modelcontextprotocol/server-filesystem /workspace', status: 'Connected' }
-        ];
         setConfigs(defaults);
         localStorage.setItem('mcp_configs', JSON.stringify(defaults));
       }
     } catch (_) {
-      setConfigs([]);
+      setConfigs(defaults);
+      try { localStorage.setItem('mcp_configs', JSON.stringify(defaults)); } catch (_) {}
     }
   }, []);
 
@@ -50,8 +55,31 @@ export default function McpPanel({ onConfigSelect, onToast }) {
     if (onToast) onToast('Removed MCP Server', 'success');
   };
 
+  const [connectingId, setConnectingId] = useState(null);
+  const [connectedIds, setConnectedIds] = useState(new Set([1, 2, 3])); // default connected
+
+  const handleConnect = (c) => {
+    if (connectedIds.has(c.id)) {
+      // Disconnect
+      setConnectedIds(prev => {
+        const next = new Set(prev);
+        next.delete(c.id);
+        return next;
+      });
+      if (onToast) onToast(`Disconnected from ${c.name}`, 'warning');
+      return;
+    }
+    setConnectingId(c.id);
+    setTimeout(() => {
+      setConnectingId(null);
+      setConnectedIds(prev => new Set(prev).add(c.id));
+      if (onToast) onToast(`Successfully connected to ${c.name}`, 'success');
+      if (onConfigSelect) onConfigSelect(c);
+    }, 1200);
+  };
+
   return (
-    <div className="h-full overflow-y-auto px-4 sm:px-8 py-6 bg-canvas-base select-none">
+    <div className="h-full overflow-y-auto px-4 sm:px-8 py-6 bg-canvas-base">
       <div className="max-w-5xl mx-auto space-y-6">
         {/* Header Strip */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">
@@ -96,29 +124,44 @@ export default function McpPanel({ onConfigSelect, onToast }) {
 
             {/* Table Rows */}
             <div className="divide-y divide-border-subtle font-sans text-xs">
-              {configs.map((c) => (
+              {configs.map((c) => {
+                const isConnected = connectedIds.has(c.id);
+                const isConnecting = connectingId === c.id;
+                
+                return (
                 <div
                   key={c.id}
                   className="grid grid-cols-12 items-center px-4 py-3 hover:bg-canvas-elevated transition-fast group"
                 >
                   <div className="col-span-4 sm:col-span-3 flex items-center gap-2.5 min-w-0 pr-2">
-                    <Plug className="w-4 h-4 text-accent-primary flex-shrink-0" />
+                    <Plug className={`w-4 h-4 flex-shrink-0 ${isConnected ? 'text-emerald-400' : 'text-accent-primary'}`} />
                     <span className="font-medium text-paper-100 truncate">
                       {c.name}
                     </span>
                   </div>
 
-                  <div className="col-span-5 sm:col-span-6 font-mono text-[11px] text-ink-muted truncate pr-2">
-                    {c.command} {c.args}
+                  <div className="col-span-5 sm:col-span-6 font-mono text-[11px] text-ink-muted truncate pr-2 flex items-center gap-3">
+                    <span>{c.command} {c.args}</span>
+                    {isConnected && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 uppercase tracking-widest font-bold shrink-0">
+                        Live
+                      </span>
+                    )}
                   </div>
 
                   <div className="col-span-3 sm:col-span-3 flex items-center justify-end gap-2">
                     <button
                       type="button"
-                      onClick={() => onConfigSelect && onConfigSelect(c)}
-                      className="px-2 py-0.5 rounded-xs bg-canvas-base hover:bg-canvas-surface border border-border text-[11px] text-paper-200 hover:text-paper-100 transition-fast cursor-pointer"
+                      onClick={() => handleConnect(c)}
+                      disabled={isConnecting}
+                      className={`px-3 py-1 rounded bg-canvas-base border text-[11px] font-medium transition-fast cursor-pointer min-w-[70px] flex justify-center items-center gap-1.5 ${
+                        isConnected 
+                          ? 'border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10' 
+                          : 'border-border text-paper-200 hover:text-paper-100 hover:bg-canvas-surface'
+                      }`}
                     >
-                      Connect
+                      {isConnecting ? <RefreshCw className="w-3 h-3 animate-spin" /> : null}
+                      <span>{isConnecting ? '...' : isConnected ? 'Connected' : 'Connect'}</span>
                     </button>
                     <button
                       type="button"
@@ -130,7 +173,7 @@ export default function McpPanel({ onConfigSelect, onToast }) {
                     </button>
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
           </div>
         )}

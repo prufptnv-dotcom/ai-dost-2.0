@@ -6,3 +6,9 @@ node_modules
 dist
 build
 .env.local
+# Live secrets must never enter a build context (#188)
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example

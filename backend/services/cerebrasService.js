@@ -1,5 +1,6 @@
 const logger = require('../logger');
 const { RobustApiClient } = require('./apiClient');
+const { withQualityStandard } = require('./outputQualityStandard');
 
 class CerebrasService {
     constructor() {
@@ -81,7 +82,7 @@ Key Response Guidelines:
 
             const messagesPayload = [];
             if (systemPrompt) {
-                messagesPayload.push({ role: 'system', content: systemPrompt });
+                messagesPayload.push({ role: 'system', content: withQualityStandard(systemPrompt) });
             }
             if (history && history.length > 0) {
                 history.forEach(h => {

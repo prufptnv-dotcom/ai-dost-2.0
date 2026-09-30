@@ -107,7 +107,8 @@ class ProjectGraphService {
     } catch (_) {}
 
     // Check disk for generated downloads (documents, research)
-    const downloadsDir = path.resolve(__dirname, '../../frontend/public/downloads');
+    // P2 #178: shared resolver — hard-coded frontend path missed Docker docs
+    const downloadsDir = require('./downloadsDir').resolveDownloadsDir();
     let diskDownloads = [];
     if (fs.existsSync(downloadsDir)) {
       try {

@@ -3,6 +3,7 @@ const { EventEmitter } = require('events');
 const crypto = require('crypto');
 const sandboxManager = require('./SandboxManager');
 const devServerManager = require('./devServerManager');
+const { upgradeGuard } = require('../middleware/localApiGuard');
 
 class SandboxWebSocketServer extends EventEmitter {
   constructor(server) {
@@ -11,6 +12,16 @@ class SandboxWebSocketServer extends EventEmitter {
     server.on('upgrade', (request, socket, head) => {
       const pathname = (request.url || '').split('?')[0];
       if (pathname === '/api/sandbox/ws') {
+        // #26: claim the socket so the catch-all upgrade handler skips it
+        socket.__upgradeHandled = true;
+        // #25: raw WS bypasses Express apiGuard — apply the same origin/IP
+        // bar before upgrading (create/exec/write/dev:* live behind this).
+        const gate = upgradeGuard(request, 'api');
+        if (!gate.allowed) {
+          console.warn(`[SandboxWS] Upgrade rejected (${gate.reason}) from ${socket.remoteAddress || 'unknown'}`);
+          socket.destroy();
+          return;
+        }
         this.wss.handleUpgrade(request, socket, head, (ws) => {
           this.wss.emit('connection', ws, request);
         });

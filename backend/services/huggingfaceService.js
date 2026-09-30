@@ -69,7 +69,7 @@ class HuggingFaceService {
                     : {
                         inputs: `<|user|>\n${message}\n<|assistant|>\n`,
                         parameters: {
-                            max_new_tokens: 500,
+                            max_new_tokens: 2048,
                             temperature: 0.7
                         },
                         options: {

@@ -1,0 +1,13 @@
+# P3 #189: keep the committed vector store and scratch scripts out of the
+# image — compose mounts a named volume at /app/chroma_db anyway, and the
+# one-shot scripts (fix/clean_main/inspect) are dev tools, not runtime.
+__pycache__/
+*.pyc
+.venv/
+venv/
+chroma_db/
+fix.py
+clean_main.py
+inspect_chroma.py
+*.bak
+.env

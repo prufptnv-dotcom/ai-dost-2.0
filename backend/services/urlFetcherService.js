@@ -13,6 +13,8 @@
 
 const dns = require('dns').promises;
 const net = require('net');
+const http = require('http');
+const https = require('https');
 const logger = require('../logger');
 const { config } = require('../config/webAccessConfig');
 
@@ -184,6 +186,60 @@ async function validateUrlForSsrf(targetUrl) {
 }
 
 /**
+ * P3 #28 — DNS pinning for the actual request.
+ *
+ * validateUrlForSsrf() resolves the hostname once, but the old code then called
+ * fetch(currentUrl) which re-resolved DNS independently: an attacker who
+ * controls the authoritative DNS could answer the validation lookup with a
+ * public IP and the fetch lookup with 169.254.169.254 / 127.0.0.1 (classic
+ * rebinding TOCTOU). A custom `lookup` passed to http(s).request forces the
+ * socket onto the exact IP(s) that passed validation, for every redirect hop.
+ */
+function makePinnedLookup(pinnedIps) {
+  const ips = (Array.isArray(pinnedIps) ? pinnedIps : []).filter(ip => net.isIP(ip));
+  return function pinnedLookup(hostname, options, callback) {
+    const opts = (typeof options === 'function' || !options) ? {} : options;
+    let pool = ips;
+    if (opts.family === 4 || opts.family === 6) {
+      pool = pool.filter(ip => (opts.family === 4 ? net.isIPv4(ip) : net.isIPv6(ip)));
+    }
+    if (!pool.length) {
+      // Fail closed: never fall back to a fresh (unvalidated) DNS resolution.
+      return callback(new Error(`SSRF pin failure: no validated IP available for '${hostname}'`));
+    }
+    const address = pool[0];
+    const family = net.isIPv6(address) ? 6 : 4;
+    if (opts.all) return callback(null, [{ address, family }]);
+    return callback(null, address, family);
+  };
+}
+
+/**
+ * GET via http/https with a pinned lookup (see makePinnedLookup).
+ * Resolves to a standard http.IncomingMessage (statusCode / headers / stream).
+ */
+function pinnedRequest(urlString, { pinnedIps, headers, signal }) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlString);
+    const lib = u.protocol === 'https:' ? https : http;
+    const req = lib.request(u, {
+      method: 'GET',
+      headers,
+      signal,
+      lookup: makePinnedLookup(pinnedIps)
+    }, (res) => resolve(res));
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+/** Drain + release a response we are not going to read fully. */
+function discardResponse(res) {
+  try { res.resume(); } catch (_) {}
+  try { res.destroy(); } catch (_) {}
+}
+
+/**
  * Extracts readable text/markdown from raw HTML.
  * Strips scripts, styles, forms, iframes, and noisy UI markup.
  * @param {string} html
@@ -285,35 +341,37 @@ async function fetchSafeUrl(targetUrl, options = {}) {
     const timeoutTimer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      // 2. Fetch with manual redirect control
-      const response = await fetch(currentUrl, {
-        method: 'GET',
+      // 2. Fetch with manual redirect control.
+      // P3 #28: socket is pinned to the validated IP (no second DNS lookup).
+      // P3 #29: the abort timer stays armed through the body read — a slow-drip
+      // server can no longer hold the connection open forever after headers.
+      const response = await pinnedRequest(currentUrl, {
+        pinnedIps: ssrfCheck.resolvedIps,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 AI-Dost-Bot/2.0',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5',
           'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8'
         },
-        redirect: 'manual',
         signal: controller.signal
       });
 
-      clearTimeout(timeoutTimer);
-
       // 3. Handle Redirects (301, 302, 303, 307, 308)
-      if ([301, 302, 303, 307, 308].includes(response.status)) {
-        const location = response.headers.get('location');
+      if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
+        const location = response.headers.location;
         if (!location) {
+          discardResponse(response);
           return {
             success: false,
             url: targetUrl,
             finalUrl: currentUrl,
             code: 'INVALID_REDIRECT',
-            error: `Redirect status ${response.status} received without Location header.`
+            error: `Redirect status ${response.statusCode} received without Location header.`
           };
         }
 
         redirectsCount++;
         if (redirectsCount > maxRedirects) {
+          discardResponse(response);
           return {
             success: false,
             url: targetUrl,
@@ -326,11 +384,13 @@ async function fetchSafeUrl(targetUrl, options = {}) {
         // Resolve relative redirects safely
         currentUrl = new URL(location, currentUrl).toString();
         logger.info(`🔄 [Safe Fetcher] Following redirect (${redirectsCount}/${maxRedirects}) to: ${currentUrl}`);
+        discardResponse(response);
         continue;
       }
 
       // 4. HTTP Status Check
-      if (!response.ok) {
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        discardResponse(response);
         return {
           success: false,
           url: targetUrl,
@@ -339,17 +399,18 @@ async function fetchSafeUrl(targetUrl, options = {}) {
           content: '',
           domain,
           wordCount: 0,
-          code: `HTTP_${response.status}`,
-          error: `HTTP Error ${response.status}: ${response.statusText || 'Failed to fetch webpage'}`
+          code: `HTTP_${response.statusCode}`,
+          error: `HTTP Error ${response.statusCode}: ${response.statusMessage || 'Failed to fetch webpage'}`
         };
       }
 
       // 5. Content-Type Check (Block executable, binary, audio, video)
-      const contentType = (response.headers.get('content-type') || '').toLowerCase();
+      const contentType = (response.headers['content-type'] || '').toLowerCase();
       const isHtml = contentType.includes('text/html') || contentType.includes('application/xhtml+xml');
       const isText = isHtml || contentType.includes('text/plain') || contentType.includes('application/json') || contentType.includes('application/xml');
 
       if (!isText && contentType) {
+        discardResponse(response);
         return {
           success: false,
           url: targetUrl,
@@ -363,21 +424,19 @@ async function fetchSafeUrl(targetUrl, options = {}) {
         };
       }
 
-      // 6. Read body with safety byte cap (stream truncated gracefully at maxBytes)
-      const reader = response.body.getReader();
+      // 6. Read body with safety byte cap (stream truncated gracefully at maxBytes).
+      // The abort timer is still armed here (P3 #29) — a slow-drip body throws
+      // AbortError and is reported as a TIMEOUT instead of hanging forever.
       const chunks = [];
       let totalBytesReceived = 0;
       let truncatedStream = false;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        totalBytesReceived += value.length;
-        chunks.push(value);
+      for await (const chunk of response) {
+        totalBytesReceived += chunk.length;
+        chunks.push(chunk);
         if (totalBytesReceived >= maxBytes) {
           truncatedStream = true;
-          try { await reader.cancel(); } catch (_) {}
+          discardResponse(response);
           break;
         }
       }
@@ -408,7 +467,6 @@ async function fetchSafeUrl(targetUrl, options = {}) {
         fetchedAt: new Date().toISOString()
       };
     } catch (fetchErr) {
-      clearTimeout(timeoutTimer);
       const isTimeout = fetchErr.name === 'AbortError' || fetchErr.message.includes('timeout') || fetchErr.message.includes('aborted');
       return {
         success: false,
@@ -421,6 +479,11 @@ async function fetchSafeUrl(targetUrl, options = {}) {
         code: isTimeout ? 'TIMEOUT' : 'FETCH_FAILED',
         error: isTimeout ? `Request timed out after ${timeoutMs}ms.` : `Failed to fetch webpage: ${fetchErr.message}`
       };
+    } finally {
+      // P3 #29: clear exactly once for the hop (headers, body, or error path).
+      // The timer is intentionally NOT cleared after the headers arrive so it
+      // keeps guarding the body read.
+      clearTimeout(timeoutTimer);
     }
   }
 

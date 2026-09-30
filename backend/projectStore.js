@@ -47,8 +47,16 @@ function saveProjectFile(projectId, filePath, content) {
 function deleteProjectFile(projectId, filePath) {
   if (!projectId || !filePath) return false;
   try {
+    const cleanPath = normalizePath(filePath);
+    if (!cleanPath) return false;
     const d = getDb();
-    d.prepare('DELETE FROM workspace_files WHERE project_id = ? AND path = ?').run(projectId, filePath);
+    // P2 #50: rows are stored via normalizePath (plus legacy backslash / ./
+    // variants) — an exact raw-path match silently missed the row and the
+    // delete appeared to succeed while the file stayed in the DB.
+    d.prepare(`
+      DELETE FROM workspace_files
+      WHERE project_id = ? AND (path = ? OR path = ? OR path = ? COLLATE NOCASE)
+    `).run(projectId, cleanPath, cleanPath.replace(/\//g, '\\'), `./${cleanPath}`);
     return true;
   } catch (e) {
     logger.error('[ProjectStore] delete failed:', e.message || e);

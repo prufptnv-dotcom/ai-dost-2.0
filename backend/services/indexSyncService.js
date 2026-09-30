@@ -1,5 +1,6 @@
 const { RobustApiClient } = require('./apiClient');
 const { generateEntityHash } = require('../utils/hash');
+const { engineHeaders } = require('./engineAuth');
 
 class IndexSyncService {
   /**
@@ -7,7 +8,7 @@ class IndexSyncService {
    * @param {string} deps.engineUrl - Base URL of the Python AI engine
    */
   constructor({ engineUrl = 'http://127.0.0.1:8001' } = {}) {
-    this.apiClient = new RobustApiClient({ baseUrl: engineUrl, serviceName: 'ai-engine-indexer' });
+    this.apiClient = new RobustApiClient({ baseUrl: engineUrl, serviceName: 'ai-engine-indexer', headers: engineHeaders() });
     this.supportedSourceTypes = [
       'workspace_file', 
       'artifact', 

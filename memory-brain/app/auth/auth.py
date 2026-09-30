@@ -8,9 +8,10 @@ from fastapi.security import OAuth2PasswordBearer
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.database.mongodb import get_database
 from app.models.user import UserResponse
+from app.config.secret_key import get_secret_key
 
-# Settings
-SECRET_KEY = "ai_dost_secret_key"  # Should be in .env in production
+# Settings (#180: env-driven secret — hard-coded fallback removed)
+SECRET_KEY = get_secret_key()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 240  # 4 hours
 

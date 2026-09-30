@@ -1,11 +1,17 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   X, Clock, ChevronLeft, ChevronRight, Bookmark, BookmarkCheck,
   CheckCircle, XCircle, AlertCircle, Award, RotateCcw,
   Sparkles, Check, HelpCircle, FileText, ChevronDown, ChevronUp, AlertTriangle
 } from 'lucide-react';
+import { useToast } from '../../context/ToastContext';
+
+const EMPTY_OBJ = {};
+const EMPTY_QUESTIONS = [];
 
 export function AssessmentRunner({ assessment, onClose, onComplete }) {
+  // P3 #123: non-blocking error UI instead of window.alert()
+  const { showToast } = useToast();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState({});
   const [markedForReview, setMarkedForReview] = useState(new Set());
@@ -24,8 +30,8 @@ export function AssessmentRunner({ assessment, onClose, onComplete }) {
 
   const isPractice = assessment?.mode === 'practice';
   const isMock = assessment?.mode === 'mock';
-  const questions = assessment?.questions || [];
-  const currentQ = questions[currentIndex] || {};
+  const questions = assessment?.questions || EMPTY_QUESTIONS;
+  const currentQ = questions[currentIndex] || EMPTY_OBJ;
 
   // Initialize or restore session
   useEffect(() => {
@@ -33,6 +39,7 @@ export function AssessmentRunner({ assessment, onClose, onComplete }) {
     const storageKey = `ai_dost_assessment_${assessment.id}`;
 
     const saved = localStorage.getItem(storageKey);
+    let restoredAttemptId = null;
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -42,23 +49,29 @@ export function AssessmentRunner({ assessment, onClose, onComplete }) {
         if (parsed.secondsRemaining !== undefined && assessment.timeLimit > 0) {
           setSecondsRemaining(parsed.secondsRemaining);
         }
-        if (parsed.attemptId) setAttemptId(parsed.attemptId);
+        if (parsed.attemptId) {
+          restoredAttemptId = parsed.attemptId;
+          setAttemptId(parsed.attemptId);
+        }
       } catch (_) {}
     }
 
-    // Call start endpoint if no attemptId
-    fetch(`/api/assessment/${assessment.id}/start`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: assessment.mode })
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (data.success && data.attemptId) {
-          setAttemptId(data.attemptId);
-        }
+    // P2 #99: only start a NEW attempt when no restored attemptId exists —
+    // the old unconditional POST overwrote the restored session id.
+    if (!restoredAttemptId) {
+      fetch(`/api/assessment/${assessment.id}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: assessment.mode })
       })
-      .catch(() => {});
+        .then(res => res.json())
+        .then(data => {
+          if (data.success && data.attemptId) {
+            setAttemptId(data.attemptId);
+          }
+        })
+        .catch(() => {});
+    }
   }, [assessment?.id, assessment?.mode, assessment?.timeLimit]);
 
   // Persist session to localStorage
@@ -78,13 +91,18 @@ export function AssessmentRunner({ assessment, onClose, onComplete }) {
   }, [assessment?.id, answers, markedForReview, currentIndex, secondsRemaining, attemptId, result]);
 
   // Submit test handler
+  const assessmentId = assessment?.id;
+  // P2 #74: ref lock — state (isSubmitting) is async, so a StrictMode
+  // double-invoke / rapid double-click could pass the guard twice.
+  const submitLockRef = useRef(false);
   const handleSubmit = useCallback(async (isAutoSubmit = false) => {
-    if (isSubmitting || result) return;
+    if (submitLockRef.current || isSubmitting || result || !assessmentId) return;
+    submitLockRef.current = true;
     setIsSubmitting(true);
     setShowConfirmModal(false);
 
     try {
-      const res = await fetch(`/api/assessment/${assessment.id}/submit`, {
+      const res = await fetch(`/api/assessment/${assessmentId}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -100,41 +118,59 @@ export function AssessmentRunner({ assessment, onClose, onComplete }) {
         setResult(data.result);
         if (onComplete) onComplete(data.result);
         try {
-          localStorage.removeItem(`ai_dost_assessment_${assessment.id}`);
+          localStorage.removeItem(`ai_dost_assessment_${assessmentId}`);
         } catch (_) {}
       } else {
-        alert('Failed to evaluate assessment: ' + (data.error || 'Unknown error'));
+        showToast({ type: 'error', message: 'Failed to evaluate assessment: ' + (data.error || 'Unknown error') });
       }
     } catch (err) {
-      alert('Error submitting assessment: ' + err.message);
+      showToast({ type: 'error', message: 'Error submitting assessment: ' + err.message });
     } finally {
+      submitLockRef.current = false;
       setIsSubmitting(false);
     }
-  }, [isSubmitting, result, assessment?.id, attemptId, answers, elapsedSeconds, onComplete]);
+  }, [isSubmitting, result, assessmentId, attemptId, answers, elapsedSeconds, onComplete, showToast]);
 
-  // Active Timer Loop
+  // Active Timer Loop (pure state updates only — P2 #74)
   useEffect(() => {
     if (result || isSubmitting) return;
 
     const timer = setInterval(() => {
       setElapsedSeconds(prev => prev + 1);
-
       if (assessment.timeLimit > 0) {
-        setSecondsRemaining(prev => {
-          if (prev <= 1) {
-            clearInterval(timer);
-            handleSubmit(true); // Auto-submit on expiry
-            return 0;
-          }
-          return prev - 1;
-        });
+        setSecondsRemaining(prev => Math.max(0, prev - 1));
       }
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [assessment?.timeLimit, result, isSubmitting, handleSubmit]);
+  }, [assessment?.timeLimit, result, isSubmitting]);
 
-  // Keyboard Navigation
+  // P2 #74: auto-submit on expiry lives in an effect — the old code called
+  // handleSubmit(true) inside the setSecondsRemaining updater (impure side
+  // effect; StrictMode double-invoked it → double-submit).
+  useEffect(() => {
+    if (result || isSubmitting) return;
+    if (assessment.timeLimit > 0 && secondsRemaining === 0) {
+      handleSubmit(true);
+    }
+  }, [secondsRemaining, assessment?.timeLimit, result, isSubmitting, handleSubmit]);
+
+  // Option selection
+  const handleSelectOption = useCallback((qId, optIdx) => {
+    if (currentQ?.type === 'multiple-select') {
+      setAnswers(prev => {
+        const existing = Array.isArray(prev[qId]) ? [...prev[qId]] : [];
+        const pos = existing.indexOf(optIdx);
+        if (pos === -1) existing.push(optIdx);
+        else existing.splice(pos, 1);
+        return { ...prev, [qId]: existing };
+      });
+    } else {
+      setAnswers(prev => ({ ...prev, [qId]: optIdx }));
+    }
+  }, [currentQ?.type]);
+
+  // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (result || isSubmitting) return;
@@ -147,7 +183,7 @@ export function AssessmentRunner({ assessment, onClose, onComplete }) {
       } else if (['1', '2', '3', '4', 'a', 'b', 'c', 'd'].includes(e.key.toLowerCase())) {
         const keyMap = { '1': 0, 'a': 0, '2': 1, 'b': 1, '3': 2, 'c': 2, '4': 3, 'd': 3 };
         const optIdx = keyMap[e.key.toLowerCase()];
-        if (currentQ.type === 'mcq' || currentQ.type === 'true-false') {
+        if (currentQ?.type === 'mcq' || currentQ?.type === 'true-false') {
           if (optIdx < (currentQ.options?.length || 0)) {
             handleSelectOption(currentQ.id, optIdx);
           }
@@ -157,20 +193,7 @@ export function AssessmentRunner({ assessment, onClose, onComplete }) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentIndex, questions.length, currentQ, result, isSubmitting]);
-
-  // Option selection
-  const handleSelectOption = (qId, optIdx) => {
-    if (currentQ.type === 'multiple-select') {
-      const existing = Array.isArray(answers[qId]) ? [...answers[qId]] : [];
-      const pos = existing.indexOf(optIdx);
-      if (pos === -1) existing.push(optIdx);
-      else existing.splice(pos, 1);
-      setAnswers(prev => ({ ...prev, [qId]: existing }));
-    } else {
-      setAnswers(prev => ({ ...prev, [qId]: optIdx }));
-    }
-  };
+  }, [currentIndex, questions.length, currentQ, result, isSubmitting, handleSelectOption]);
 
   const handleShortAnswerChange = (qId, val) => {
     setAnswers(prev => ({ ...prev, [qId]: val }));

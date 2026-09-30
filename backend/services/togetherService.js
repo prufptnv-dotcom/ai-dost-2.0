@@ -1,5 +1,6 @@
 const logger = require('../logger');
 const { RobustApiClient } = require('./apiClient');
+const { withQualityStandard } = require('./outputQualityStandard');
 
 class TogetherService {
     constructor() {
@@ -40,10 +41,11 @@ class TogetherService {
             const result = await this.client.post('/chat/completions', {
                 model: "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
                 messages: [
-                    { role: "system", content: "You are Ai-Dost, a helpful AI assistant." },
+                    { role: "system", content: withQualityStandard("You are Ai-Dost, a helpful AI assistant.") },
                     ...formattedHistory,
                     { role: "user", content: message }
                 ],
+                max_tokens: 4096,
                 temperature: 0.7
             }, {
                 "Content-Type": "application/json",

@@ -16,10 +16,18 @@ const GitHubCallback = () => {
       try {
         const response = await githubAuth(code);
         
+        if (!response?.token || !response?.user?.user_id) {
+          throw new Error('Invalid auth response from server');
+        }
+
         // Save token and user details to localStorage
-        localStorage.setItem('ai_dost_token', response.token);
-        localStorage.setItem('ai_dost_user_id', response.user.user_id);
-        localStorage.setItem('ai_dost_user_name', response.user.name);
+        try {
+          localStorage.setItem('ai_dost_token', response.token);
+          localStorage.setItem('ai_dost_user_id', String(response.user.user_id));
+          localStorage.setItem('ai_dost_user_name', response.user.name || '');
+        } catch (storageErr) {
+          console.warn('Failed to persist auth to localStorage:', storageErr);
+        }
         
         showToast({ type: 'success', message: 'Successfully authenticated with GitHub!' });
         router.push('/dashboard');

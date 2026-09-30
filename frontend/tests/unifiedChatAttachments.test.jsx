@@ -35,7 +35,13 @@ describe('UnifiedChatAttachments', () => {
       new File([`file-${index}`], `note-${index}.txt`, { type: 'text/plain' })
     ));
 
-    fireEvent.change(input, { target: { files } });
+    // jsdom: HTMLInputElement.files is readonly — assign via defineProperty
+    Object.defineProperty(input, 'files', {
+      value: files,
+      configurable: true,
+      writable: true,
+    });
+    fireEvent.change(input);
 
     await waitFor(() => expect(screen.getByText('15/15 files ready for this chat')).toBeInTheDocument());
     expect(getComposerAttachments()).toHaveLength(15);

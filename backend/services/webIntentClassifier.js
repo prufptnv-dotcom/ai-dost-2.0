@@ -26,7 +26,16 @@ const PATTERNS = {
   PRODUCT_PRICES: /\b(price of|cost of|kitne ka hai|rate of|market cost|discount on|buying price|launch price)\b/i,
   DOCS_LOOKUP: /\b(documentation|official docs|api reference|docs for|changelog of|release notes of|spec sheet)\b/i,
   CURRENT_INFO: /\b(latest|current|recent|today'?s|yesterday'?s|this week|this month|this year|right now|currently|aaj ka|aaj ki|abhi ka|haal hi me|nay?a update)\b/i,
-  WEB_SEARCH: /\b(search web|search online|google karo|google pe dhundho|internet par|find online|search the web|pata karo|dhundho internet pe)\b/i
+  WEB_SEARCH: /\b(search web|search online|google karo|google pe dhundho|internet par|find online|search the web|pata karo|dhundho internet pe)\b/i,
+  GOV_SCHEMES: /\b(yojana|scheme|sarkari scheme|pm kisan|ayushman bharat|pradhan mantri|subsidy|sarkari portal|eligibility scheme)\b/i,
+  EXAMS_SYLLABUS: /\b(exam pattern|syllabus|upsc|jee|neet|gate|ssc|ibps|cutoff|admit card|exam date)\b/i,
+  JOB_ELIGIBILITY: /\b(job eligibility|eligibility criteria|job role|salary bracket|experience required|qualification for|hiring requirements)\b/i,
+  PRODUCT_COMPARISON: /\b(vs\b|compare|comparison|versus|which is better|kaun sa achha hai|difference between|pros and cons of)\b/i,
+  LAPTOP_MOBILE: /\b(laptop|smartphone|mobile|phone|benchmarks?|processor|snapdragon|apple m\d|battery life|best phone under|best laptop for)\b/i,
+  AI_MODELS: /\b(ai model|deepseek|claude|gemini|gpt-4|gpt-5|llama|qwen|mistral|context window|llm benchmark|huggingface)\b/i,
+  TRAVEL_INFO: /\b(travel|itinerary|flight|visa rules|places to visit|hotel|tourist spots|train status|best time to visit)\b/i,
+  LOCAL_BUSINESS: /\b(near me|restaurants in|shops in|hospital in|store in|address of|contact number of|timings of|open now)\b/i,
+  SCIENCE_RESEARCH: /\b(research paper|scientific study|experiment|discovery|isro|nasa|astrophysics|quantum|clinical trial)\b/i
 };
 
 // Explicit non-web keywords to guard against false triggers (pure coding, math, general chat)
@@ -163,6 +172,96 @@ function classifyWebIntent(message, options = {}) {
       query: cleanQueryForSearch(text, 'web_search'),
       extractedUrls: [],
       reason: 'Explicit user request to search the web.'
+    };
+  }
+
+  if (PATTERNS.GOV_SCHEMES.test(text)) {
+    return {
+      needsWeb: true,
+      intent: 'GOV_SCHEMES',
+      query: cleanQueryForSearch(text, 'gov_schemes'),
+      extractedUrls: [],
+      reason: 'Live government scheme details, eligibility, or official portal requested.'
+    };
+  }
+
+  if (PATTERNS.EXAMS_SYLLABUS.test(text)) {
+    return {
+      needsWeb: true,
+      intent: 'EXAMS_SYLLABUS',
+      query: cleanQueryForSearch(text, 'exams_syllabus'),
+      extractedUrls: [],
+      reason: 'Exam syllabus, pattern, dates, or cutoff details requested.'
+    };
+  }
+
+  if (PATTERNS.PRODUCT_COMPARISON.test(text)) {
+    return {
+      needsWeb: true,
+      intent: 'PRODUCT_COMPARISON',
+      query: cleanQueryForSearch(text, 'product_comparison'),
+      extractedUrls: [],
+      reason: 'Product comparison, benchmarks, or feature trade-offs requested.'
+    };
+  }
+
+  if (PATTERNS.AI_MODELS.test(text)) {
+    return {
+      needsWeb: true,
+      intent: 'AI_MODELS',
+      query: cleanQueryForSearch(text, 'ai_models'),
+      extractedUrls: [],
+      reason: 'Latest frontier AI model specifications or benchmarks requested.'
+    };
+  }
+
+  if (PATTERNS.LAPTOP_MOBILE.test(text)) {
+    return {
+      needsWeb: true,
+      intent: 'LAPTOP_MOBILE',
+      query: cleanQueryForSearch(text, 'laptop_mobile'),
+      extractedUrls: [],
+      reason: 'Laptop, smartphone, or hardware specifications requested.'
+    };
+  }
+
+  if (PATTERNS.JOB_ELIGIBILITY.test(text)) {
+    return {
+      needsWeb: true,
+      intent: 'JOB_ELIGIBILITY',
+      query: cleanQueryForSearch(text, 'job_eligibility'),
+      extractedUrls: [],
+      reason: 'Job role requirements, eligibility, or salary telemetry requested.'
+    };
+  }
+
+  if (PATTERNS.TRAVEL_INFO.test(text)) {
+    return {
+      needsWeb: true,
+      intent: 'TRAVEL_INFO',
+      query: cleanQueryForSearch(text, 'travel_info'),
+      extractedUrls: [],
+      reason: 'Travel itinerary, transit, or visa information requested.'
+    };
+  }
+
+  if (PATTERNS.LOCAL_BUSINESS.test(text)) {
+    return {
+      needsWeb: true,
+      intent: 'LOCAL_BUSINESS',
+      query: cleanQueryForSearch(text, 'local_business'),
+      extractedUrls: [],
+      reason: 'Local business, service hours, or address discovery requested.'
+    };
+  }
+
+  if (PATTERNS.SCIENCE_RESEARCH.test(text)) {
+    return {
+      needsWeb: true,
+      intent: 'SCIENCE_RESEARCH',
+      query: cleanQueryForSearch(text, 'science_research'),
+      extractedUrls: [],
+      reason: 'Scientific research papers, experiments, or discoveries requested.'
     };
   }
 

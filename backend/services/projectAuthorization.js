@@ -2,6 +2,8 @@ const { getDatabase } = require('../db');
 const ProjectDAO = require('../db/dao/ProjectDAO');
 const UserDAO = require('../db/dao/UserDAO');
 const logger = require('../logger');
+const crypto = require('crypto');
+const { isValidUid } = require('../middleware/anonIdentity');
 
 class ProjectAuthorizationService {
   constructor(db = null) {
@@ -18,9 +20,21 @@ class ProjectAuthorizationService {
   /**
    * Resolve caller identity from a trusted authentication context.
    *
-   * Production rule: req.user.id is the only accepted authenticated identity.
-   * The x-user-id header is retained only as an explicit local/test escape hatch
-   * when ALLOW_UNTRUSTED_USER_HEADER=true. Body/query userId is never trusted.
+   * Order (P1 FIX #12):
+   *  1. Authenticated req.user.id — always wins (future login system).
+   *  2. x-user-id header — only an explicit local/test escape hatch
+   *     (ALLOW_UNTRUSTED_USER_HEADER=true, non-production).
+   *  3. Production without auth — legacy shared identity (status quo,
+   *     BUG_REPORT #12 is scoped to non-production).
+   *  4. Trusted local caller (loopback req.ip) — keeps the legacy
+   *     `local-user` identity so existing conversations/attempts/projects
+   *     remain visible. req.ip is trustworthy on every path: Express ignores
+   *     X-Forwarded-For from untrusted sockets, and the Next rewrite proxy
+   *     overwrites x-forwarded-for with the real TCP peer
+   *     (frontend/scripts/apply-next-xff-patch.js).
+   *  5. Everyone else (LAN / remote browsers) — stable `anon-<uuid>`
+   *     identity from the ad_uid HttpOnly cookie (middleware/anonIdentity.js),
+   *     isolated from local-user data. Body/query userId is never trusted.
    */
   resolveUser(req) {
     if (req && req.user && typeof req.user.id === 'string' && req.user.id.trim()) {
@@ -33,7 +47,19 @@ class ProjectAuthorizationService {
       return req.headers['x-user-id'].trim();
     }
 
-    return 'local-user';
+    if (isProduction()) {
+      return 'local-user';
+    }
+
+    const ip = clientIpOf(req);
+    // No request context at all (programmatic/unit-test calls): legacy contract
+    // 'local-user'. Real HTTP requests always carry req.ip/remoteAddress, so this
+    // branch is unreachable for actual clients.
+    if (!ip || isLoopbackIp(ip)) {
+      return 'local-user';
+    }
+
+    return `anon-${anonUid(req)}`;
   }
 
   /**
@@ -136,6 +162,34 @@ class ProjectAuthorizationService {
 
 function isProduction() {
   return process.env.NODE_ENV === 'production';
+}
+
+/**
+ * Trusted client address from Express (honours trust-proxy rules) with a
+ * socket fallback. Never reads forgeable headers: direct clients' XFF is
+ * ignored by Express and the Next rewrite proxy overwrites XFF with the
+ * real TCP peer (frontend/scripts/apply-next-xff-patch.js).
+ */
+function clientIpOf(req) {
+  const raw = (req && (req.ip || (req.socket && req.socket.remoteAddress))) || '';
+  return String(raw).replace(/^::ffff:/i, '');
+}
+
+/** True for genuinely local callers (127.0.0.0/8 or ::1). */
+function isLoopbackIp(ip) {
+  return ip === '::1' || ip.startsWith('127.');
+}
+
+/**
+ * Stable anonymous id for a request: cookie-backed ad_uid when the
+ * anonIdentity middleware ran, otherwise a deterministic IP-derived
+ * hash (keeps unit tests / early requests stable — never random).
+ */
+function anonUid(req) {
+  const uid = req && req.adUid;
+  if (isValidUid(uid)) return uid;
+  const basis = String((req && (req.ip || (req.socket && req.socket.remoteAddress))) || 'unknown');
+  return crypto.createHash('sha256').update(basis).digest('hex').slice(0, 16);
 }
 
 const defaultInstance = new ProjectAuthorizationService();

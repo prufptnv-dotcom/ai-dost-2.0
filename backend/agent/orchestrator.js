@@ -307,8 +307,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           const inMem = projectFiles && Array.isArray(projectFiles) ? projectFiles.find(f => f.path === parameters.path) : null;
           const exists = existsOnDisk || Boolean(inMem);
 
-          // Phase 1: Existing-file write enforcement (allow explicit trusted override only)
-          if (exists && !parameters.allowOverwrite) {
+  // Phase 1: Existing-file write enforcement
+  // P2 #59: parameters.allowOverwrite was LLM-controlled (bypassable) — removed.
+  if (exists) {
             return {
               success: false,
               code: 'WRITE_FORBIDDEN_ON_EXISTING',
@@ -422,9 +423,12 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       case 'run_terminal': {
         return (async () => {
           const cmd = parameters.command || '';
-          const BLOCKED = ['rm -rf /', 'format c:', 'del /f /s /q c:\\', 'shutdown', 'rmdir /s /q c:'];
-          if (BLOCKED.some(b => cmd.toLowerCase().includes(b))) {
-            return { success: false, error: 'Command blocked for safety.', exit_code: 1 };
+          // P3 #35: the old 5-string BLOCKED list let nearly every destructive
+          // escape through — use the shared SandboxManager policy (extended
+          // denylist) that already gates exec().
+          const policy = require('../sandbox/SandboxManager').validateCommandPolicy(cmd);
+          if (!policy.allowed) {
+            return { success: false, error: policy.reason || 'Command blocked for safety.', exit_code: 1 };
           }
           try {
             const sandboxMgr = require('../sandbox/SandboxManager');
@@ -678,27 +682,46 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       case 'generate_project_from_prompt': {
         try {
           const prompt = parameters.prompt || '';
-            const targetDir = parameters.targetDir || this.projectPath;
-            
-            const cleanPrompt = prompt.toLowerCase();
-            const projectType = this.detectProjectType(cleanPrompt);
-            const projectFiles = await this.generateProjectFiles(projectType, prompt, targetDir);
-            
-            const sandboxMgr = require('../sandbox/SandboxManager');
-            if (!this.sandboxId) {
-              const sb = await sandboxMgr.createSandbox(this.projectId || 'orchestrator-task', { workdir: this.projectPath });
-              this.sandboxId = sb.id;
-            }
-            
-            try {
-              await sandboxMgr.exec(this.sandboxId, 'git init', { timeout: 10000 });
-            } catch (_) {}
-            
-            if (projectFiles.some(f => f.path === 'package.json')) {
-              try {
-                await sandboxMgr.exec(this.sandboxId, 'npm install', { timeout: 120000 });
-              } catch (e) {}
-            }
+          // P0 FIX (#1-2): targetDir must resolve INSIDE the workspace. The raw
+          // client value previously became the write target + git/npm cwd →
+          // write-anywhere and host RCE via crafted package.json.
+          const requestedDir = parameters.targetDir || this.projectPath;
+          const targetDir = this.resolveSafePath(currentWorkspace, requestedDir);
+          if (!targetDir) {
+            return { success: false, error: 'Access denied: targetDir escapes the workspace boundary' };
+          }
+
+          const cleanPrompt = prompt.toLowerCase();
+          const projectType = this.detectProjectType(cleanPrompt);
+          const projectFiles = await this.generateProjectFiles(projectType, prompt, targetDir);
+
+          // Files are written to HOST targetDir — run git/npm there, not in a
+          // separate empty sandbox container (was: mismatch → empty node_modules)
+          const { execFile } = require('child_process');
+          const run = (args, timeout = 15000) => new Promise((resolve) => {
+            execFile('git', args, { cwd: targetDir, timeout, shell: false }, (err, stdout, stderr) => {
+              resolve({ err, stdout, stderr });
+            });
+          });
+
+          await run(['init']);
+
+          if (projectFiles.some(f => f.path === 'package.json')) {
+            await new Promise((resolve) => {
+              const { spawn } = require('child_process');
+              const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+              // P0 FIX: --ignore-scripts stops package.json lifecycle scripts
+              // (preinstall/install/postinstall) from running on the host.
+              const child = spawn(npmCmd, ['install', '--ignore-scripts'], {
+                cwd: targetDir,
+                shell: false,
+                timeout: 120000,
+                env: { ...process.env, NODE_ENV: 'development' }
+              });
+              child.on('close', () => resolve());
+              child.on('error', () => resolve());
+            });
+          }
             
             return { 
               success: true, 

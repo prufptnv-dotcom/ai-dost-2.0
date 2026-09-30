@@ -23,8 +23,13 @@ export function isVisualCode(code = '', language = 'text') {
     return true;
   }
 
+  // Check for 3D graphics, WebGL, Three.js & Animation libraries
+  if (/THREE\.|WebGL|OrbitControls|requestAnimationFrame|cancelAnimationFrame|PerspectiveCamera|WebGLRenderer|BoxGeometry|SphereGeometry|anime\(/i.test(code)) {
+    return true;
+  }
+
   // Check for browser DOM / Canvas / animation APIs
-  if (/document\.(getElementById|querySelector|querySelectorAll|createElement|body)|window\.(requestAnimationFrame|cancelAnimationFrame|addEventListener)|getContext\s*\(\s*['"]2d['"]\s*\)|setInterval\s*\(|setTimeout\s*\(/i.test(code)) {
+  if (/document\.(getElementById|querySelector|querySelectorAll|createElement|body)|window\.(requestAnimationFrame|cancelAnimationFrame|addEventListener)|getContext\s*\(\s*['"](?:2d|webgl|experimental-webgl)['"]\s*\)|setInterval\s*\(|setTimeout\s*\(/i.test(code)) {
     return true;
   }
 
@@ -45,13 +50,64 @@ export function compileLiveHtml(code = '', language = 'html') {
       .replace(/<link\b[^>]*href=["'](?!(?:https?:|\/\/|data:))[^"']+\.css["'][^>]*>/gi, '')
       .replace(/<script\b[^>]*src=["'](?!(?:https?:|\/\/|data:))[^"']+\.js["'][^>]*>\s*<\/script>/gi, '');
 
+    // Ensure Three.js and OrbitControls are injected if used but not included in head
+    if (/THREE\./i.test(cleanCode) && !cleanCode.includes('three.min.js') && !cleanCode.includes('three.js') && cleanCode.includes('</head>')) {
+      cleanCode = cleanCode.replace('</head>', '<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script></head>');
+    }
+    if (/OrbitControls/i.test(cleanCode) && !cleanCode.includes('OrbitControls.js') && cleanCode.includes('</head>')) {
+      cleanCode = cleanCode.replace('</head>', '<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script></head>');
+    }
+
     // If no background style is defined in the HTML document, ensure it defaults to dark instead of blinding white
     if (!/background\s*:/i.test(cleanCode) && cleanCode.includes('</head>')) {
       cleanCode = cleanCode.replace(
         '</head>',
-        '<style>body{background:#090d16;color:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,sans-serif;margin:0;padding:16px;}</style></head>'
+        '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet"><style>body{background:#02040a;color:#f8fafc;font-family:\'Space Grotesk\',-apple-system,BlinkMacSystemFont,sans-serif;margin:0;padding:16px;}</style></head>'
       );
     }
+const SANDBOX_ERROR_TELEMETRY = `
+<script>
+  (function() {
+    function sendTelemetry(msg, lineNo, colNo, stack) {
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({
+            type: 'SANDBOX_RUNTIME_ERROR',
+            error: String(msg),
+            line: lineNo || null,
+            column: colNo || null,
+            stack: stack || '',
+            timestamp: Date.now()
+          }, '*');
+        }
+      } catch (_) {}
+    }
+
+    window.onerror = function(msg, url, lineNo, colNo, error) {
+      sendTelemetry(msg, lineNo, colNo, error ? error.stack : '');
+      const banner = document.createElement('div');
+      banner.style = 'background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #fca5a5; padding: 10px 14px; border-radius: 8px; font-family: monospace; font-size: 12px; margin-top: 14px; max-width: 90vw;';
+      banner.textContent = 'Runtime error: ' + msg + (lineNo ? ' (line ' + lineNo + ')' : '');
+      document.body.appendChild(banner);
+    };
+
+    window.addEventListener('unhandledrejection', function(event) {
+      const err = event.reason;
+      sendTelemetry(err ? (err.message || String(err)) : 'Unhandled Promise Rejection', null, null, err ? err.stack : '');
+    });
+  })();
+</script>
+`;
+
+    // Inject telemetry before closing body or html
+    if (cleanCode.includes('</body>')) {
+      cleanCode = cleanCode.replace('</body>', `${SANDBOX_ERROR_TELEMETRY}</body>`);
+    } else if (cleanCode.includes('</html>')) {
+      cleanCode = cleanCode.replace('</html>', `${SANDBOX_ERROR_TELEMETRY}</html>`);
+    } else {
+      cleanCode += SANDBOX_ERROR_TELEMETRY;
+    }
+
     return cleanCode;
   }
 
@@ -96,11 +152,17 @@ export function compileLiveHtml(code = '', language = 'html') {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Live Animation Preview</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Space+Grotesk:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #090d16;
+      font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #02040a;
       color: #f8fafc;
       margin: 0;
       padding: 16px;
@@ -161,6 +223,12 @@ export function compileLiveHtml(code = '', language = 'html') {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>JavaScript Live Preview</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Space+Grotesk:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; }
     body {
@@ -171,9 +239,9 @@ export function compileLiveHtml(code = '', language = 'html') {
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: #090d16;
+      background: #02040a;
       color: #f8fafc;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       overflow: auto;
     }
     canvas {
@@ -214,12 +282,38 @@ export function compileLiveHtml(code = '', language = 'html') {
       };
     })();
 
-    window.onerror = function(msg, url, lineNo) {
+    window.onerror = function(msg, url, lineNo, colNo, error) {
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({
+            type: 'SANDBOX_RUNTIME_ERROR',
+            error: String(msg),
+            line: lineNo || null,
+            column: colNo || null,
+            stack: error ? error.stack : '',
+            timestamp: Date.now()
+          }, '*');
+        }
+      } catch (_) {}
       const banner = document.createElement('div');
       banner.style = 'background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #fca5a5; padding: 10px 14px; border-radius: 8px; font-family: monospace; font-size: 12px; margin-top: 14px; max-width: 90vw;';
       banner.textContent = 'Runtime error: ' + msg + (lineNo ? ' (line ' + lineNo + ')' : '');
       document.body.appendChild(banner);
     };
+
+    window.addEventListener('unhandledrejection', function(event) {
+      const err = event.reason;
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({
+            type: 'SANDBOX_RUNTIME_ERROR',
+            error: err ? (err.message || String(err)) : 'Unhandled Rejection',
+            stack: err ? err.stack : '',
+            timestamp: Date.now()
+          }, '*');
+        }
+      } catch (_) {}
+    });
 
     try {
       ${code}

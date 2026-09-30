@@ -86,7 +86,25 @@ export default function ChatWorkspacePanel({ onClose, onOpenInCopilot }) {
               <FileText className="w-4 h-4 text-accent" />
               <span className="text-xs font-semibold">Files in context</span>
             </div>
-            <div className="text-xs text-ink-muted">{state.payload?.count || 0} selected file(s) are available to the current task.</div>
+            {steps.length > 0 ? (
+              <ul className="space-y-1.5">
+                {steps.map((att, index) => {
+                  const name = typeof att === 'object' && att !== null
+                    ? (att.name || att.title || `file-${index + 1}`)
+                    : String(att);
+                  const type = typeof att === 'object' && att !== null ? (att.mime || att.type) : null;
+                  return (
+                    <li key={`${name}-${index}`} className="flex items-center gap-2 text-xs text-paper-100">
+                      <FileText className="w-3.5 h-3.5 text-accent shrink-0" />
+                      <span className="truncate" title={name}>{name}</span>
+                      {type && <span className="ml-auto text-[10px] font-mono text-ink-muted shrink-0">{type}</span>}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <div className="text-xs text-ink-muted">{state.payload?.count || 0} selected file(s) are available to the current task.</div>
+            )}
           </section>
         )}
 

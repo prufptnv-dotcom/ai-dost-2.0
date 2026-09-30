@@ -8,7 +8,15 @@
     max_restarts: 10,
     min_uptime: "5s",
     max_memory_restart: "512M",
-    node_args: ["--max-old-space-size=512"],
+    // P2 FIX (#181): npm start/dev preload these three policy modules
+    // (package.json), but PM2 never did — CORS deny-list, JSON body limits
+    // and the SSE task-event bridge were silently off in PM2 deployments.
+    node_args: [
+      "--max-old-space-size=512",
+      "-r", "./security-hardening.js",
+      "-r", "./taskCancellation.js",
+      "-r", "./chatAgentRouteBridge.js",
+    ],
     kill_timeout: 5000,
     out_file: "./logs/pm2-out.log",
     error_file: "./logs/pm2-err.log",

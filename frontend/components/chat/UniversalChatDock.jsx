@@ -1,6 +1,5 @@
 import { useCallback } from 'react';
 import { useRouter } from 'next/router';
-import ChatExperienceLayer from './ChatExperienceLayerV4';
 import UniversalCommandBridge from './UniversalCommandBridge';
 import TaskRuntimeBridge from './TaskRuntimeBridge';
 import TaskActivityOverlay from './TaskActivityOverlay';
@@ -36,7 +35,11 @@ function clickNewConversationButton() {
 function resetChatState() {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.removeItem('ai_dost_messages_chat');
+    // P2 #100: clear the ACTIVE session's transcript (was hard-wired to
+    // 'ai_dost_messages_chat', leaving non-default sessions stale) then
+    // return to a fresh default session.
+    const sessionId = localStorage.getItem('ai_dost_session_id') || 'default';
+    localStorage.removeItem(sessionId === 'default' ? 'ai_dost_messages_chat' : `ai_dost_messages_${sessionId}`);
     localStorage.setItem('ai_dost_session_id', 'default');
   } catch (_) {}
   if (!clickNewConversationButton()) window.location.assign('/dashboard');
@@ -85,11 +88,6 @@ export default function UniversalChatDock() {
         onDeleteChat={onDeleteChat}
       />
       <UnifiedChatAttachments />
-      <ChatExperienceLayer
-        onNavigate={onNavigate}
-        onNewChat={onNewChat}
-        onDeleteChat={onDeleteChat}
-      />
       <ChatWorkspacePanel onOpenInCopilot={(artifact) => {
         try {
           localStorage.setItem('ai_dost_copilot_import', JSON.stringify({

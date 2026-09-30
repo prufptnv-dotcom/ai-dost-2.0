@@ -5,6 +5,7 @@ const researchService = require('../services/researchService');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { selfBaseUrl } = require('../services/selfUrl'); // P3 #66
 
 // POST /api/research/run
 router.post('/run', async (req, res) => {
@@ -37,8 +38,7 @@ router.post('/export', async (req, res) => {
 
   try {
     const cleanFormat = (format || 'pdf').toLowerCase();
-    const port = process.env.PORT || 5000;
-    const base = `http://127.0.0.1:${port}`;
+    const base = selfBaseUrl(); // P3 #66 — was hardcoded 127.0.0.1
 
     let exportRes;
     if (cleanFormat === 'pdf') {

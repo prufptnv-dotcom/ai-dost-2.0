@@ -1,6 +1,9 @@
 const logger = require('../logger');
 const { RobustApiClient } = require('./apiClient');
+const { withQualityStandard } = require('./outputQualityStandard');
 const { exec } = require('child_process');
+// P3 #191: configurable Ollama endpoint (was hard-coded localhost:11434)
+const { ollamaBaseUrl } = require('./ollamaEnv');
 
 class GeminiService {
     constructor() {
@@ -25,7 +28,7 @@ class GeminiService {
     async checkOllamaAvailability() {
         try {
             await new Promise((resolve, reject) => {
-                exec('curl -s http://localhost:11434/api/tags', (error, stdout, stderr) => {
+                exec(`curl -s ${ollamaBaseUrl()}/api/tags`, (error, stdout, stderr) => {
                     if (!error && stdout.includes('models')) {
                         this.ollamaAvailable = true;
                         logger.info('✅ Ollama local model server available');
@@ -127,7 +130,7 @@ Here is what you can do and what features are available to the user on this plat
 
             const bodyPayload = { contents };
             if (systemPrompt) {
-                bodyPayload.systemInstruction = { parts: [{ text: systemPrompt }] };
+                bodyPayload.systemInstruction = { parts: [{ text: withQualityStandard(systemPrompt) }] };
             }
 
             // Try multiple models in order — free tier quota varies per model/key
@@ -135,9 +138,12 @@ Here is what you can do and what features are available to the user on this plat
             let lastError = null;
 
             for (const model of models) {
-                const endpoint = `/models/${model}:generateContent?key=${API_KEY}`;
+                // #54: key via header, never in the URL (logs)
+                const endpoint = `/models/${model}:generateContent`;
                 try {
-                    const result = await this.client.post(endpoint, bodyPayload);
+                    const result = await this.client.post(endpoint, bodyPayload, {
+                        headers: { 'x-goog-api-key': API_KEY },
+                    });
 
                     logger.info(`✅ Gemini response received (model: ${model})`);
 
@@ -173,7 +179,7 @@ Here is what you can do and what features are available to the user on this plat
                     };
 
                     const ollamaResult = await new Promise((resolve, reject) => {
-                        exec(`curl -s -X POST http://localhost:11434/api/generate -H "Content-Type: application/json" -d '${JSON.stringify(ollamaBody)}'`, (error, stdout, stderr) => {
+                        exec(`curl -s -X POST ${ollamaBaseUrl()}/api/generate -H "Content-Type: application/json" -d '${JSON.stringify(ollamaBody)}'`, (error, stdout, stderr) => {
                             if (error) {
                                 reject(error);
                                 return;
@@ -309,7 +315,8 @@ Return a JSON object with:
             let lastError = null;
 
             for (const model of models) {
-                const endpoint = `/models/${model}:generateContent?key=${API_KEY}`;
+                // #54: key via header, never in the URL (logs)
+                const endpoint = `/models/${model}:generateContent`;
                 try {
                     // Add timeout wrapper to prevent hanging
                     const timeoutPromise = new Promise((_, reject) => 
@@ -317,7 +324,9 @@ Return a JSON object with:
                     );
                     
                     const result = await Promise.race([
-                        this.client.post(endpoint, bodyPayload),
+                        this.client.post(endpoint, bodyPayload, {
+                            headers: { 'x-goog-api-key': API_KEY },
+                        }),
                         timeoutPromise
                     ]);
 

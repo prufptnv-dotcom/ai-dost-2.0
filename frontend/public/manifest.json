@@ -10,15 +10,15 @@
   "icons": [
     {
       "src": "/logo.jpg",
-      "sizes": "192x192",
+      "sizes": "1024x1024",
       "type": "image/jpeg",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "/logo.jpg",
-      "sizes": "512x512",
+      "sizes": "1024x1024",
       "type": "image/jpeg",
-      "purpose": "any maskable"
+      "purpose": "maskable"
     }
   ],
   "categories": ["productivity", "developer-tools", "utilities"],
@@ -29,14 +29,14 @@
       "short_name": "Chat",
       "description": "AI chat with free models",
       "url": "/dashboard",
-      "icons": [{ "src": "/icons/icon-192x192.png", "sizes": "192x192" }]
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
     },
     {
       "name": "Documents",
       "short_name": "Docs",
       "description": "Generate PDF, Word, Excel, PPT",
       "url": "/dashboard",
-      "icons": [{ "src": "/icons/icon-192x192.png", "sizes": "192x192" }]
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
     }
   ]
 }

@@ -23,7 +23,9 @@ class JwtKeyManager {
     this.keyring = new Map(); // kid -> { kid, secret, status: 'active'|'grace_period'|'revoked', createdAt, expiresAt }
     this.currentKid = null;
 
-    const initialSecret = options.initialSecret || process.env.JWT_SECRET || 'aidost-default-secure-jwt-key-min-32-chars-entropy-ok!';
+    // Never ship a hardcoded secret: use JWT_SECRET or a per-process random key
+    // (tokens won't survive restart without JWT_SECRET — intentional fail-safe).
+    const initialSecret = options.initialSecret || process.env.JWT_SECRET || crypto.randomBytes(48).toString('base64url');
     const initialKid = options.initialKid || `key_${crypto.randomUUID().substring(0, 8)}`;
     this.addKey(initialKid, initialSecret, { status: 'active' });
     this.currentKid = initialKid;

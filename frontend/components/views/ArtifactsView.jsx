@@ -48,7 +48,7 @@ export default function ArtifactsView({ onToast }) {
   };
 
   return (
-    <div className="h-full overflow-y-auto px-4 sm:px-8 py-6 bg-canvas-base select-none">
+    <div className="h-full overflow-y-auto px-4 sm:px-8 py-6 bg-canvas-base">
       <div className="max-w-5xl mx-auto space-y-6">
         {/* Header Strip */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">

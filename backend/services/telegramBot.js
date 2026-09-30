@@ -11,11 +11,12 @@
  *   (plain text)  — chat ki tarah
  */
 const logger = require('../logger');
+const { selfBaseUrl } = require('./selfUrl'); // P3 #66
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ALLOWED_IDS = (process.env.TELEGRAM_ALLOWED_IDS || '')
     .split(',').map(s => s.trim()).filter(Boolean);
-const BACKEND = `http://127.0.0.1:${process.env.PORT || 5000}`;
+const BACKEND = selfBaseUrl(); // P3 #66 — was hardcoded 127.0.0.1
 
 // Document keywords — same as ChatView: input me jo format keyword aaya → wahi file
 // Specific format (pdf/csv/ppt) hamesha generic (report/document) pe jeeta
@@ -414,7 +415,7 @@ class TelegramBot {
             if (!data.success || !data.downloadUrl) {
                 return this.sendMessage(chatId, `⚠️ ${typeLabel} ban nahi paya — dobara try karo.`);
             }
-            const downloadUrl = `http://127.0.0.1:${process.env.PORT || 5000}${data.downloadUrl}`;
+            const downloadUrl = `${BACKEND}${data.downloadUrl}`; // P3 #66
             // Download the file from backend
             const fileRes = await fetch(downloadUrl);
             if (!fileRes.ok) throw new Error(`Download failed: ${fileRes.status}`);

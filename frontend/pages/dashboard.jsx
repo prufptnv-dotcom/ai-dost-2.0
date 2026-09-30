@@ -3,13 +3,14 @@ import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   MessageSquare, FolderOpen, Code2, Bot, Mic, Image as ImageIcon,
-  FileText, History, Settings, CornerDownLeft, Sparkles, X, Loader2, Zap, BarChart3
+  FileText, History, Settings, CornerDownLeft, Sparkles, X, Loader2, Zap, BarChart3,
+  Move3d, Building2, MapPinned, PenTool, Calendar, Languages, Scale, ShieldCheck
 } from 'lucide-react';
 import AppShell from '../components/layout/AppShell';
 import ProjectsView from '../components/views/ProjectsView';
 import ArtifactsView from '../components/views/ArtifactsView';
 import VoiceView from '../components/views/VoiceView';
-const VoiceAssistant = dynamic(() => import('../components/VoiceAssistant'), { ssr: false, loading: () => (<div>Loading...</div>) });
+const VoiceAssistant = dynamic(() => import('../components/VoiceAssistant'), { ssr: false, loading: () => null });
 import ResearchView from '../components/views/ResearchView';
 import ImageView from '../components/views/ImageView';
 import ResumeView from '../components/views/ResumeView';
@@ -24,35 +25,82 @@ import DataAnalyticsView from '../components/views/DataAnalyticsView';
 import { fetchProjects, createProject } from '../services/api';
 import { useMode } from '../context/ModeContext';
 import { useRouter } from 'next/router';
+import ViewSkeletonLoader from '../components/ui/ViewSkeletonLoader';
 
 const CopilotIDE = dynamic(() => import('../components/views/CopilotIDE'), {
   ssr: false,
-  loading: () => (
-    <div className="h-full flex items-center justify-center bg-canvas-base">
-      <Loader2 className="w-6 h-6 animate-spin text-accent-primary" />
-    </div>
-  ),
+  loading: () => <ViewSkeletonLoader type="ide" />,
 });
 
 const ChatView = dynamic(() => import('../components/views/ChatView'), {
   ssr: false,
-  loading: () => (
-    <div className="h-full flex items-center justify-center bg-canvas-base">
-      <Loader2 className="w-6 h-6 animate-spin text-accent" />
-    </div>
-  ),
+  loading: () => <ViewSkeletonLoader type="chat" />,
+});
+
+const AnimationStudioView = dynamic(() => import('../components/views/AnimationStudioView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
+});
+
+const BharatHubView = dynamic(() => import('../components/views/BharatHubView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
+});
+
+const WritingStudioView = dynamic(() => import('../components/views/WritingStudioView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
+});
+
+const ProductivityPlannerView = dynamic(() => import('../components/views/ProductivityPlannerView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
+});
+
+const TravelAssistantView = dynamic(() => import('../components/views/TravelAssistantView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
+});
+
+const LanguageHubView = dynamic(() => import('../components/views/LanguageHubView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
+});
+
+const DecisionSupportView = dynamic(() => import('../components/views/DecisionSupportView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
+});
+
+const SecurityHubView = dynamic(() => import('../components/views/SecurityHubView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
+});
+
+const MasterCapabilitiesView = dynamic(() => import('../components/views/MasterCapabilitiesView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
 });
 
 const PALETTE_ACTIONS = [
   { id: 'chat', label: 'Open Chat', hint: 'Ctrl+1', icon: MessageSquare },
+  { id: 'capabilities', label: '50-Domain Master Hub', hint: '50 Skills & Standards', icon: Sparkles },
   { id: 'agent', label: 'Open Agent Workbench', hint: 'Ctrl+2', icon: Bot },
   { id: 'copilot', label: 'Open Copilot IDE', hint: 'Ctrl+3', icon: Code2 },
-  { id: 'analytics', label: 'Open Data Analytics', hint: 'Ctrl+A', icon: BarChart3 },
+  { id: 'animations', label: 'Anime.js 3D Motion Studio', hint: '3D/Motion', icon: Move3d },
+  { id: 'bharat', label: 'Bharat Hub (Free India APIs)', hint: 'Pincode/IFSC/ISRO', icon: Building2 },
+  { id: 'analytics', label: 'Open Data Analytics', hint: 'Charts/Insights', icon: BarChart3 }, // P3 #88: no Ctrl+A — reserved for native Select All
   { id: 'projects', label: 'Open Projects', hint: 'Ctrl+4', icon: FolderOpen },
   { id: 'artifacts', label: 'Open Artifacts', hint: 'Ctrl+5', icon: FileText },
   { id: 'voice', label: 'Open Voice Assistant', hint: 'Ctrl+6', icon: Mic },
   { id: 'settings', label: 'Open Settings', hint: 'Ctrl+7', icon: Settings },
+  { id: 'writing', label: 'Writing Studio', hint: 'Copy/Email/Articles', icon: PenTool },
+  { id: 'planner', label: 'Planner & Habits', hint: 'Timetable/Routines', icon: Calendar },
   { id: 'automations', label: 'Open Automations & Watchers', hint: 'Ctrl+8', icon: Zap },
+  { id: 'travel', label: 'Travel & Places', hint: 'Restaurants/Hotels/Trips', icon: MapPinned },
+  { id: 'language', label: 'Language & Translation Hub', hint: 'Translate/Grammar/Spoken', icon: Languages },
+  { id: 'decision', label: 'Decision Matrix & Trade-offs', hint: 'Laptop/Stack/Cloud/DB', icon: Scale },
+  { id: 'security', label: 'Security & Cybersecurity Hub', hint: 'OWASP/Audit/Headers/STRIDE', icon: ShieldCheck },
   { id: 'new-chat', label: 'Start New Conversation', hint: 'Ctrl+N', icon: Sparkles },
 ];
 
@@ -75,13 +123,21 @@ export default function Dashboard() {
   const [newProjectDesc, setNewProjectDesc] = useState('');
   const [creating, setCreating] = useState(false);
   const [voiceAssistantOpen, setVoiceAssistantOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   const paletteRef = useRef(null);
   const paletteInputRef = useRef(null);
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // Load preferences
   useEffect(() => {
-    const savedTheme = localStorage.getItem('ai_dost_theme') || localStorage.getItem('theme') || 'dark';
+    let savedTheme = 'dark';
+    try {
+      savedTheme = localStorage.getItem('ai_dost_theme') || localStorage.getItem('theme') || 'dark';
+    } catch (_) {}
     setTheme(savedTheme);
     
     // Remove all possible theme classes
@@ -94,7 +150,11 @@ export default function Dashboard() {
       document.documentElement.classList.add(`${savedTheme}-theme`);
     }
     document.documentElement.setAttribute('data-theme', savedTheme);
-    setModel(localStorage.getItem('ai_dost_model') || 'auto');
+    try {
+      setModel(localStorage.getItem('ai_dost_model') || 'auto');
+    } catch (_) {
+      setModel('auto');
+    }
   }, []);
 
   const handleToggleTheme = useCallback(() => {
@@ -155,29 +215,38 @@ export default function Dashboard() {
     }
   }, [router.query?.view]);
 
+  // P3 #116: track toast timers so unmount clears them (no setState after unmount)
+  const toastTimersRef = useRef([]);
   const showToast = useCallback((message, type = 'success') => {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3500);
+    const timer = setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3500);
+    toastTimersRef.current.push(timer);
   }, []);
 
   useEffect(() => {
-    const handler = (e) => {
-      if (e.detail && e.detail.message) {
-        showToast(e.detail.message, e.detail.type || 'success');
-      }
-    };
-    window.addEventListener('ai_dost_toast', handler);
-    return () => window.removeEventListener('ai_dost_toast', handler);
-  }, [showToast]);
+    const timers = toastTimersRef.current;
+    return () => { timers.forEach((t) => clearTimeout(t)); };
+  }, []);
 
-  const go = useCallback((v) => {
+  // P3 #87: ToastContext (global provider) already listens to ai_dost_toast
+  // and renders the shared toast UI — this second listener produced a
+  // duplicate toast for every global event. Direct showToast() calls above
+  // still render the dashboard's own stack.
+
+  const [initialChatPrompt, setInitialChatPrompt] = useState('');
+
+  const go = useCallback((v, opts) => {
+    if (v === 'chat' && opts?.initialPrompt) {
+      setInitialChatPrompt(opts.initialPrompt);
+    }
     setView(v);
     setPaletteOpen(false);
   }, []);
 
   const handleNewChat = useCallback(() => {
     setChatKey((k) => k + 1);
+    setInitialChatPrompt('');
     go('chat');
     showToast('New conversation initialized', 'success');
   }, [go, showToast]);
@@ -219,15 +288,12 @@ export default function Dashboard() {
         e.preventDefault();
         setPaletteOpen((p) => !p);
       }
-      if (isMod && e.key.toLowerCase() === 'c' && !e.shiftKey) {
-        e.preventDefault();
-        setPaletteOpen((p) => !p);
-      }
       if (isMod && e.shiftKey && e.key.toLowerCase() === 'v') {
         e.preventDefault();
         setVoiceAssistantOpen((v) => !v);
       }
-      if (isMod && e.key.toLowerCase() === 'n') {
+      // P3 #89: exclude shift so Ctrl+Shift+N (new window) is not hijacked
+      if (isMod && !e.shiftKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         handleNewChat();
       }
@@ -236,6 +302,11 @@ export default function Dashboard() {
       if (isMod && e.key === '3') { e.preventDefault(); go('copilot'); }
       if (isMod && e.key === '4') { e.preventDefault(); go('projects'); }
       if (isMod && e.key === '5') { e.preventDefault(); go('artifacts'); }
+      // P3 #88: implement the 6/7/8 shortcuts the palette advertises
+      // (Ctrl+A deliberately NOT bound — it must stay native Select All)
+      if (isMod && e.key === '6') { e.preventDefault(); go('voice'); }
+      if (isMod && e.key === '7') { e.preventDefault(); go('settings'); }
+      if (isMod && e.key === '8') { e.preventDefault(); go('automations'); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -247,13 +318,15 @@ export default function Dashboard() {
     setCreating(true);
     try {
       const userId = localStorage.getItem('ai_dost_user_id') || 'demo_user_id';
-      const created = await createProject({ name: newProjectName.trim(), description: newProjectDesc.trim(), userId });
+      const created = await createProject(newProjectName.trim(), newProjectDesc.trim(), userId);
       setProjects((prev) => [created, ...prev]);
       setActiveProject(created);
       setShowCreateModal(false);
       setNewProjectName('');
       setNewProjectDesc('');
-      showToast(`Project "${created.name}" created`, 'success');
+      // P2 #78: backend returns { project_name } (server.js /memory/project) —
+      // created.name was undefined → toast showed Project "undefined" created.
+      showToast(`Project "${created.project_name || created.name || 'Untitled'}" created`, 'success');
       go('projects');
     } catch (err) {
       showToast(err.message || 'Project creation failed', 'error');
@@ -294,6 +367,7 @@ export default function Dashboard() {
             <ChatView
               key={chatKey}
               model={model}
+              initialPrompt={initialChatPrompt}
               onModelChange={setModel}
               onOpenResumeWithData={handleOpenResumeWithData}
               onOpenVoice={handleOpenVoice}
@@ -304,6 +378,13 @@ export default function Dashboard() {
             <AgentView
               onToast={showToast}
               onOpenFile={(filePath) => {
+                // P3 #118: persist the clicked file so CopilotIDE (mounted after
+                // the view switch) opens it instead of dropping the request.
+                try {
+                  if (filePath && typeof window !== 'undefined') {
+                    localStorage.setItem('ai_dost_copilot_open', JSON.stringify({ path: filePath, at: Date.now() }));
+                  }
+                } catch (_) {}
                 go('copilot');
               }}
             />
@@ -330,6 +411,27 @@ export default function Dashboard() {
           {view === 'artifacts' && (
             <ArtifactsView onToast={showToast} />
           )}
+          {view === 'writing' && (
+            <WritingStudioView onToast={showToast} />
+          )}
+          {view === 'planner' && (
+            <ProductivityPlannerView onToast={showToast} />
+          )}
+          {view === 'travel' && (
+            <TravelAssistantView onToast={showToast} />
+          )}
+          {view === 'language' && (
+            <LanguageHubView onToast={showToast} />
+          )}
+          {view === 'decision' && (
+            <DecisionSupportView onToast={showToast} />
+          )}
+          {view === 'security' && (
+            <SecurityHubView onToast={showToast} />
+          )}
+          {view === 'capabilities' && (
+            <MasterCapabilitiesView onToast={showToast} onNavigate={go} />
+          )}
           {view === 'research' && (
             <ResearchView onToast={showToast} onNavigate={go} />
           )}
@@ -337,6 +439,7 @@ export default function Dashboard() {
             <VoiceView
               onToast={showToast}
               onTranscript={handleVoiceTranscript}
+              onNavigate={go}
               onClose={() => go('chat')}
             />
           )}
@@ -358,11 +461,17 @@ export default function Dashboard() {
                   } catch (_) {}
                 }
                 go('chat');
-                setTimeout(() => {
-                  if (typeof window !== 'undefined') {
-                    window.dispatchEvent(new CustomEvent('ai_dost_switch_session', { detail: sessId }));
-                  }
-                }, 50);
+                // P3 #119: handshake instead of a fixed 50ms mount race —
+                // ChatView dispatches 'ai_dost_chat_ready' once its switch
+                // listener is attached; then we emit the actual switch.
+                let fallbackTimer = null;
+                const fireSwitch = () => {
+                  if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
+                  window.removeEventListener('ai_dost_chat_ready', fireSwitch);
+                  window.dispatchEvent(new CustomEvent('ai_dost_switch_session', { detail: sessId }));
+                };
+                window.addEventListener('ai_dost_chat_ready', fireSwitch);
+                fallbackTimer = setTimeout(fireSwitch, 2000); // safety net
               }}
             />
           )}
@@ -374,6 +483,12 @@ export default function Dashboard() {
           )}
           {view === 'automations' && (
             <AutomationsView onToast={showToast} onNavigate={go} />
+          )}
+          {view === 'animations' && (
+            <AnimationStudioView onToast={showToast} onOpenIDE={() => go('copilot')} />
+          )}
+          {view === 'bharat' && (
+            <BharatHubView onToast={showToast} />
           )}
           {view === 'skills' && (
             <SkillsView onToast={showToast} />
@@ -421,11 +536,11 @@ export default function Dashboard() {
               initial={{ opacity: 0, scale: 0.98, y: -8 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.98, y: -8 }}
-              transition={{ duration: 0.12 }}
-              className="fixed left-1/2 top-20 -translate-x-1/2 z-[95] w-full max-w-lg rounded-sm overflow-hidden shadow-modal bg-canvas-surface border border-border"
+              transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
+              className="fixed left-1/2 top-20 -translate-x-1/2 z-[95] w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl bg-canvas-surface/95 backdrop-blur-xl border border-border"
             >
-              <div className="flex items-center gap-3 px-3.5 py-3 border-b border-border">
-                <Sparkles className="w-4 h-4 text-accent-primary" />
+              <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+                <Sparkles className="w-4 h-4 text-accent shrink-0" />
                 <input
                   ref={paletteInputRef}
                   value={paletteQuery}
@@ -454,7 +569,7 @@ export default function Dashboard() {
                   type="button"
                   onClick={() => {
                     setPaletteOpen(false);
-                    setVoiceAssistantOpen(true);
+                    handleOpenVoice();
                   }}
                   className="p-1.5 rounded-lg hover:bg-canvas-elevated text-ink-muted hover:text-accent transition-fast cursor-pointer flex items-center justify-center mr-1"
                   aria-label="Voice Input (Ctrl+Shift+V)"
@@ -462,13 +577,13 @@ export default function Dashboard() {
                 >
                   <Mic className="w-4 h-4" />
                 </button>
-                <kbd className="text-[9px] font-mono px-1.5 py-0.5 rounded-xs bg-canvas-elevated text-ink-muted hidden sm:inline-block">
+                <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-canvas-elevated border border-border text-ink-muted hidden sm:inline-block">
                   ESC
                 </kbd>
               </div>
-              <div id="palette-actions-list" role="listbox" aria-label="Commands" className="max-h-72 overflow-y-auto py-1 divide-y divide-border-subtle">
+              <div id="palette-actions-list" role="listbox" aria-label="Commands" className="max-h-72 overflow-y-auto p-1.5 space-y-0.5">
                 {filteredActions.length === 0 && (
-                  <div className="px-4 py-6 text-center text-xs text-ink-muted">No commands found</div>
+                  <div className="px-4 py-8 text-center text-xs text-ink-muted">No commands found</div>
                 )}
                 {filteredActions.map((a, i) => {
                   const isSelected = paletteIndex === i;
@@ -480,20 +595,29 @@ export default function Dashboard() {
                       aria-selected={isSelected}
                       onMouseEnter={() => setPaletteIndex(i)}
                       onClick={() => runPaletteAction(a.id)}
-                      className={`w-full flex items-center justify-between gap-3 px-3.5 py-2 text-left transition-fast cursor-pointer ${
+                      className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-xl text-left transition-all duration-150 cursor-pointer ${
                         isSelected
-                          ? 'bg-canvas-elevated text-accent-primary border-l-2 border-accent-primary'
-                          : 'hover:bg-canvas-elevated text-paper-100'
+                          ? 'bg-canvas-elevated text-paper-100 shadow-xs'
+                          : 'text-paper-200 hover:bg-canvas-elevated/60 hover:text-paper-100'
                       }`}
                     >
-                      <div className="flex items-center gap-2.5">
-                        <a.icon className={`w-4 h-4 ${isSelected ? 'text-accent-primary' : 'text-ink-muted'}`} />
-                        <span className={`text-xs ${isSelected ? 'text-white font-medium' : 'text-paper-100'}`}>{a.label}</span>
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className={`p-1.5 rounded-lg border transition-colors shrink-0 ${isSelected ? 'bg-accent/15 border-accent/30 text-accent' : 'bg-canvas-base border-border text-ink-muted'}`}>
+                          <a.icon className="w-3.5 h-3.5" />
+                        </div>
+                        <span className={`text-xs truncate ${isSelected ? 'font-semibold text-paper-100' : 'text-paper-200'}`}>{a.label}</span>
                       </div>
-                      <kbd className="text-[10px] font-mono text-ink-muted">{a.hint}</kbd>
+                      <kbd className="text-[10px] font-mono text-ink-muted px-1.5 py-0.5 rounded-md bg-canvas-base border border-border shrink-0">{a.hint}</kbd>
                     </button>
                   );
                 })}
+              </div>
+              <div className="flex items-center justify-between px-3.5 py-2 border-t border-border bg-canvas-subtle/50 text-[11px] text-ink-muted select-none">
+                <div className="flex items-center gap-3">
+                  <span><kbd className="font-mono bg-canvas-elevated px-1 py-0.5 rounded text-[10px] border border-border">↑↓</kbd> Navigate</span>
+                  <span><kbd className="font-mono bg-canvas-elevated px-1 py-0.5 rounded text-[10px] border border-border">↵</kbd> Select</span>
+                </div>
+                <span><kbd className="font-mono bg-canvas-elevated px-1 py-0.5 rounded text-[10px] border border-border">Esc</kbd> Close</span>
               </div>
             </motion.div>
           </>
@@ -554,13 +678,20 @@ export default function Dashboard() {
         )}
       </AnimatePresence>
       {/* Voice Assistant Modal */}
-      <VoiceAssistant
-        isOpen={voiceAssistantOpen}
-        onClose={() => setVoiceAssistantOpen(false)}
-        onTranscript={(text) => {
-          // Additional handling if needed
-        }}
-      />
+      {mounted && voiceAssistantOpen && (
+        <VoiceAssistant
+          isOpen={voiceAssistantOpen}
+          onClose={() => setVoiceAssistantOpen(false)}
+          onNavigate={go}
+          onToggleTheme={handleToggleTheme}
+          onNewChat={handleNewChat}
+          onOpenPalette={handleOpenPalette}
+          theme={theme}
+          onTranscript={(text) => {
+            // Additional handling if needed
+          }}
+        />
+      )}
     </AppShell>
   );
 }

@@ -68,7 +68,9 @@ class ArtifactService {
 
     const resolved = path.resolve(filePath);
     const approvedRoots = [
-      path.resolve(path.join(__dirname, '../../frontend/public/downloads')),
+      // P2 #178: env-aware downloads dir — hard-coding frontend/public/downloads
+      // blocked artifact registration in Docker where docs live elsewhere
+      path.resolve(require('./downloadsDir').resolveDownloadsDir()),
       path.resolve(path.join(__dirname, '../uploads')),
       path.resolve(workspaceManager.getWorkspacePath(projectId)),
       path.resolve(os.tmpdir())
@@ -126,7 +128,7 @@ class ArtifactService {
 
     // 4. Compute Uniform Storage Path (relative to standard roots or web path)
     let storagePath = resolved;
-    const downloadsRoot = path.resolve(path.join(__dirname, '../../frontend/public/downloads'));
+    const downloadsRoot = path.resolve(require('./downloadsDir').resolveDownloadsDir());
     const uploadsRoot = path.resolve(path.join(__dirname, '../uploads'));
     const wsRoot = path.resolve(workspaceManager.getWorkspacePath(validProjId));
 

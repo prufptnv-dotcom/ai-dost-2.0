@@ -35,6 +35,16 @@ async function figmaFetch(path, options = {}) {
   }
 }
 
+// P2 #58: fileKey/nodeId/format flow into Figma API URL paths — strict charset
+// keeps path/query injection (../, ?, #, encoded junk) out of upstream requests.
+function isValidFileKey(v) {
+  return typeof v === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(v);
+}
+function isValidNodeId(v) {
+  return typeof v === 'string' && /^[0-9]+:[0-9]+(,[0-9]+:[0-9]+)*$/.test(v);
+}
+const EXPORT_FORMATS = new Set(['png', 'svg', 'jpg', 'jpeg', 'pdf', 'webp']);
+
 function walkNodes(node, results = []) {
   if (!node) return results;
   if (node.type === 'COMPONENT' || node.type === 'INSTANCE') {
@@ -110,6 +120,9 @@ router.get('/health', (_req, res) => {
 // GET /api/figma/file/:fileKey — fetch file metadata
 router.get('/file/:fileKey', async (req, res, next) => {
   try {
+    if (!isValidFileKey(req.params.fileKey)) {
+      return res.status(400).json({ error: 'Invalid fileKey format' });
+    }
     const file = await figmaFetch(`/files/${req.params.fileKey}`);
     res.json({ name: file.name, lastModified: file.lastModified, thumbnailUrl: file.thumbnailUrl, version: file.version });
   } catch (err) { next(err); }
@@ -120,6 +133,7 @@ router.get('/components', async (req, res, next) => {
   try {
     const { fileKey, componentId } = req.query;
     if (!fileKey) return res.status(400).json({ error: 'fileKey query param is required' });
+    if (!isValidFileKey(fileKey)) return res.status(400).json({ error: 'Invalid fileKey format' });
     const data = await figmaFetch(`/files/${fileKey}`);
     let components = walkNodes(data.document);
     if (componentId) components = components.filter(c => c.id === componentId);
@@ -133,9 +147,13 @@ router.get('/design-to-code', async (req, res, next) => {
     const { fileKey, nodeId } = req.query;
     if (!fileKey) return res.status(400).json({ error: 'fileKey query param is required' });
     if (!nodeId) return res.status(400).json({ error: 'nodeId query param is required (Figma node id, e.g. 1:23)' });
+    if (!isValidFileKey(fileKey)) return res.status(400).json({ error: 'Invalid fileKey format' });
+    if (!isValidNodeId(nodeId)) return res.status(400).json({ error: 'Invalid nodeId format' });
 
     const data = await figmaFetch(`/files/${fileKey}`);
-    let found = data.document?.findNode?.id === nodeId ? data.document : null;
+    // P3 #65: Figma documents have no findNode() — only the recursive walk
+    // below is a real path (the old `data.document?.findNode?.id` was dead).
+    let found = data.document && data.document.id === nodeId ? data.document : null;
     if (!found && data.document) {
       const stack = [data.document];
       while (stack.length) {
@@ -169,6 +187,9 @@ router.get('/export', async (req, res, next) => {
   try {
     const { fileKey, nodeId, format = 'png' } = req.query;
     if (!fileKey || !nodeId) return res.status(400).json({ error: 'fileKey and nodeId are required' });
+    if (!isValidFileKey(fileKey)) return res.status(400).json({ error: 'Invalid fileKey format' });
+    if (!isValidNodeId(nodeId)) return res.status(400).json({ error: 'Invalid nodeId format' });
+    if (!EXPORT_FORMATS.has(String(format))) return res.status(400).json({ error: 'Invalid format (png|svg|jpg|pdf|webp)' });
     const token = getToken();
     if (!token) {
       const err = new Error('FIGMA_API_KEY not set in backend/.env');

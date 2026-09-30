@@ -24,15 +24,22 @@ function isProtectedSecretFile(targetPath) {
 
 function resolveSafePath(workspacePath, targetPath) {
   if (!workspacePath || !targetPath || typeof targetPath !== 'string') return null;
+  if (targetPath.includes('\0')) return null; // null-byte truncation bypass
   const normalizedTarget = targetPath.replace(/\\/g, '/');
   if (normalizedTarget.includes('../') || normalizedTarget.includes('..\\')) return null;
+  // Also catch bare '..' segments
+  if (normalizedTarget.split('/').some(seg => seg === '..')) return null;
 
   const ws = path.resolve(workspacePath);
   let target;
 
+  // Case-insensitive containment on Windows (paths are case-insensitive there)
+  const isWin = process.platform === 'win32';
+  const norm = (p) => (isWin ? p.toLowerCase() : p);
+
   if (path.isAbsolute(targetPath)) {
     const absResolved = path.resolve(targetPath);
-    if (absResolved === ws || absResolved.startsWith(ws + path.sep)) {
+    if (norm(absResolved) === norm(ws) || norm(absResolved).startsWith(norm(ws) + path.sep)) {
       target = absResolved;
     } else {
       return null;
@@ -42,7 +49,7 @@ function resolveSafePath(workspacePath, targetPath) {
     target = path.resolve(ws, cleaned);
   }
 
-  if (target !== ws && !target.startsWith(ws + path.sep)) return null;
+  if (norm(target) !== norm(ws) && !norm(target).startsWith(norm(ws) + path.sep)) return null;
   if (isProtectedSecretFile(target)) return null;
 
   return target;

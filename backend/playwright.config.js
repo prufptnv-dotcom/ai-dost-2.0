@@ -22,7 +22,10 @@ module.exports = defineConfig({
   },
   webServer: [
     {
-      command: 'node server.js',
+      // P3 #202: npm start → same -r preload chain as production
+      // (security-hardening, taskCancellation, chatAgentRouteBridge); bare
+      // `node server.js` exercised a differently-configured server.
+      command: 'npm start',
       url: 'http://localhost:5000/health',
       reuseExistingServer: true,
       timeout: 60_000,
@@ -33,7 +36,7 @@ module.exports = defineConfig({
       url: 'http://localhost:3000',
       reuseExistingServer: true,
       timeout: 120_000,
-      cwd: require('path').join(__dirname, '..', '..', 'frontend'),
+      cwd: require('path').join(__dirname, '..', 'frontend'),
     },
   ],
 });

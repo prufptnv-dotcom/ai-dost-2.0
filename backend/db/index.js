@@ -27,18 +27,25 @@ function initDatabase(customPath = null) {
   const dbPath = customPath || path.join(dataDir, 'app.db');
   dbInstance = new Database(dbPath);
 
-  // Polyfill for better-sqlite3 db.transaction()
+  // Polyfill for better-sqlite3 db.transaction() (kept in sync with
+  // sqlitePolyfill.js — P2 #56: nesting guard + rollback that cannot mask)
   if (typeof dbInstance.transaction !== 'function') {
     dbInstance.transaction = function(fn) {
       return function(...args) {
+        if ((dbInstance.__txnDepth || 0) > 0) {
+          return fn(...args);
+        }
+        dbInstance.__txnDepth = 1;
         dbInstance.exec('BEGIN');
         try {
           const result = fn(...args);
           dbInstance.exec('COMMIT');
           return result;
         } catch (e) {
-          dbInstance.exec('ROLLBACK');
+          try { dbInstance.exec('ROLLBACK'); } catch (_) { /* tx already closed */ }
           throw e;
+        } finally {
+          dbInstance.__txnDepth = 0;
         }
       };
     };

@@ -1,6 +1,23 @@
 const express = require('express');
 const logger = require('../logger');
+const { ReasoningStreamFilter } = require('../utils/streamUtils');
+const { OUTPUT_QUALITY_STANDARD } = require('../services/outputQualityStandard');
+const DEEP_REASONING_SYSTEM_PROMPT = `You are AI-Dost — an elite autonomous AI system combining the depth of a principal engineer and research analyst with the execution autonomy of a Devin-class AI developer (ChatGPT/Claude-level output quality is the minimum bar).
+
+[THINKING PROTOCOL]
+Before producing the final reply, reason step-by-step INTERNALLY inside <think>...</think> tags.
+Do NOT reveal these tags or the raw chain-of-thought in the conversational reply — the frontend parses them into a visible "thought trace". If the model emits native reasoning (reasoning_content), prefer that; otherwise use the <think>...</think> wrapper.
+
+[PRIMARY DIRECTIVE]
+Deliver complete, expert-level, actionable answers: depth, precision, and working solutions over brevity. Do the thinking for the user — never offload basic reasoning as follow-up questions. For build/fix requests, work like an autonomous agent: Plan -> Assumptions -> Implementation -> Verify -> Next steps.
+
+${OUTPUT_QUALITY_STANDARD}
+
+Always communicate conversationally in Hinglish unless requested otherwise.`;
 const router = express.Router();
+const { handleWebSearch } = require('../controllers/searchController');
+const { handleFileAnalysis } = require('../controllers/analyzeController');
+const { handleExecute } = require('../controllers/executeController');
 const MoERouterService = require('../services/moeRouterService');
 const VllmService = require('../services/vllmService');
 const { detectResponseLanguage } = require('../services/languageDetector');
@@ -242,6 +259,8 @@ router.post('/', async (req, res) => {
 4. Interactive UI Elements: Do NOT hallucinate or pretend to generate interactive UI buttons like "Launch Assessment" in plain text chat. Present quizzes or questions directly in plain text or markdown.
 5. Language Consistency: The user has chosen a specific language (e.g., Hinglish). You MUST reply entirely in that chosen language. Do not switch back to English except for technical terms.
 6. Citation Style: When citing sources, ALWAYS include the full clickable URL in this format: [1] https://... (do not just write [1] without the link).
+7. Completeness (MANDATORY): Never truncate an answer mid-way, never use placeholder code ("// rest of code here", "// TODO", "your_code_here"), and never give a shallow one-liner when the question needs depth. Code must be complete and runnable with imports + error handling.
+8. Self-Verification: Before finalizing, confirm silently — the actual question is answered, every code block is complete, steps are in runnable order, citations are real, and filler is removed.
 `;
         processedMessage = `${GLOBAL_SYSTEM_RULES}\n\n${langInfo.instruction}\n\n${processedMessage}`;
 
@@ -574,8 +593,8 @@ Structure the answer clearly, use appropriate diagrams, code, tables, or step-by
         let fallbacksAttempted = [];
         const groqMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
 
-        if (model && model.startsWith('local:')) {
-            const localModelName = model.substring(6);
+        if (model === 'ollama' || (model && model.startsWith('local:'))) {
+            const localModelName = model.startsWith('local:') ? model.substring(6) : (process.env.OLLAMA_MODEL || 'qwen2.5-coder:7b');
             const localMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
             
             logger.info(`🔄 Routing request to local model: ${localModelName}`);
@@ -913,98 +932,7 @@ router.get('/web-status', (req, res) => {
 });
 
 // ── Web Search with sources (Perplexity-style) ────────────────────────────────
-router.post('/search', async (req, res) => {
-    const { message, model, history } = req.body;
-    if (!message || !message.trim()) {
-        return res.status(400).json({ success: false, error: 'message is required' });
-    }
-    const query = message.trim();
-
-    // Production-Grade Automatic Response-Language Matching for Web Search answers
-    const cleanHistory = buildCleanHistory(history, 10, 12000);
-    const langInfo = detectResponseLanguage(query, cleanHistory);
-
-    try {
-        const searchRes = await webSearchService.search(query, { maxResults: 6 });
-        const sources = (searchRes.results || []).map((s, i) => ({
-            citationId: i + 1,
-            title: s.title,
-            url: s.url,
-            domain: s.domain,
-            snippet: s.snippet,
-            publishedDate: s.publishedDate,
-            retrievalTimestamp: s.retrievalTimestamp,
-            reliability: s.reliability
-        }));
-
-        if (sources.length === 0) {
-            return res.json({
-                success: true,
-                reply: langInfo.detectedResponseLanguage === 'hindi'
-                    ? 'इंटरनेट पर इस विषय पर कोई सत्यापित जानकारी नहीं मिली। कृपया अपने प्रश्न को थोड़ा और स्पष्ट करें।'
-                    : 'Could not find verified live web results for this query. Please try again with more specific keywords.',
-                sources: [],
-                provider: searchRes.provider || 'none',
-                status: 'NO_RESULTS',
-                detectedResponseLanguage: langInfo.detectedResponseLanguage,
-                languageName: langInfo.languageName
-            });
-        }
-
-        // Synthesize response using LLM grounded with verified web sources and strict citation rules
-        const sourcesContext = sources.map((s, i) => `[${i + 1}] "${s.title}" (${s.domain})\nURL: ${s.url}\nDate: ${s.publishedDate || 'N/A'}\nSnippet: ${s.snippet}`).join('\n\n');
-
-        const prompt = `${langInfo.instruction}
-
-You are AI-Dost with live web search access. Answer the user query factually based ONLY on the verified live web search results below.
-
-USER QUERY:
-${query}
-
-VERIFIED LIVE WEB SOURCES:
-${sourcesContext}
-
-STRICT CITATION DIRECTIVES:
-- Only assert facts directly substantiated by the sources above.
-- Embed numbered bracket citations [1], [2], etc., immediately following the facts they support.
-- Do not invent, hallucinate, or fabricate any facts or citations.
-- If information is missing or sources conflict, state this transparently.
-- Keep original URLs and proper names intact.
-- Respond in: ${langInfo.languageName} (${langInfo.detectedResponseLanguage}).`;
-
-        let reply = '';
-        try {
-            const llmPromise = autoSelectModel(prompt, 'chat', null, cleanHistory, 'chat', null);
-            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('LLM synthesis timeout')), 8000));
-            const llmRes = await Promise.race([llmPromise, timeoutPromise]);
-            if (isValidResponse(llmRes.response)) {
-                reply = llmRes.response;
-            }
-        } catch (llmErr) {
-            logger.warn('[Search] LLM synthesis fallback:', llmErr.message);
-        }
-
-        if (!reply) {
-            // Fallback synthesis directly from verified snippets in user language
-            reply = sources.slice(0, 4).map((s, i) => `**[${i + 1}] ${s.title}**\n${s.snippet}\n🔗 [${s.domain}](${s.url})`).join('\n\n');
-        }
-
-        return res.json({
-            success: true,
-            reply,
-            sources,
-            provider: searchRes.provider,
-            status: 'SUCCESS',
-            retrievalTimestamp: new Date().toISOString(),
-            detectedResponseLanguage: langInfo.detectedResponseLanguage,
-            languageName: langInfo.languageName
-        });
-    } catch (e) {
-        logger.error('[Search] Web search error:', e.message);
-        return res.status(500).json({ success: false, error: 'Web search failed', detail: e.message });
-    }
-});
-
+router.post('/search', handleWebSearch);
 // ── Creative Canvas & Visual Art System Directive ───────────────────────────
 const CREATIVE_CANVAS_SYSTEM_PROMPT = `You are AI-Dost, an elite Senior Software Engineer, Creative Canvas/SVG Technologist, and Autonomous AI Assistant.
 Key Directives & Mandates:
@@ -1042,252 +970,7 @@ Key Directives & Mandates:
 ${CODING_SOFTWARE_DEV_DIRECTIVE}`;
 
 // ── Universal File Reader & Deep Analytical Studio (Category 7) ─────────────
-router.post('/analyze', async (req, res) => {
-    const { message, text, imageBase64, imageMime, pdfBase64, docxBase64, pptxBase64, xlsxBase64, files } = req.body;
-    
-    // Normalize incoming files into a unified array
-    const rawFiles = Array.isArray(files) && files.length > 0 ? [...files] : [];
-    if (pdfBase64) rawFiles.push({ name: 'document.pdf', base64: pdfBase64, mime: 'application/pdf' });
-    if (docxBase64) rawFiles.push({ name: 'document.docx', base64: docxBase64, mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-    if (pptxBase64) rawFiles.push({ name: 'presentation.pptx', base64: pptxBase64, mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
-    if (xlsxBase64) rawFiles.push({ name: 'spreadsheet.xlsx', base64: xlsxBase64, mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    if (text) rawFiles.push({ name: 'snippet.txt', text });
-
-    if (!message && !imageBase64 && rawFiles.length === 0) {
-        return res.status(400).json({ success: false, error: 'Nothing to analyze. Upload a PDF, DOCX, PPTX, XLSX, CSV, image, or text file.' });
-    }
-
-    // 1. Extract content across all provided files
-    const parsedFiles = [];
-    for (const f of rawFiles) {
-        try {
-            const extracted = await extractFileContent(f);
-            parsedFiles.push(extracted);
-        } catch (fErr) {
-            logger.warn(`[Analyze] File extract error for ${f.name}: ${fErr.message}`);
-            parsedFiles.push({ name: f.name || 'file', ext: '', text: `[Error reading file: ${fErr.message}]` });
-        }
-    }
-
-    // 2. Detect Analytical Mode & Intent
-    const mode = detectAnalysisMode(message, parsedFiles.length);
-
-    // 3. Assemble Consolidated Context
-    let contextText = '';
-    if (parsedFiles.length === 1) {
-        contextText = `FILE NAME: ${parsedFiles[0].name}\nFILE EXTENSION: .${parsedFiles[0].ext}\n\nCONTENT:\n${parsedFiles[0].text}`;
-    } else if (parsedFiles.length > 1) {
-        contextText = `MULTIPLE FILES FOR COMPARISON & ANALYSIS (${parsedFiles.length} files):\n\n` +
-            parsedFiles.map((pf, idx) => `══════════════════════════════════════════════════════════════\nFILE ${idx + 1}: ${pf.name} (.${pf.ext})\n══════════════════════════════════════════════════════════════\n${pf.text}`).join('\n\n');
-    }
-
-    // Trim context safely if too large for prompt budget
-    if (contextText.length > 35000) {
-        contextText = contextText.slice(0, 35000) + '\n\n[...content truncated for context budget...]';
-    }
-
-    // 4. Build 2030 Executive Analysis Prompt
-    const userPrompt = message || (imageBase64 ? 'Analyze this image and explain what is depicted with high accuracy.' : 'Provide a comprehensive executive analysis and summary of this file in Hinglish.');
-
-    const systemPrompt = `${FILE_ANALYSIS_STUDIO_DIRECTIVE}
-
-CURRENT TASK DIRECTIVE:
-You are AI-Dost's Master Analyst & Auditor.
-The user has uploaded ${parsedFiles.length} file(s) and requested analysis mode: "${mode}".
-Deliver a top-tier, authoritative, exhaustive response adhering strictly to the Category 7 Protocol.
-Ensure all tables, metrics, rubrics, and code blocks are completely filled out with concrete facts (no placeholders).`;
-
-    // 5. Multi-Model Cascade
-    // Attempt 1: Gemini Vision / Multimodal (handles images + rich file text)
-    try {
-        const API_KEY = process.env.GEMINI_API_KEY;
-        let parts = [];
-        if (contextText) {
-            parts.push({ text: `${contextText}\n\nUSER INSTRUCTION: ${userPrompt}` });
-        } else {
-            parts.push({ text: userPrompt });
-        }
-        if (imageBase64) {
-            parts.unshift({
-                inlineData: {
-                    mimeType: imageMime || 'image/png',
-                    data: imageBase64
-                }
-            });
-        }
-
-        const geminiModels = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite'];
-        for (const gModel of geminiModels) {
-            try {
-                const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), 45000);
-                const r = await fetch(
-                    `https://generativelanguage.googleapis.com/v1beta/models/${gModel}:generateContent?key=${API_KEY}`,
-                    {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            contents: [{ role: 'user', parts }],
-                            systemInstruction: { parts: [{ text: systemPrompt }] }
-                        }),
-                        signal: controller.signal
-                    }
-                );
-                clearTimeout(timer);
-                if (r.ok) {
-                    const data = await r.json();
-                    const reply = (data?.candidates?.[0]?.content?.parts || [])
-                        .map((p) => p.text).filter(Boolean).join('\n');
-                    if (reply && reply.length > 20) {
-                        return res.json({
-                            success: true,
-                            reply,
-                            mode,
-                            fileCount: parsedFiles.length,
-                            provider: imageBase64 ? `gemini-vision (${gModel})` : `gemini-analysis (${gModel})`
-                        });
-                    }
-                }
-            } catch (errModel) {
-                logger.warn(`[Analyze] Gemini model ${gModel} failed:`, errModel.message);
-            }
-        }
-    } catch (e) {
-        logger.warn('[Analyze] Gemini cascade failed:', e.message);
-    }
-
-    // Attempt 2: Groq Cascade Fallback
-    try {
-        const GroqService = require('../services/groqService');
-        const groqPrompt = `${systemPrompt}\n\n${contextText ? contextText.slice(0, 16000) + '\n\n' : ''}USER INSTRUCTION: ${userPrompt}`;
-        const reply = await GroqService.chat(groqPrompt, [], 'chat');
-        if (reply && !reply.startsWith('Groq')) {
-            return res.json({
-                success: true,
-                reply,
-                mode,
-                fileCount: parsedFiles.length,
-                provider: 'groq-analysis'
-            });
-        }
-    } catch (e) {
-        logger.warn('[Analyze] Groq fallback failed:', e.message);
-    }
-
-    // Attempt 3: Cerebras / OpenRouter Fallback
-    try {
-        const CerebrasService = require('../services/cerebrasService');
-        const cerebrasPrompt = `${systemPrompt}\n\n${contextText ? contextText.slice(0, 14000) + '\n\n' : ''}USER INSTRUCTION: ${userPrompt}`;
-        const reply = await CerebrasService.chat(cerebrasPrompt, [], 'chat');
-        if (reply && reply.length > 20) {
-            return res.json({
-                success: true,
-                reply,
-                mode,
-                fileCount: parsedFiles.length,
-                provider: 'cerebras-analysis'
-            });
-        }
-    } catch (e) {
-        logger.warn('[Analyze] Cerebras fallback failed:', e.message);
-    }
-
-    return res.json({
-        success: true,
-        reply: 'File ka analysis poori tarah se generate nahi ho paya — kripya dobara try karein.',
-        provider: 'none'
-    });
-});
-
-// ── Deep Reasoning & Thought Trace Stream Demuxer (Pillar 1) ─────────────────
-class ReasoningStreamFilter {
-    constructor(onThought, onContent) {
-        this.onThought = onThought;
-        this.onContent = onContent;
-        this.inThinkTag = false;
-        this.buffer = '';
-        this.hasEmittedThought = false;
-    }
-
-    pushReasoningDelta(reasoningText) {
-        if (reasoningText) {
-            this.hasEmittedThought = true;
-            this.onThought(reasoningText);
-        }
-    }
-
-    pushContentDelta(text) {
-        if (!text) return;
-        this.buffer += text;
-
-        while (this.buffer.length > 0) {
-            if (!this.inThinkTag) {
-                const thinkStart = this.buffer.indexOf('<think>');
-                if (thinkStart === -1) {
-                    const partialMatch = this.buffer.match(/<t?h?i?n?k?$/i);
-                    if (partialMatch && partialMatch.index > 0) {
-                        const safeText = this.buffer.slice(0, partialMatch.index);
-                        this.buffer = this.buffer.slice(partialMatch.index);
-                        this.onContent(safeText);
-                        break;
-                    } else if (partialMatch && partialMatch.index === 0) {
-                        break;
-                    } else {
-                        this.onContent(this.buffer);
-                        this.buffer = '';
-                    }
-                } else {
-                    if (thinkStart > 0) {
-                        this.onContent(this.buffer.slice(0, thinkStart));
-                    }
-                    this.inThinkTag = true;
-                    this.hasEmittedThought = true;
-                    this.buffer = this.buffer.slice(thinkStart + 7);
-                }
-            } else {
-                const thinkEnd = this.buffer.indexOf('</think>');
-                if (thinkEnd === -1) {
-                    const partialEndMatch = this.buffer.match(/<\/?t?h?i?n?k?>?$/i);
-                    if (partialEndMatch && partialEndMatch.index > 0) {
-                        const safeThought = this.buffer.slice(0, partialEndMatch.index);
-                        this.buffer = this.buffer.slice(partialEndMatch.index);
-                        this.onThought(safeThought);
-                        break;
-                    } else if (partialEndMatch && partialEndMatch.index === 0) {
-                        break;
-                    } else {
-                        this.onThought(this.buffer);
-                        this.buffer = '';
-                    }
-                } else {
-                    const thoughtPart = this.buffer.slice(0, thinkEnd);
-                    if (thoughtPart) this.onThought(thoughtPart);
-                    this.inThinkTag = false;
-                    this.buffer = this.buffer.slice(thinkEnd + 8);
-                }
-            }
-        }
-    }
-
-    flush() {
-        if (this.buffer.length > 0) {
-            if (this.inThinkTag) {
-                this.onThought(this.buffer);
-            } else {
-                this.onContent(this.buffer);
-            }
-            this.buffer = '';
-        }
-    }
-}
-
-const DEEP_REASONING_SYSTEM_PROMPT = `You are AI-Dost, an elite autonomous AI system and Principal Engineer with multi-step reasoning capabilities.
-When addressing complex architectural questions, algorithms, mathematical proofs, software designs, or complex user queries:
-1. Deep Chain-of-Thought: Formulate internal reasoning steps inside <think>...</think> tags if you need to analyze constraints, verify edge cases, or deduce proofs before presenting the final answer.
-2. Deliver a clear, polished, and comprehensive final response outside of any thinking tags.
-3. Language: Respond in clean, natural, grammatically correct language matching the user's requested language (Hindi/Hinglish/English).
-4. Code & Quality: Write production-ready, clean, well-tested code without placeholders.`;
-
+router.post('/analyze', handleFileAnalysis);
 // ── Stream Chat (Server-Sent Events) ─────────────────────────────────────────
 router.post('/stream', async (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -1552,8 +1235,8 @@ Include:
         let usedModel = 'auto';
 
         // 1. If Local Ollama requested
-        if (model && model.startsWith('local:')) {
-            const localModelName = model.substring(6);
+        if (model === 'ollama' || (model && model.startsWith('local:'))) {
+            const localModelName = model.startsWith('local:') ? model.substring(6) : (process.env.OLLAMA_MODEL || 'qwen2.5-coder:7b');
             try {
                 const ollamaRes = await fetch('http://127.0.0.1:11434/api/chat', {
                     method: 'POST',
@@ -1695,7 +1378,7 @@ Include:
                                         { role: 'user', parts: [{ text: processedMessage }] }
                                     ],
                                     systemInstruction: { parts: [{ text: DEEP_REASONING_SYSTEM_PROMPT }] },
-                                    generationConfig: { temperature: 0.3 }
+                                    generationConfig: { temperature: 0.3, maxOutputTokens: 8192 }
                                 }),
                                 signal: AbortSignal.timeout(25000)
                             }
@@ -1770,7 +1453,8 @@ Include:
                                     { role: 'user', content: groqMsg }
                                 ],
                                 stream: true,
-                                temperature: 0.2
+                                temperature: 0.2,
+                                max_tokens: 4096
                             }),
                             signal: AbortSignal.timeout(20000)
                         });
@@ -1825,6 +1509,11 @@ Include:
 
         // 5. Fallback to normal cascading chat if streaming had no output
         if (!streamedSuccessfully) {
+            if (model === 'ollama' || (model && model.startsWith('local:'))) {
+                const ollamaModelName = process.env.OLLAMA_MODEL || 'qwen2.5-coder:7b';
+                sendEvent({ chunk: 'Ai-Dost: Local Ollama model (' + ollamaModelName + ') connect nahi ho pa raha.\nKripya check karein:\n1. Kya "ollama serve" terminal me chal raha hai?\n2. Kya apne model download kiya hai? ("ollama pull ' + ollamaModelName + '")' });
+                usedModel = 'ollama-error';
+            } else {
             logger.info('Streaming fallbacks exhausted, falling back to synchronous cascade...');
             const fallbackResult = await autoSelectModel(processedMessage, section, fileContent, cleanHistory, mode, customKeys);
             if (isValidResponse(fallbackResult.response)) {
@@ -1854,6 +1543,7 @@ Include:
                 }
             }
         }
+        }
 
         sendEvent({ done: true, model: usedModel, sources: attachedSources });
         sendEvent('[DONE]');
@@ -1872,64 +1562,6 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-router.post('/execute', async (req, res) => {
-    const { code, language } = req.body;
-    if (!code || typeof code !== 'string') {
-        return res.status(400).json({ success: false, error: 'code is required' });
-    }
-
-    const lang = (language || 'javascript').toLowerCase();
-    const startTime = Date.now();
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidost-chat-exec-'));
-    
-    let filePath;
-    let execCmd;
-
-    if (lang === 'python' || lang === 'py') {
-        filePath = path.join(tempDir, 'script.py');
-        fs.writeFileSync(filePath, code, 'utf-8');
-        execCmd = `python "${filePath}"`;
-    } else if (lang === 'javascript' || lang === 'js' || lang === 'node') {
-        filePath = path.join(tempDir, 'script.js');
-        fs.writeFileSync(filePath, code, 'utf-8');
-        execCmd = `node "${filePath}"`;
-    } else {
-        try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
-        return res.json({
-            success: false,
-            error: `Execution for '${lang}' is not supported directly in chat. Use Copilot IDE for full-stack environments.`,
-            duration: Date.now() - startTime
-        });
-    }
-
-    runChildExec(execCmd, { timeout: 10000, maxBuffer: 1024 * 512 }, (err, stdout, stderr) => {
-        const duration = Date.now() - startTime;
-        try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
-
-        if (err && err.killed) {
-            return res.json({
-                success: false,
-                error: 'Execution timed out (10s limit exceeded)',
-                stdout: stdout || '',
-                stderr: stderr || '',
-                exitCode: 124,
-                duration
-            });
-        }
-
-        let cleanStderr = stderr || (err ? err.message : '');
-        if (cleanStderr && (cleanStderr.includes('document is not defined') || cleanStderr.includes('window is not defined') || cleanStderr.includes('HTMLElement is not defined'))) {
-            cleanStderr += '\n💡 Note: This snippet relies on browser DOM/Canvas APIs. Click "Open as Live Browser Animation" to run and view it interactively in real time.';
-        }
-
-        res.json({
-            success: !err,
-            stdout: stdout || '',
-            stderr: cleanStderr,
-            exitCode: err ? (err.code || 1) : 0,
-            duration
-        });
-    });
-});
+router.post('/execute', handleExecute);
 
 module.exports = router;
