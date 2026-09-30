@@ -30,10 +30,12 @@ const customJestConfig = {
   ],
   coverageThreshold: {
     global: {
-      statements: 4,
-      branches: 3,
-      functions: 4,
-      lines: 4,
+      statements: 18,
+      branches: 15,
+      // functions: 14 — was 15 before the dead-component/test prune (2026-09-30);
+      // removing tested-but-dead components trimmed the denominator slightly.
+      functions: 14,
+      lines: 19,
     },
   },
 };

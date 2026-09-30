@@ -3,7 +3,6 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import ToolExecutionCard from '../components/chat/ToolExecutionCard';
 import VerificationCard from '../components/chat/VerificationCard';
 import ArtifactCard from '../components/chat/ArtifactCard';
-import ChatComposer from '../components/chat/ChatComposer';
 
 describe('Phase 3.4 — Chat UX Modular Components', () => {
   describe('ToolExecutionCard', () => {
@@ -85,43 +84,6 @@ describe('Phase 3.4 — Chat UX Modular Components', () => {
 
       const downloadLink = screen.getByRole('link', { name: /Download/i });
       expect(downloadLink).toHaveAttribute('href', '/downloads/bihar_report.pdf');
-    });
-  });
-
-  describe('ChatComposer', () => {
-    it('handles typing and triggers onSend on Enter', () => {
-      const onChange = jest.fn();
-      const onSend = jest.fn();
-      render(
-        <ChatComposer
-          input="Create a Next.js app"
-          onChange={onChange}
-          onSend={onSend}
-        />
-      );
-      const textarea = screen.getByPlaceholderText(/Ask anything/i);
-      expect(textarea.value).toBe('Create a Next.js app');
-
-      fireEvent.change(textarea, { target: { value: 'New prompt' } });
-      expect(onChange).toHaveBeenCalledWith('New prompt');
-
-      fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
-      expect(onSend).toHaveBeenCalledTimes(1);
-    });
-
-    it('shows Stop button when isStreaming=true', () => {
-      const onStop = jest.fn();
-      render(
-        <ChatComposer
-          input="Streaming message..."
-          isStreaming={true}
-          onStop={onStop}
-        />
-      );
-      const stopBtn = screen.getByLabelText('Stop Generation');
-      expect(stopBtn).toBeInTheDocument();
-      fireEvent.click(stopBtn);
-      expect(onStop).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -1,4 +1,7 @@
-node_modules
+# P3 #187: plain `node_modules` only matches the context-root entry —
+# nested node_modules (deep copies) still shipped in the build
+# context. **/node_modules matches at any depth.
+**/node_modules
 npm-debug.log
 temp
 data

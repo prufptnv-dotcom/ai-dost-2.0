@@ -7,8 +7,8 @@ jest.mock('next/router', () => ({
   useRouter: () => ({ push: jest.fn() }),
 }));
 
-jest.mock('../components/chat/ChatExperienceLayerV4', () => function MockChatExperienceLayer() {
-  return <div data-testid="chat-experience-layer" />;
+jest.mock('../components/chat/LiveMultimodalExperience', () => function MockLiveMultimodalExperience() {
+  return <div data-testid="live-multimodal" />;
 });
 
 describe('SmartChatHeader composer bridges', () => {

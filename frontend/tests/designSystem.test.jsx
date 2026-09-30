@@ -1,15 +1,11 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { Button, IconButton } from '../components/ui/Button';
-import { Input, Textarea } from '../components/ui/Input';
 import { Badge, StatusIndicator } from '../components/ui/Badge';
 import { Tabs } from '../components/ui/Tabs';
 import { Modal } from '../components/ui/Modal';
-import { Panel, Divider } from '../components/ui/Panel';
 import { Skeleton, EmptyState } from '../components/ui/EmptyState';
-import BrandLogo from '../components/ui/BrandLogo';
 import { AppShell } from '../components/layout/AppShell';
-import { SplitPane, PanelGroup } from '../components/layout/SplitPane';
 
 describe('Phase 3.2 — Core Design System Primitives', () => {
   describe('Button & IconButton', () => {
@@ -41,40 +37,6 @@ describe('Phase 3.2 — Core Design System Primitives', () => {
       expect(btn).toBeInTheDocument();
       fireEvent.click(btn);
       expect(onClick).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe('Input & Textarea', () => {
-    it('renders Input with label, placeholder, and handles change', () => {
-      const onChange = jest.fn();
-      render(
-        <Input
-          label="Project Name"
-          placeholder="Enter name"
-          onChange={onChange}
-        />
-      );
-      expect(screen.getByText('Project Name')).toBeInTheDocument();
-      const input = screen.getByPlaceholderText('Enter name');
-      fireEvent.change(input, { target: { value: 'AI Project' } });
-      expect(onChange).toHaveBeenCalled();
-    });
-
-    it('renders error and hint states on Input', () => {
-      const { rerender } = render(<Input error="Name is required" />);
-      expect(screen.getByText('Name is required')).toBeInTheDocument();
-
-      rerender(<Input hint="Maximum 50 characters" />);
-      expect(screen.getByText('Maximum 50 characters')).toBeInTheDocument();
-    });
-
-    it('renders Textarea with label and handles input', () => {
-      const onChange = jest.fn();
-      render(<Textarea label="Description" placeholder="Enter details" onChange={onChange} />);
-      expect(screen.getByText('Description')).toBeInTheDocument();
-      const textarea = screen.getByPlaceholderText('Enter details');
-      fireEvent.change(textarea, { target: { value: 'Description content' } });
-      expect(onChange).toHaveBeenCalled();
     });
   });
 
@@ -144,24 +106,6 @@ describe('Phase 3.2 — Core Design System Primitives', () => {
     });
   });
 
-  describe('Panel & Divider', () => {
-    it('renders Panel with header, body, and footer', () => {
-      render(
-        <Panel header="Panel Header" footer={<button>Save</button>}>
-          <p>Panel Content</p>
-        </Panel>
-      );
-      expect(screen.getByText('Panel Header')).toBeInTheDocument();
-      expect(screen.getByText('Panel Content')).toBeInTheDocument();
-      expect(screen.getByText('Save')).toBeInTheDocument();
-    });
-
-    it('renders Divider with optional label', () => {
-      render(<Divider label="OR" />);
-      expect(screen.getByText('OR')).toBeInTheDocument();
-    });
-  });
-
   describe('Skeleton & EmptyState', () => {
     it('renders Skeleton component', () => {
       const { container } = render(<Skeleton width="100px" height="20px" />);
@@ -186,16 +130,7 @@ describe('Phase 3.2 — Core Design System Primitives', () => {
     });
   });
 
-  describe('BrandLogo', () => {
-    it('renders BrandLogo with text', () => {
-      render(<BrandLogo size="md" showText={true} />);
-      expect(screen.getByRole('img', { name: 'AI-Dost Logo' })).toBeInTheDocument();
-      expect(screen.getByText('AI')).toBeInTheDocument();
-      expect(screen.getByText('Dost')).toBeInTheDocument();
-    });
-  });
-
-  describe('Layout Primitives (AppShell, SplitPane, PanelGroup)', () => {
+  describe('Layout Primitives (AppShell)', () => {
     it('renders AppShell with CommandRail, top strip, and canvas content', () => {
       render(
         <AppShell
@@ -208,28 +143,6 @@ describe('Phase 3.2 — Core Design System Primitives', () => {
       expect(screen.getAllByText(/AI-Dost/i)[0]).toBeInTheDocument();
       expect(screen.getByText('Main Canvas Content')).toBeInTheDocument();
       expect(screen.getByText('Inspector Drawer')).toBeInTheDocument();
-    });
-
-    it('renders SplitPane with left and right panes', () => {
-      render(
-        <SplitPane
-          left={<div>File Tree</div>}
-          right={<div>Editor View</div>}
-        />
-      );
-      expect(screen.getByText('File Tree')).toBeInTheDocument();
-      expect(screen.getByText('Editor View')).toBeInTheDocument();
-    });
-
-    it('renders PanelGroup', () => {
-      render(
-        <PanelGroup direction="horizontal">
-          <div>Pane 1</div>
-          <div>Pane 2</div>
-        </PanelGroup>
-      );
-      expect(screen.getByText('Pane 1')).toBeInTheDocument();
-      expect(screen.getByText('Pane 2')).toBeInTheDocument();
     });
   });
 });

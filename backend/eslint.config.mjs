@@ -63,15 +63,8 @@ export default [
       "temp_test_workspace/**",
       "scratch/**",
       "**/*.log",
-      "copilottest*.js",
-      "debug_p1*.js",
-      "fix_*.js",
-      "patch*.js",
       "test_*.js",
-      "cascade_check.js",
-      "rag_run_check.js",
-      "verify_*.js",
-      "CUsersVIKASH1AppDataLocalTempagentwscopilotworkspace/**"
+      "verify_*.js"
     ]
   },
   js.configs.recommended,
@@ -84,7 +77,7 @@ export default [
     },
     rules: {
       "no-console": "off",
-      "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+      "no-unused-vars": ["warn", { "args": "none", "varsIgnorePattern": "^_", "caughtErrors": "none" }],
       "no-empty": ["error", { "allowEmptyCatch": true }],
       "no-useless-escape": "off",
       "no-misleading-character-class": "off"
@@ -99,12 +92,23 @@ export default [
     }
   },
   {
-    files: ["tests/**/*.js"],
+    files: ["tests/**/*.js", "**/*.test.js", "**/tests/**/*.js"],
     languageOptions: {
       globals: {
         ...nodeGlobals,
-        ...browserGlobals
+        ...browserGlobals,
+        describe: "readonly",
+        test: "readonly",
+        it: "readonly",
+        expect: "readonly",
+        beforeEach: "readonly",
+        afterEach: "readonly",
+        beforeAll: "readonly",
+        afterAll: "readonly"
       }
+    },
+    rules: {
+      "no-unused-vars": "off"
     }
   }
 ];
