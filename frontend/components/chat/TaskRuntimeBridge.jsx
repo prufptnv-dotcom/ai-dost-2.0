@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { createTaskId, normalizeServerEvent, parseSseLines, TASK_EVENT_TYPES } from './taskRuntime';
+import { BLOCK_FALLBACK_KEY, createTaskId, normalizeServerEvent, parseSseLines, TASK_EVENT_TYPES } from './taskRuntime';
 import { buildUploadedDocsContext, readSharedContext } from './sharedChatContext';
 import { createTaskPlan } from './taskPlanner';
 import { clearComposerAttachments, getComposerAttachments } from './UnifiedChatAttachments';
@@ -8,8 +8,15 @@ const STREAM_PATH = '/api/chat/stream';
 const AGENT_RUN_PATH = '/api/agent/run';
 const ACTIVE_KEY = '__aiDostActiveTask';
 const RECOVERY_KEY = '__aiDostInterruptedTask';
-const BLOCK_FALLBACK_KEY = '__aiDostBlockNextChatFallback';
 const FALLBACK_BLOCK_TTL_MS = 2000;
+const AGENT_MARKER_TTL_MS = 30 * 60 * 1000;
+
+function settleAgentMarker(marker, reply) {
+  if (!marker || marker.settled) return;
+  marker.settled = true;
+  marker.reply = typeof reply === 'string' ? reply : '';
+  try { marker._settle(marker.reply); } catch (_) {}
+}
 
 function isChatStreamRequest(input) {
   const url = typeof input === 'string' ? input : input?.url;
@@ -26,9 +33,11 @@ function isChatFallbackRequest(input) {
   if (!url) return false;
   try {
     const pathname = new URL(url, window.location.origin).pathname;
-    return /\/api\/chat\/?$/.test(pathname);
+    // axios baseURL can be /api or /api/v1 — both must match or the
+    // cancel-marker block silently misses the REST fallback.
+    return /\/api\/chat\/?$/.test(pathname) || /\/api\/v1\/chat\/?$/.test(pathname);
   } catch (_) {
-    return /\/api\/chat\/?(?:\?|$)/.test(String(url));
+    return /\/api\/chat\/?(?:\?|$)/.test(String(url)) || /\/api\/v1\/chat\/?(?:\?|$)/.test(String(url));
   }
 }
 
@@ -153,6 +162,7 @@ export default function TaskRuntimeBridge() {
       task.controller.abort();
       tasks.delete(taskId);
       clearRecoveryTask(taskId);
+      settleAgentMarker(task.agentMarker, `⛔ ${reason}`);
 
       if (task.requestKey) {
         const marker = { requestKey: task.requestKey, expiresAt: Date.now() + FALLBACK_BLOCK_TTL_MS };
@@ -201,7 +211,7 @@ export default function TaskRuntimeBridge() {
       if (isChatFallbackRequest(input)) {
         const marker = window[BLOCK_FALLBACK_KEY];
         const requestKey = getChatRequestKey(args);
-        if (marker && marker.expiresAt > Date.now() && marker.requestKey === requestKey) {
+        if (marker && marker.kind !== 'agent' && marker.expiresAt > Date.now() && marker.requestKey === requestKey) {
           delete window[BLOCK_FALLBACK_KEY];
           throw new DOMException('Chat task canceled', 'AbortError');
         }
@@ -251,6 +261,7 @@ export default function TaskRuntimeBridge() {
         taskFinished = true;
         if (tasks.get(taskId) === task) tasks.delete(taskId);
         if (window[ACTIVE_KEY] === taskId) delete window[ACTIVE_KEY];
+        settleAgentMarker(task.agentMarker, '⚠️ Task unexpectedly ended.');
       };
 
       const requestArgs = augmentStreamRequest(args);
@@ -290,6 +301,22 @@ export default function TaskRuntimeBridge() {
           task.paused = false;
           task.approvalToken = null;
 
+          // Agent SSE carries phase/tool events, not chat chunks — useChatStream
+          // would see an empty reply and fire the REST cascade ("provider busy"
+          // duplicate). Park a marker it awaits until the run's terminal event.
+          const agentMarker = {
+            kind: 'agent',
+            taskId,
+            requestKey: getChatRequestKey(args),
+            expiresAt: Date.now() + AGENT_MARKER_TTL_MS,
+            settled: false,
+            reply: '',
+            _settle: null,
+          };
+          agentMarker.done = new Promise((resolve) => { agentMarker._settle = resolve; });
+          task.agentMarker = agentMarker;
+          window[BLOCK_FALLBACK_KEY] = agentMarker;
+
           // One SSE run against /api/agent/run — used for the initial run AND for
           // the approval-resume run (fresh AbortController, body + approvalToken).
           task.startAgentRun = async () => {
@@ -327,6 +354,14 @@ export default function TaskRuntimeBridge() {
                   return;
                 }
                 task.approvalPending = false;
+                // Full done text (project summary) becomes the chat bubble reply.
+                settleAgentMarker(task.agentMarker, String(payload.message || payload.summary || 'Task complete ho gaya.'));
+              }
+              if (event.type === TASK_EVENT_TYPES.CANCELED) {
+                settleAgentMarker(task.agentMarker, `⛔ ${event.label || 'Task canceled'}`);
+              }
+              if (event.type === TASK_EVENT_TYPES.ERROR) {
+                settleAgentMarker(task.agentMarker, `⚠️ ${event.label || 'Task failed'}`);
               }
               if (event.type === TASK_EVENT_TYPES.COMPLETE || event.type === TASK_EVENT_TYPES.CANCELED || event.type === TASK_EVENT_TYPES.ERROR) {
                 terminalEmitted = true;
@@ -350,6 +385,9 @@ export default function TaskRuntimeBridge() {
                   emit({ error: error?.message || 'Agent task stream interrupted' });
                 }
               } finally {
+                if (task.controller.signal.aborted) {
+                  settleAgentMarker(task.agentMarker, '⏹️ Task stop kar diya gaya.');
+                }
                 const awaitingApproval = task.approvalPending && task.paused;
                 if (!terminalEmitted && !awaitingApproval && !task.controller.signal.aborted) {
                   emit({ error: 'Task stream ended unexpectedly' });
@@ -446,7 +484,10 @@ export default function TaskRuntimeBridge() {
     window.fetch = patchedFetch;
     return () => {
       window.fetch = originalFetch;
-      tasks.forEach(({ controller }) => controller.abort());
+      tasks.forEach((task) => {
+        settleAgentMarker(task.agentMarker, '⏹️ Task stop kar diya gaya.');
+        task.controller.abort();
+      });
       tasks.clear();
       delete window[BLOCK_FALLBACK_KEY];
       if (window.aiDostCancelTask === cancelTask) delete window.aiDostCancelTask;

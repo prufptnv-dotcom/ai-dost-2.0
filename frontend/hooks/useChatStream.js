@@ -1,6 +1,7 @@
 import api from '../services/api';
 import { extractArtifact, stripInternalTags } from '../utils/chatContent';
 import { getFuturistic2030Html } from '../lib/threeJsTemplates';
+import { BLOCK_FALLBACK_KEY } from '../components/chat/taskRuntime';
 
 export async function streamChatResponse({
   content,
@@ -167,19 +168,61 @@ export async function streamChatResponse({
 
     finalReply = stripInternalTags(finalReply);
 
-    // If stream finished empty (e.g. 503 or model capacity exhaustion), fallback to REST cascade
+    // Empty reply has two very different causes:
+    //  1. Agent run answered this request (phase/tool events, no chat chunks) —
+    //     await the run's terminal event (covers the approval pause cycle) and
+    //     use THAT text. Firing the REST cascade here used to produce a
+    //     duplicate "provider busy" bubble minutes later.
+    //  2. Genuine stream failure (503 / capacity) — REST cascade fallback.
     if (!finalReply || !finalReply.trim()) {
-      try {
-        const fallbackRes = await api.post('/chat', {
-          message: content,
-          model: selectedModel === 'auto' ? 'auto' : selectedModel,
-          section: 'chat',
-          history,
-          mode: 'chat',
-          persona,
-        });
-        finalReply = stripInternalTags(fallbackRes.data?.reply || fallbackRes.data?.message || '');
-      } catch (_) {}
+      const marker = typeof window !== 'undefined' ? window[BLOCK_FALLBACK_KEY] : null;
+      if (marker && marker.kind === 'agent') {
+        try {
+          if (marker.settled) {
+            finalReply = marker.reply || '';
+          } else {
+            finalReply = await new Promise((resolve, reject) => {
+              let done = false;
+              const finish = (value) => {
+                if (!done) {
+                  done = true;
+                  resolve(typeof value === 'string' ? value : '');
+                }
+              };
+              const onAbort = () => {
+                if (!done) {
+                  done = true;
+                  const err = new Error('The operation was aborted');
+                  err.name = 'AbortError';
+                  reject(err);
+                }
+              };
+              marker.done.then(() => finish(marker.reply), () => finish(''));
+              if (signal) {
+                if (signal.aborted) onAbort();
+                else signal.addEventListener('abort', onAbort, { once: true });
+              }
+              // Safety valve: never hang the composer if a run dies silently.
+              setTimeout(() => finish(marker.reply || ''), 15 * 60 * 1000);
+            });
+          }
+        } catch (err) {
+          if (err?.name === 'AbortError' || signal?.aborted) throw err;
+          finalReply = '';
+        }
+      } else {
+        try {
+          const fallbackRes = await api.post('/chat', {
+            message: content,
+            model: selectedModel === 'auto' ? 'auto' : selectedModel,
+            section: 'chat',
+            history,
+            mode: 'chat',
+            persona,
+          });
+          finalReply = stripInternalTags(fallbackRes.data?.reply || fallbackRes.data?.message || '');
+        } catch (_) {}
+      }
     }
 
     if (!finalReply || !finalReply.trim()) {

@@ -10,6 +10,11 @@ export const TASK_EVENT_TYPES = {
   APPROVAL: 'task_approval',
 };
 
+// Window key shared with useChatStream: when a chat request is answered by an
+// agent run (kind:'agent') or a canceled task, the REST fallback must NOT fire
+// a duplicate cascade — useChatStream awaits marker.done for the real reply.
+export const BLOCK_FALLBACK_KEY = '__aiDostBlockNextChatFallback';
+
 const PHASE_BY_SERVER_EVENT = {
   language_lock: 'understanding',
   assessment_creating: 'planning',
