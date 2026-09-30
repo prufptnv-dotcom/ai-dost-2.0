@@ -279,7 +279,7 @@ class SandboxManager extends EventEmitter {
           Memory: memBytes,
           MemorySwap: memBytes, // Prevent runaway swap allocation
           NanoCpus: Math.floor(Math.min(config.cpus, 2) * 1e9),
-          PidsLimit: 100, // Anti-fork-bomb protection
+          PidsLimit: 512, // Anti-fork-bomb protection (vite/esbuild/node thread pools exceed 100)
           SecurityOpt: ['no-new-privileges:true'], // Disallow privilege escalation
           Ulimits: [{ Name: 'nofile', Soft: 1024, Hard: 2048 }],
           NetworkMode: config.network,
@@ -460,11 +460,19 @@ class SandboxManager extends EventEmitter {
       }
 
       proc.stdout?.on('data', (data) => {
-        stdout += data.toString();
+        const str = data.toString();
+        stdout += str;
+        if (typeof options.onData === 'function') {
+          try { options.onData('stdout', str); } catch (_) {}
+        }
       });
 
       proc.stderr?.on('data', (data) => {
-        stderr += data.toString();
+        const str = data.toString();
+        stderr += str;
+        if (typeof options.onData === 'function') {
+          try { options.onData('stderr', str); } catch (_) {}
+        }
       });
 
       if (options.input && proc.stdin) {
@@ -533,6 +541,9 @@ class SandboxManager extends EventEmitter {
           const str = chunk.toString();
           if (chunk[0] === 1) stdout += str;
           else if (chunk[0] === 2) stderr += str;
+          if (typeof options.onData === 'function') {
+            try { options.onData(chunk[0] === 2 ? 'stderr' : 'stdout', str); } catch (_) {}
+          }
         });
 
         stream.on('end', async () => {
@@ -693,7 +704,7 @@ class SandboxManager extends EventEmitter {
       resourceQuotas: {
         memoryLimit: '1GB (Capped max 2GB)',
         cpuQuota: '1.0 Core',
-        pidsLimit: 100,
+        pidsLimit: 512,
         memorySwap: 'Disabled (Swap capped to Memory)',
         pathTraversalDefense: 'Active (_resolveSafe enforced)',
         commandPolicy: 'Active (Destructive shell commands filtered)'

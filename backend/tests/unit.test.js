@@ -297,7 +297,7 @@ describe('sandboxManager path safety', () => {
     const status = await sandboxManager.getHealthStatus();
     assert.ok(status.engine);
     assert.ok(status.resourceQuotas);
-    assert.equal(status.resourceQuotas.pidsLimit, 100);
+    assert.equal(status.resourceQuotas.pidsLimit, 512);
   });
 
   test('runSelfTest completes diagnostic probe cleanly', async () => {

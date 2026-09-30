@@ -401,7 +401,7 @@ test('GET /api/sandbox/health -> 200 with engine and resource quotas', async () 
   assert.equal(body.success, true);
   assert.ok(body.engine);
   assert.ok(body.resourceQuotas);
-  assert.equal(body.resourceQuotas.pidsLimit, 100);
+  assert.equal(body.resourceQuotas.pidsLimit, 512);
 });
 
 test('POST /api/sandbox/test -> 200 with probe success', async () => {

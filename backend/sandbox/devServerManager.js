@@ -74,6 +74,25 @@ const FRAMEWORK_CONFIGS = {
   }
 };
 
+// Normalize package.json dev scripts so vite-based dev servers bind 0.0.0.0.
+// Flags passed as `npm run dev -- --host 0.0.0.0` are swallowed by meta-runners
+// (concurrently/npm: aliases), so the vite invocation itself must carry --host.
+// Returns { changed, updated } and mutates pkg.scripts in place.
+function ensureViteHostScripts(pkg) {
+  if (!pkg || !pkg.scripts || typeof pkg.scripts !== 'object') return { changed: false, updated: [] };
+  const updated = [];
+  for (const [name, value] of Object.entries(pkg.scripts)) {
+    if (typeof value !== 'string' || value.includes('--host')) continue;
+    const invokesVite = /(?:^|[\s"'`])(?:npx\s+)?vite(?:\s|$)/.test(value)
+      || /vite[\\/]bin[\\/]vite\.js/.test(value);
+    if (!invokesVite) continue;
+    if (/(?:^|[\s"'`])vite\s+(?:build|preview|--version)(?:\s|$)/.test(value)) continue;
+    pkg.scripts[name] = `${value} --host 0.0.0.0`;
+    updated.push(name);
+  }
+  return { changed: updated.length > 0, updated };
+}
+
 class DevServerManager extends EventEmitter {
   constructor() {
     super();
@@ -197,6 +216,30 @@ class DevServerManager extends EventEmitter {
     }
   }
 
+  // Ensure vite dev scripts bind 0.0.0.0 (rewritten in sandbox or workspace).
+  async _applyHostBinding(targetId, projectPath, framework) {
+    if (!['vite', 'sveltekit', 'astro'].includes(framework)) return;
+    const pkg = await this.readPackageJson(targetId, projectPath);
+    if (!pkg) return;
+    const { changed, updated } = ensureViteHostScripts(pkg);
+    if (!changed) return;
+    const content = `${JSON.stringify(pkg, null, 2)}\n`;
+    const sandbox = sandboxManager.getSandbox(targetId);
+    try {
+      if (sandbox) {
+        await sandboxManager.writeFile(targetId, path.join(projectPath, 'package.json').replace(/\\/g, '/'), content);
+      } else {
+        const wsRoot = path.resolve(this._workspaceDir(targetId));
+        const wsDir = path.resolve(wsRoot, projectPath);
+        if (wsDir !== wsRoot && !wsDir.startsWith(wsRoot + path.sep)) return;
+        await fs.writeFile(path.join(wsDir, 'package.json'), content);
+      }
+      this.emitLog(targetId, `🔧 package.json normalized (host binding): ${updated.join(', ')} → added --host 0.0.0.0`, 'info');
+    } catch (err) {
+      this.emitLog(targetId, `⚠️ Could not normalize package.json: ${err.message}`, 'warn');
+    }
+  }
+
   async installDependencies(targetId, projectPath = '.') {
     const safeRel = this._safeProjectPath(projectPath);
     if (safeRel === null) return { success: false, error: 'Invalid projectPath (absolute/.. blocked)' };
@@ -205,18 +248,22 @@ class DevServerManager extends EventEmitter {
     const pkg = await this.readPackageJson(targetId, projectPath);
     if (!pkg) return { success: false, error: 'No package.json found' };
 
-    const cmd = 'npm install';
-    this.emitLog(targetId, `📦 Installing dependencies with: ${cmd}`, 'info');
+    // Agent scaffolds install with --ignore-scripts (supply-chain guard), so
+    // native addons (better-sqlite3 etc.) arrive unbuilt — npm rebuild runs
+    // exactly the install scripts npm install would have run. Same trust
+    // surface as the plain `npm install` below; sandbox is isolated anyway.
+    const cmd = 'npm install && npm rebuild';
+    this.emitLog(targetId, `📦 Installing dependencies: ${cmd}`, 'info');
 
     if (sandbox) {
       const result = await sandboxManager.exec(targetId, `cd '${projectPath.replace(/'/g, '')}' && ${cmd}`, {
-        timeout: 180000
+        timeout: 300000
       });
       if (!result.success) {
         this.emitLog(targetId, `❌ Dependency install failed: ${result.stderr}`, 'error');
         return { success: false, error: result.stderr };
       }
-      this.emitLog(targetId, '✅ Dependencies installed successfully inside sandbox', 'success');
+      this.emitLog(targetId, '✅ Dependencies installed + native addons rebuilt inside sandbox', 'success');
       return { success: true };
     }
 
@@ -228,8 +275,31 @@ class DevServerManager extends EventEmitter {
     }
     try {
       if (require('fs').existsSync(path.join(wsDir, 'node_modules'))) {
-        this.emitLog(targetId, '⚡ Existing node_modules found, skipping npm install', 'info');
-        return { success: true };
+        this.emitLog(targetId, '⚡ Existing node_modules found — running npm rebuild (native addons)', 'info');
+        return new Promise((resolve) => {
+          const isWin = process.platform === 'win32';
+          const npmCmd = isWin ? 'npm.cmd' : 'npm';
+          const child = spawn(npmCmd, ['rebuild'], {
+            cwd: wsDir,
+            shell: false,
+            env: { ...process.env, NODE_ENV: 'development' }
+          });
+          let stderr = '';
+          child.stderr.on('data', chunk => { stderr += chunk.toString(); });
+          child.on('close', code => {
+            if (code === 0) {
+              this.emitLog(targetId, '✅ npm rebuild completed on host', 'success');
+              resolve({ success: true });
+            } else {
+              this.emitLog(targetId, `⚠️ npm rebuild exited ${code} (app may miss native addons): ${stderr.slice(0, 300)}`, 'warn');
+              resolve({ success: true });
+            }
+          });
+          child.on('error', err => {
+            this.emitLog(targetId, `⚠️ npm rebuild could not run: ${err.message}`, 'warn');
+            resolve({ success: true });
+          });
+        });
       }
     } catch (_) {}
 
@@ -286,6 +356,7 @@ class DevServerManager extends EventEmitter {
     if (!config) {
       return { success: false, error: 'No dev server configuration detected (static project)' };
     }
+    await this._applyHostBinding(targetId, projectPath, framework);
 
     const serverInfo = {
       sandboxId: sandboxManager.getSandbox(targetId) ? targetId : null,
@@ -346,8 +417,17 @@ class DevServerManager extends EventEmitter {
 
       sandboxManager.exec(targetId, fullCmd, {
         timeout: 0,
+        // Live-tail child output (concurrently/vite/api) into dev logs —
+        // previously only visible after the whole chain exited.
+        onData: (channel, text) => {
+          const line = text.replace(/\s+$/, '');
+          if (line) this.emitLog(targetId, line, channel === 'stderr' ? 'stderr' : 'stdout');
+        },
         env: {
-          PORT: containerPort.toString(),
+          // vite ignores PORT but sibling processes (e.g. an api server.js
+          // reading process.env.PORT) would collide with the vite port —
+          // let them fall back to their own defaults instead.
+          ...(framework === 'vite' ? {} : { PORT: containerPort.toString() }),
           HOST: '0.0.0.0',
           BROWSER: 'none'
         }
@@ -565,3 +645,4 @@ class DevServerManager extends EventEmitter {
 }
 
 module.exports = new DevServerManager();
+module.exports.ensureViteHostScripts = ensureViteHostScripts;

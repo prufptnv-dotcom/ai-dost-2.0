@@ -11,7 +11,7 @@
     "dev": "nodemon --exec \"node -r ./security-hardening.js -r ./taskCancellation.js -r ./chatAgentRouteBridge.js\" server.js",
     "postinstall": "node -e \"const fs=require('fs');if(!fs.existsSync('node_modules/@playwright/test')){console.log('postinstall: @playwright/test absent (omit-dev install) — skipping browser download');}else{require('child_process').execSync('npx playwright install chromium',{stdio:'inherit'});}\"",
     "lint": "eslint .",
-    "test:unit": "node --test tests/unit.test.js tests/projectAuthorization.test.js tests/identity.test.js tests/p1WebSecurity.test.js tests/settingsStore.test.js tests/cacheRateLimit.test.js",
+    "test:unit": "node --test tests/unit.test.js tests/projectAuthorization.test.js tests/identity.test.js tests/p1WebSecurity.test.js tests/settingsStore.test.js tests/cacheRateLimit.test.js tests/devServerHostBinding.test.js",
     "test:integration": "node --test tests/integration.test.js",
     "test:security": "node --test tests/security-hardening.test.js tests/projectAuthorization.security.test.js agent/security/ProductionHardeningRuntime.test.js",
     "test:mcp": "node --test tests/mcpClientManager.test.js",
