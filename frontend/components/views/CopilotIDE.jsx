@@ -5,13 +5,13 @@ import {
   FolderTree, Search, GitBranch, Puzzle, X, Plus, Save,
   Send, Sparkles, Play, Terminal as TerminalIcon,
   Loader2, Bot, Eraser, Eye, Download, Square, RotateCcw, Settings2,
-  FilePlus2, FolderPlus, Pencil, Trash2, SaveAll, PanelLeftClose, PanelLeftOpen, ChevronRight, GitCompareArrows, Database,
+  FolderPlus, Pencil, Trash2, SaveAll, PanelLeftClose, PanelLeftOpen, ChevronRight, GitCompareArrows, Database,
   Smartphone, Tablet, Monitor, Crosshair,
   Mic, MicOff, LayoutGrid, Zap, Bug, Code2, RefreshCw, ExternalLink, Copy, Check, ArrowRight,
-  Code, ShieldCheck, ShoppingCart, BarChart3, Kanban, MessageSquare, Flame, CheckCircle2, ChevronDown, ChevronUp,
-  BrainCircuit, Workflow, ArrowUp, CornerDownLeft, Paperclip,
+  Code, ShieldCheck, ShoppingCart, BarChart3, Kanban, MessageSquare, Flame,
+  BrainCircuit, Workflow, ArrowUp, Paperclip,
   Columns2, Package, KeyRound, History, AlertTriangle, AlertCircle,
-  Volume2, AudioWaveform, Wrench, TableProperties
+  Volume2, AudioWaveform, Wrench, TableProperties, FileDiff
 } from 'lucide-react';
 import api from '../../services/api';
 import { LANG_BY_EXT, TreeView, fileTreeFromFiles } from './CopilotTree';
@@ -19,7 +19,9 @@ import { PromptModal, QuickOpen, CommandPalette, SearchOverlay, MODAL_ICONS } fr
 import DiffReviewModal from './DiffReviewModal';
 import ProjectWizardModal from './ProjectWizardModal';
 import DeployModal from './DeployModal';
-import TaskStepItem from './TaskStepItem';
+import CopilotPlanCard from '../ide/CopilotPlanCard';
+import CopilotStatusBar, { stripEmoji } from '../ide/CopilotStatusBar';
+import { diffLines, diffStats } from '../../lib/lineDiff';
 import VisualDebugger from './VisualDebugger';
 import VisualHealer from '../VisualHealer';
 import CopilotHistoryModal from './CopilotHistoryModal';
@@ -265,6 +267,10 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   const [openTabs, setOpenTabs] = useState([]);
   const [activePath, setActivePath] = useState(null);
   const [contents, setContents] = useState({});
+  // Mirror of `contents` for SSE handlers (state closure goes stale mid-run) —
+  // used to compute per-file diff stats when file_written events arrive.
+  const contentsRef = useRef({});
+  useEffect(() => { contentsRef.current = contents; }, [contents]);
   const [dirtyPaths, setDirtyPaths] = useState(() => new Set());
 
   // Workspace Mode: 'code' | 'split' | 'preview'
@@ -294,6 +300,16 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [problems, setProblems] = useState(0);
   const [copilotStatus, setCopilotStatus] = useState({ label: '', tone: 'info' });
+  // Devin-style elapsed timer for the live status strip
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const runStartRef = useRef(null);
+  useEffect(() => {
+    if (!running) return undefined;
+    const id = setInterval(() => {
+      if (runStartRef.current) setElapsedSec((Date.now() - runStartRef.current) / 1000);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [running]);
   const [planTasks, setPlanTasks] = useState([]);
   const [planGate, setPlanGate] = useState(false); // Default to Autopilot (Replit/Bolt style)
   const [pendingPlan, setPendingPlan] = useState(null);
@@ -333,7 +349,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   // Live preview configuration
   const [previewDevice, setPreviewDevice] = useState('desktop');
   const [previewZoom, setPreviewZoom] = useState(100); // Default 100% desktop for crisp full preview
-  const [milestonesExpanded, setMilestonesExpanded] = useState(false); // Collapsible milestone tasks
+  const [milestonesExpanded, setMilestonesExpanded] = useState(true); // Plan checklist default open (Devin-style)
   const [inspectorActive, setInspectorActive] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(`/api/preview/${projectId}`);
   const [previewSourceMode, setPreviewSourceMode] = useState('auto'); // 'auto' | 'live' | 'mock'
@@ -1518,6 +1534,8 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     }
 
     setRunning(true);
+    runStartRef.current = Date.now();
+    setElapsedSec(0);
     setCopilotStatus({ label: '🤖 Agent thinking & planning...', tone: 'info' });
     const cleanDisplay = prompt.replace(/\[IMAGE_BASE64:[^\]]+\]/g, '').trim() || 'Analyze screenshot & apply upgrades';
     setCopilotMessages(prev => [...prev, { role: 'user', content: cleanDisplay, images: attachedImages }]);
@@ -1726,7 +1744,22 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                 if (!createdFilesTracker.includes(filePath)) {
                   createdFilesTracker.push(filePath);
                 }
-                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'file', file: filePath, content: `Created/Updated: ${filePath}` }]);
+                // Devin-style per-file diff stats vs. previous known content.
+                // Update contentsRef synchronously: multiple file_written events
+                // can land in the same tick, before React effects re-sync the ref.
+                const prevContent = contentsRef.current[filePath];
+                const isNew = typeof prevContent !== 'string';
+                let added = null;
+                let removed = null;
+                if (!isNew) {
+                  try {
+                    const stats = diffStats(diffLines(prevContent, content));
+                    added = stats.added;
+                    removed = stats.removed;
+                  } catch (_) {}
+                }
+                contentsRef.current = { ...contentsRef.current, [filePath]: content };
+                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'file', file: filePath, content: `Created/Updated: ${filePath}`, isNew, added, removed }]);
                 setFiles(prev => {
                   const existingIdx = prev.findIndex(f => normalizePath(f.path).toLowerCase() === filePath.toLowerCase());
                   if (existingIdx !== -1) {
@@ -2371,7 +2404,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                 <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
                 <span className="w-2 h-2 rounded-full bg-emerald-400 absolute inset-0 animate-ping opacity-75" />
               </div>
-              <span className="text-xs font-bold text-paper-100 tracking-wide">Build assistant</span>
+              <span className="text-xs font-bold text-paper-100 tracking-wide">Copilot</span>
               <span className="text-[10px] font-mono text-ink-muted bg-canvas-elevated px-2 py-0.5 rounded border border-border">
                 Groq + Gemini
               </span>
@@ -2405,35 +2438,15 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
             </div>
           </div>
 
-          {/* Planning Todo Milestones */}
-          {planTasks.length > 0 && (
-            <div className="bg-canvas-surface border-b border-border text-xs">
-              <button
-                onClick={() => setMilestonesExpanded(prev => !prev)}
-                className="w-full px-3 py-1.5 flex items-center justify-between hover:bg-canvas-elevated transition-colors cursor-pointer text-left"
-              >
-                <span className="text-[10px] uppercase font-bold text-accent tracking-wider flex items-center gap-1.5 font-mono">
-                  <CheckCircle2 size={11} /> Milestone Tasks ({planTasks.filter(t => t.status === 'completed').length}/{planTasks.length})
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-canvas-base border border-border text-ink-muted">
-                    {planTasks.every(t => t.status === 'completed') ? 'Done' : 'Running'}
-                  </span>
-                  {milestonesExpanded ? <ChevronUp size={12} className="text-ink-muted" /> : <ChevronDown size={12} className="text-ink-muted" />}
-                </div>
-              </button>
-              {milestonesExpanded && (
-                <div className="p-2 pt-0 space-y-1 max-h-32 overflow-y-auto pr-1 border-t border-border/40">
-                  {planTasks.map((t, idx) => (
-                    <TaskStepItem key={idx} step={t} index={idx} />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          {/* Plan Checklist Card (Devin-style) */}
+          <CopilotPlanCard
+            tasks={planTasks}
+            expanded={milestonesExpanded}
+            onToggle={() => setMilestonesExpanded(prev => !prev)}
+          />
 
           {/* Chat Messages Scroll Container */}
-          <div ref={endRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div ref={endRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5">
 
             {/* Empty State: Linear/Cursor Style Hero Starters */}
             {copilotMessages.length === 0 && !pendingPlan && (
@@ -2474,31 +2487,31 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
 
             {/* Pending Plan Approval Gate */}
             {pendingPlan && (
-              <div className="rounded-2xl p-4 bg-[#161a2b] border border-indigo-500/40 space-y-3 shadow-xl animate-in fade-in">
+              <div className="rounded-xl p-4 bg-canvas-surface border border-accent/30 space-y-3 shadow-surface-card">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <ShieldCheck size={14} className="text-indigo-400" /> Plan Generated
+                  <span className="text-xs font-bold text-accent uppercase tracking-wider flex items-center gap-1.5">
+                    <ShieldCheck size={14} /> Plan ready for approval
                   </span>
-                  <span className="text-[10px] text-zinc-400 font-mono">Approve to proceed</span>
+                  <span className="text-[10px] text-ink-muted font-mono">Approve to proceed</span>
                 </div>
                 <div className="space-y-1.5">
                   {pendingPlan.tasks.map((t, i) => (
-                    <div key={i} className="flex items-start gap-2 text-xs text-zinc-300 font-mono">
-                      <span className="text-indigo-400">▸</span>
+                    <div key={i} className="flex items-start gap-2 text-xs text-paper-300 font-mono">
+                      <span className="text-accent">▸</span>
                       <span>{t.title}</span>
                     </div>
                   ))}
                 </div>
-                <div className="flex gap-2 pt-2 border-t border-[#23273b]">
+                <div className="flex gap-2 pt-2 border-t border-border">
                   <button
                     onClick={approvePlan}
-                    className="flex-1 py-2 rounded-md text-xs font-bold bg-accent hover:bg-accent-hover text-white transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                    className="flex-1 py-2 rounded-lg text-xs font-bold bg-accent hover:bg-accent-hover text-white transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                   >
-                    <Play size={12} className="fill-white" /> Approve & Build
+                    <Play size={12} className="fill-white" /> Approve &amp; Build
                   </button>
                   <button
                     onClick={cancelPlan}
-                    className="px-3.5 py-2 rounded-xl text-xs font-medium bg-[#1e2235] hover:bg-[#282d47] text-zinc-300 transition-all cursor-pointer"
+                    className="px-3.5 py-2 rounded-lg text-xs font-medium bg-canvas-elevated hover:bg-canvas-overlay text-paper-300 border border-border transition-all cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -2510,51 +2523,68 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
             {copilotMessages.map((m, i) => {
               if (m.kind === 'thought') {
                 return (
-                  <div key={i} className="flex gap-2.5 items-start text-xs text-blue-300 font-mono bg-blue-950/20 p-3 rounded-2xl border border-blue-900/30">
-                    <Sparkles size={13} className="text-blue-400 mt-0.5 shrink-0" />
-                    <div>
-                      <span className="font-bold text-blue-400 block text-[9px] uppercase tracking-wider">{m.agent || 'Agent Thought'}</span>
-                      {m.content}
+                  <div key={i} className="flex gap-2 text-[11px] font-mono bg-canvas-subtle/70 px-3 py-2 rounded-lg border border-border-subtle">
+                    <Sparkles size={12} className="text-accent/70 mt-0.5 shrink-0" />
+                    <div className="min-w-0">
+                      <span className="font-bold text-ink-muted block text-[9px] uppercase tracking-wider">{m.agent || 'thinking'}</span>
+                      <span className="text-paper-300 break-words whitespace-pre-wrap">{m.content}</span>
                     </div>
                   </div>
                 );
               }
               if (m.kind === 'tool') {
                 return (
-                  <div key={i} className="flex gap-2.5 items-center text-[11px] text-fuchsia-300 font-medium bg-fuchsia-950/30 px-3.5 py-2.5 rounded-xl border border-fuchsia-800/40 shadow-sm animate-pulse">
-                    <Zap size={14} className="text-fuchsia-400 shrink-0" />
-                    <div className="flex flex-col">
-                      <span className="font-bold text-fuchsia-400 text-[10px] uppercase tracking-wider mb-0.5">Autonomous Action</span>
-                      <span className="truncate opacity-90">{typeof m.label === 'object' ? JSON.stringify(m.label) : String(m.label || '')}</span>
-                    </div>
+                  <div key={i} className="flex items-center gap-2 text-[11px] font-mono text-paper-300 bg-canvas-subtle/70 px-3 py-2 rounded-lg border border-border-subtle">
+                    <Zap size={12} className="text-accent shrink-0" />
+                    <span className="truncate">{stripEmoji(typeof m.label === 'object' ? JSON.stringify(m.label) : String(m.label || ''))}</span>
                   </div>
                 );
               }
               if (m.kind === 'file') {
+                const hasStats = typeof m.added === 'number' || typeof m.removed === 'number';
                 return (
-                  <div key={i} className="flex items-center gap-2 text-xs text-emerald-300 font-mono bg-emerald-950/20 px-3 py-2 rounded-xl border border-emerald-900/30">
-                    <FilePlus2 size={13} className="text-emerald-400 shrink-0" />
-                    <span className="truncate">📄 {m.file || m.content}</span>
-                  </div>
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => m.file && selectFile(m.file)}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-border-subtle bg-canvas-subtle/70 hover:border-accent/40 hover:bg-accent/[0.06] transition-colors cursor-pointer text-left group"
+                    title={m.file ? `Open ${m.file} in editor` : undefined}
+                    data-testid="chat-file-row"
+                  >
+                    <FileDiff size={12} className="text-accent shrink-0" />
+                    <span className="flex-1 min-w-0 text-[11px] font-mono text-paper-300 truncate">
+                      {m.file || m.content}
+                    </span>
+                    {m.isNew && (
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/25 shrink-0">NEW</span>
+                    )}
+                    {hasStats && (
+                      <span className="flex items-center gap-1 text-[10px] font-mono tabular-nums shrink-0">
+                        {typeof m.added === 'number' && <span className="text-emerald-500">+{m.added}</span>}
+                        {typeof m.removed === 'number' && <span className="text-red-400">-{m.removed}</span>}
+                      </span>
+                    )}
+                    <ChevronRight size={12} className="text-ink-muted opacity-0 group-hover:opacity-100 shrink-0 transition-opacity" />
+                  </button>
                 );
               }
               if (m.kind === 'step') {
                 return (
-                  <div key={i} className="flex items-center gap-2 text-xs text-indigo-300 font-mono bg-indigo-950/20 px-3 py-2 rounded-xl border border-indigo-900/30">
-                    <Zap size={13} className="text-indigo-400 shrink-0" />
+                  <div key={i} className="flex items-center gap-2 text-[11px] font-mono text-ink-muted px-2 py-1">
+                    <span className="text-accent/60 shrink-0">▸</span>
                     <span className="truncate">{typeof m.content === 'object' ? JSON.stringify(m.content) : String(m.content || '')}</span>
                   </div>
                 );
               }
               if (m.kind === 'screenshot') {
                 return (
-                  <div key={i} className="space-y-2 p-3 rounded-2xl bg-[#141724] border border-purple-500/30 shadow-xl">
-                    <span className="text-xs font-semibold text-purple-300 flex items-center gap-1.5">
-                      📸 {m.message}
+                  <div key={i} className="space-y-2 p-3 rounded-xl bg-canvas-surface border border-border">
+                    <span className="text-[11px] font-mono text-ink-muted flex items-center gap-1.5">
+                      {m.message}
                     </span>
                     {m.image && m.image.length > 30 && !m.image.endsWith('undefined') && (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={m.image} alt="Live App UI" className="rounded-xl border border-white/10 w-full object-cover shadow-md" />
+                      <img src={m.image} alt="Live App UI" className="rounded-lg border border-border w-full object-cover" />
                     )}
                   </div>
                 );
@@ -2588,7 +2618,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                         ))}
                       </div>
                     )}
-                    <div className="max-w-[85%] px-4 py-2.5 rounded-2xl rounded-tr-xs text-xs leading-relaxed bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md shadow-indigo-600/20 font-medium whitespace-pre-wrap">
+                    <div className="max-w-[85%] px-3.5 py-2.5 rounded-2xl rounded-tr-sm text-xs leading-relaxed bg-accent/15 border border-accent/30 text-paper-100 whitespace-pre-wrap">
                       {m.content}
                     </div>
                   </div>
@@ -2598,18 +2628,21 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                 return null;
               }
               return (
-                <div key={i} className="flex gap-3 items-start">
-                  <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0 bg-gradient-to-br from-indigo-500 to-purple-600 shadow-md">
-                    <Bot size={14} className="text-white" />
+                <div key={i} className="flex gap-2.5 items-start">
+                  <div className="w-6 h-6 mt-0.5 rounded-md flex items-center justify-center shrink-0 bg-canvas-elevated border border-border text-ink-muted">
+                    <Bot size={12} />
                   </div>
                   <div
-                    className="max-w-[90%] px-4 py-3 rounded-2xl rounded-tl-xs text-xs leading-relaxed bg-canvas-surface border border-border text-paper-200 space-y-1 shadow-md"
+                    className="max-w-[92%] px-3.5 py-2.5 rounded-xl rounded-tl-sm text-xs leading-relaxed bg-canvas-surface border border-border text-paper-200 space-y-1"
                     dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(m.content || '')) }}
                   />
                 </div>
               );
             })}
           </div>
+
+          {/* Live Status Strip (Devin-style: current action + elapsed timer) */}
+          <CopilotStatusBar running={running} status={copilotStatus} elapsedSec={elapsedSec} />
 
           {/* Floating Prompt Composer */}
           <div className="p-3 bg-canvas-surface border-t border-border">
@@ -2676,7 +2709,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                   }
                 }}
                 rows={2}
-                placeholder="Ask AI Dost to build, edit, or paste screenshots (Ctrl+V) for instant upgrades..."
+                placeholder="Message Copilot — build, edit, or paste a screenshot (Ctrl+V)…"
                 className="w-full bg-transparent px-3.5 pt-3 pb-2 text-xs text-paper-100 placeholder:text-ink-muted focus:outline-none resize-none font-sans leading-relaxed"
               />
 
@@ -2721,30 +2754,29 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                   </button>
 
                   <label
-                    className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated transition-colors cursor-pointer"
+                    className="p-1.5 rounded-md flex items-center justify-center text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated transition-colors cursor-pointer"
                     title="Attach screenshot or image (or Ctrl+V directly)"
                   >
-                    <Paperclip className="w-3 h-3 text-ink-muted" />
-                    <span>Attach Image</span>
+                    <Paperclip className="w-3.5 h-3.5" />
                     <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} />
                   </label>
 
                   <button
                     type="button"
                     onClick={() => { setTerminalOpen(!terminalOpen); setBottomPanelTab('terminal'); }}
-                    className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated transition-colors cursor-pointer"
+                    className="p-1.5 rounded-md flex items-center justify-center text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated transition-colors cursor-pointer"
+                    title="Toggle Terminal"
                   >
-                    <TerminalIcon className="w-3 h-3 text-ink-muted" />
-                    <span>Terminal</span>
+                    <TerminalIcon className="w-3.5 h-3.5" />
                   </button>
 
                   <button
                     type="button"
                     onClick={() => { setTerminalOpen(true); setBottomPanelTab('database'); }}
-                    className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated transition-colors cursor-pointer"
+                    className="p-1.5 rounded-md flex items-center justify-center text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated transition-colors cursor-pointer"
+                    title="Open Database Explorer"
                   >
-                    <Database className="w-3 h-3 text-ink-muted" />
-                    <span>Database</span>
+                    <Database className="w-3.5 h-3.5" />
                   </button>
                 </div>
 
@@ -2755,14 +2787,14 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                       <Wrench size={9} /> {healCount} healed
                     </span>
                   )}
-                  <span className="text-[10px] text-ink-muted font-mono hidden sm:inline-flex items-center gap-0.5">
-                    <span>Return</span>
-                    <CornerDownLeft className="w-2.5 h-2.5" />
+                  <span className="text-[10px] text-ink-muted font-mono hidden sm:inline-flex items-center gap-1">
+                    <kbd className="px-1 py-px rounded border border-border-subtle bg-canvas-base text-[9px]">↵</kbd> send
+                    <kbd className="px-1 py-px rounded border border-border-subtle bg-canvas-base text-[9px]">⇧↵</kbd> line
                   </span>
                   <button
                     onClick={() => handleSend()}
                     disabled={(!copilotInput.trim() && pastedImages.length === 0) || running}
-                    className="w-7 h-7 rounded-lg bg-accent hover:bg-accent/90 disabled:opacity-30 disabled:hover:bg-accent text-white flex items-center justify-center transition-all shadow-glow-sm cursor-pointer"
+                    className="w-7 h-7 rounded-full bg-accent hover:bg-accent/90 disabled:opacity-30 disabled:hover:bg-accent text-white flex items-center justify-center transition-all shadow-glow-sm cursor-pointer"
                   >
                     {running ? <Loader2 size={13} className="animate-spin" /> : <ArrowUp className="w-4 h-4 stroke-[2.5]" />}
                   </button>

@@ -183,6 +183,15 @@ start_ai_engine.bat
 - **Diff data**: backend `generate_project_from_prompt` cleanup se pehle DB snapshot leta hai → `file_written` me `previous`/`isNew` (prev >120KB → new treat); overlay content 200KB cap
 - Regressions: `frontend/tests/{lineDiff,chatAgentFallback,taskRuntime,taskActivityOverlay}.test.js(x)`; journey `phase1-journey-v2.js` asserts bubble-plan + file-diff + 0 dup POSTs
 
+### 15. Devin-Style Copilot IDE UX (2026-09-30)
+- **Plan card** (`ide/CopilotPlanCard.jsx`): header `PLAN · n/m` + progress bar + collapse (default open); rows = `TaskStepItem` checkbox checklist (square done/active/error markers, mono target + live log lines)
+- **Live status strip** (`ide/CopilotStatusBar.jsx`): composer ke upar — spinner + emoji-stripped action label + `M:SS` elapsed timer (`copilotStatus` state pehle kabhi render nahi hoti thi); idle pe last status dot ke saath rehta hai
+- **Muted message rows**: thought/tool/step = compact mono rows (`border-border-subtle`, koi neon/pulse nahi); user bubble = flat `bg-accent/15`; assistant = neutral avatar; tool labels emoji-stripped (`stripEmoji`)
+- **Diff-aware file rows**: `file_written` par `contentsRef` (sync update — same-tick multiple events!) se prev content → `lib/lineDiff` stats → row me `NEW` badge ya `+N -N`; click → editor me file open (`selectFile`)
+- **Composer**: pill box, icon-only chips (attach/terminal/db), circular send, `↵ send · ⇧↵ line` kbd hints, "Message Copilot…" placeholder
+- **IdeHeader**: nowrap (no wrapping), icon-only right launchers (History/Save count chips), segmented Code/Split/Preview = single accent active style
+- Regressions: `frontend/tests/copilotSessionUi.test.jsx` (11 tests: checklist rows, plan card progress/toggle, status strip emoji/timer); live verify via Playwright SSE route-intercept (synthetic run: plan 3/3, NEW → +2-1 rows, status 0:01)
+
 ## ⌃ Keyboard Shortcuts
 
 | Shortcut | Action |
@@ -287,7 +296,7 @@ ai-dost version 2.o/
 ```powershell
 # Frontend: unit + component (Jest 30 + RTL, jsdom, 0 LLM calls)
 cd "C:\Users\vikash kumar\Pictures\ai dost 3.0\frontend"
-npm test                    # 218 tests / 35 suites
+ npm test                    # 229 tests / 36 suites
 npm test -- --coverage      # coverage thresholds enforced (statements 18 / branches 15 / functions 14 / lines 19)
 
 # Frontend: real-browser VisualHealer suite (Playwright + Chromium, file:// fixtures)
@@ -317,7 +326,7 @@ npm run lint
 - `backend/tests/unit.test.js` — agent `parseLLMAction`, RAG search, CircuitBreaker/RateLimiter/RobustApiClient, `utils/errors`, sandbox path-traversal guard. Zero network.
 - `backend/tests/integration.test.js` — boots real Express app on port 0 (no listener, no Telegram): health, error envelopes (BAD_JSON/404), chat validation, chat history save/load round-trip, agent plan/tasks, eval status + bad ID, document validation, figma 503, deploy targets, sandbox 404s, root redirect. Zero LLM.
 - `backend/tests/e2e/smoke.spec.js` + `backend/playwright.config.js` — UI-deterministic; LLM replies asserted softly so free-tier rate limits don't flake CI.
-- `frontend/tests/` — 35 suites / 218 tests total: KanbanBoard (add-task + TDZ crash regression), ProjectsView (api mocked via jest.mock), AICompanion, chatContent (internal-tag + image-command stripping), copilotIde, SmartChatHeader bridge, agent/task timeline+planner+runtime, taskRuntime/taskActivityOverlay (chat approval gate + completion summary + per-file diff view), chatAgentFallback (agent marker vs REST cascade + live plan attach), lineDiff (unified LCS diff), universal intent, accessibility audit, public website smoke, design system (live primitives), chatStreamStop (SSE stream abort/meta regression), etc.
+- `frontend/tests/` — 36 suites / 229 tests total: KanbanBoard (add-task + TDZ crash regression), ProjectsView (api mocked via jest.mock), AICompanion, chatContent (internal-tag + image-command stripping), copilotIde, copilotSessionUi (Devin-style plan card / status strip / checklist rows), SmartChatHeader bridge, agent/task timeline+planner+runtime, taskRuntime/taskActivityOverlay (chat approval gate + completion summary + per-file diff view), chatAgentFallback (agent marker vs REST cascade + live plan attach), lineDiff (unified LCS diff), universal intent, accessibility audit, public website smoke, design system (live primitives), chatStreamStop (SSE stream abort/meta regression), etc.
 - `jest.setup.js` polyfills TextEncoder/TextDecoder/Streams (jsdom lacks them).
 - **Dead-code purge (2026-09-30)**: 41 unreferenced frontend modules + their 10 orphaned test suites were deleted (BFS import-graph verified from `pages/` entry points; live shell = `layout/AppShell` + `layout/CommandRail`, live chat = `views/ChatView`). Removed: legacy `Sidebar`/`TopBar`, old chat stack (`ActionSpine|ActionTimeline|ChatComposer|ChatExperienceLayerV4|ChatProcessingState|ComposerDock|MessageStream|QuickActionGrid|SessionInspector|SmartChatMessage|SmartComposer|TaskServerCancelBridge|ThinkingRail`), `HistoryModal|ProjectCard|ResumeBuilder|SettingsModal|TerminalModal`, `ui/{BrandLogo,ConfirmDialog,Input,Panel,ProjectSwitcher}`, `layout/{ContextInspector,SplitPane}`, `views/{AutonomousCopilotDirector,AutonomousCopilotWorkspace,ChatPromptBox,Header,TemplateHubModal}`, `sandbox/*`, `editor/*`, `CopilotWorkspace`, `agent/AgentDashboard`, `ide/CursorComposerHud`, `hooks/useWebContainer`, `lib/clientVisualHeuristics`, `services/FigmaMCPClient`, `public/audio-processor`. Also purged one-off scripts: frontend root `extract_*|refactor_*|test_overlay*`, `scripts/{e2e_full_project_test,run_1st_2nd_3rd_test,run_ui_test,verify_ui_live,visual_healer_test}`, `pages/dashboard.jsx.bak`, lighthouse report JSONs, backend root `copilottest*|debug_p1*|fix_*|patch*|test_*|verify_*|cascade_check|rag_run_check|aiServices|refactor*|chaos_*|inject_rules|extractChatLogic|broken_script|scratch_eval|news.txt`, `backend/sandbox_test_app/`, `backend/services/{refactorIntents,transformIntents}`, root `apply_patch|audit_codebase|fix_ollama*|fix_*|patch_*|test_*|notes.md|vs_BuildTools.exe`, ai-engine `{clean_main,fix,inspect_chroma,dummy_mcp_server}.py`. Kept (live): `scripts/apply-next-xff-patch.js` (postinstall), `public/sw.js` (registered in `_app.js`), `ecosystem.config.js`, `logger.js`, `projectStore.js`, `temp_test_workspace` (test fixture), `calculator_live_preview.html` (preview-server fixture).
 - `eslint.config.mjs` ignores `coverage/`, `test-results/`, `playwright-report/`, `downloads/`.

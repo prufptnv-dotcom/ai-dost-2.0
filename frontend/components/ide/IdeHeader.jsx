@@ -22,20 +22,20 @@ export function IdeHeader({
   backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000',
 }) {
   return (
-    <header className="h-13 shrink-0 flex items-center justify-between px-4 bg-canvas-surface border-b border-border z-20 select-none">
+    <header className="h-13 shrink-0 flex items-center justify-between gap-3 px-4 bg-canvas-surface border-b border-border z-20 select-none whitespace-nowrap overflow-hidden">
       {/* Left: Project identity + New Project button */}
-      <div className="flex items-center gap-3">
-        <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-accent text-white shadow-glow-sm">
+      <div className="flex items-center gap-3 shrink-0 min-w-0">
+        <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-accent text-white shadow-glow-sm shrink-0">
           <Code2 size={15} />
         </div>
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="text-xs font-bold text-paper-100 tracking-tight">{projectName}</h1>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-medium">
+            <h1 className="text-xs font-bold text-paper-100 tracking-tight truncate">{projectName}</h1>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-medium shrink-0">
               Live
             </span>
           </div>
-          <span className="text-[10px] text-ink-muted font-mono">React 19 • Express • Vite • SQLite</span>
+          <span className="text-[10px] text-ink-muted font-mono block truncate">React 19 • Express • Vite • SQLite</span>
         </div>
 
         <button
@@ -49,7 +49,7 @@ export function IdeHeader({
       </div>
 
       {/* Center: Replit Central Run Button & Segmented Mode Switcher */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 shrink-0">
         <button
           type="button"
           onClick={handleReplitRun}
@@ -80,6 +80,7 @@ export function IdeHeader({
                 ? 'bg-accent text-white shadow-glow-sm font-semibold'
                 : 'text-ink-muted hover:text-paper-100'
             }`}
+            title="Code editor"
           >
             <Code size={13} /> Code
           </button>
@@ -89,7 +90,7 @@ export function IdeHeader({
             onClick={() => setWorkspaceMode('split')}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
               workspaceMode === 'split'
-                ? 'bg-indigo-600 text-white shadow-md font-semibold'
+                ? 'bg-accent text-white shadow-glow-sm font-semibold'
                 : 'text-ink-muted hover:text-paper-100'
             }`}
             title="Split View (Code & Live Preview side-by-side)"
@@ -102,9 +103,10 @@ export function IdeHeader({
             onClick={() => setWorkspaceMode('preview')}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
               workspaceMode === 'preview'
-                ? 'bg-emerald-600 text-white shadow-md font-semibold'
+                ? 'bg-accent text-white shadow-glow-sm font-semibold'
                 : 'text-ink-muted hover:text-paper-100'
             }`}
+            title="Live preview"
           >
             <Eye size={13} /> Preview
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -113,7 +115,7 @@ export function IdeHeader({
       </div>
 
       {/* Right: Quick Launchers */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 shrink-0">
         <button
           type="button"
           onClick={() => setHistoryModalOpen(true)}
@@ -121,7 +123,6 @@ export function IdeHeader({
           title="Copilot IDE Session History"
         >
           <History size={13} className="text-accent" />
-          <span>History</span>
           <span className="px-1.5 py-0.2 rounded-full text-[9px] font-mono bg-accent/15 text-accent border border-accent/20">
             {sessions.length}
           </span>
@@ -130,19 +131,19 @@ export function IdeHeader({
         <button
           type="button"
           onClick={() => setPackagesModalOpen(true)}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 border border-border transition-all cursor-pointer shadow-xs"
+          className="p-1.5 rounded-md text-paper-200 hover:text-paper-100 hover:bg-canvas-elevated border border-border bg-canvas-surface transition-all cursor-pointer shadow-xs"
           title="Replit Package Manager (npm dependencies)"
         >
-          <Package size={13} className="text-indigo-400" /> Packages
+          <Package size={13} className="text-indigo-400" />
         </button>
 
         <button
           type="button"
           onClick={() => setSecretsModalOpen(true)}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 border border-border transition-all cursor-pointer shadow-xs"
+          className="p-1.5 rounded-md text-paper-200 hover:text-paper-100 hover:bg-canvas-elevated border border-border bg-canvas-surface transition-all cursor-pointer shadow-xs"
           title="Replit Secrets (.env environment variables)"
         >
-          <KeyRound size={13} className="text-amber-400" /> Secrets
+          <KeyRound size={13} className="text-amber-400" />
         </button>
 
         <button
@@ -158,19 +159,23 @@ export function IdeHeader({
           type="button"
           onClick={saveAllFiles}
           disabled={dirtyPaths.size === 0}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 border border-border transition-all disabled:opacity-40 cursor-pointer"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 border border-border transition-all disabled:opacity-40 cursor-pointer shadow-xs"
           title="Save all modified files"
         >
           <SaveAll size={13} className="text-emerald-500" />
-          Save{dirtyPaths.size > 0 ? ` (${dirtyPaths.size})` : ''}
+          {dirtyPaths.size > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full text-[9px] font-mono bg-emerald-500/15 text-emerald-500 border border-emerald-500/20">
+              {dirtyPaths.size}
+            </span>
+          )}
         </button>
 
         <a
           href={`${backendUrl}/api/preview/${projectId}/zip`}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 border border-border transition-all cursor-pointer"
+          className="p-1.5 rounded-md text-paper-200 hover:text-paper-100 hover:bg-canvas-elevated border border-border bg-canvas-surface transition-all cursor-pointer shadow-xs"
           title="Download ZIP with Windows & Mac double-click launchers"
         >
-          <Download size={13} className="text-accent" /> ZIP
+          <Download size={13} className="text-accent" />
         </a>
       </div>
     </header>
