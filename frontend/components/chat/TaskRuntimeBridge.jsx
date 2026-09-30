@@ -128,7 +128,11 @@ function toAgentRunBody(task, plan, requestBody) {
     projectPath: requestBody?.projectPath,
     projectFiles: requestBody?.projectFiles,
     customKeys: requestBody?.customKeys,
-    chatTaskPlan: plan,
+    // NOTE: deliberately NOT `chatTaskPlan` — that key makes chatAgentRouteBridge
+    // intercept /api/agent/run into the canonical gateway, which has NO
+    // capability-gate/approval flow. The main handler (deterministic plan +
+    // CapabilityGatekeeper approval + scaffold cascade) is what we want.
+    clientTaskPlan: plan,
     taskId: task.taskId,
     sessionId: task.sessionId,
   };
@@ -140,7 +144,7 @@ export default function TaskRuntimeBridge() {
     const originalFetch = window.fetch.bind(window);
     const tasks = new Map();
 
-    const cancelTask = (taskId) => {
+    const cancelTask = (taskId, reason = 'Task canceled by user') => {
       if (!taskId) return false;
       const task = tasks.get(taskId);
       if (!task) return false;
@@ -160,7 +164,7 @@ export default function TaskRuntimeBridge() {
 
       if (window[ACTIVE_KEY] === taskId) delete window[ACTIVE_KEY];
       window.dispatchEvent(new CustomEvent('ai_dost_task_event', {
-        detail: normalizeServerEvent(taskId, { canceled: true, error: 'Task canceled by user' }),
+        detail: normalizeServerEvent(taskId, { canceled: true, error: reason }),
       }));
       window.dispatchEvent(new CustomEvent('ai_dost_toast', {
         detail: { type: 'warning', message: 'AI-Dost task canceled.' },
@@ -169,6 +173,28 @@ export default function TaskRuntimeBridge() {
     };
 
     window.aiDostCancelTask = cancelTask;
+
+    // Devin-style inline approval: resume a gate-paused agent run with the token.
+    const approveTask = (taskId) => {
+      const task = tasks.get(taskId);
+      if (!task || !task.approvalPending || typeof task.startAgentRun !== 'function') return false;
+      const token = task.approvalToken;
+      task.approvalPending = false;
+      task.paused = false;
+      try { task.controller.abort(); } catch (_) {}
+      task.controller = new AbortController();
+      task.agentBody = { ...task.agentBody, approvalToken: token || null };
+      window.dispatchEvent(new CustomEvent('ai_dost_task_event', {
+        detail: normalizeServerEvent(taskId, { type: 'gate_approved', message: 'Approval mil gayi — task resume ho raha hai' }),
+      }));
+      void task.startAgentRun().catch(() => {});
+      return true;
+    };
+
+    const rejectTask = (taskId) => cancelTask(taskId, 'Approval rejected — task rok diya');
+
+    window.aiDostApproveTask = approveTask;
+    window.aiDostRejectTask = rejectTask;
 
     const patchedFetch = async (...args) => {
       const input = args[0];
@@ -258,68 +284,89 @@ export default function TaskRuntimeBridge() {
         // Regular conversation keeps the established /api/chat/stream pipeline.
         if (plan.intent.type === 'task' && plan.intent.requiresTool) {
           const [, init] = args;
-          const agentBody = toAgentRunBody(task, plan, effectiveBody);
-          const agentInit = {
-            ...(init || {}),
-            method: 'POST',
-            headers: {
-              ...(init?.headers || {}),
-              'Content-Type': 'application/json',
-              'X-AI-Dost-Task-Id': taskId,
-            },
-            body: JSON.stringify(agentBody),
-            signal: controller.signal,
+          task.agentBody = toAgentRunBody(task, plan, effectiveBody);
+          task.agentHeaders = { 'Content-Type': 'application/json', 'X-AI-Dost-Task-Id': taskId, ...(init?.headers || {}) };
+          task.approvalPending = false;
+          task.paused = false;
+          task.approvalToken = null;
+
+          // One SSE run against /api/agent/run — used for the initial run AND for
+          // the approval-resume run (fresh AbortController, body + approvalToken).
+          task.startAgentRun = async () => {
+            const agentInit = {
+              ...(init || {}),
+              method: 'POST',
+              headers: task.agentHeaders,
+              body: JSON.stringify(task.agentBody),
+              signal: task.controller.signal,
+            };
+            const response = await originalFetch(AGENT_RUN_PATH, agentInit);
+            if (!response?.body) {
+              finishTask();
+              return response;
+            }
+
+            const cloned = response.clone();
+            const reader = cloned.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let terminalEmitted = false;
+            const emit = (payload) => {
+              const event = normalizeServerEvent(taskId, payload);
+              if (!event) return;
+              if (event.type === TASK_EVENT_TYPES.APPROVAL) {
+                task.approvalPending = true;
+                task.paused = false;
+                task.approvalToken = event.approval?.token || null;
+              }
+              if (event.type === TASK_EVENT_TYPES.COMPLETE) {
+                if (terminalEmitted) return; // e.g. gate_blocked/invalid error already terminal
+                if (task.approvalPending && /\b(?:paused|awaiting)\b/i.test(String(payload.message || ''))) {
+                  // Gate pause sends a synthetic "done" — hold the task open awaiting approval
+                  task.paused = true;
+                  return;
+                }
+                task.approvalPending = false;
+              }
+              if (event.type === TASK_EVENT_TYPES.COMPLETE || event.type === TASK_EVENT_TYPES.CANCELED || event.type === TASK_EVENT_TYPES.ERROR) {
+                terminalEmitted = true;
+              }
+              window.dispatchEvent(new CustomEvent('ai_dost_task_event', { detail: event }));
+            };
+            const pump = async () => {
+              try {
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  buffer += decoder.decode(value, { stream: true });
+                  buffer = parseSseLines(buffer, emit);
+                }
+                buffer += decoder.decode();
+                if (buffer.trim()) parseSseLines(`${buffer}\n`, emit);
+                clearRecoveryTask(taskId);
+              } catch (error) {
+                if (!task.controller.signal.aborted) {
+                  writeRecoveryTask(task);
+                  emit({ error: error?.message || 'Agent task stream interrupted' });
+                }
+              } finally {
+                const awaitingApproval = task.approvalPending && task.paused;
+                if (!terminalEmitted && !awaitingApproval && !task.controller.signal.aborted) {
+                  emit({ error: 'Task stream ended unexpectedly' });
+                }
+                // Paused-for-approval keeps the task alive so Approve/Reject can resume it.
+                if (!awaitingApproval) finishTask();
+              }
+            };
+            void pump();
+            return response;
           };
 
           window.dispatchEvent(new CustomEvent('ai_dost_task_event', {
             detail: agentTaskEvent(taskId, 'executing', 'Executing task'),
           }));
 
-          const response = await originalFetch(AGENT_RUN_PATH, agentInit);
-          if (!response?.body) {
-            finishTask();
-            return response;
-          }
-
-          const cloned = response.clone();
-          const reader = cloned.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
-          let terminalEmitted = false;
-          const emit = (payload) => {
-            const event = normalizeServerEvent(taskId, payload);
-            if (event) {
-              if (event.type === TASK_EVENT_TYPES.COMPLETE || event.type === TASK_EVENT_TYPES.CANCELED || event.type === TASK_EVENT_TYPES.ERROR) {
-                terminalEmitted = true;
-              }
-              window.dispatchEvent(new CustomEvent('ai_dost_task_event', { detail: event }));
-            }
-          };
-          const pump = async () => {
-            try {
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                buffer = parseSseLines(buffer, emit);
-              }
-              buffer += decoder.decode();
-              if (buffer.trim()) parseSseLines(`${buffer}\n`, emit);
-              clearRecoveryTask(taskId);
-            } catch (error) {
-              if (!controller.signal.aborted) {
-                writeRecoveryTask(task);
-                emit({ error: error?.message || 'Agent task stream interrupted' });
-              }
-            } finally {
-              if (!terminalEmitted) {
-                emit({ error: 'Task stream ended unexpectedly' });
-              }
-              finishTask();
-            }
-          };
-          void pump();
-          return response;
+          return await task.startAgentRun();
         }
 
         const [, init] = args;
@@ -403,6 +450,8 @@ export default function TaskRuntimeBridge() {
       tasks.clear();
       delete window[BLOCK_FALLBACK_KEY];
       if (window.aiDostCancelTask === cancelTask) delete window.aiDostCancelTask;
+      if (window.aiDostApproveTask === approveTask) delete window.aiDostApproveTask;
+      if (window.aiDostRejectTask === rejectTask) delete window.aiDostRejectTask;
       if (window[ACTIVE_KEY]) delete window[ACTIVE_KEY];
     };
   }, []);

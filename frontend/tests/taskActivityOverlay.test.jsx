@@ -51,4 +51,80 @@ describe('TaskActivityOverlay', () => {
     await waitFor(() => expect(screen.queryByText('Pichla task ruk gaya tha')).not.toBeInTheDocument());
     expect(screen.getByText('AI-Dost is working')).toBeInTheDocument();
   });
+
+  const approvalDetail = (taskId = 'chat-appr') => ({
+    id: `${taskId}-gate`,
+    taskId,
+    type: 'task_approval',
+    phase: 'approval',
+    label: 'Action requires user explicit approval before execution.',
+    ts: Date.now(),
+    approval: {
+      token: 'tok-abc',
+      capabilities: ['sandbox_write'],
+      reason: 'Workspace write chahiye',
+    },
+  });
+
+  it('shows an auto-expanded approval banner with Approve and Reject controls', async () => {
+    window.aiDostApproveTask = jest.fn(() => true);
+    window.aiDostRejectTask = jest.fn(() => true);
+
+    render(<TaskActivityOverlay />);
+    fireEvent(window, new CustomEvent('ai_dost_task_event', { detail: approvalDetail() }));
+
+    expect(await screen.findByTestId('approval-banner')).toBeInTheDocument();
+    expect(screen.getByText('Workspace write chahiye')).toBeInTheDocument();
+    expect(screen.getByText('sandbox_write')).toBeInTheDocument();
+    expect(screen.getByText('Approval chahiye')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve task' }));
+    expect(window.aiDostApproveTask).toHaveBeenCalledWith('chat-appr');
+
+    // bridge dispatches a resumed event → banner clears + approving resets
+    fireEvent(window, new CustomEvent('ai_dost_task_event', {
+      detail: { id: 'chat-appr-resume', taskId: 'chat-appr', type: 'task_phase', phase: 'resuming', resumed: true, label: 'Approval mil gayi', ts: Date.now() },
+    }));
+    await waitFor(() => expect(screen.queryByTestId('approval-banner')).not.toBeInTheDocument());
+
+    // approval can arrive again (e.g. second gate) → Reject works fresh
+    fireEvent(window, new CustomEvent('ai_dost_task_event', { detail: approvalDetail() }));
+    expect(await screen.findByTestId('approval-banner')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reject task' }));
+    expect(window.aiDostRejectTask).toHaveBeenCalledWith('chat-appr');
+
+    delete window.aiDostApproveTask;
+    delete window.aiDostRejectTask;
+  });
+
+  it('renders plan checklist, files changed and completion summary', async () => {
+    const taskId = 'chat-session';
+    render(<TaskActivityOverlay />);
+
+    fireEvent(window, new CustomEvent('ai_dost_task_event', {
+      detail: { id: `${taskId}-start`, taskId, type: 'task_started', phase: 'planning', label: 'Planning', ts: Date.now() },
+    }));
+    fireEvent(window, new CustomEvent('ai_dost_intent_plan', {
+      detail: { taskId, plan: { intent: { type: 'task' }, steps: [{ id: 'tool', action: 'generate project' }] } },
+    }));
+    fireEvent(window, new CustomEvent('ai_dost_task_event', {
+      detail: { id: `${taskId}-plan`, taskId, type: 'task_phase', phase: 'planning', label: 'Plan taiyar — 2 steps', serverType: 'plan', payload: { plan: { tasks: [{ title: 'Scaffold app' }, { title: 'Wire API' }] } }, ts: Date.now() },
+    }));
+    fireEvent(window, new CustomEvent('ai_dost_task_event', {
+      detail: { id: `${taskId}-file`, taskId, type: 'task_tool', phase: 'processing', label: 'Likh diya: App.jsx', serverType: 'file_written', payload: { file: 'src/App.jsx' }, ts: Date.now() },
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand task session' }));
+    expect(await screen.findByTestId('plan-checklist')).toBeInTheDocument();
+    expect(screen.getByText('Scaffold app')).toBeInTheDocument();
+    expect(screen.getByTestId('files-list')).toBeInTheDocument();
+    expect(screen.getByText('src/App.jsx')).toBeInTheDocument();
+
+    fireEvent(window, new CustomEvent('ai_dost_task_event', {
+      detail: { id: `${taskId}-done`, taskId, type: 'task_complete', phase: 'success', label: 'Project ban gaya', summary: 'Project ban gaya — 3 files', ts: Date.now() },
+    }));
+
+    expect(await screen.findByTestId('completion-summary')).toBeInTheDocument();
+    expect(screen.getByText(/Project ban gaya — 3 files/)).toBeInTheDocument();
+  });
 });
