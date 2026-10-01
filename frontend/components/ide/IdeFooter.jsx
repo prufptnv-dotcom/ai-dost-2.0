@@ -1,11 +1,16 @@
 import React from 'react';
 import { GitBranch, AlertCircle, Check, Zap } from 'lucide-react';
+import { formatElapsed } from './CopilotStatusBar';
 
 export function IdeFooter({
   activePath,
   handleAutoFixProblems,
   running = false,
   problems = 0,
+  stepLabel = '',
+  approxTokens = 0,
+  elapsedSec = 0,
+  modelLabel = 'Auto (cascade)',
 }) {
   return (
     <footer className="h-6 shrink-0 flex items-center justify-between px-4 bg-canvas-surface border-t border-border text-[10px] text-ink-muted font-mono select-none">
@@ -44,8 +49,21 @@ export function IdeFooter({
       </div>
 
       <div className="flex items-center gap-3">
-        <span className="text-ink-muted flex items-center gap-1">
-          <Zap size={10} className="text-emerald-500" /> Groq + Gemini Cascade
+        {stepLabel && (
+          <span className="text-paper-200" data-testid="footer-step">
+            step {stepLabel}
+          </span>
+        )}
+        {running && elapsedSec >= 1 && (
+          <span className="text-paper-200 tabular-nums" data-testid="footer-elapsed">
+            {formatElapsed(elapsedSec)}
+          </span>
+        )}
+        <span className="text-ink-muted tabular-nums" data-testid="footer-tokens" title="Approximate tokens (chars ÷ 4) — free tier">
+          ≈{approxTokens >= 1000 ? `${(approxTokens / 1000).toFixed(1)}k` : approxTokens} tok · ₹0
+        </span>
+        <span className="text-ink-muted flex items-center gap-1" title="Preferred model — cascade fallback active">
+          <Zap size={10} className="text-emerald-500" /> {modelLabel}
         </span>
         <span>UTF-8</span>
         <span className="text-paper-200">AI-Dost v3.0</span>

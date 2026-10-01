@@ -39,6 +39,7 @@ export function PreviewPane({
   setRuntimeError,
   handleAutoFixRuntimeError,
   healingInProgress = false,
+  qaStatus = 'idle',
 }) {
   return (
     <div className="flex-1 flex flex-col overflow-hidden min-h-0 bg-canvas-base w-full h-full">
@@ -68,6 +69,28 @@ export function PreviewPane({
               </span>
             )}
           </div>
+
+          {/* Visual QA Badge (from director verification gate) */}
+          {qaStatus && qaStatus !== 'idle' && (
+            <div
+              className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-canvas-base border border-border text-[10px] font-mono"
+              data-testid="qa-badge"
+            >
+              {qaStatus === 'passed' ? (
+                <span className="flex items-center gap-1 text-emerald-500 font-medium">
+                  <Check size={11} /> QA passed
+                </span>
+              ) : qaStatus === 'failed' ? (
+                <span className="flex items-center gap-1 text-red-400 font-medium">
+                  <AlertTriangle size={11} /> QA failed
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-amber-400 font-medium">
+                  <Loader2 size={11} className="animate-spin" /> QA running
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Dev Server Actions */}
           <div className="flex items-center gap-1">

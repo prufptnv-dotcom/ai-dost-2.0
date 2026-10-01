@@ -3,6 +3,9 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import TaskStepItem from '../components/views/TaskStepItem';
 import CopilotPlanCard from '../components/ide/CopilotPlanCard';
 import CopilotStatusBar, { stripEmoji, formatElapsed } from '../components/ide/CopilotStatusBar';
+import IdeFooter from '../components/ide/IdeFooter';
+import { PreviewPane } from '../components/ide/PreviewPane';
+import { ToastProvider } from '../context/ToastContext';
 
 describe('CopilotDevinUI — TaskStepItem (checklist row)', () => {
   const base = { id: 't1', title: 'Scaffold Vite app' };
@@ -94,8 +97,63 @@ describe('CopilotDevinUI — CopilotStatusBar', () => {
   });
 
   test('idle error status renders without timer', () => {
-    render(<CopilotStatusBar running={false} status={{ label: '⚠️ scaffold failed', tone: 'error' }} />);
+    render(<CopilotStatusBar running={false} status={{ label: 'scaffold failed', tone: 'error' }} />);
     expect(screen.getByTestId('copilot-status-bar')).toHaveTextContent('scaffold failed');
     expect(screen.queryByTestId('copilot-elapsed')).toBeNull();
+  });
+});
+
+describe('CopilotDevinUI - IdeFooter (run meter)', () => {
+  const noop = () => {};
+
+  test('shows plan step, token estimate, elapsed timer and model label while running', () => {
+    render(
+      <IdeFooter
+        activePath="src/App.jsx"
+        handleAutoFixProblems={noop}
+        running
+        problems={0}
+        stepLabel="4/6"
+        approxTokens={12400}
+        elapsedSec={134}
+        modelLabel="Gemini first"
+      />
+    );
+    expect(screen.getByTestId('footer-step')).toHaveTextContent('step 4/6');
+    expect(screen.getByTestId('footer-tokens')).toHaveTextContent('12.4k tok · ₹0');
+    expect(screen.getByTestId('footer-elapsed')).toHaveTextContent('2:14');
+    expect(screen.getByText('Gemini first')).toBeInTheDocument();
+  });
+
+  test('hides step + timer when no plan or not running; small token counts stay exact', () => {
+    render(<IdeFooter handleAutoFixProblems={noop} running={false} approxTokens={80} />);
+    expect(screen.queryByTestId('footer-step')).toBeNull();
+    expect(screen.queryByTestId('footer-elapsed')).toBeNull();
+    expect(screen.getByTestId('footer-tokens')).toHaveTextContent('80 tok · ₹0');
+    expect(screen.getByText('Auto (cascade)')).toBeInTheDocument();
+  });
+});
+
+describe('CopilotDevinUI - PreviewPane QA badge', () => {
+  const renderPreview = (qaStatus) =>
+    render(
+      <ToastProvider>
+        <PreviewPane qaStatus={qaStatus} />
+      </ToastProvider>
+    );
+
+  test('renders QA passed badge when verification succeeded', () => {
+    renderPreview('passed');
+    expect(screen.getByTestId('qa-badge')).toHaveTextContent('QA passed');
+  });
+
+  test('renders QA running badge while verification is in flight', () => {
+    renderPreview('running');
+    expect(screen.getByTestId('qa-badge')).toHaveTextContent('QA running');
+  });
+
+  test('no badge in idle state', () => {
+    renderPreview('idle');
+    expect(screen.queryByTestId('qa-badge')).toBeNull();
   });
 });

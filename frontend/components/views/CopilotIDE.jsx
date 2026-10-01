@@ -5,7 +5,7 @@ import {
   FolderTree, Search, GitBranch, Puzzle, X, Plus, Save,
   Send, Sparkles, Play, Terminal as TerminalIcon,
   Loader2, Bot, Eraser, Eye, Download, Square, RotateCcw, Settings2,
-  FolderPlus, Pencil, Trash2, SaveAll, PanelLeftClose, PanelLeftOpen, ChevronRight, GitCompareArrows, Database,
+  FolderPlus, Pencil, Trash2, SaveAll, PanelLeftClose, PanelLeftOpen, ChevronRight, ChevronDown, GitCompareArrows, Database,
   Smartphone, Tablet, Monitor, Crosshair,
   Mic, MicOff, LayoutGrid, Zap, Bug, Code2, RefreshCw, ExternalLink, Copy, Check, ArrowRight,
   Code, ShieldCheck, ShoppingCart, BarChart3, Kanban, MessageSquare, Flame,
@@ -52,6 +52,15 @@ marked.setOptions({
 // rewrite — the hardcoded http://localhost:5000 bypassed rewrites and died
 // off-machine. Env opt-in still wins.
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || '';
+
+// Model picker options — preferred provider rotates server-side cascade (fallback always on)
+const MODEL_OPTIONS = [
+  { v: 'auto', l: 'Auto (cascade)' },
+  { v: 'gemini', l: 'Gemini first' },
+  { v: 'groq', l: 'Groq first' },
+  { v: 'ollama', l: 'Ollama local' },
+];
+const fmtTs = (ts) => (ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 const TerminalPanel = dynamic(() => import('./TerminalPanel'), { ssr: false });
@@ -294,12 +303,28 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   const [selectedCode, setSelectedCode] = useState('');
 
   // Copilot Agent Chat States
-  const [copilotMessages, setCopilotMessages] = useState([]);
+  const [copilotMessages, setCopilotMessagesRaw] = useState([]);
+  // Auto-stamp every appended message with push time — audit rows render HH:MM
+  const setCopilotMessages = useCallback((action) => {
+    setCopilotMessagesRaw(prev => {
+      const next = typeof action === 'function' ? action(prev) : action;
+      if (Array.isArray(next) && Array.isArray(prev) && next.length > prev.length) {
+        const now = Date.now();
+        return next.map((m, idx) => (idx >= prev.length && !m.ts ? { ...m, ts: now } : m));
+      }
+      return next;
+    });
+  }, []);
   const [copilotInput, setCopilotInput] = useState('');
   const [running, setRunning] = useState(false);
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [problems, setProblems] = useState(0);
   const [copilotStatus, setCopilotStatus] = useState({ label: '', tone: 'info' });
+  // Preferred model (rotates cascade order server-side; fallback always active)
+  const [preferredModel, setPreferredModel] = useState('auto');
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  // Visual QA badge: idle → running → passed/failed (from director_verification)
+  const [qaStatus, setQaStatus] = useState('idle');
   // Devin-style elapsed timer for the live status strip
   const [elapsedSec, setElapsedSec] = useState(0);
   const runStartRef = useRef(null);
@@ -314,6 +339,13 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   const [planGate, setPlanGate] = useState(false); // Default to Autopilot (Replit/Bolt style)
   const [pendingPlan, setPendingPlan] = useState(null);
   const [isLight, setIsLight] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem('ai_dost_copilot_model');
+      if (saved && MODEL_OPTIONS.some(o => o.v === saved)) setPreferredModel(saved);
+    } catch (_) { /* storage unavailable */ }
+  }, []);
 
   // Dynamic session project name
   const projectName = useMemo(() => {
@@ -930,7 +962,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
 
     hydrateSessions();
     return () => { isMounted = false; };
-  }, [defaultProjectId, defaultProjectName]);
+  }, [defaultProjectId, defaultProjectName, setCopilotMessages]);
 
   // 2. Save current session function
   const saveCurrentSession = useCallback((overrides = {}) => {
@@ -1033,7 +1065,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     api.post('/copilot/sessions', newSession).catch(() => {});
 
     showToast('✨ Started new project! Past work is safely saved in History.', 'success');
-  }, [saveCurrentSession, showToast]);
+  }, [saveCurrentSession, showToast, setCopilotMessages]);
 
   const handleSelectSession = useCallback((sessionId) => {
     if (sessionId === activeSessionId) return;
@@ -1062,7 +1094,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     setSelectedInspectorElement(null);
 
     showToast(`📂 Switched to session: "${target.title || 'Untitled'}"`, 'info');
-  }, [activeSessionId, sessions, saveCurrentSession, showToast]);
+  }, [activeSessionId, sessions, saveCurrentSession, showToast, setCopilotMessages]);
 
   const handleRenameSession = useCallback((id, newTitle) => {
     const updated = sessionsRef.current.map(s => s.id === id ? { ...s, title: newTitle, updatedAt: Date.now() } : s);
@@ -1536,6 +1568,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     setRunning(true);
     runStartRef.current = Date.now();
     setElapsedSec(0);
+    setQaStatus('idle');
     setCopilotStatus({ label: '🤖 Agent thinking & planning...', tone: 'info' });
     const cleanDisplay = prompt.replace(/\[IMAGE_BASE64:[^\]]+\]/g, '').trim() || 'Analyze screenshot & apply upgrades';
     setCopilotMessages(prev => [...prev, { role: 'user', content: cleanDisplay, images: attachedImages }]);
@@ -1560,7 +1593,8 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
             kind: m.kind,
             file: m.file
           })),
-          copilotDirector: true
+          copilotDirector: true,
+          preferredModel
         }),
         signal: controller.signal
       });
@@ -1649,6 +1683,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
               const vEmoji = vStatus === 'SUCCEEDED' ? '✅' : vStatus === 'DELEGATING' ? '🔍' : '⚠️';
               setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: `${vEmoji} Final Verification Gate: ${vStatus}` }]);
               setCopilotStatus({ label: `${vEmoji} Verification: ${vStatus}`, tone: 'work' });
+              setQaStatus(vStatus === 'SUCCEEDED' ? 'passed' : vStatus === 'DELEGATING' ? 'running' : 'failed');
             }
             // ── Director Complete: CRITICAL — Map to done, reset running state ──
             else if (data.type === 'director_complete') {
@@ -2135,7 +2170,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     } finally {
       setHealingInProgress(false);
     }
-  }, [healingInProgress, activePath, contents, projectId, showToast, applyHealedCode]);
+  }, [healingInProgress, activePath, contents, projectId, showToast, applyHealedCode, setCopilotMessages]);
 
   // Handler for user-approved banner fix
   const handleApplyBannerFix = useCallback(() => {
@@ -2146,7 +2181,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
       content: `### ✅ Self-Healing Applied (User Approved)\n**Fixed:** ${autoFixBanner.explanation}`
     } : m));
     setAutoFixBanner(null);
-  }, [autoFixBanner, applyHealedCode]);
+  }, [autoFixBanner, applyHealedCode, setCopilotMessages]);
 
   const handleDismissBannerFix = useCallback(() => {
     setAutoFixBanner(null);
@@ -2370,6 +2405,14 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     { label: 'Debug: Visual Debugger', run: () => setVisualDebuggerOpen(true) },
   ];
 
+  const planProgressLabel = planTasks.length
+    ? `${planTasks.filter(t => t.status === 'completed').length}/${planTasks.length}`
+    : '';
+  const approxTokens = Math.round(
+    copilotMessages.reduce((n, m) => n + (m.content?.length || 0) + (m.file?.length || 0), 0) / 4
+  );
+  const modelLabel = MODEL_OPTIONS.find(o => o.v === preferredModel)?.l || 'auto';
+
   return (
     <div className="h-full w-full flex flex-col bg-canvas-base text-paper-100 overflow-hidden font-sans">
       {/* ── TOP ACTION BAR (Linear/Cursor style header) ────────────────────────── */}
@@ -2405,9 +2448,47 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                 <span className="w-2 h-2 rounded-full bg-emerald-400 absolute inset-0 animate-ping opacity-75" />
               </div>
               <span className="text-xs font-bold text-paper-100 tracking-wide">Copilot</span>
-              <span className="text-[10px] font-mono text-ink-muted bg-canvas-elevated px-2 py-0.5 rounded border border-border">
-                Groq + Gemini
-              </span>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setModelMenuOpen(o => !o)}
+                  className="text-[10px] font-mono text-ink-muted bg-canvas-elevated px-2 py-0.5 rounded border border-border hover:border-accent/40 hover:text-paper-200 transition-colors cursor-pointer flex items-center gap-1"
+                  title="Preferred model — failure still falls back through the cascade"
+                  data-testid="model-picker-btn"
+                >
+                  <Zap size={9} className="text-accent" />
+                  {MODEL_OPTIONS.find(o => o.v === preferredModel)?.l || 'auto'}
+                  <ChevronDown size={9} />
+                </button>
+                {modelMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setModelMenuOpen(false)} />
+                    <div className="absolute left-0 top-full mt-1 z-50 w-48 rounded-lg bg-canvas-elevated border border-border shadow-surface-card py-1" data-testid="model-menu">
+                      {MODEL_OPTIONS.map(opt => (
+                        <button
+                          key={opt.v}
+                          type="button"
+                          onClick={() => {
+                            setPreferredModel(opt.v);
+                            try { window.localStorage.setItem('ai_dost_copilot_model', opt.v); } catch (_) { /* ignore */ }
+                            setModelMenuOpen(false);
+                            showToast(`Model: ${opt.l}`, 'info');
+                          }}
+                          className={`w-full text-left px-3 py-1.5 text-[11px] font-mono hover:bg-canvas-overlay transition-colors flex items-center justify-between ${
+                            preferredModel === opt.v ? 'text-accent' : 'text-paper-300'
+                          }`}
+                        >
+                          <span>{opt.l}</span>
+                          {preferredModel === opt.v && <Check size={11} />}
+                        </button>
+                      ))}
+                      <div className="px-3 pt-1.5 pb-1 text-[9px] text-ink-muted border-t border-border-subtle mt-1">
+                        Fallback cascade stays on
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
             <div className="flex items-center gap-1.5">
@@ -2529,6 +2610,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                       <span className="font-bold text-ink-muted block text-[9px] uppercase tracking-wider">{m.agent || 'thinking'}</span>
                       <span className="text-paper-300 break-words whitespace-pre-wrap">{m.content}</span>
                     </div>
+                    <span className="ml-auto shrink-0 self-start text-[9px] font-mono text-ink-muted tabular-nums">{fmtTs(m.ts)}</span>
                   </div>
                 );
               }
@@ -2537,6 +2619,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                   <div key={i} className="flex items-center gap-2 text-[11px] font-mono text-paper-300 bg-canvas-subtle/70 px-3 py-2 rounded-lg border border-border-subtle">
                     <Zap size={12} className="text-accent shrink-0" />
                     <span className="truncate">{stripEmoji(typeof m.label === 'object' ? JSON.stringify(m.label) : String(m.label || ''))}</span>
+                    <span className="ml-auto shrink-0 text-[9px] text-ink-muted tabular-nums">{fmtTs(m.ts)}</span>
                   </div>
                 );
               }
@@ -2564,6 +2647,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                         {typeof m.removed === 'number' && <span className="text-red-400">-{m.removed}</span>}
                       </span>
                     )}
+                    <span className="text-[9px] font-mono text-ink-muted tabular-nums shrink-0">{fmtTs(m.ts)}</span>
                     <ChevronRight size={12} className="text-ink-muted opacity-0 group-hover:opacity-100 shrink-0 transition-opacity" />
                   </button>
                 );
@@ -2573,6 +2657,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                   <div key={i} className="flex items-center gap-2 text-[11px] font-mono text-ink-muted px-2 py-1">
                     <span className="text-accent/60 shrink-0">▸</span>
                     <span className="truncate">{typeof m.content === 'object' ? JSON.stringify(m.content) : String(m.content || '')}</span>
+                    <span className="ml-auto shrink-0 text-[9px] tabular-nums">{fmtTs(m.ts)}</span>
                   </div>
                 );
               }
@@ -3094,6 +3179,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                 setRuntimeError={setRuntimeError}
                 handleAutoFixRuntimeError={handleAutoFixRuntimeError}
                 healingInProgress={healingInProgress}
+                qaStatus={qaStatus}
               />
             );
 
@@ -3252,6 +3338,10 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
         handleAutoFixProblems={handleAutoFixProblems}
         running={running}
         problems={problems}
+        stepLabel={planProgressLabel}
+        approxTokens={approxTokens}
+        elapsedSec={elapsedSec}
+        modelLabel={modelLabel}
       />
     </div>
   );

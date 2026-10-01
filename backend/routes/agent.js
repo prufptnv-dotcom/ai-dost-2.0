@@ -1235,7 +1235,7 @@ async function callOllamaLocal(agentPrompt, preferredModel = null) {
 }
 
 // ── LLM Call with Cascade ─────────────────────────────────────────────────────
-async function callLLM(messages, customKeys = null, onFallbackNotice = null) {
+async function callLLM(messages, customKeys = null, onFallbackNotice = null, preferredModel = 'auto') {
   const contextBlock = messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
   const agentPrompt = `${AGENT_SYSTEM_PROMPT}\n\n---\n\n${contextBlock}\n\nASSISTANT (respond with valid JSON only):`;
 
@@ -1252,55 +1252,49 @@ async function callLLM(messages, customKeys = null, onFallbackNotice = null) {
     (r.trim().length <= 80 && /\b429\b/.test(r.trim())) ||
     r.trim().length <= 5;
 
-  // 1. Try Groq (Fast model)
-  try {
-    const resp = await GroqService.chat(agentPrompt, [], 'agent', customKeys?.groq);
-    if (!isErrorResp(resp)) return resp;
-  } catch (e) { logger.info('[Agent] Groq failed:', e.message); }
+  // Cascade order (auto mode). preferredModel rotates a provider to front —
+  // failure still falls through the rest, so a preference can never dead-end a run.
+  const providers = [
+    { key: 'groq', name: 'Groq', call: () => GroqService.chat(agentPrompt, [], 'agent', customKeys?.groq) },
+    { key: 'gemini', name: 'Gemini', call: () => GeminiService.chat(agentPrompt, [], null, 'agent', customKeys?.gemini) },
+    { key: 'nvidia', name: 'NVIDIA', call: () => NvidiaService.chat(agentPrompt, [], customKeys?.nvidia, 'agent') },
+    { key: 'together', name: 'Together', call: () => TogetherService.chat(agentPrompt, [], customKeys?.together) },
+    { key: 'deepseek', name: 'DeepSeek', call: () => DeepSeekService.chat(agentPrompt, [], customKeys?.deepseek) },
+    { key: 'mistral', name: 'Mistral', call: () => MistralService.chat(agentPrompt, [], customKeys?.mistral, 'agent') },
+    { key: 'huggingface', name: 'HuggingFace', call: () => HuggingFaceService.chat(agentPrompt) },
+    { key: 'openrouter', name: 'OpenRouter', call: () => OpenRouterService.chat(agentPrompt, [], customKeys?.openrouter, 'agent') },
+  ];
 
-  // 2. Try Gemini (High quota, fast fallback)
-  try {
-    const resp = await GeminiService.chat(agentPrompt, [], null, 'agent', customKeys?.gemini);
-    if (!isErrorResp(resp)) return resp;
-  } catch (e) { logger.info('[Agent] Gemini failed:', e.message); }
+  if (preferredModel && preferredModel !== 'auto') {
+    if (preferredModel === 'ollama') {
+      // Local-first: try Ollama now, then normal cloud cascade if it's down.
+      try {
+        if (typeof onFallbackNotice === 'function') {
+          onFallbackNotice(`🦙 Preferred mode: local Ollama first (${process.env.OLLAMA_MODEL || 'default'})...`);
+        }
+        const resp = await callOllamaLocal(agentPrompt);
+        if (resp && resp.trim().length > 5) return resp;
+      } catch (e) { logger.info('[Agent] Preferred Ollama failed:', e.message); }
+    } else {
+      const idx = providers.findIndex(p => p.key === preferredModel);
+      if (idx > 0) {
+        const [p] = providers.splice(idx, 1);
+        providers.unshift(p);
+        if (typeof onFallbackNotice === 'function') {
+          onFallbackNotice(`⚡ Preferred model: ${p.name} first (cascade fallback active)`);
+        }
+      }
+    }
+  }
 
-// 3. Try NVIDIA NIM
-  try {
-    const resp = await NvidiaService.chat(agentPrompt, [], customKeys?.nvidia, 'agent');
-    if (!isErrorResp(resp)) return resp;
-  } catch (e) { logger.info('[Agent] NVIDIA failed:', e.message); }
+  for (const provider of providers) {
+    try {
+      const resp = await provider.call();
+      if (!isErrorResp(resp)) return resp;
+    } catch (e) { logger.info(`[Agent] ${provider.name} failed:`, e.message); }
+  }
 
-  // 4. Try Together AI
-  try {
-    const resp = await TogetherService.chat(agentPrompt, [], customKeys?.together);
-    if (!isErrorResp(resp)) return resp;
-  } catch (e) { logger.info('[Agent] Together failed:', e.message); }
-
-  // 5. Try DeepSeek
-  try {
-    const resp = await DeepSeekService.chat(agentPrompt, [], customKeys?.deepseek);
-    if (!isErrorResp(resp)) return resp;
-  } catch (e) { logger.info('[Agent] DeepSeek failed:', e.message); }
-
-  // 6. Try Mistral
-  try {
-    const resp = await MistralService.chat(agentPrompt, [], customKeys?.mistral, 'agent');
-    if (!isErrorResp(resp)) return resp;
-  } catch (e) { logger.info('[Agent] Mistral failed:', e.message); }
-
-  // 6b. Try Hugging Face
-  try {
-    const resp = await HuggingFaceService.chat(agentPrompt);
-    if (!isErrorResp(resp)) return resp;
-  } catch (e) { logger.info('[Agent] HuggingFace failed:', e.message); }
-
-  // 7. Try OpenRouter
-  try {
-    const resp = await OpenRouterService.chat(agentPrompt, [], customKeys?.openrouter, 'agent');
-    if (!isErrorResp(resp)) return resp;
-  } catch (e) { logger.info('[Agent] OpenRouter failed:', e.message); }
-
-  // 5. Try Local Ollama (Offline / Rate Limit Fallback Mode)
+  // Final fallback: Local Ollama (Offline / Rate Limit Fallback Mode)
   try {
     if (typeof onFallbackNotice === 'function') {
       onFallbackNotice('🦙 Cloud APIs unavailable/rate-limited. Falling back to local Ollama AI model...');
@@ -2320,7 +2314,7 @@ router.get('/tasks', (_req, res) => {
 
 // ── ReAct Loop API Endpoint (SSE Streaming) ───────────────────────────────────
 router.post('/run', async (req, res) => {
-  let { userPrompt, projectPath, projectFiles, projectId, customKeys, chatHistory } = req.body;
+  let { userPrompt, projectPath, projectFiles, projectId, customKeys, chatHistory, preferredModel } = req.body;
   customKeys = settingsStore.mergeCustomKeys(customKeys);
 
   if (!userPrompt || typeof userPrompt !== 'string' || !userPrompt.trim()) {
@@ -2750,7 +2744,7 @@ FILE: <filepath>
 
       const rawResponse = await callLLM(messages, customKeys, (noticeMsg) => {
         send({ type: 'thinking', step: step + 1, message: noticeMsg });
-      });
+      }, preferredModel);
       const parsed = parseLLMAction(rawResponse);
 
       // Inject user prompt fallback for project generation when LLM omits params
