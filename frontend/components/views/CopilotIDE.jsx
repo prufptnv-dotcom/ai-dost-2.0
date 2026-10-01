@@ -21,6 +21,7 @@ import ProjectWizardModal from './ProjectWizardModal';
 import DeployModal from './DeployModal';
 import CopilotPlanCard from '../ide/CopilotPlanCard';
 import CopilotStatusBar, { stripEmoji } from '../ide/CopilotStatusBar';
+import CopilotMarkdown from '../ide/CopilotMarkdown';
 import { diffLines, diffStats } from '../../lib/lineDiff';
 import VisualDebugger from './VisualDebugger';
 import VisualHealer from '../VisualHealer';
@@ -41,7 +42,6 @@ import { IdeFooter } from '../ide/IdeFooter';
 import { generateLiveAppHtml, PREVIEW_TELEMETRY_SCRIPT } from '../ide/PreviewEngine';
 import { syncFileToWebContainer } from '../../lib/webcontainer';
 import { marked } from 'marked';
-import DOMPurify from 'dompurify';
 
 marked.setOptions({
   breaks: true,
@@ -111,19 +111,6 @@ function AiStudioResponseCard({ message, onSelectFile, onOpenDiff, onRollback, o
   const files = Array.isArray(message.files) ? message.files : [];
   const content = message.content || message.summary || '';
 
-  const renderedHtml = useMemo(() => {
-    if (!content) return '';
-    try {
-      const raw = marked.parse(content);
-      if (typeof window !== 'undefined' && DOMPurify?.isSupported !== false && typeof DOMPurify?.sanitize === 'function') {
-        return DOMPurify.sanitize(raw);
-      }
-      return String(raw).replace(/<[^>]*>/g, '');
-    } catch (_) {
-      return String(content).replace(/<[^>]*>/g, '');
-    }
-  }, [content]);
-
   return (
     <div className="flex gap-3 items-start animate-in fade-in slide-in-from-bottom-2 duration-200">
       <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5 bg-accent text-white shadow-md">
@@ -144,9 +131,9 @@ function AiStudioResponseCard({ message, onSelectFile, onOpenDiff, onRollback, o
 
         {/* Markdown Content */}
         {content && (
-          <div
+          <CopilotMarkdown
+            text={content}
             className="ai-studio-markdown text-xs leading-relaxed text-paper-200 space-y-2.5"
-            dangerouslySetInnerHTML={{ __html: renderedHtml }}
           />
         )}
 
@@ -325,6 +312,18 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   // Visual QA badge: idle → running → passed/failed (from director_verification)
   const [qaStatus, setQaStatus] = useState('idle');
+  // Devin-style preview console drawer (iframe console.log / errors)
+  const [previewLogs, setPreviewLogs] = useState([]);
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  // Chat: click a file row → inline unified diff; thought rows collapsible
+  const [expandedDiffIdx, setExpandedDiffIdx] = useState(null);
+  const [openThoughts, setOpenThoughts] = useState(() => new Set());
+  const toggleThought = (idx) => setOpenThoughts((prev) => {
+    const nextSet = new Set(prev);
+    if (nextSet.has(idx)) nextSet.delete(idx);
+    else nextSet.add(idx);
+    return nextSet;
+  });
   // Devin-style elapsed timer for the live status strip
   const [elapsedSec, setElapsedSec] = useState(0);
   const runStartRef = useRef(null);
@@ -1569,6 +1568,8 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     runStartRef.current = Date.now();
     setElapsedSec(0);
     setQaStatus('idle');
+    setPreviewLogs([]);
+    setExpandedDiffIdx(null);
     setCopilotStatus({ label: '🤖 Agent thinking & planning...', tone: 'info' });
     const cleanDisplay = prompt.replace(/\[IMAGE_BASE64:[^\]]+\]/g, '').trim() || 'Analyze screenshot & apply upgrades';
     setCopilotMessages(prev => [...prev, { role: 'user', content: cleanDisplay, images: attachedImages }]);
@@ -1794,7 +1795,15 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                   } catch (_) {}
                 }
                 contentsRef.current = { ...contentsRef.current, [filePath]: content };
-                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'file', file: filePath, content: `Created/Updated: ${filePath}`, isNew, added, removed }]);
+                setCopilotMessages(prev => [...prev, {
+                  role: 'assistant', kind: 'file', file: filePath,
+                  content: `Created/Updated: ${filePath}`,
+                  isNew, added, removed,
+                  // Keep capped prev/next for click-to-expand inline diff
+                  ...(!isNew && typeof prevContent === 'string'
+                    ? { prev: String(prevContent).slice(-80000), next: String(content).slice(-80000) }
+                    : {})
+                }]);
                 setFiles(prev => {
                   const existingIdx = prev.findIndex(f => normalizePath(f.path).toLowerCase() === filePath.toLowerCase());
                   if (existingIdx !== -1) {
@@ -2198,6 +2207,12 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
         const err = String(e.data.error || 'Unknown runtime error');
         setRuntimeError({ error: err, time: Date.now() });
         handleAutonomousSelfHeal(err, e.data.source);
+      } else if (e.data.type === 'CONSOLE') {
+        setPreviewLogs((prev) => [...prev.slice(-79), {
+          level: String(e.data.level || 'log'),
+          text: String(e.data.text || ''),
+          ts: Date.now(),
+        }]);
       } else if (e.data.type === 'VISUAL_ERROR') {
         setRuntimeError({ error: String(e.data.message || 'Blank preview detected'), time: Date.now() });
       } else if (e.data.type === 'PREVIEW_READY') {
@@ -2603,14 +2618,28 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
             {/* Chat Timeline */}
             {copilotMessages.map((m, i) => {
               if (m.kind === 'thought') {
+                const longThought = (m.content || '').length > 120;
+                const thoughtOpen = openThoughts.has(i) || !longThought;
                 return (
-                  <div key={i} className="flex gap-2 text-[11px] font-mono bg-canvas-subtle/70 px-3 py-2 rounded-lg border border-border-subtle">
-                    <Sparkles size={12} className="text-accent/70 mt-0.5 shrink-0" />
-                    <div className="min-w-0">
-                      <span className="font-bold text-ink-muted block text-[9px] uppercase tracking-wider">{m.agent || 'thinking'}</span>
-                      <span className="text-paper-300 break-words whitespace-pre-wrap">{m.content}</span>
-                    </div>
-                    <span className="ml-auto shrink-0 self-start text-[9px] font-mono text-ink-muted tabular-nums">{fmtTs(m.ts)}</span>
+                  <div key={i} className="flex flex-col text-[11px] font-mono bg-canvas-subtle/70 px-3 py-2 rounded-lg border border-border-subtle" data-testid="thought-row">
+                    <button
+                      type="button"
+                      onClick={() => longThought && toggleThought(i)}
+                      className={`flex items-center gap-2 text-left ${longThought ? 'cursor-pointer' : 'cursor-default'}`}
+                      title={longThought ? (thoughtOpen ? 'Collapse thought' : 'Expand thought') : undefined}
+                    >
+                      <Sparkles size={12} className="text-accent/70 shrink-0" />
+                      <span className="font-bold text-ink-muted text-[9px] uppercase tracking-wider">{m.agent || 'thinking'}</span>
+                      <span className="ml-auto shrink-0 text-[9px] text-ink-muted tabular-nums">{fmtTs(m.ts)}</span>
+                      {longThought && (
+                        <ChevronRight size={11} className={`shrink-0 text-ink-muted transition-transform ${thoughtOpen ? 'rotate-90' : ''}`} />
+                      )}
+                    </button>
+                    {thoughtOpen ? (
+                      <span className="text-paper-300 break-words whitespace-pre-wrap pl-5 mt-0.5">{m.content}</span>
+                    ) : (
+                      <span className="text-ink-muted pl-5 mt-0.5 truncate">{m.content}</span>
+                    )}
                   </div>
                 );
               }
@@ -2625,31 +2654,87 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
               }
               if (m.kind === 'file') {
                 const hasStats = typeof m.added === 'number' || typeof m.removed === 'number';
+                const diffExpanded = expandedDiffIdx === i;
+                const canExpand = !m.isNew && typeof m.prev === 'string' && typeof m.next === 'string' && m.prev !== m.next;
+                let diffOps = null;
+                if (diffExpanded && canExpand) {
+                  try { diffOps = diffLines(m.prev, m.next); } catch (_) { diffOps = null; }
+                }
+                const diffStats2 = diffOps ? diffStats(diffOps) : null;
                 return (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => m.file && selectFile(m.file)}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-border-subtle bg-canvas-subtle/70 hover:border-accent/40 hover:bg-accent/[0.06] transition-colors cursor-pointer text-left group"
-                    title={m.file ? `Open ${m.file} in editor` : undefined}
-                    data-testid="chat-file-row"
-                  >
-                    <FileDiff size={12} className="text-accent shrink-0" />
-                    <span className="flex-1 min-w-0 text-[11px] font-mono text-paper-300 truncate">
-                      {m.file || m.content}
-                    </span>
-                    {m.isNew && (
-                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/25 shrink-0">NEW</span>
+                  <div key={i} className="rounded-lg border border-border-subtle bg-canvas-subtle/70 hover:border-accent/40 transition-colors group" data-testid="chat-file-row">
+                    <div className="flex items-center gap-2 px-3 py-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (canExpand) setExpandedDiffIdx(diffExpanded ? null : i);
+                          else if (m.file) selectFile(m.file);
+                        }}
+                        className="flex-1 min-w-0 flex items-center gap-2 text-left cursor-pointer"
+                        data-testid="file-row-main"
+                        title={canExpand ? (diffExpanded ? 'Collapse diff' : 'Show inline diff') : `Open ${m.file || ''} in editor`}
+                      >
+                        <FileDiff size={12} className="text-accent shrink-0" />
+                        <span className="flex-1 min-w-0 text-[11px] font-mono text-paper-300 truncate">
+                          {m.file || m.content}
+                        </span>
+                        {m.isNew && (
+                          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/25 shrink-0">NEW</span>
+                        )}
+                        {hasStats && (
+                          <span className="flex items-center gap-1 text-[10px] font-mono tabular-nums shrink-0">
+                            {typeof m.added === 'number' && <span className="text-emerald-500">+{m.added}</span>}
+                            {typeof m.removed === 'number' && <span className="text-red-400">-{m.removed}</span>}
+                          </span>
+                        )}
+                        <span className="text-[9px] font-mono text-ink-muted tabular-nums shrink-0">{fmtTs(m.ts)}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => m.file && selectFile(m.file)}
+                        className="p-1 rounded hover:bg-canvas-elevated text-ink-muted hover:text-accent transition-colors shrink-0"
+                        title="Open in editor"
+                        data-testid="file-row-open"
+                      >
+                        <ChevronRight size={12} className={`transition-transform ${diffExpanded ? 'rotate-90' : ''}`} />
+                      </button>
+                    </div>
+                    {diffOps && (
+                      <div className="border-t border-border-subtle" data-testid="file-diff-panel">
+                        <div className="flex items-center justify-between px-3 py-1 text-[9px] font-mono text-ink-muted bg-canvas-elevated/60 border-b border-border-subtle">
+                          <span className="truncate">unified diff · {m.file}</span>
+                          <span className="flex gap-2 shrink-0">
+                            <span className="text-emerald-500">+{diffStats2?.added || 0}</span>
+                            <span className="text-red-400">-{diffStats2?.removed || 0}</span>
+                          </span>
+                        </div>
+                        <div className="max-h-56 overflow-auto px-1 py-1" data-testid="file-diff-lines">
+                          {(diffOps.length > 600 ? diffOps.slice(0, 600) : diffOps).map((op, k) => (
+                            <div
+                              key={k}
+                              className={`flex text-[10px] leading-[1.45] font-mono ${
+                                op.type === 'add'
+                                  ? 'bg-emerald-500/10 text-emerald-500'
+                                  : op.type === 'del'
+                                    ? 'bg-red-500/10 text-red-400'
+                                    : 'text-ink-muted'
+                              }`}
+                            >
+                              <span className="w-6 shrink-0 text-right pr-1.5 select-none opacity-60">
+                                {op.type === 'add' ? '+' : op.type === 'del' ? '\u2212' : ' '}
+                              </span>
+                              <span className="min-w-0 whitespace-pre-wrap break-all">{op.text || ' '}</span>
+                            </div>
+                          ))}
+                          {diffOps.length > 600 && (
+                            <div className="px-2 py-1 text-[9px] text-ink-muted">
+                              … {diffOps.length - 600} more lines (open in editor for full file)
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     )}
-                    {hasStats && (
-                      <span className="flex items-center gap-1 text-[10px] font-mono tabular-nums shrink-0">
-                        {typeof m.added === 'number' && <span className="text-emerald-500">+{m.added}</span>}
-                        {typeof m.removed === 'number' && <span className="text-red-400">-{m.removed}</span>}
-                      </span>
-                    )}
-                    <span className="text-[9px] font-mono text-ink-muted tabular-nums shrink-0">{fmtTs(m.ts)}</span>
-                    <ChevronRight size={12} className="text-ink-muted opacity-0 group-hover:opacity-100 shrink-0 transition-opacity" />
-                  </button>
+                  </div>
                 );
               }
               if (m.kind === 'step') {
@@ -2717,10 +2802,9 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                   <div className="w-6 h-6 mt-0.5 rounded-md flex items-center justify-center shrink-0 bg-canvas-elevated border border-border text-ink-muted">
                     <Bot size={12} />
                   </div>
-                  <div
-                    className="max-w-[92%] px-3.5 py-2.5 rounded-xl rounded-tl-sm text-xs leading-relaxed bg-canvas-surface border border-border text-paper-200 space-y-1"
-                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(m.content || '')) }}
-                  />
+                  <div className="max-w-[92%] px-3.5 py-2.5 rounded-xl rounded-tl-sm text-xs leading-relaxed bg-canvas-surface border border-border text-paper-200 space-y-1">
+                    <CopilotMarkdown text={m.content} />
+                  </div>
                 </div>
               );
             })}
@@ -3180,6 +3264,10 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                 handleAutoFixRuntimeError={handleAutoFixRuntimeError}
                 healingInProgress={healingInProgress}
                 qaStatus={qaStatus}
+                previewLogs={previewLogs}
+                onClearLogs={() => setPreviewLogs([])}
+                consoleOpen={consoleOpen}
+                setConsoleOpen={setConsoleOpen}
               />
             );
 

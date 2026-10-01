@@ -1,11 +1,12 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import TaskStepItem from '../components/views/TaskStepItem';
 import CopilotPlanCard from '../components/ide/CopilotPlanCard';
 import CopilotStatusBar, { stripEmoji, formatElapsed } from '../components/ide/CopilotStatusBar';
 import IdeFooter from '../components/ide/IdeFooter';
 import { PreviewPane } from '../components/ide/PreviewPane';
 import { ToastProvider } from '../context/ToastContext';
+import CopilotMarkdown, { wrapCodeBlocks, renderCopilotMarkdown } from '../components/ide/CopilotMarkdown';
 
 describe('CopilotDevinUI — TaskStepItem (checklist row)', () => {
   const base = { id: 't1', title: 'Scaffold Vite app' };
@@ -155,5 +156,81 @@ describe('CopilotDevinUI - PreviewPane QA badge', () => {
   test('no badge in idle state', () => {
     renderPreview('idle');
     expect(screen.queryByTestId('qa-badge')).toBeNull();
+  });
+});
+
+describe('CopilotDevinUI - CopilotMarkdown (code blocks + copy)', () => {
+  test('wrapCodeBlocks adds language tag + copy button around pre/code', () => {
+    const wrapped = wrapCodeBlocks('<pre><code class="language-js">const a = 1;</code></pre>');
+    expect(wrapped).toContain('cm-code-bar');
+    expect(wrapped).toContain('data-cm-copy');
+    expect(wrapped).toContain('>js<');
+    expect(wrapped).toContain('const a = 1;');
+  });
+
+  test('wrapCodeBlocks sanitizes hostile language class to "code"', () => {
+    const hostile = wrapCodeBlocks('<pre><code class="language-\"><img src=x>">z</code></pre>');
+    expect(hostile).toContain('language-code');
+    expect(hostile).not.toContain('class="language-\\');
+  });
+
+  test('renderCopilotMarkdown keeps script tags out (DOMPurify)', () => {
+    const html = renderCopilotMarkdown('Hello\n\n<script>alert(1)</script>\n\n**bold**');
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('<strong>bold</strong>');
+  });
+
+  test('renders markdown + code copy button; click copies to clipboard', async () => {
+    const writeText = jest.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    render(<CopilotMarkdown text={'Intro\n\n```js\nconsole.log(1)\n```'} />);
+    const btn = screen.getByRole('button', { name: 'Copy' });
+    expect(btn).toBeInTheDocument();
+    expect(document.querySelector('.cm-code-lang')).toHaveTextContent('js');
+    await act(async () => { btn.click(); });
+    expect(writeText).toHaveBeenCalledWith('console.log(1)');
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    expect(btn).toHaveTextContent('Copied!');
+  });
+});
+
+describe('CopilotDevinUI - PreviewPane console drawer', () => {
+  const baseProps = {
+    previewLogs: [
+      { level: 'log', text: 'app booted', ts: 1759312800000 },
+      { level: 'error', text: 'undefined is not a function', ts: 1759312801000 },
+    ],
+    onClearLogs: jest.fn(),
+    consoleOpen: true,
+    setConsoleOpen: jest.fn(),
+  };
+  const renderConsole = (extra = {}) =>
+    render(
+      <ToastProvider>
+        <PreviewPane {...baseProps} {...extra} />
+      </ToastProvider>
+    );
+
+  test('shows log lines + error count when open', () => {
+    renderConsole();
+    expect(screen.getByTestId('console-lines')).toHaveTextContent('app booted');
+    expect(screen.getByTestId('console-lines')).toHaveTextContent('undefined is not a function');
+    expect(screen.getByTestId('console-error-count')).toHaveTextContent('1 error');
+    expect(screen.getByTestId('console-toggle')).toHaveTextContent('Console');
+    expect(screen.getByTestId('console-toggle')).toHaveTextContent('2');
+  });
+
+  test('toggle button calls setConsoleOpen; Clear calls onClearLogs', () => {
+    renderConsole();
+    fireEvent.click(screen.getByTestId('console-toggle'));
+    expect(baseProps.setConsoleOpen).toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Clear'));
+    expect(baseProps.onClearLogs).toHaveBeenCalled();
+  });
+
+  test('closed drawer hides lines but keeps toggle + count', () => {
+    renderConsole({ consoleOpen: false });
+    expect(screen.queryByTestId('console-lines')).toBeNull();
+    expect(screen.getByTestId('console-toggle')).toHaveTextContent('Console');
   });
 });

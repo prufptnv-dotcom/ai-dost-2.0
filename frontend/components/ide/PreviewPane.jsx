@@ -1,7 +1,8 @@
 import React from 'react';
 import {
   Eye, Loader2, Play, RotateCcw, Square, Monitor, Tablet, Smartphone,
-  Crosshair, RefreshCw, ExternalLink, Zap, Wrench, Check, X, AlertTriangle, Sparkles
+  Crosshair, RefreshCw, ExternalLink, Zap, Wrench, Check, X, AlertTriangle, Sparkles,
+  Terminal, ChevronUp, ChevronDown, Trash2, Lock
 } from 'lucide-react';
 import VisualDebugger from '../views/VisualDebugger';
 import VisualHealer from '../VisualHealer';
@@ -40,6 +41,10 @@ export function PreviewPane({
   handleAutoFixRuntimeError,
   healingInProgress = false,
   qaStatus = 'idle',
+  previewLogs = [],
+  onClearLogs,
+  consoleOpen = false,
+  setConsoleOpen,
 }) {
   return (
     <div className="flex-1 flex flex-col overflow-hidden min-h-0 bg-canvas-base w-full h-full">
@@ -91,6 +96,19 @@ export function PreviewPane({
               )}
             </div>
           )}
+
+          {/* Browser URL pill (Devin-style chrome) */}
+          <div
+            className="hidden md:flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-canvas-base border border-border text-[10px] font-mono text-ink-muted min-w-0 max-w-[220px] flex-1"
+            title="Preview origin"
+          >
+            <Lock size={9} className="text-emerald-500 shrink-0" />
+            <span className="truncate">
+              {devServerStatus.state === 'READY'
+                ? `localhost:${devServerStatus.hostPort || 5173}`
+                : 'preview://in-browser'}
+            </span>
+          </div>
 
           {/* Dev Server Actions */}
           <div className="flex items-center gap-1">
@@ -415,6 +433,70 @@ export function PreviewPane({
             )}
           </div>
         </div>
+      </div>
+
+      {/* Console Drawer (Devin-style: preview logs + errors) */}
+      <div className="shrink-0 border-t border-border bg-canvas-surface" data-testid="preview-console">
+        <div className="flex items-center justify-between px-3 py-1.5">
+          <button
+            type="button"
+            onClick={() => setConsoleOpen?.(o => !o)}
+            className="flex items-center gap-2 text-[10px] font-mono text-ink-muted hover:text-paper-200 transition-colors cursor-pointer"
+            data-testid="console-toggle"
+            title={consoleOpen ? 'Hide console' : 'Show console'}
+          >
+            {consoleOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+            <Terminal size={11} className="text-accent" />
+            <span className="font-bold uppercase tracking-wider">Console</span>
+            <span className="text-paper-300">{previewLogs.length}</span>
+            {previewLogs.some(l => l.level === 'error') && (
+              <span className="flex items-center gap-1 text-red-400" data-testid="console-error-count">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                {previewLogs.filter(l => l.level === 'error').length} error{previewLogs.filter(l => l.level === 'error').length === 1 ? '' : 's'}
+              </span>
+            )}
+          </button>
+          {previewLogs.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onClearLogs?.()}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated transition-colors cursor-pointer"
+              title="Clear console"
+            >
+              <Trash2 size={10} /> Clear
+            </button>
+          )}
+        </div>
+        {consoleOpen && (
+          <div className="max-h-40 overflow-auto px-3 pb-2 space-y-0.5 font-mono text-[10px]" data-testid="console-lines">
+            {previewLogs.length === 0 ? (
+              <div className="text-ink-muted py-1">
+                No output yet — console.log / errors from the preview show up here.
+              </div>
+            ) : (
+              previewLogs.map((log, i) => (
+                <div
+                  key={i}
+                  className={`flex gap-2 rounded px-1.5 py-0.5 ${
+                    log.level === 'error'
+                      ? 'bg-red-500/10 text-red-400'
+                      : log.level === 'warn'
+                        ? 'bg-amber-500/10 text-amber-400'
+                        : log.level === 'debug' || log.level === 'info'
+                          ? 'text-paper-300'
+                          : 'text-ink-muted'
+                  }`}
+                >
+                  <span className="shrink-0 opacity-50 tabular-nums">
+                    {log.ts ? new Date(log.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--:--:--'}
+                  </span>
+                  <span className="uppercase shrink-0 opacity-60 w-10">{log.level}</span>
+                  <span className="min-w-0 break-all">{log.text}</span>
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

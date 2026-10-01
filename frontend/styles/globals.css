@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @import './chat-ux.css';
 @import "./tokens.css";
+@import './markdown.css';
 
 /* ─── Local Fonts ─── */
 @font-face {

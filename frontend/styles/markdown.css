@@ -67,3 +67,65 @@
   font-size: 0.83em;
   font-family: monospace;
 }
+
+/* -- Copilot markdown: code blocks with copy bar (CopilotMarkdown) ---------- */
+.md-prose pre {
+  background: #090a0f;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 0.5em 0;
+  font-size: 0.85em;
+  line-height: 1.55;
+}
+.md-prose pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 1em;
+}
+.cm-code {
+  margin: 0.5em 0;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #090a0f;
+}
+.cm-code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  font-family: monospace;
+  font-size: 10px;
+}
+.cm-code-lang {
+  color: #94a3b8;
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+}
+.cm-code-copy {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #cbd5e1;
+  border-radius: 5px;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-family: monospace;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.cm-code-copy:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f1f5f9;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+.cm-code pre {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}

@@ -10,6 +10,25 @@ export const PREVIEW_TELEMETRY_SCRIPT = `
   const report = (type, payload) => window.parent.postMessage({ channel: 'ai-dost-preview', type, ...payload }, '*');
   window.addEventListener('error', (event) => report('RUNTIME_ERROR', { error: event.message || 'Runtime error' }));
   window.addEventListener('unhandledrejection', (event) => report('RUNTIME_ERROR', { error: String(event.reason?.message || event.reason || 'Unhandled promise') }));
+  // Console capture → parent console drawer (cap 80 entries, 600 chars each)
+  const fmt = (a) => {
+    try { return typeof a === 'string' ? a : JSON.stringify(a); }
+    catch (_) { return String(a); }
+  };
+  ['log', 'info', 'warn', 'error', 'debug'].forEach((level) => {
+    const orig = console[level] ? console[level].bind(console) : null;
+    console[level] = (...args) => {
+      try { report('CONSOLE', { level, text: args.map(fmt).join(' ').slice(0, 600) }); } catch (_) {}
+      if (orig) orig(...args);
+    };
+  });
+  // Failed resource loads (img/script/css) → console drawer
+  window.addEventListener('error', (event) => {
+    const t = event.target;
+    if (t && t !== window && (t.src || t.href)) {
+      report('CONSOLE', { level: 'error', text: 'Failed to load ' + (t.src || t.href) });
+    }
+  }, true);
   const inspect = () => {
     const body = document.body;
     if (!body) return;
@@ -248,6 +267,19 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
     const report = (type, payload) => window.parent.postMessage({ channel: 'ai-dost-preview', type, ...payload }, '*');
     window.addEventListener('error', (event) => report('RUNTIME_ERROR', { error: event.message || 'Runtime error' }));
     window.addEventListener('unhandledrejection', (event) => report('RUNTIME_ERROR', { error: String(event.reason?.message || event.reason || 'Unhandled promise') }));
+    // Console capture → parent console drawer (cap ~80 by parent, 600 chars each)
+    const _fmtArg = (a) => { try { return typeof a === 'string' ? a : JSON.stringify(a); } catch (_) { return String(a); } };
+    ['log', 'info', 'warn', 'error', 'debug'].forEach((level) => {
+      const orig = console[level] ? console[level].bind(console) : null;
+      console[level] = (...args) => {
+        try { report('CONSOLE', { level, text: args.map(_fmtArg).join(' ').slice(0, 600) }); } catch (_) {}
+        if (orig) orig(...args);
+      };
+    });
+    window.addEventListener('error', (event) => {
+      const t = event.target;
+      if (t && t !== window && (t.src || t.href)) report('CONSOLE', { level: 'error', text: 'Failed to load ' + (t.src || t.href) });
+    }, true);
     const inspect = () => {
       const body = document.body;
       if (!body) return;
