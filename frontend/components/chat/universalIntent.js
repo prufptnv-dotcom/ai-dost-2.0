@@ -18,6 +18,7 @@ const VIEW_ALIASES = [
   { view: 'decision', words: ['decision', 'decision matrix', 'problem solving', 'tradeoffs', 'rice', 'compare'], actions: ['open', 'show', 'khol', 'kholo', 'dikhao'] },
   { view: 'language', words: ['language', 'translation', 'translate', 'grammar', 'vocab', 'anuvad'], actions: ['open', 'show', 'khol', 'kholo', 'dikhao', 'karo'] },
   { view: 'capabilities', words: ['capabilities', 'all tools', 'studios', 'tools', 'master hub', 'saare tools'], actions: ['open', 'show', 'khol', 'kholo', 'dikhao'] },
+  { view: 'animations', words: ['animation', 'animations', 'animation studio', '3d studio', 'animejs', '3d motion', 'quantum', 'wormhole', 'black hole', 'cyber city', 'dna', '3d'], actions: ['open', 'show', 'khol', 'kholo', 'dikhao', 'banao', 'chalao', 'create', 'make'] },
 ];
 
 const normalized = (value) => String(value || '')

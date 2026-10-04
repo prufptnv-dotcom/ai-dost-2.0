@@ -15,7 +15,7 @@ function getDashboardBlueprint(name, title, prompt) {
         dependencies: {
           react: '^19.0.0',
           'react-dom': '^19.0.0',
-          'lucide-react': '^1.16.0',
+          '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0',
           express: '^4.18.2',
           cors: '^2.8.5'
         },
@@ -94,16 +94,17 @@ app.listen(PORT, () => console.log('SaaS server running on port ' + PORT));`
     {
       path: 'src/App.jsx',
       content: `import React, { useState } from 'react';
-import { BarChart3, TrendingUp, Users, DollarSign, Activity, Bell, Search, ArrowUpRight, ArrowDownRight, Layers } from 'lucide-react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faChartColumn, faArrowTrendUp, faUsers, faDollarSign, faWaveSquare, faBell, faMagnifyingGlass, faUpRightFromSquare, faArrowTrendDown, faTableColumns } from '@fortawesome/free-solid-svg-icons';
 
 export default function App() {
   const [timeframe, setTimeframe] = useState('30D');
 
   const metrics = [
-    { label: 'Monthly Recurring Revenue', value: '$48,920', change: '+14.2%', isPositive: true, icon: DollarSign },
-    { label: 'Active Subscribers', value: '14,205', change: '+8.1%', isPositive: true, icon: Users },
-    { label: 'Average Contract Value', value: '$1,840', change: '+5.4%', isPositive: true, icon: Activity },
-    { label: 'Gross Churn Rate', value: '1.2%', change: '-0.4%', isPositive: true, icon: TrendingUp },
+    { label: 'Monthly Recurring Revenue', value: '$48,920', change: '+14.2%', isPositive: true, icon: faDollarSign },
+    { label: 'Active Subscribers', value: '14,205', change: '+8.1%', isPositive: true, icon: faUsers },
+    { label: 'Average Contract Value', value: '$1,840', change: '+5.4%', isPositive: true, icon: faWaveSquare },
+    { label: 'Gross Churn Rate', value: '1.2%', change: '-0.4%', isPositive: true, icon: faArrowTrendUp },
   ];
 
   return (
@@ -111,7 +112,7 @@ export default function App() {
       <header className="sticky top-0 z-20 bg-[#0e1424]/90 backdrop-blur-md border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg">
-            <BarChart3 className="w-4 h-4 text-white" />
+            <FontAwesomeIcon icon={faChartColumn} className="w-4 h-4 text-white" />
           </div>
           <span className="font-extrabold text-white text-base">Linear Metrics Pro</span>
         </div>
@@ -134,11 +135,11 @@ export default function App() {
             <div key={m.label} className="p-5 rounded-2xl bg-[#111728] border border-zinc-800 shadow-xl">
               <div className="flex items-center justify-between text-zinc-400">
                 <span className="text-xs font-bold uppercase tracking-wider">{m.label}</span>
-                <m.icon size={16} className="text-indigo-400" />
+                <FontAwesomeIcon icon={m.icon} style={{ fontSize: 16 }} className="text-indigo-400" />
               </div>
               <div className="text-2xl font-mono font-black text-white mt-3">{m.value}</div>
               <div className="flex items-center gap-1 text-xs font-bold text-emerald-400 mt-1.5 font-mono">
-                <ArrowUpRight size={12} />
+                <FontAwesomeIcon icon={faUpRightFromSquare} style={{ fontSize: 12 }} />
                 <span>{m.change} vs previous period</span>
               </div>
             </div>

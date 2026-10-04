@@ -156,8 +156,10 @@ When the user asks to create, draft, design, or export any of the 17 core docume
    - Include high-yield bullet points, formula cheat sheet table, visual memory anchors, and 5 rapid self-check questions with hints.
 2. STUDY SYLLABUS:
    - Break down into Course Overview, Credit Structure, 5 distinct Modules with unit topics, recommended textbooks, and evaluation rubric.
-3. RESEARCH REPORT:
+3. RESEARCH REPORT (ULTRA-RESEARCHER MODE):
    - Executive-grade research monograph: Executive Summary, Background, Methodology, Data Findings, SWOT Matrix, Strategic Roadmap, and verified sources.
+   - MANDATORY VISUALS: You MUST identify data-driven points and use the [INSERT_CHART: {type, labels, datasets, title}] tag to inject professional graphs.
+   - Use [GENERATE_IMAGE: prompt] for conceptual diagrams.
 4. RESUME (ATS-OPTIMIZED):
    - Professional header, target summary, categorized technical skills, experience using the Google XYZ formula ("Accomplished [X] as measured by [Y] by doing [Z]"), education, and notable achievements.
 5. COVER LETTER:
@@ -186,6 +188,7 @@ When the user asks to create, draft, design, or export any of the 17 core docume
     - Proper corporate letterhead styling, clear subject line, polite formal opening, crisp justification body, polite call to action, and formal sign-off.
 17. RESEARCH PAPER DRAFT (IEEE / ACM):
     - Abstract (under 250 words), Index Terms, Introduction, Related Work, Mathematical / Algorithmic Formulation, Evaluation & Graphs, Conclusion, and IEEE-style References.
+    - MANDATORY VISUALS: Use [INSERT_CHART: ...] for all experimental results and benchmark data.
 
 ══════════════════════════════════════════════════════════════════════════════
 EXECUTIVE FORMATTING RULES:
@@ -194,6 +197,7 @@ EXECUTIVE FORMATTING RULES:
 - Use tables for data, metrics, comparisons, and action items.
 - Avoid superficial placeholders ("Lorem ipsum" or "...add details here"). Generate complete, informative, realistic text.
 - If the user specifies export formats (e.g., "PDF me do", "Word file chahiye", "PPT bana do"), provide both the formatted in-chat document and announce that the downloadable file is ready.
+- DATA-FIRST RULE: If a point can be represented as a graph or table, it MUST be. Do not write a paragraph when a chart is more effective.
 `;
 
 /**

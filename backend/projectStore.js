@@ -1,5 +1,24 @@
 const { getDatabase } = require('./db');
 const logger = require('./logger');
+const { EventEmitter } = require('events');
+
+// Workspace change bus — watch mode (Phase 3b) pushes these to CopilotIDE via
+// GET /api/agent/watch/:projectId SSE. One event per successful write/delete.
+const workspaceBus = new EventEmitter();
+workspaceBus.setMaxListeners(0);
+
+function onWorkspaceChange(listener) {
+  workspaceBus.on('change', listener);
+  return () => workspaceBus.off('change', listener);
+}
+
+function emitChange(projectId, path, action) {
+  try {
+    workspaceBus.emit('change', { projectId, path, action, at: Date.now() });
+  } catch (e) {
+    logger.error('[ProjectStore] change emit failed:', e.message || e);
+  }
+}
 
 function getDb() {
   return getDatabase();
@@ -36,6 +55,7 @@ function saveProjectFile(projectId, filePath, content) {
       d.prepare('INSERT INTO workspace_files (project_id, path, content) VALUES (?, ?, ?)')
         .run(projectId, cleanPath, content);
     }
+    emitChange(projectId, cleanPath, 'write');
     return true;
   } catch (e) {
     logger.error('[ProjectStore] save failed:', e.message || e);
@@ -57,6 +77,7 @@ function deleteProjectFile(projectId, filePath) {
       DELETE FROM workspace_files
       WHERE project_id = ? AND (path = ? OR path = ? OR path = ? COLLATE NOCASE)
     `).run(projectId, cleanPath, cleanPath.replace(/\//g, '\\'), `./${cleanPath}`);
+    emitChange(projectId, cleanPath, 'delete');
     return true;
   } catch (e) {
     logger.error('[ProjectStore] delete failed:', e.message || e);
@@ -76,4 +97,4 @@ function getProjectFiles(projectId) {
   }
 }
 
-module.exports = { saveProjectFile, deleteProjectFile, getProjectFiles };
+module.exports = { saveProjectFile, deleteProjectFile, getProjectFiles, onWorkspaceChange, notifyWorkspaceChange: emitChange };

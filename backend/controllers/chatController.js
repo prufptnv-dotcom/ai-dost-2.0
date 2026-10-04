@@ -5,6 +5,7 @@ const { runStreamCascade } = require('../services/llmCascadeService');
 const { ReasoningStreamFilter } = require('../utils/streamUtils');
 const router = express.Router();
 const { DEEP_REASONING_SYSTEM_PROMPT } = require('../services/outputQualityStandard');
+const { isImageCreateRequest } = require('../services/imageIntent');
 const MoERouterService = require('../services/moeRouterService');
 const VllmService = require('../services/vllmService');
 const { detectResponseLanguage } = require('../services/languageDetector');
@@ -635,8 +636,11 @@ exports.handleChatStream = async (req, res) => {
             }
 
             // 6. Z-Image Turbo Intent (ONLY for static image generation, never for 3D/animation/games)
-            if (/(?:image banao|fast image|turbo image|photo banao|generate image|picture of)/i.test(message) && !/(?:animation|3d|three\.?js|webgl|game|simulation|kinetic|typography|reveal|code|runner)/i.test(message)) {
-                processedMessage += `\n\n[INSTRUCTION: The user is requesting static image generation. You MUST include the tag '[GENERATE_IMAGE: <clean english prompt>]' in your response. Since Z-Image Turbo is active, optimize the prompt for vibrant, high-detail generation.]`;
+            // Shared matcher: the old literal phrase list missed plurals ("ek cat ka
+            // images banao") and "banado", so no instruction was injected and the
+            // model answered with Python/Pillow code instead of emitting the tag.
+            if (isImageCreateRequest(message)) {
+                processedMessage += `\n\n[INSTRUCTION: The user is requesting static image generation. You MUST include the tag '[GENERATE_IMAGE: <clean english prompt>]' in your response and keep any prose to one or two short sentences. HARD RULE: do NOT reply with source code (Pillow/PIL, matplotlib, SVG, canvas, HTML), do NOT produce a Plan/Assumptions/Implementation breakdown, and do NOT suggest installing packages — render the picture instead. Since Z-Image Turbo is active, optimize the prompt for vibrant, high-detail generation.]`;
             }
 
             // 7. Anime.js 3D Animation Intent

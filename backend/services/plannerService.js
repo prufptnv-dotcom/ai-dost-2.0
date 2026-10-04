@@ -8,7 +8,7 @@ const FRAMEWORK_TEMPLATES = {
   'react-vite': {
     name: 'React + Vite',
     description: 'Modern React app with Vite build tool',
-    dependencies: { react: '^18.2.0', 'react-dom': '^18.2.0' },
+    dependencies: { react: '^18.2.0', 'react-dom': '^18.2.0', '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0' },
     devDependencies: { vite: '^5.0.0', '@vitejs/plugin-react': '^4.2.0' },
     scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
     files: {
@@ -83,7 +83,12 @@ export default defineConfig({
   },
   "dependencies": {
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "@fortawesome/fontawesome-svg-core": "^7.3.1",
+    "@fortawesome/free-solid-svg-icons": "^7.3.1",
+    "@fortawesome/free-regular-svg-icons": "^7.3.1",
+    "@fortawesome/free-brands-svg-icons": "^7.3.1",
+    "@fortawesome/react-fontawesome": "^3.5.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.0",
@@ -95,7 +100,7 @@ export default defineConfig({
   'nextjs': {
     name: 'Next.js App Router',
     description: 'Full-stack React framework with App Router',
-    dependencies: { next: '^14.0.0', react: '^18.2.0', 'react-dom': '^18.2.0' },
+    dependencies: { next: '^14.0.0', react: '^18.2.0', 'react-dom': '^18.2.0', '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0' },
     devDependencies: { typescript: '^5.0.0', '@types/react': '^18.2.0', '@types/node': '^20.0.0' },
     scripts: { dev: 'next dev', build: 'next build', start: 'next start' },
     files: {
@@ -111,7 +116,12 @@ export default defineConfig({
   "dependencies": {
     "next": "^14.0.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "@fortawesome/fontawesome-svg-core": "^7.3.1",
+    "@fortawesome/free-solid-svg-icons": "^7.3.1",
+    "@fortawesome/free-regular-svg-icons": "^7.3.1",
+    "@fortawesome/free-brands-svg-icons": "^7.3.1",
+    "@fortawesome/react-fontawesome": "^3.5.0"
   },
   "devDependencies": {
     "typescript": "^5.0.0",
@@ -205,7 +215,7 @@ export default defineConfig({ server: { host: '0.0.0.0', port: 4321 } })`,
 </html>`,
       'src/styles/global.css': `* { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: system-ui, sans-serif; line-height: 1.5; }`,
-      'public/favicon.svg': `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text x="50" y="55" font-size="50" text-anchor="middle">🚀</text></svg>`
+      'public/favicon.svg': `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="100" height="100" rx="22" fill="url(#g)"/><path d="M50 24 L57 43 L76 50 L57 57 L50 76 L43 57 L24 50 L43 43 Z" fill="#ffffff"/></svg>`
     }
   },
   'sveltekit': {

@@ -292,6 +292,14 @@ export default function Dashboard() {
         e.preventDefault();
         setVoiceAssistantOpen((v) => !v);
       }
+      if (isMod && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('ai_dost_toggle_sidebar'));
+      }
+      if (isMod && e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('ai_dost_toggle_sidebar'));
+      }
       // P3 #89: exclude shift so Ctrl+Shift+N (new window) is not hijacked
       if (isMod && !e.shiftKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();

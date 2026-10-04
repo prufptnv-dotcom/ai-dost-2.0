@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { CommandRail } from './CommandRail';
 import { AiDostWordmark } from '../brand/AiDostWordmark';
 import { AiDostMark } from '../brand/AiDostMark';
-import { Search, Bell, ChevronDown, Menu, X, WifiOff, PanelLeftOpen, Plus, MessageSquare, Code2, Bot } from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 
 export function AppShell({
   currentView = 'chat',
@@ -126,7 +126,7 @@ export function AppShell({
             title="Expand sidebar (Ctrl+B)"
             aria-label="Expand sidebar"
           >
-            <PanelLeftOpen size={16} />
+            <AppIcon name="expand" size={16} />
           </button>
 
           <div className="w-5 h-px bg-border my-0.5" />
@@ -138,7 +138,7 @@ export function AppShell({
             title="New chat"
             aria-label="New chat"
           >
-            <Plus size={15} />
+            <AppIcon name="plus" size={15} />
           </button>
 
           <button
@@ -149,7 +149,7 @@ export function AppShell({
             }`}
             title="Chat (Ctrl+1)"
           >
-            <MessageSquare size={15} />
+            <AppIcon name="message" size={15} />
           </button>
 
           <button
@@ -160,7 +160,7 @@ export function AppShell({
             }`}
             title="Copilot IDE (Ctrl+3)"
           >
-            <Code2 size={15} />
+            <AppIcon name="code" size={15} />
           </button>
 
           <button
@@ -171,7 +171,7 @@ export function AppShell({
             }`}
             title="Agent Workbench (Ctrl+2)"
           >
-            <Bot size={15} />
+            <AppIcon name="bot" size={15} />
           </button>
         </div>
       )}
@@ -206,7 +206,7 @@ export function AppShell({
             className="h-7 px-3 bg-signal-warning-subtle border-b border-signal-warning/40 text-signal-warning text-xs font-medium flex items-center justify-between z-50 shrink-0 select-none"
           >
             <div className="flex items-center gap-2">
-              <WifiOff className="w-3.5 h-3.5 shrink-0" />
+              <AppIcon name="wifi" className="w-3.5 h-3.5 shrink-0" />
               <span className="text-[11px]">Working offline. Local workspace features remain available.</span>
             </div>
             <span className="text-[9px] uppercase font-mono tracking-wider opacity-75">Offline</span>
@@ -232,7 +232,7 @@ export function AppShell({
                 className="ml-auto w-8 h-8 rounded-lg flex items-center justify-center text-paper-300 hover:text-paper-100 hover:bg-canvas-surface transition-fast cursor-pointer"
                 aria-label="Search"
               >
-                <Search className="w-4 h-4" />
+                <AppIcon name="search" className="w-4 h-4" />
               </button>
             )}
           </div>
@@ -253,7 +253,7 @@ export function AppShell({
               <span className="text-sm font-medium text-paper-100 truncate max-w-[220px]">
                 {projectName}
               </span>
-              <ChevronDown className="w-3.5 h-3.5 text-ink-muted" />
+              <AppIcon name="chevronDown" className="w-3.5 h-3.5 text-ink-muted" />
             </div>
             <div className="h-5 w-px bg-border hidden md:block" />
             <div className="min-w-0">
@@ -273,7 +273,7 @@ export function AppShell({
                 className="hidden sm:flex items-center gap-2 h-9 px-3 rounded-lg bg-canvas-surface hover:bg-canvas-elevated border border-border hover:border-accent/40 text-xs text-paper-300 hover:text-paper-100 transition-fast cursor-pointer focus-ring shadow-sm"
                 title="Open Command Palette (Ctrl+K)"
               >
-                <Search className="w-3.5 h-3.5 text-accent" />
+                <AppIcon name="search" className="w-3.5 h-3.5 text-accent" />
                 <span className="hidden md:inline">Search anything</span>
                 <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-canvas-elevated text-paper-300 border border-border/50">
                   ⌘K
@@ -286,7 +286,7 @@ export function AppShell({
               title="Notifications"
               aria-label="Notifications"
             >
-              <Bell className="w-4 h-4" />
+              <AppIcon name="bell" className="w-4 h-4" />
             </button>
             <div className="hidden md:flex items-center gap-2 pl-2 ml-1 border-l border-border">
               <div className="w-8 h-8 rounded-full bg-accent/20 border border-accent/40 flex items-center justify-center text-xs font-bold text-paper-100 shadow-sm">

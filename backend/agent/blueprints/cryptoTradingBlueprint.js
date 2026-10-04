@@ -21,7 +21,7 @@ function getCryptoTradingBlueprint(name, title, prompt) {
         dependencies: {
           react: '^19.0.0',
           'react-dom': '^19.0.0',
-          'lucide-react': '^1.16.0',
+          '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0',
           express: '^4.18.2',
           cors: '^2.8.5'
         },
@@ -205,11 +205,12 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     {
       path: 'src/App.jsx',
       content: `import React, { useState, useEffect, useMemo } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-  TrendingUp, TrendingDown, DollarSign, Wallet, ArrowUpRight, ArrowDownRight,
-  PieChart as PieChartIcon, Activity, PlusCircle, ArrowLeftRight,
-  CheckCircle2, X, Search, Clock, BarChart3, AlertCircle, Coins
-} from 'lucide-react';
+  faArrowTrendUp, faArrowTrendDown, faDollarSign, faWallet, faUpRightFromSquare,
+  faChartPie, faWaveSquare, faCirclePlus, faArrowRightArrowLeft,
+  faCircleCheck, faXmark, faMagnifyingGlass, faClock, faChartColumn, faCircleExclamation, faCoins
+} from '@fortawesome/free-solid-svg-icons';
 
 const INITIAL_COINS = [
   {
@@ -554,7 +555,7 @@ export default function App() {
               ? 'bg-rose-950/90 border-rose-500/40 text-rose-200'
               : 'bg-emerald-950/90 border-emerald-500/40 text-emerald-200'
           }\`}>
-            {notification.type === 'error' ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
+            {notification.type === 'error' ? <FontAwesomeIcon icon={faCircleExclamation} style={{ fontSize: 16 }} /> : <FontAwesomeIcon icon={faCircleCheck} style={{ fontSize: 16 }} />}
             <span className="text-xs font-bold">{notification.msg}</span>
           </div>
         </div>
@@ -564,7 +565,7 @@ export default function App() {
       <header className="sticky top-0 z-30 bg-[#0c1220]/90 backdrop-blur-md border-b border-zinc-800/80 px-4 md:px-8 py-3.5 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <Coins className="w-5 h-5 text-white" />
+            <FontAwesomeIcon icon={faCoins} className="w-5 h-5 text-white" />
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -583,7 +584,7 @@ export default function App() {
             onClick={() => setDepositModalOpen(true)}
             className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-200 transition-all flex items-center gap-1.5 border border-zinc-700/60 shadow cursor-pointer"
           >
-            <PlusCircle size={14} className="text-emerald-400" />
+            <FontAwesomeIcon icon={faCirclePlus} style={{ fontSize: 14 }} className="text-emerald-400" />
             <span>Deposit USDT</span>
           </button>
           <button
@@ -594,7 +595,7 @@ export default function App() {
             }}
             className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-xs font-bold text-white shadow-lg shadow-indigo-500/25 transition-all flex items-center gap-1.5 cursor-pointer"
           >
-            <ArrowLeftRight size={14} />
+            <FontAwesomeIcon icon={faArrowRightArrowLeft} style={{ fontSize: 14 }} />
             <span>Quick Trade</span>
           </button>
         </div>
@@ -645,7 +646,7 @@ export default function App() {
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Total Net Worth</span>
               <div className="w-8 h-8 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
-                <Wallet size={16} />
+                <FontAwesomeIcon icon={faWallet} style={{ fontSize: 16 }} />
               </div>
             </div>
             <div className="mt-3">
@@ -653,7 +654,7 @@ export default function App() {
                 $\${totalPortfolioValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
               <div className="flex items-center gap-1.5 mt-2 text-xs font-bold text-emerald-400 font-mono">
-                <TrendingUp size={14} />
+                <FontAwesomeIcon icon={faArrowTrendUp} style={{ fontSize: 14 }} />
                 <span>+$2,410.50 (5.18%)</span>
                 <span className="text-[10px] text-zinc-400 font-normal">Past 24h</span>
               </div>
@@ -664,7 +665,7 @@ export default function App() {
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Buying Power (USDT)</span>
               <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                <DollarSign size={16} />
+                <FontAwesomeIcon icon={faDollarSign} style={{ fontSize: 16 }} />
               </div>
             </div>
             <div className="mt-3">
@@ -686,7 +687,7 @@ export default function App() {
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Crypto Assets</span>
               <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
-                <Coins size={16} />
+                <FontAwesomeIcon icon={faCoins} style={{ fontSize: 16 }} />
               </div>
             </div>
             <div className="mt-3">
@@ -703,7 +704,7 @@ export default function App() {
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Realized Profit</span>
               <div className="w-8 h-8 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
-                <Activity size={16} />
+                <FontAwesomeIcon icon={faWaveSquare} style={{ fontSize: 16 }} />
               </div>
             </div>
             <div className="mt-3">
@@ -723,11 +724,11 @@ export default function App() {
             <div className="bg-[#0f1527] border border-zinc-800/90 rounded-2xl p-5 shadow-xl">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                 <div className="flex items-center gap-2">
-                  <BarChart3 className="w-5 h-5 text-indigo-400" />
+                  <FontAwesomeIcon icon={faChartColumn} className="w-5 h-5 text-indigo-400" />
                   <h2 className="text-sm font-bold text-white uppercase tracking-wider">Live Assets & Holdings</h2>
                 </div>
                 <div className="relative w-full sm:w-64">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                  <FontAwesomeIcon icon={faMagnifyingGlass} style={{ fontSize: 14 }} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
                   <input
                     type="text"
                     value={searchQuery}
@@ -783,7 +784,7 @@ export default function App() {
                             <span className={\`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-lg text-[11px] \${
                               coin.change24h >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
                             }\`}>
-                              {coin.change24h >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+                              {coin.change24h >= 0 ? <FontAwesomeIcon icon={faUpRightFromSquare} style={{ fontSize: 12 }} /> : <FontAwesomeIcon icon={faArrowTrendDown} style={{ fontSize: 12 }} />}
                               {Math.abs(coin.change24h)}%
                             </span>
                           </td>
@@ -829,7 +830,7 @@ export default function App() {
             <div className="bg-[#0f1527] border border-zinc-800/90 rounded-2xl p-5 shadow-xl">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
-                  <PieChartIcon className="w-5 h-5 text-indigo-400" />
+                  <FontAwesomeIcon icon={faChartPie} className="w-5 h-5 text-indigo-400" />
                   <h2 className="text-sm font-bold text-white uppercase tracking-wider">Asset Allocation</h2>
                 </div>
                 <span className="text-[11px] font-mono text-zinc-400">
@@ -851,7 +852,7 @@ export default function App() {
         <div className="bg-[#0f1527] border border-zinc-800/90 rounded-2xl p-5 shadow-xl">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
             <div className="flex items-center gap-2">
-              <Clock className="w-5 h-5 text-indigo-400" />
+              <FontAwesomeIcon icon={faClock} className="w-5 h-5 text-indigo-400" />
               <h2 className="text-sm font-bold text-white uppercase tracking-wider">Execution Ledger & Realized P&L</h2>
             </div>
             
@@ -904,7 +905,7 @@ export default function App() {
                     <td className="py-3 text-right font-mono text-zinc-400 text-[11px]">{tx.timestamp}</td>
                     <td className="py-3 text-right pr-2">
                       <span className="text-[11px] font-semibold text-emerald-400 flex items-center justify-end gap-1">
-                        <CheckCircle2 size={12} />
+                        <FontAwesomeIcon icon={faCircleCheck} style={{ fontSize: 12 }} />
                         {tx.status}
                       </span>
                     </td>
@@ -922,14 +923,14 @@ export default function App() {
           <div className="w-full max-w-md bg-[#111728] border border-zinc-700/80 rounded-2xl shadow-2xl p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center gap-2">
-                <ArrowLeftRight className="w-4 h-4 text-indigo-400" />
+                <FontAwesomeIcon icon={faArrowRightArrowLeft} className="w-4 h-4 text-indigo-400" />
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">Execute Trade</h3>
               </div>
               <button
                 onClick={() => setTradeModalOpen(false)}
                 className="p-1 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-lg transition-colors cursor-pointer"
               >
-                <X size={16} />
+                <FontAwesomeIcon icon={faXmark} style={{ fontSize: 16 }} />
               </button>
             </div>
 
@@ -1054,14 +1055,14 @@ export default function App() {
           <div className="w-full max-w-sm bg-[#111728] border border-zinc-700/80 rounded-2xl shadow-2xl p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center gap-2">
-                <DollarSign className="w-4 h-4 text-emerald-400" />
+                <FontAwesomeIcon icon={faDollarSign} className="w-4 h-4 text-emerald-400" />
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">Deposit USDT Funds</h3>
               </div>
               <button
                 onClick={() => setDepositModalOpen(false)}
                 className="p-1 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-lg transition-colors cursor-pointer"
               >
-                <X size={16} />
+                <FontAwesomeIcon icon={faXmark} style={{ fontSize: 16 }} />
               </button>
             </div>
 
@@ -1091,7 +1092,7 @@ export default function App() {
       path: 'README.md',
       content: `# 🚀 ${title || 'CryptoFolio AI'} — Real-Time Crypto Portfolio Tracker
 
-A production-grade, high-frequency cryptocurrency portfolio tracker and DEX simulator built with React 19, Tailwind CSS, and Lucide Icons.
+A production-grade, high-frequency cryptocurrency portfolio tracker and DEX simulator built with React 19, Tailwind CSS, and Font Awesome icons.
 
 ## Features
 - **⚡ Simulated Live Price Tickers**: High-frequency ticks for BTC, ETH, SOL, BNB, ADA, AVAX with real-time green/red market flashes.

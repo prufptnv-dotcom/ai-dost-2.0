@@ -220,14 +220,14 @@ function detectAnalysisMode(prompt, fileCount = 1) {
   if (fileCount > 1 || /\b(?:compare|comparison|dono\s*me\s*fark|difference\s*between|diff|versus|vs)\b/i.test(text)) {
     return ANALYSIS_MODES.MULTI_FILE_COMPARE;
   }
+  if (/\b(?:mistakes?|galati|galti|errors?|bugs?|kahan\s*galti|flaws?|vulnerabilit(?:y|ies)|issues?)\b/i.test(text)) {
+    return ANALYSIS_MODES.MISTAKES;
+  }
   if (/\b(?:marks?|number|score|grade|percentile|kitne\s*marks|grading)\b/i.test(text)) {
     return ANALYSIS_MODES.MARKS_ANALYSIS;
   }
-  if (/\b(?:assignment|homework|evaluate|evaluation|check\s*karo|check\s*kardo|project\s*evaluate)\b/i.test(text)) {
+  if (/\b(?:assignment|homework|rubric|evaluate|evaluation|project\s*evaluate)\b/i.test(text)) {
     return ANALYSIS_MODES.ASSIGNMENT_EVALUATE;
-  }
-  if (/\b(?:mistakes?|galati|errors?|bugs?|kahan\s*galti|flaws?|vulnerabilit(?:y|ies)|issues?)\b/i.test(text)) {
-    return ANALYSIS_MODES.MISTAKES;
   }
   if (/\b(?:missing|chhoot\s*gaya|recommenda?tion|kya\s*nahi\s*hai|gap\s*analysis|what\s*is\s*missing)\b/i.test(text)) {
     return ANALYSIS_MODES.MISSING_CONCEPTS;
@@ -238,11 +238,11 @@ function detectAnalysisMode(prompt, fileCount = 1) {
   if (/\b(?:tables?|structured\s*data|extract\s*table|data\s*extract|csv\s*extract|json\s*extract)\b/i.test(text)) {
     return ANALYSIS_MODES.EXTRACT_TABLES;
   }
-  if (/\b(?:important\s*points|key\s*points|mukhya\s*baatein|takeaways|bullet\s*points|highlights)\b/i.test(text)) {
-    return ANALYSIS_MODES.IMPORTANT_POINTS;
-  }
   if (/\b(?:summary|summarize|nichod|overview|brief|khulasa)\b/i.test(text)) {
     return ANALYSIS_MODES.SUMMARY;
+  }
+  if (/\b(?:important\s*points|key\s*points|mukhya\s*baatein|takeaways|bullet\s*points|highlights)\b/i.test(text)) {
+    return ANALYSIS_MODES.IMPORTANT_POINTS;
   }
 
   return ANALYSIS_MODES.GENERAL_READ;

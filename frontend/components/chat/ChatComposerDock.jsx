@@ -1,5 +1,5 @@
 import React from 'react';
-import { Paperclip, Mic, Send, Square } from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 
 export default function ChatComposerDock({
   input,
@@ -38,7 +38,7 @@ export default function ChatComposerDock({
                     className="w-5 h-5 rounded object-cover border border-border shrink-0"
                   />
                 ) : (
-                  <Paperclip className="w-3.5 h-3.5 text-accent" />
+                  <AppIcon name="paperclip" className="w-3.5 h-3.5 text-accent" />
                 )}
                 <span className="truncate max-w-[140px] sm:max-w-[200px] text-paper-100 font-medium text-[11px]">
                   {att.name}
@@ -78,12 +78,13 @@ export default function ChatComposerDock({
         >
           <textarea
             ref={inputRef}
+            aria-label="Ask AI-Dost anything"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             rows={Math.min(4, Math.max(1, input.split('\n').length))}
-            placeholder="Ask AI-Dost anything, or paste an image (Ctrl+V)…"
+            placeholder="Ask AI-Dost anything in any language, or paste an image (Ctrl+V)…"
             style={{ color: 'var(--paper-100, var(--color-text-primary, #0f172a))' }}
             className="w-full bg-transparent resize-none text-sm focus:outline-none placeholder:text-ink-muted text-paper-100 leading-relaxed px-4 pt-3 pb-1 font-sans min-h-[40px] max-h-[140px]"
           />
@@ -105,7 +106,7 @@ export default function ChatComposerDock({
                 aria-label="Attach file"
                 className="p-1.5 rounded-lg hover:bg-canvas-elevated text-paper-300 hover:text-paper-100 transition-fast cursor-pointer focus-ring"
               >
-                <Paperclip className="w-4 h-4" />
+                <AppIcon name="paperclip" className="w-4 h-4" />
               </button>
               {onOpenVoice && (
                 <button
@@ -115,7 +116,7 @@ export default function ChatComposerDock({
                   aria-label="Voice input"
                   className="p-1.5 rounded-lg hover:bg-canvas-elevated text-paper-300 hover:text-accent transition-fast cursor-pointer focus-ring"
                 >
-                  <Mic className="w-4 h-4" />
+                  <AppIcon name="mic" className="w-4 h-4" />
                 </button>
               )}
             </div>
@@ -141,7 +142,7 @@ export default function ChatComposerDock({
                   aria-label="Stop generating"
                   className="group/stop flex items-center justify-center w-8 h-8 rounded-lg bg-red-500 hover:bg-red-600 text-white shadow-[0_0_14px_-2px_rgba(239,68,68,0.6)] active:scale-95 transition-all duration-150 cursor-pointer focus-ring animate-pulse hover:animate-none"
                 >
-                  <Square className="w-3.5 h-3.5 fill-current" />
+                  <AppIcon name="square" className="w-3.5 h-3.5 fill-current" />
                 </button>
               ) : (
                 <button
@@ -156,7 +157,7 @@ export default function ChatComposerDock({
                       : 'bg-canvas-elevated text-ink-muted opacity-40 cursor-not-allowed'
                   }`}
                 >
-                  <Send className="w-3.5 h-3.5" />
+                  <AppIcon name="send" className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>

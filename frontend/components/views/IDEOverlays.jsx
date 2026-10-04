@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FilePlus2, FolderPlus, Pencil, Search, CornerDownLeft, Command as CommandIcon, File, FolderTree, FileSearch, CaseSensitive, Loader2 } from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 
 export function useFocusTrap(ref, isActive) {
   useEffect(() => {
@@ -149,7 +149,7 @@ export function QuickOpen({ files, onPick, onClose }) {
         style={{ background: 'var(--color-canvas-surface)', border: '1px solid var(--color-border-default)', boxShadow: 'var(--shadow-modal)' }}
       >
         <div className="flex items-center gap-2 px-3 py-2.5 border-b" style={{ borderColor: 'var(--color-border-subtle)' }}>
-          <Search className="w-3.5 h-3.5 shrink-0 stroke-[1.5]" style={{ color: 'var(--color-text-muted)' }} />
+          <AppIcon name="search" className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--color-text-muted)' }} />
           <input
             ref={inputRef}
             value={q}
@@ -206,9 +206,9 @@ export function QuickOpen({ files, onPick, onClose }) {
                 color: i === idx ? 'var(--color-accent)' : 'var(--color-text-secondary)',
               }}
             >
-              <File className="w-3.5 h-3.5 shrink-0 stroke-[1.5]" style={{ color: 'var(--color-primary)' }} />
+              <AppIcon name="file" className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--color-primary)' }} />
               <span className="truncate">{f.path}</span>
-              {i === idx && <CornerDownLeft className="w-3 h-3 ml-auto shrink-0" style={{ color: 'var(--color-text-muted)' }} />}
+              {i === idx && <AppIcon name="turnDown" className="w-3 h-3 ml-auto shrink-0" style={{ color: 'var(--color-text-muted)' }} />}
             </button>
           ))}
         </div>
@@ -249,7 +249,7 @@ export function CommandPalette({ commands, onRun, onClose }) {
         style={{ background: 'var(--color-canvas-surface)', border: '1px solid var(--color-border-default)', boxShadow: 'var(--shadow-modal)' }}
       >
         <div className="flex items-center gap-2 px-3 py-2.5 border-b" style={{ borderColor: 'var(--color-border-subtle)' }}>
-          <CommandIcon className="w-3.5 h-3.5 shrink-0 stroke-[1.5]" style={{ color: 'var(--color-text-muted)' }} />
+          <AppIcon name="terminal" className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--color-text-muted)' }} />
           <input
             ref={inputRef}
             value={q}
@@ -303,7 +303,7 @@ export function CommandPalette({ commands, onRun, onClose }) {
                 color: i === idx ? 'var(--color-accent)' : 'var(--color-text-secondary)',
               }}
             >
-              {c.icon || <FilePlus2 className="w-3.5 h-3.5 shrink-0 stroke-[1.5]" style={{ color: 'var(--color-primary)' }} />}
+              {c.icon || <AppIcon name="filePlus" className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--color-primary)' }} />}
               <span className="truncate">{c.label}</span>
               {c.key && (
                 <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded shrink-0" style={{ background: 'var(--color-canvas-subtle)', color: 'var(--color-text-muted)' }}>
@@ -320,11 +320,11 @@ export function CommandPalette({ commands, onRun, onClose }) {
 
 // Shared icons for prompt modal types
 export const MODAL_ICONS = {
-  newFile: <FilePlus2 className="w-3.5 h-3.5 stroke-[1.5]" style={{ color: 'var(--color-primary)' }} />,
-  newFolder: <FolderPlus className="w-3.5 h-3.5 stroke-[1.5]" style={{ color: 'var(--color-primary)' }} />,
-  fileIn: <FilePlus2 className="w-3.5 h-3.5 stroke-[1.5]" style={{ color: 'var(--color-primary)' }} />,
-  folderIn: <FolderPlus className="w-3.5 h-3.5 stroke-[1.5]" style={{ color: 'var(--color-primary)' }} />,
-  rename: <Pencil className="w-3.5 h-3.5 stroke-[1.5]" style={{ color: 'var(--color-accent)' }} />,
+  newFile: <AppIcon name="filePlus" className="w-3.5 h-3.5" style={{ color: 'var(--color-primary)' }} />,
+  newFolder: <AppIcon name="folderPlus" className="w-3.5 h-3.5" style={{ color: 'var(--color-primary)' }} />,
+  fileIn: <AppIcon name="filePlus" className="w-3.5 h-3.5" style={{ color: 'var(--color-primary)' }} />,
+  folderIn: <AppIcon name="folderPlus" className="w-3.5 h-3.5" style={{ color: 'var(--color-primary)' }} />,
+  rename: <AppIcon name="pencil" className="w-3.5 h-3.5" style={{ color: 'var(--color-accent)' }} />,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -378,7 +378,7 @@ export function SearchOverlay({ q, onQueryChange, caseSensitive, onCaseChange, r
         style={{ background: 'var(--color-canvas-surface)', border: '1px solid var(--color-border-default)', boxShadow: 'var(--shadow-modal)' }}
       >
         <div className="flex items-center gap-2 px-3 py-2.5 border-b" style={{ borderColor: 'var(--color-border-subtle)' }}>
-          <FileSearch className="w-3.5 h-3.5 shrink-0 stroke-[1.5]" style={{ color: 'var(--color-text-muted)' }} />
+          <AppIcon name="search" className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--color-text-muted)' }} />
           <input
             ref={inputRef}
             value={q}
@@ -388,7 +388,7 @@ export function SearchOverlay({ q, onQueryChange, caseSensitive, onCaseChange, r
             className="flex-1 text-xs focus:outline-none bg-transparent"
             style={{ color: 'var(--color-text-primary)' }}
           />
-          {searching && <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" style={{ color: 'var(--color-info)' }} />}
+          {searching && <AppIcon name="loader" className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--color-info)' }} />}
           <button
             onClick={() => onCaseChange(!caseSensitive)}
             title="Case sensitive (Aa)"
@@ -399,7 +399,7 @@ export function SearchOverlay({ q, onQueryChange, caseSensitive, onCaseChange, r
               color: caseSensitive ? 'var(--color-accent)' : 'var(--color-text-muted)',
             }}
           >
-            <CaseSensitive className="w-3.5 h-3.5 inline stroke-[1.5]" /> Aa
+            <AppIcon name="caseSensitive" className="w-3.5 h-3.5 inline" /> Aa
           </button>
           <span className="text-[9px] px-1.5 py-0.5 rounded shrink-0" style={{ background: 'var(--color-canvas-subtle)', color: 'var(--color-text-muted)' }}>
             Esc
@@ -423,7 +423,7 @@ export function SearchOverlay({ q, onQueryChange, caseSensitive, onCaseChange, r
               className="w-full flex items-start gap-2.5 px-3 py-1.5 text-left text-[11px] cursor-pointer hover:opacity-90 transition-opacity"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              <File className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: 'var(--color-primary)' }} />
+              <AppIcon name="file" className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: 'var(--color-primary)' }} />
               <span className="flex-1 min-w-0">
                 <span className="block truncate font-semibold" style={{ color: 'var(--color-text-primary)' }}>
                   {r.path}
@@ -433,7 +433,7 @@ export function SearchOverlay({ q, onQueryChange, caseSensitive, onCaseChange, r
                   {highlight(r.text)}
                 </span>
               </span>
-              <CornerDownLeft className="w-3 h-3 shrink-0 mt-0.5" style={{ color: 'var(--color-text-muted)' }} />
+              <AppIcon name="turnDown" className="w-3 h-3 shrink-0 mt-0.5" style={{ color: 'var(--color-text-muted)' }} />
             </button>
           ))}
         </div>

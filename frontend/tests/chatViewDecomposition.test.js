@@ -2,10 +2,15 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 describe('ChatView decomposition', () => {
-  const source = readFileSync(
+  const chatViewSource = readFileSync(
     path.join(__dirname, '../components/views/ChatView.jsx'),
     'utf8'
   );
+  const listSource = readFileSync(
+    path.join(__dirname, '../components/chat/ChatMessageList.jsx'),
+    'utf8'
+  );
+  const source = chatViewSource + listSource;
 
   it('uses extracted message and thinking components', () => {
     expect(source).toContain("import ChatMessageBubble from '../chat/ChatMessageBubble';");

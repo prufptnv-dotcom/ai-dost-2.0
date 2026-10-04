@@ -229,6 +229,60 @@ class CapabilityGatekeeper {
   }
 
   /**
+   * Permission-level wrapper around evaluate() (Devin-style Ask / Auto / Turbo):
+   * - 'ask'    → any plan with capabilities requires explicit approval (fresh
+   *              single-use token minted when canonical policy would auto-allow)
+   * - 'auto'   → plain canonical evaluate() (default, unchanged policy)
+   * - 'turbo'  → approval/confirmation downgraded to ALLOW (hard BLOCK still blocks)
+   * Hard BLOCK decisions are NEVER overridden by a permission level.
+   *
+   * @param {object|string[]|string} capabilitiesInput
+   * @param {object} [context] - Execution context (requestId, permissions, planId, ...)
+   * @param {string} [permissionLevel] - 'ask' | 'auto' | 'turbo'
+   * @returns {object} Machine-readable gate decision contract
+   */
+  evaluateWithLevel(capabilitiesInput, context = {}, permissionLevel = 'auto') {
+    const level = permissionLevel === 'ask' || permissionLevel === 'turbo'
+      ? permissionLevel
+      : 'auto';
+    const gate = this.evaluate(capabilitiesInput, context);
+
+    if (level === 'auto') return gate;
+    if (gate.decision === DECISION.BLOCK) return gate;
+
+    const capabilityIds = (gate.capabilities || []).map(c => c.capability_id);
+
+    if (level === 'turbo') {
+      if (!gate.requires_user_action) return gate;
+      return Object.freeze({
+        ...gate,
+        decision: DECISION.ALLOW,
+        requires_user_action: false,
+        approval_token: null,
+        expires_at: null,
+      });
+    }
+
+    // 'ask': empty capability set → conversational request, nothing to protect
+    if (capabilityIds.length === 0) return gate;
+    // Canonical policy already escalated and issued a token — reuse it
+    if (gate.requires_user_action && gate.approval_token) return gate;
+
+    const tokenRecord = this._createApprovalToken({
+      requestId: gate.request_id,
+      capabilityIds,
+      planId: context.planId || null,
+    });
+    return Object.freeze({
+      ...gate,
+      decision: DECISION.REQUIRE_EXPLICIT_APPROVAL,
+      requires_user_action: true,
+      approval_token: tokenRecord.token,
+      expires_at: tokenRecord.expiresAt,
+    });
+  }
+
+  /**
    * Revalidates and consumes an approval token prior to execution.
    * Protects against stale approvals, token replay, modified capability sets, and concurrent execution races.
    * 

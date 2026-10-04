@@ -16,15 +16,20 @@ const SPECIALTY_TO_ROLE = {
   security: 'VERIFIER', browser_qa: 'VERIFIER', repair: 'CODER'
 };
 
-const DIRECTOR_PLANNER_PROMPT = `You are the AI-Dost Copilot Director/Boss. Convert ONE software outcome request into the minimum sufficient set of specialist tasks. Decide the task count dynamically from the actual scope, dependencies, risk, affected files, and verification needs. A trivial change may need one task; a large product may need many tasks. Do not use a fixed pipeline and do not assign every specialist by default.
+const DIRECTOR_PLANNER_PROMPT = `You are the AI-Dost Copilot Director/Boss. Convert ONE software outcome request into the minimum sufficient set of specialist tasks. 
+
+MANDATORY ARCHITECTURE RULE: For any non-trivial task, the first task MUST be 'architecture' (specialty: requirements). The agent must define a blueprint, file structure, and API contracts before any coding starts.
+
+INCREMENTAL UPGRADE RULE: If the request is an upgrade or change to an existing project, the first task MUST be 'analysis' (specialty: research). The agent must index the existing codebase, identify affected files, and determine the impact of the change before planning the implementation.
+
+Decide the task count dynamically from the actual scope, dependencies, risk, affected files, and verification needs. 
 
 Return ONLY JSON:
 {"summary":"string","tasks":[{"id":"string","specialty":"requirements|research|frontend|backend|integration|data|testing|verification|visual_qa|security|browser_qa|repair","objective":"string","dependsOn":["task-id"],"expectedOutput":"string"}]}
 
 Rules:
-- Choose 1 to 32 tasks only when justified; the ceiling is defensive, not a target.
-- Dependencies may reference any task id in the returned plan; the runtime validates them.
-- Avoid duplicate or ceremonial tasks. Include only specialists required by the outcome.
+- Choose 1 to 32 tasks only when justified.
+- Dependencies may reference any task id in the returned plan.
 - For upgrades/fixes, target the affected subsystem; do not rebuild unrelated areas.
 - Include testing, security, browser QA, or verification when the request/risk requires it.
 - Runtime failures are automatically retried and repaired; use repair for explicit repair work too.
@@ -45,16 +50,24 @@ function extractJson(text) {
 function fallbackPlan(request) {
   const text = String(request || '').toLowerCase();
   const complex = /\b(full|complete|entire|platform|app|application|website|dashboard|integrat|database|backend|frontend|deploy|production|security)\b/.test(text);
+  
   if (!complex) return {
-    summary: 'Single-task adaptive execution',
-    tasks: [{ id: 'task-1', specialty: 'integration', objective: request, dependsOn: [], expectedOutput: 'Working requested outcome with verification evidence.' }]
-  };
-  return {
-    summary: 'Adaptive multi-specialist execution',
+    summary: 'Adaptive targeted execution',
     tasks: [
-      { id: 'task-1', specialty: 'requirements', objective: `Inspect the existing workspace and define the smallest safe implementation for: ${request}`, dependsOn: [], expectedOutput: 'Concrete implementation scope and constraints.' },
-      { id: 'task-2', specialty: 'integration', objective: request, dependsOn: ['task-1'], expectedOutput: 'Implemented outcome in affected subsystem(s).' },
-      { id: 'task-3', specialty: 'testing', objective: `Test the completed implementation for: ${request}`, dependsOn: ['task-2'], expectedOutput: 'Test/build/runtime evidence and actionable failures.' }
+      { id: 'task-1', specialty: 'requirements', objective: `Analyze workspace and define technical spec for: ${request}`, dependsOn: [], expectedOutput: 'Technical specification and file map.' },
+      { id: 'task-2', specialty: 'integration', objective: request, dependsOn: ['task-1'], expectedOutput: 'Implemented outcome based on the spec.' },
+      { id: 'task-3', specialty: 'testing', objective: `Verify implementation of: ${request}`, dependsOn: ['task-2'], expectedOutput: 'Verification evidence.' }
+    ]
+  };
+  
+  return {
+    summary: 'Devin-Grade Autonomous Implementation',
+    tasks: [
+      { id: 'task-1', specialty: 'requirements', objective: `Create a full technical specification, architecture blueprint, and file-system map for: ${request}`, dependsOn: [], expectedOutput: 'Comprehensive technical spec (blueprint.md).' },
+      { id: 'task-2', specialty: 'backend', objective: `Implement the backend services and data models defined in task-1 for: ${request}`, dependsOn: ['task-1'], expectedOutput: 'Working backend implementation.' },
+      { id: 'task-3', specialty: 'frontend', objective: `Implement the UI/UX based on the architecture in task-1 for: ${request}`, dependsOn: ['task-2'], expectedOutput: 'Working frontend implementation.' },
+      { id: 'task-4', specialty: 'integration', objective: `Integrate frontend and backend and verify end-to-end flow for: ${request}`, dependsOn: ['task-3'], expectedOutput: 'Integrated working application.' },
+      { id: 'task-5', specialty: 'testing', objective: `Perform rigorous stress testing and bug hunting for: ${request}`, dependsOn: ['task-4'], expectedOutput: 'Clean test report with 0 critical failures.' }
     ]
   };
 }
@@ -132,12 +145,63 @@ class CopilotDirector {
 
   async executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs }) {
     const objectiveWithDirective = `[SURGICAL_DIRECTIVE: Inspect existing workspace files first. Apply surgical targeted edits to affected files only without wiping or regenerating unrelated code.]\n${task.objective}`;
-    const workerPlan = await this.taskPlanner.generatePlan(objectiveWithDirective, { projectId, role: task.role, specialty: task.specialty, directorTaskId: task.id, request, expectedOutput: task.expectedOutput });
-    return this.plannerExecutionLoop.runWithPlan(projectId, userId, workerPlan, maxRepairs, () => Boolean(signal?.aborted), `copilot_${delegated.workerRun.id}`);
+    
+    let attempt = 0;
+    let lastResult = null;
+    let lastError = null;
+    const maxSelfHealingAttempts = maxRepairs || 3;
+
+    while (attempt <= maxSelfHealingAttempts) {
+      attempt++;
+      try {
+        const currentObjective = attempt === 1 
+          ? objectiveWithDirective 
+          : `REPAIR ATTEMPT ${attempt}: The previous implementation failed with error: ${lastError}. Please analyze the failure, read the relevant logs, and provide a corrected fix. Original objective: ${objectiveWithDirective}`;
+
+        const workerPlan = await this.taskPlanner.generatePlan(currentObjective, { 
+          projectId, 
+          role: task.role, 
+          specialty: task.specialty, 
+          directorTaskId: task.id, 
+          request, 
+          expectedOutput: task.expectedOutput 
+        });
+
+        // --- VERIFICATION GATE: Execute and then Verify ---
+        lastResult = await this.plannerExecutionLoop.runWithPlan(
+          projectId, 
+          userId, 
+          workerPlan, 
+          0, 
+          () => Boolean(signal?.aborted), 
+          `copilot_${delegated.workerRun.id}_att${attempt}`
+        );
+
+        // Only mark as SUCCEEDED if the result actually matches the expected output
+        if (lastResult?.status === 'SUCCEEDED') {
+          const verificationPrompt = `TASK: ${task.objective}\nEXPECTED OUTPUT: ${task.expectedOutput}\nACTUAL RESULT: ${JSON.stringify(lastResult.result || lastResult)}`;
+          const verifyRes = await this.aiService.chat(`Verify if the following result actually meets the expected output. Reply ONLY with 'PASS' or 'FAIL: <reason>'.\n\n${verificationPrompt}`, [], 'agent');
+          
+          if (verifyRes.includes('PASS')) {
+            return lastResult;
+          } else {
+            lastError = `Verification failed: ${verifyRes}`;
+          }
+        } else {
+          lastError = lastResult?.error || 'Unknown execution failure';
+        }
+      } catch (error) {
+        lastError = error.message;
+      }
+    }
+
+    throw new Error(`Worker ${task.id} failed after ${attempt} self-healing attempts. Final error: ${lastError}`);
   }
 
-  async run({ userId, projectId, request, signal = null, onEvent = () => {}, maxRepairs = 3 }) {
-    const plan = await this.createPlan(request, { projectId });
+  async run({ userId, projectId, request, signal = null, onEvent = () => {}, maxRepairs = 3, plan: presetPlan = null }) {
+    // Plan-mode override: use the user-approved plan (normalized + validated —
+    // bad shapes fall back to a generic sequential plan, never crash).
+    const plan = presetPlan ? normalizePlan(presetPlan, request) : await this.createPlan(request, { projectId });
     const supervisorResult = await this.coordinator.createSupervisorTask({ userId, projectId, title: `Copilot Director: ${String(request).slice(0, 180)}`, prompt: request, metadata: { source: 'copilot-director', plannedTaskCount: plan.tasks.length } });
     const supervisorTaskId = supervisorResult.task.id;
     const supervisorRunId = supervisorResult.run.id;
@@ -152,7 +216,6 @@ class CopilotDirector {
         if (signal?.aborted) return { status: 'CANCELLED', taskId: supervisorTaskId, runId: supervisorRunId, plan, results };
         const ready = plan.tasks.filter((task) => pending.has(task.id) && task.dependsOn.every((dep) => completed.get(dep) === 'SUCCEEDED'));
         if (!ready.length) throw new Error('Director plan is dependency-blocked or contains an invalid dependency graph');
-        // Execute ready tasks serially to protect a shared workspace from concurrent writes.
         for (const task of ready) {
           pending.delete(task.id);
           let delegated = null;
@@ -178,7 +241,6 @@ class CopilotDirector {
           results.push({ task, status: taskStatus, workerRunId: delegated.workerRun.id, result: executionResult });
           onEvent({ type: 'director_task', status: taskStatus, taskId: task.id, specialty: task.specialty, role: task.role, workerRunId: delegated.workerRun.id, result: executionResult });
 
-          // Devin / Cursor Composer 2: Emit multi-file diff telemetry
           if (Array.isArray(executionResult?.stepLogs)) {
             for (const step of executionResult.stepLogs) {
               const act = step?.action || step?.tool || '';

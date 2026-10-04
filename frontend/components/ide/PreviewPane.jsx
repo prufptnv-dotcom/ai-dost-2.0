@@ -1,9 +1,5 @@
 import React from 'react';
-import {
-  Eye, Loader2, Play, RotateCcw, Square, Monitor, Tablet, Smartphone,
-  Crosshair, RefreshCw, ExternalLink, Zap, Wrench, Check, X, AlertTriangle, Sparkles,
-  Terminal, ChevronUp, ChevronDown, Trash2, Lock
-} from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 import VisualDebugger from '../views/VisualDebugger';
 import VisualHealer from '../VisualHealer';
 import { generateLiveAppHtml } from './PreviewEngine';
@@ -52,7 +48,7 @@ export function PreviewPane({
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-canvas-surface border-b border-border shrink-0">
         <div className="flex items-center gap-2">
           <span className="flex items-center gap-1 text-xs font-bold text-accent uppercase tracking-wider font-mono">
-            <Eye size={13} /> Preview
+            <AppIcon name="eye" size={13} /> Preview
           </span>
 
           {/* Dev Server Live Status Badge */}
@@ -64,7 +60,7 @@ export function PreviewPane({
               </span>
             ) : devServerStatus.state === 'STARTING' || devServerStatus.state === 'CREATING' ? (
               <span className="flex items-center gap-1 text-amber-400 font-medium">
-                <Loader2 size={11} className="animate-spin" />
+                <AppIcon name="loader" size={11} />
                 Booting...
               </span>
             ) : (
@@ -83,15 +79,15 @@ export function PreviewPane({
             >
               {qaStatus === 'passed' ? (
                 <span className="flex items-center gap-1 text-emerald-500 font-medium">
-                  <Check size={11} /> QA passed
+                  <AppIcon name="check" size={11} /> QA passed
                 </span>
               ) : qaStatus === 'failed' ? (
                 <span className="flex items-center gap-1 text-red-400 font-medium">
-                  <AlertTriangle size={11} /> QA failed
+                  <AppIcon name="alert" size={11} /> QA failed
                 </span>
               ) : (
                 <span className="flex items-center gap-1 text-amber-400 font-medium">
-                  <Loader2 size={11} className="animate-spin" /> QA running
+                  <AppIcon name="loader" size={11} /> QA running
                 </span>
               )}
             </div>
@@ -102,7 +98,7 @@ export function PreviewPane({
             className="hidden md:flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-canvas-base border border-border text-[10px] font-mono text-ink-muted min-w-0 max-w-[220px] flex-1"
             title="Preview origin"
           >
-            <Lock size={9} className="text-emerald-500 shrink-0" />
+            <AppIcon name="lock" size={9} className="text-emerald-500 shrink-0" />
             <span className="truncate">
               {devServerStatus.state === 'READY'
                 ? `localhost:${devServerStatus.hostPort || 5173}`
@@ -120,7 +116,7 @@ export function PreviewPane({
                 className="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-all cursor-pointer flex items-center gap-1"
                 title="Start Real Dev Server"
               >
-                <Play size={10} className="fill-emerald-500" /> Start
+                <AppIcon name="play" size={10} className="fill-emerald-500" /> Start
               </button>
             )}
             {devServerStatus.state === 'READY' && (
@@ -132,7 +128,7 @@ export function PreviewPane({
                   className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-sky-500/15 text-sky-600 dark:text-sky-300 border border-sky-500/30 hover:bg-sky-500/25 transition-all cursor-pointer flex items-center gap-1"
                   title="Restart Dev Server"
                 >
-                  <RotateCcw size={10} />
+                  <AppIcon name="rotate" size={10} />
                 </button>
                 <button
                   type="button"
@@ -140,7 +136,7 @@ export function PreviewPane({
                   className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/15 text-red-600 dark:text-red-300 border border-red-500/30 hover:bg-red-500/25 transition-all cursor-pointer flex items-center gap-1"
                   title="Stop Dev Server"
                 >
-                  <Square size={10} className="fill-red-500" />
+                  <AppIcon name="square" size={10} className="fill-red-500" />
                 </button>
               </>
             )}
@@ -156,7 +152,7 @@ export function PreviewPane({
               }`}
               title="Desktop View"
             >
-              <Monitor size={11} />
+              <AppIcon name="desktop" size={11} />
             </button>
             <button
               type="button"
@@ -166,7 +162,7 @@ export function PreviewPane({
               }`}
               title="Tablet View"
             >
-              <Tablet size={11} />
+              <AppIcon name="tablet" size={11} />
             </button>
             <button
               type="button"
@@ -176,7 +172,7 @@ export function PreviewPane({
               }`}
               title="Mobile View"
             >
-              <Smartphone size={11} />
+              <AppIcon name="mobile" size={11} />
             </button>
           </div>
 
@@ -220,7 +216,7 @@ export function PreviewPane({
             }`}
             title={inspectorActive ? 'Inspector Active — click any element to edit' : 'Enable Visual Inspector'}
           >
-            <Crosshair size={11} /> {inspectorActive ? 'Inspecting...' : 'Inspect'}
+            <AppIcon name="crosshair" size={11} /> {inspectorActive ? 'Inspecting...' : 'Inspect'}
           </button>
 
           <button
@@ -233,7 +229,7 @@ export function PreviewPane({
             }`}
             title="Run zero-token DOM layout diagnostics"
           >
-            <Eye size={11} /> {visualDebuggerOpen ? 'QA Open' : 'Zero-Token QA'}
+            <AppIcon name="eye" size={11} /> {visualDebuggerOpen ? 'QA Open' : 'Zero-Token QA'}
           </button>
         </div>
 
@@ -269,7 +265,7 @@ export function PreviewPane({
             className="p-1 rounded-md bg-canvas-subtle hover:bg-canvas-elevated text-ink-muted hover:text-paper-100 border border-border transition-colors cursor-pointer"
             title="Reload Preview"
           >
-            <RefreshCw size={12} />
+            <AppIcon name="refresh" size={12} />
           </button>
 
           <button
@@ -278,7 +274,7 @@ export function PreviewPane({
             className="p-1 rounded-md bg-canvas-subtle hover:bg-canvas-elevated text-ink-muted hover:text-paper-100 border border-border transition-colors cursor-pointer"
             title="Open preview in new tab"
           >
-            <ExternalLink size={12} />
+            <AppIcon name="external" size={12} />
           </button>
 
           <button
@@ -287,7 +283,7 @@ export function PreviewPane({
             className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/50 shadow-xs transition-all cursor-pointer"
             title="Deploy live to Vercel/Netlify"
           >
-            <Zap size={11} className="fill-white" /> Deploy
+            <AppIcon name="zap" size={11} className="fill-white" /> Deploy
           </button>
         </div>
       </div>
@@ -350,7 +346,7 @@ export function PreviewPane({
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-start gap-2.5 min-w-0">
                     <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
-                      <Wrench size={14} />
+                      <AppIcon name="wrench" size={14} />
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
@@ -371,7 +367,7 @@ export function PreviewPane({
                       onClick={handleApplyBannerFix}
                       className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-semibold shadow flex items-center gap-1.5 transition-all cursor-pointer"
                     >
-                      <Check size={12} /> Apply Fix
+                      <AppIcon name="check" size={12} /> Apply Fix
                     </button>
                     <button
                       type="button"
@@ -379,7 +375,7 @@ export function PreviewPane({
                       className="p-1.5 hover:bg-white/10 text-zinc-400 hover:text-white rounded-lg transition-colors cursor-pointer"
                       title="Dismiss suggestion"
                     >
-                      <X size={14} />
+                      <AppIcon name="close" size={14} />
                     </button>
                   </div>
                 </div>
@@ -392,7 +388,7 @@ export function PreviewPane({
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-start gap-2.5 min-w-0">
                     <div className="w-6 h-6 rounded-lg bg-red-500/20 text-red-400 flex items-center justify-center shrink-0 mt-0.5">
-                      <AlertTriangle size={14} />
+                      <AppIcon name="alert" size={14} />
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
@@ -400,7 +396,7 @@ export function PreviewPane({
                         <span className="text-[10px] text-red-400/70 font-mono">Live Crash</span>
                         {healingInProgress && (
                           <span className="text-[9px] text-amber-400 font-medium flex items-center gap-1 animate-pulse">
-                            <Loader2 size={10} className="animate-spin" /> Auto-healing...
+                            <AppIcon name="loader" size={10} /> Auto-healing...
                           </span>
                         )}
                       </div>
@@ -416,7 +412,7 @@ export function PreviewPane({
                       disabled={running || healingInProgress}
                       className="px-2.5 py-1.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white rounded-lg text-xs font-semibold shadow flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
                     >
-                      <Sparkles size={12} />
+                      <AppIcon name="sparkles" size={12} />
                       {healingInProgress ? 'Healing...' : 'Auto-Fix with Copilot'}
                     </button>
                     <button
@@ -425,7 +421,7 @@ export function PreviewPane({
                       className="p-1 hover:bg-white/10 text-zinc-400 hover:text-white rounded-md transition-colors"
                       title="Dismiss"
                     >
-                      <X size={14} />
+                      <AppIcon name="close" size={14} />
                     </button>
                   </div>
                 </div>
@@ -445,8 +441,8 @@ export function PreviewPane({
             data-testid="console-toggle"
             title={consoleOpen ? 'Hide console' : 'Show console'}
           >
-            {consoleOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-            <Terminal size={11} className="text-accent" />
+            {consoleOpen ? <AppIcon name="chevronUp" size={11} /> : <AppIcon name="chevronDown" size={11} />}
+            <AppIcon name="terminal" size={11} className="text-accent" />
             <span className="font-bold uppercase tracking-wider">Console</span>
             <span className="text-paper-300">{previewLogs.length}</span>
             {previewLogs.some(l => l.level === 'error') && (
@@ -463,7 +459,7 @@ export function PreviewPane({
               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated transition-colors cursor-pointer"
               title="Clear console"
             >
-              <Trash2 size={10} /> Clear
+              <AppIcon name="trash" size={10} /> Clear
             </button>
           )}
         </div>

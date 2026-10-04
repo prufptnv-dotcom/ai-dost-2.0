@@ -37,6 +37,19 @@ class AgentTaskDAO {
   listByProject(projectId) {
     return this.db.prepare('SELECT * FROM agent_tasks WHERE project_id = ? ORDER BY created_at DESC').all(projectId);
   }
+
+  // Newest-first history for GET /api/agent/tasks (optionally scoped to a project).
+  // created_at has second granularity — rowid DESC keeps same-second inserts deterministic.
+  listRecent(limit = 50, projectId = null) {
+    if (projectId) {
+      return this.db
+        .prepare('SELECT * FROM agent_tasks WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?')
+        .all(projectId, limit);
+    }
+    return this.db
+      .prepare('SELECT * FROM agent_tasks ORDER BY created_at DESC, rowid DESC LIMIT ?')
+      .all(limit);
+  }
 }
 
 module.exports = AgentTaskDAO;

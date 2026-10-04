@@ -146,7 +146,7 @@ Shape 2 (Final Answer):
       dependencies: {
         react: '^18.2.0',
         'react-dom': '^18.2.0',
-        'lucide-react': '^0.344.0',
+        '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0',
         express: '^4.18.2',
         cors: '^2.8.5'
       },
@@ -1381,7 +1381,7 @@ p { color: #64748b; }`,
     tasks.push({
       id: 'task-1',
       title: '1. Initialize Baseline Vite & React Architecture',
-      description: `Scaffold ${architecture.framework} with Tailwind CSS, Lucide icons, and modern Vite build config.`,
+      description: `Scaffold ${architecture.framework} with Tailwind CSS, Font Awesome icons, and modern Vite build config.`,
       status: 'pending',
       files: ['package.json', 'index.html', 'vite.config.js', 'src/main.jsx']
     });
@@ -2006,7 +2006,7 @@ async function injectBaseBoilerplate(workspace) {
     version: '1.0.0',
     type: 'module',
     scripts: { dev: 'vite', build: 'vite build', start: 'vite' },
-    dependencies: { react: '^18.2.0', 'react-dom': '^18.2.0', 'lucide-react': '^0.344.0' },
+    dependencies: { react: '^18.2.0', 'react-dom': '^18.2.0', '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0' },
     devDependencies: { vite: '^5.1.4', '@vitejs/plugin-react': '^4.2.1', tailwindcss: '^3.4.1' }
   }, null, 2);
 

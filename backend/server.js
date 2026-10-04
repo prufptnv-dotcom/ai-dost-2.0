@@ -31,6 +31,7 @@ const fs = require('fs');
 const os = require('os');
 const dns = require('dns');
 const logger = require('./logger');
+const { notifyWorkspaceChange } = require('./projectStore');
 const { initDatabase } = require('./db');
 const { Server } = require('socket.io');
 const compression = require('compression');
@@ -311,6 +312,7 @@ function saveProjectFile(projectId, filePath, content) {
       db.prepare('INSERT INTO workspace_files (project_id, path, content) VALUES (?, ?, ?)')
         .run(projectId, cleanPath, content);
     }
+    notifyWorkspaceChange(projectId, cleanPath, 'write');
     return true;
   } catch (e) {
     logger.error('[Server] saveProjectFile failed:', e.message || e);
@@ -529,6 +531,7 @@ const testRoutes    = require('./routes/test');
 const imageRoutes   = require('./routes/image');
 const pdfRoutes     = require('./routes/pdf');
 const learningRoutes = require('./routes/learning');
+const copilotMemoryRoutes = require('./routes/copilotMemory');
 const gitRoutes     = require('./routes/git');
 const agentRoutes   = require('./routes/agent');
 const figmaRoutes   = require('./routes/figma');
@@ -579,6 +582,7 @@ app.use('/api/test',     testRoutes);
 app.use('/api/image',    imageRoutes);
 app.use('/api/pdf',      pdfRoutes);
 app.use('/api/learning', learningRoutes);
+app.use(['/api/copilot/memory', '/api/v1/copilot/memory'], copilotMemoryRoutes);
 app.use('/api/git',      gitRoutes);
 app.use('/api/agent',    agentRoutes);
 app.use('/api/figma',    figmaRoutes);
@@ -1154,6 +1158,21 @@ app.get(['/api/v1/memory/project/:id', '/api/memory/project/:id', '/api/project/
     const { id } = req.params;
     const auth = projectAuth.authorize(id, req, { autoCreateIfMissing: true });
     if (!auth.authorized) {
+        // A workspace load for a project that doesn't exist yet is NOT an error —
+        // the editor wants an empty file list. autoCreateIfMissing only covers
+        // 'default'/'copilot-workspace' (anti-DoS: no row per arbitrary id), so
+        // session ids like 'copilot-session-<ts>' used to 404 here and spam the
+        // browser console on every CopilotIDE mount. Return 200 + empty files.
+        if (auth.status === 404 && auth.project === undefined) {
+            return res.json({
+                project_id: id,
+                project_name: id,
+                description: '',
+                status: 'Active',
+                created_at: null,
+                files: []
+            });
+        }
         return res.status(auth.status).json({ success: false, error: auth.error });
     }
 
@@ -1172,7 +1191,7 @@ app.get(['/api/v1/memory/project/:id', '/api/memory/project/:id', '/api/project/
 
 app.post(['/api/v1/memory/project/:id/folder', '/api/memory/project/:id/folder', '/api/project/:id/folder'], (req, res) => {
     const { id } = req.params;
-    const auth = projectAuth.authorize(id, req, { autoCreateIfMissing: true });
+    const auth = projectAuth.authorize(id, req, { autoCreateIfMissing: true, autoCreateSessionProject: true });
     if (!auth.authorized) {
         return res.status(auth.status).json({ success: false, error: auth.error });
     }
@@ -1213,6 +1232,7 @@ app.post(['/api/v1/memory/project/:id/rename', '/api/memory/project/:id/rename',
         else if (r.path.startsWith(oldPath + '/')) upd.run(newPath + r.path.slice(oldPath.length), id, r.path);
       }
     } catch (e) { logger.warn('[Server] DB rename failed', e); }
+    notifyWorkspaceChange(id, newPath, 'rename');
     res.json({ success: true, message: 'Renamed' });
 });
 
@@ -1235,12 +1255,13 @@ app.delete(['/api/v1/memory/project/:id/folder', '/api/memory/project/:id/folder
     try {
       db.prepare('DELETE FROM workspace_files WHERE project_id = ? AND (path = ? OR path LIKE ?)').run(id, folderPath, folderPath + '/%');
     } catch(e){}
+    notifyWorkspaceChange(id, folderPath, 'delete');
     res.json({ success: true, message: 'Folder deleted' });
 });
 
 app.post(['/api/v1/memory/project/:id/file', '/api/memory/project/:id/file', '/api/project/:id/file'], (req, res) => {
     const { id } = req.params;
-    const auth = projectAuth.authorize(id, req, { autoCreateIfMissing: true });
+    const auth = projectAuth.authorize(id, req, { autoCreateIfMissing: true, autoCreateSessionProject: true });
     if (!auth.authorized) {
         return res.status(auth.status).json({ success: false, error: auth.error });
     }
@@ -1284,6 +1305,7 @@ app.delete(['/api/v1/memory/project/:id/file', '/api/memory/project/:id/file', '
     try {
       db.prepare('DELETE FROM workspace_files WHERE project_id = ? AND path = ?').run(id, filePath);
     } catch(e) {}
+    notifyWorkspaceChange(id, filePath, 'delete');
     res.json({ success: true, message: 'File deleted successfully' });
 });
 
@@ -1733,6 +1755,3 @@ if (require.main === module) {
 }
 
 module.exports = { app, server, io, sandboxWs, db, startServer, PORT };
-
-
-

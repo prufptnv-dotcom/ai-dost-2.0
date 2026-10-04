@@ -155,11 +155,19 @@ User Requirement: "${prompt}"
 Domain: ${category.toUpperCase()}
 ${domainDirectives}
 STRICT RULES:
+ICON RULE (Font Awesome ONLY — no exceptions):
+- Every icon MUST be a real Font Awesome Free icon via @fortawesome/react-fontawesome with individual icon imports. Example:
+  import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+  import { faMagnifyingGlass, faPlus, faTrashCan } from '@fortawesome/free-solid-svg-icons';
+  <FontAwesomeIcon icon={faMagnifyingGlass} style={{ fontSize: 15 }} className="text-zinc-400" />
+- Brand logos (Github, Google, Twitter/X) MUST come from '@fortawesome/free-brands-svg-icons' (e.g. faGithub, faGoogle, faXTwitter).
+- FORBIDDEN: lucide-react (any import), emoji-as-icons (never use 🚀📝💰🎯 etc. as UI icons or favicons), and hand-written <svg> icon markup.
+- package.json dependencies MUST include: @fortawesome/fontawesome-svg-core, @fortawesome/free-solid-svg-icons, @fortawesome/free-regular-svg-icons, @fortawesome/free-brands-svg-icons, @fortawesome/react-fontawesome.
 1. Return code using this markdown format for each file:
 
 FILE: src/App.jsx
 \`\`\`jsx
-// Complete stateful React UI with dark theme (slate-950), Lucide icons, filters, modals, and dynamic data
+// Complete stateful React UI with dark theme (slate-950), Font Awesome icons, filters, modals, and dynamic data
 \`\`\`
 
 FILE: server.js
@@ -238,7 +246,7 @@ function getAuthFullstackBlueprint(name, title, prompt) {
         dependencies: {
           react: '^18.2.0',
           'react-dom': '^18.2.0',
-          'lucide-react': '^0.344.0',
+          '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0',
           express: '^4.18.2',
           cors: '^2.8.5'
         },
@@ -375,7 +383,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);`
     {
       path: 'src/App.jsx',
       content: `import React, { useState, useEffect } from 'react';
-import { ShieldCheck, User, LogIn, LogOut, Plus, Trash2, CheckCircle2, Lock, Mail, Sparkles, Database } from 'lucide-react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faShieldHalved, faUser, faRightToBracket, faRightFromBracket, faPlus, faTrashCan, faCircleCheck, faLock, faEnvelope, faWandMagicSparkles, faDatabase } from '@fortawesome/free-solid-svg-icons';
 
 export default function App() {
   const [user, setUser] = useState(() => {
@@ -468,7 +477,7 @@ export default function App() {
       <header className="h-16 border-b border-zinc-800 px-6 flex items-center justify-between bg-zinc-900/80 backdrop-blur-md">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-600/30">
-            <Database className="w-5 h-5" />
+            <FontAwesomeIcon icon={faDatabase} className="w-5 h-5" />
           </div>
           <span className="font-bold text-lg text-white tracking-tight">${title}</span>
         </div>
@@ -486,7 +495,7 @@ export default function App() {
                 </span>
               </div>
               <button onClick={handleLogout} className="p-2 bg-zinc-900 hover:bg-zinc-800 rounded-xl text-zinc-400 hover:text-white" title="Sign Out">
-                <LogOut className="w-4 h-4" />
+                <FontAwesomeIcon icon={faRightFromBracket} className="w-4 h-4" />
               </button>
             </div>
           ) : (
@@ -494,7 +503,7 @@ export default function App() {
               onClick={() => { setAuthMode('login'); setAuthModalOpen(true); }}
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-lg shadow-indigo-600/30"
             >
-              <LogIn className="w-3.5 h-3.5" /> Sign In
+              <FontAwesomeIcon icon={faRightToBracket} className="w-3.5 h-3.5" /> Sign In
             </button>
           )}
         </div>
@@ -511,7 +520,7 @@ export default function App() {
             <h1 className="text-2xl font-bold text-white">Protected Application Database</h1>
             <p className="text-xs text-zinc-400">Persistent user accounts and encrypted session authentication.</p>
           </div>
-          <ShieldCheck className="w-12 h-12 text-indigo-400 opacity-70" />
+          <FontAwesomeIcon icon={faShieldHalved} className="w-12 h-12 text-indigo-400 opacity-70" />
         </div>
 
         {/* Database CRUD Actions */}
@@ -525,7 +534,7 @@ export default function App() {
               className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-indigo-500"
             />
             <button onClick={addRecord} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl text-xs flex items-center gap-1">
-              <Plus className="w-4 h-4" /> Save Record
+              <FontAwesomeIcon icon={faPlus} className="w-4 h-4" /> Save Record
             </button>
           </div>
 
@@ -533,14 +542,14 @@ export default function App() {
             {records.map(rec => (
               <div key={rec.id} className="p-4 rounded-xl bg-zinc-900/70 border border-zinc-800 flex items-center justify-between shadow-md">
                 <div className="flex items-center gap-3">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <FontAwesomeIcon icon={faCircleCheck} className="w-4 h-4 text-emerald-400" />
                   <div>
                     <p className="text-sm font-semibold text-zinc-100">{rec.title}</p>
                     <p className="text-[11px] text-zinc-500">{rec.category} • {rec.timestamp}</p>
                   </div>
                 </div>
                 <button onClick={() => deleteRecord(rec.id)} className="text-zinc-500 hover:text-red-400 p-1">
-                  <Trash2 className="w-4 h-4" />
+                  <FontAwesomeIcon icon={faTrashCan} className="w-4 h-4" />
                 </button>
               </div>
             ))}
@@ -645,7 +654,7 @@ function getEcommerceBlueprint(name, title, prompt) {
         dependencies: {
           react: '^18.2.0',
           'react-dom': '^18.2.0',
-          'lucide-react': '^0.344.0',
+          '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0',
           express: '^4.18.2',
           cors: '^2.8.5'
         },
@@ -825,7 +834,8 @@ export async function submitOrder(orderData) {
     {
       path: 'src/App.jsx',
       content: `import React, { useState, useEffect } from 'react';
-import { ShoppingBag, Search, Star, Plus, Minus, CheckCircle2, ShieldCheck, Zap } from 'lucide-react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faBagShopping, faMagnifyingGlass, faStar, faPlus, faMinus, faCircleCheck, faShieldHalved, faBolt } from '@fortawesome/free-solid-svg-icons';
 import { fetchProducts, submitOrder } from './services/api';
 
 export default function App() {
@@ -888,7 +898,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/30">
-              <Zap className="w-5 h-5" />
+              <FontAwesomeIcon icon={faBolt} className="w-5 h-5" />
             </div>
             <span className="font-bold text-lg tracking-tight bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">
               ${title}
@@ -896,7 +906,7 @@ export default function App() {
           </div>
 
           <div className="flex-1 max-w-md relative">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <FontAwesomeIcon icon={faMagnifyingGlass} className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
             <input
               type="text"
               placeholder="Search products..."
@@ -910,7 +920,7 @@ export default function App() {
             onClick={() => setIsCartOpen(true)}
             className="relative p-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 transition-colors text-zinc-200"
           >
-            <ShoppingBag className="w-5 h-5" />
+            <FontAwesomeIcon icon={faBagShopping} className="w-5 h-5" />
             {cart.length > 0 && (
               <span className="absolute -top-1 -right-1 bg-indigo-500 text-white text-[11px] font-bold w-5 h-5 rounded-full flex items-center justify-center animate-pulse">
                 {cart.reduce((s, i) => s + i.qty, 0)}
@@ -934,8 +944,8 @@ export default function App() {
             </p>
           </div>
           <div className="flex items-center gap-4 text-xs text-zinc-400">
-            <div className="flex items-center gap-1.5"><ShieldCheck className="w-4 h-4 text-indigo-400" /> 2-Year Warranty</div>
-            <div className="flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Instant Dispatch</div>
+            <div className="flex items-center gap-1.5"><FontAwesomeIcon icon={faShieldHalved} className="w-4 h-4 text-indigo-400" /> 2-Year Warranty</div>
+            <div className="flex items-center gap-1.5"><FontAwesomeIcon icon={faCircleCheck} className="w-4 h-4 text-emerald-400" /> Instant Dispatch</div>
           </div>
         </div>
 
@@ -963,7 +973,7 @@ export default function App() {
           </div>
         ) : products.length === 0 ? (
           <div className="text-center py-16 bg-zinc-900/40 rounded-3xl border border-zinc-800/80">
-            <ShoppingBag className="w-12 h-12 text-zinc-600 mx-auto mb-3" />
+            <FontAwesomeIcon icon={faBagShopping} className="w-12 h-12 text-zinc-600 mx-auto mb-3" />
             <p className="text-zinc-400">No products found in this category.</p>
           </div>
         ) : (
@@ -990,7 +1000,7 @@ export default function App() {
                         {product.name}
                       </h3>
                       <div className="flex items-center gap-1 text-xs text-amber-400 font-bold shrink-0">
-                        <Star className="w-3.5 h-3.5 fill-amber-400" />
+                        <FontAwesomeIcon icon={faStar} className="w-3.5 h-3.5 fill-amber-400" />
                         {product.rating}
                       </div>
                     </div>
@@ -1011,7 +1021,7 @@ export default function App() {
                           : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
                       }\`}
                     >
-                      <Plus className="w-3.5 h-3.5" />
+                      <FontAwesomeIcon icon={faPlus} className="w-3.5 h-3.5" />
                       {product.inStock ? 'Add to Cart' : 'Out of Stock'}
                     </button>
                   </div>
@@ -1028,7 +1038,7 @@ export default function App() {
           <div className="relative w-full max-w-md bg-zinc-900 border-l border-zinc-800 h-full p-6 flex flex-col z-10 shadow-2xl">
             <div className="flex items-center justify-between pb-4 border-b border-zinc-800">
               <div className="flex items-center gap-2">
-                <ShoppingBag className="w-5 h-5 text-indigo-400" />
+                <FontAwesomeIcon icon={faBagShopping} className="w-5 h-5 text-indigo-400" />
                 <h2 className="font-bold text-lg text-white">Shopping Cart</h2>
               </div>
               <button onClick={() => setIsCartOpen(false)} className="text-zinc-400 hover:text-white text-sm">✕</button>
@@ -1046,9 +1056,9 @@ export default function App() {
                       <p className="text-xs text-indigo-400 font-bold">\${item.price.toFixed(2)}</p>
                     </div>
                     <div className="flex items-center gap-2 bg-zinc-800 px-2 py-1 rounded-lg">
-                      <button onClick={() => updateQty(item.id, -1)} className="text-zinc-400 hover:text-white"><Minus className="w-3 h-3" /></button>
+                      <button onClick={() => updateQty(item.id, -1)} className="text-zinc-400 hover:text-white"><FontAwesomeIcon icon={faMinus} className="w-3 h-3" /></button>
                       <span className="text-xs font-bold text-white w-4 text-center">{item.qty}</span>
-                      <button onClick={() => updateQty(item.id, 1)} className="text-zinc-400 hover:text-white"><Plus className="w-3 h-3" /></button>
+                      <button onClick={() => updateQty(item.id, 1)} className="text-zinc-400 hover:text-white"><FontAwesomeIcon icon={faPlus} className="w-3 h-3" /></button>
                     </div>
                   </div>
                 ))
@@ -1075,7 +1085,7 @@ export default function App() {
 
       {orderSuccess && (
         <div className="fixed bottom-6 right-6 z-50 bg-emerald-500 text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-bounce">
-          <CheckCircle2 className="w-6 h-6" />
+          <FontAwesomeIcon icon={faCircleCheck} className="w-6 h-6" />
           <div>
             <p className="font-bold text-sm">Order Placed Successfully!</p>
             <p className="text-xs text-emerald-100">Order ID: {orderSuccess.id}</p>
@@ -1110,7 +1120,7 @@ function getMlDataScienceBlueprint(name, title, prompt) {
         dependencies: {
           'react': '^19.0.0',
           'react-dom': '^19.0.0',
-          'lucide-react': '^0.475.0',
+          '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0',
           'clsx': '^2.1.1',
           'tailwind-merge': '^3.0.1'
         },
@@ -1341,7 +1351,8 @@ export async function makePrediction(input) {
     {
       path: 'src/App.jsx',
       content: `import React, { useState, useEffect } from 'react';
-import { Database, BrainCircuit, Activity, BarChart2, Sparkles, Play, Layers, TrendingUp, CheckCircle, Shield } from 'lucide-react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faDatabase, faBrain, faWaveSquare, faChartColumn, faWandMagicSparkles, faPlay, faLayerGroup, faArrowTrendUp, faCircleCheck, faShield } from '@fortawesome/free-solid-svg-icons';
 import { fetchDataset, trainModel, makePrediction } from './services/api';
 
 export default function App() {
@@ -1377,7 +1388,7 @@ export default function App() {
       <header className="h-16 bg-[#111625] border-b border-slate-800 px-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-            <BrainCircuit className="w-5 h-5 text-white" />
+            <FontAwesomeIcon icon={faBrain} className="w-5 h-5 text-white" />
           </div>
           <div>
             <h1 className="text-sm font-bold tracking-tight text-white">${title}</h1>
@@ -1387,10 +1398,10 @@ export default function App() {
 
         <nav className="flex items-center gap-1 bg-[#090c14] p-1 rounded-xl border border-slate-800">
           {[
-            { id: 'data', label: '1. Dataset & EDA', icon: Database },
-            { id: 'train', label: '2. Train Model', icon: Activity },
-            { id: 'metrics', label: '3. Metrics & Insights', icon: BarChart2 },
-            { id: 'predict', label: '4. Live Inference', icon: Sparkles }
+            { id: 'data', label: '1. Dataset & EDA', icon: faDatabase },
+            { id: 'train', label: '2. Train Model', icon: faWaveSquare },
+            { id: 'metrics', label: '3. Metrics & Insights', icon: faChartColumn },
+            { id: 'predict', label: '4. Live Inference', icon: faWandMagicSparkles }
           ].map(tab => {
             const Icon = tab.icon;
             return (
@@ -1403,7 +1414,7 @@ export default function App() {
                     : 'text-slate-400 hover:text-white'
                 }\`}
               >
-                <Icon className="w-3.5 h-3.5" />
+                <FontAwesomeIcon icon={tab.icon} className="w-3.5 h-3.5" />
                 {tab.label}
               </button>
             );
@@ -1425,7 +1436,7 @@ export default function App() {
                 onClick={() => setActiveTab('train')}
                 className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer"
               >
-                <Play className="w-3.5 h-3.5 fill-black" /> Proceed to Model Training
+                <FontAwesomeIcon icon={faPlay} className="w-3.5 h-3.5 fill-black" /> Proceed to Model Training
               </button>
             </div>
 
@@ -1462,7 +1473,7 @@ export default function App() {
         {activeTab === 'train' && (
           <div className="max-w-xl mx-auto space-y-4 bg-[#111625] border border-slate-800 p-6 rounded-2xl shadow-xl animate-in fade-in">
             <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <Layers className="w-5 h-5 text-cyan-400" /> Configure Model Architecture
+              <FontAwesomeIcon icon={faLayerGroup} className="w-5 h-5 text-cyan-400" /> Configure Model Architecture
             </h2>
             <div className="space-y-3 text-xs">
               <div>
@@ -1484,7 +1495,7 @@ export default function App() {
                 disabled={isTraining}
                 className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold text-xs shadow-lg shadow-cyan-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 mt-4"
               >
-                <Sparkles className="w-4 h-4" />
+                <FontAwesomeIcon icon={faWandMagicSparkles} className="w-4 h-4" />
                 {isTraining ? 'Training Model & Computing Weights...' : 'Start Training & Evaluation'}
               </button>
             </div>
@@ -1495,7 +1506,7 @@ export default function App() {
         {activeTab === 'metrics' && (
           <div className="space-y-6 animate-in fade-in">
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-cyan-400" /> Model Performance & Feature Importance
+              <FontAwesomeIcon icon={faArrowTrendUp} className="w-5 h-5 text-cyan-400" /> Model Performance & Feature Importance
             </h2>
 
             <div className="grid grid-cols-3 gap-4">
@@ -1544,7 +1555,7 @@ export default function App() {
         {activeTab === 'predict' && (
           <div className="max-w-xl mx-auto space-y-6 bg-[#111625] border border-slate-800 p-6 rounded-2xl shadow-xl animate-in fade-in">
             <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-cyan-400" /> Real-time Model Inference
+              <FontAwesomeIcon icon={faWandMagicSparkles} className="w-5 h-5 text-cyan-400" /> Real-time Model Inference
             </h2>
             <form onSubmit={handlePredict} className="space-y-3 text-xs">
               <div>
@@ -1638,7 +1649,7 @@ function getWorkflowAutomationBlueprint(name, title, prompt) {
         dependencies: {
           'react': '^19.0.0',
           'react-dom': '^19.0.0',
-          'lucide-react': '^0.475.0'
+          '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0'
         },
         devDependencies: {
           '@vitejs/plugin-react': '^4.3.4',
@@ -1692,7 +1703,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     {
       path: 'src/App.jsx',
       content: `import React, { useState } from 'react';
-import { GitBranch, Play, CheckCircle2, Clock, Plus, Zap, Box, ArrowRight, ShieldCheck, Download } from 'lucide-react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faCodeBranch, faPlay, faCircleCheck, faClock, faPlus, faBolt, faBox, faArrowRight, faShieldHalved, faDownload } from '@fortawesome/free-solid-svg-icons';
 
 export default function App() {
   const [steps, setSteps] = useState([
@@ -1716,7 +1728,7 @@ export default function App() {
       <header className="h-16 bg-[#131722] border-b border-slate-800 px-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <GitBranch className="w-5 h-5 text-white" />
+            <FontAwesomeIcon icon={faCodeBranch} className="w-5 h-5 text-white" />
           </div>
           <div>
             <h1 className="text-sm font-bold text-white">${title}</h1>
@@ -1730,7 +1742,7 @@ export default function App() {
             disabled={isRunning}
             className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
           >
-            <Play className="w-3.5 h-3.5 fill-white" />
+            <FontAwesomeIcon icon={faPlay} className="w-3.5 h-3.5 fill-white" />
             {isRunning ? 'Executing Workflow...' : 'Run Pipeline'}
           </button>
         </div>
@@ -1795,7 +1807,7 @@ function getHealthcareBookingBlueprint(name, title, prompt) {
         dependencies: {
           react: '^18.2.0',
           'react-dom': '^18.2.0',
-          'lucide-react': '^0.344.0',
+          '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0',
           express: '^4.18.2',
           cors: '^2.8.5'
         },
@@ -2081,11 +2093,12 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     {
       path: 'src/App.jsx',
       content: `import React, { useState, useEffect } from 'react';
-import { 
-  Search, Calendar, Clock, User, Phone, CheckCircle2, ShieldCheck, 
-  Activity, Sparkles, Heart, AlertCircle, Trash2, X, Plus, Filter,
-  Stethoscope, Award, Hospital
-} from 'lucide-react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import {
+  faMagnifyingGlass, faCalendar, faClock, faUser, faPhone, faCircleCheck, faShieldHalved,
+  faWaveSquare, faWandMagicSparkles, faHeart, faCircleExclamation, faTrashCan, faXmark, faPlus, faFilter,
+  faStethoscope, faAward, faHospital
+} from '@fortawesome/free-solid-svg-icons';
 
 const SPECIALTIES = [
   { id: 'All', name: 'All Doctors', icon: '🩺' },
@@ -2306,13 +2319,13 @@ export default function App() {
       <section className="bg-gradient-to-r from-indigo-950/60 via-slate-900/60 to-cyan-950/60 border-b border-slate-800/60 px-6 py-2.5 flex flex-wrap items-center justify-between text-xs text-slate-400">
         <div className="flex items-center gap-6">
           <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
-            <CheckCircle2 size={13} /> ICU Beds: 18 Available
+            <FontAwesomeIcon icon={faCircleCheck} style={{ fontSize: 13 }} /> ICU Beds: 18 Available
           </span>
           <span className="flex items-center gap-1.5 text-cyan-400 font-medium">
-            <Activity size={13} /> Operation Theatres: 4 Ready
+            <FontAwesomeIcon icon={faWaveSquare} style={{ fontSize: 13 }} /> Operation Theatres: 4 Ready
           </span>
           <span className="flex items-center gap-1.5 text-amber-400 font-medium">
-            <Heart size={13} /> Blood Bank: All Groups In-Stock
+            <FontAwesomeIcon icon={faHeart} style={{ fontSize: 13 }} /> Blood Bank: All Groups In-Stock
           </span>
         </div>
         <span className="text-slate-400">Average Wait Time: <b>~10 mins</b></span>
@@ -2336,7 +2349,7 @@ export default function App() {
 
               {/* Live Search Bar */}
               <div className="relative w-full md:w-80">
-                <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <FontAwesomeIcon icon={faMagnifyingGlass} style={{ fontSize: 15 }} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
                   placeholder="Search doctor or symptom..."
@@ -2393,11 +2406,11 @@ export default function App() {
 
                     <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-1.5 text-xs text-slate-400">
                       <div className="flex items-center gap-2">
-                        <Hospital size={13} className="text-slate-500" />
+                        <FontAwesomeIcon icon={faHospital} style={{ fontSize: 13 }} className="text-slate-500" />
                         <span className="truncate">{doc.hospital}</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Clock size={13} className="text-slate-500" />
+                        <FontAwesomeIcon icon={faClock} style={{ fontSize: 13 }} className="text-slate-500" />
                         <span>Available: {doc.timing}</span>
                       </div>
                     </div>
@@ -2413,7 +2426,7 @@ export default function App() {
                       onClick={() => handleOpenBooking(doc)}
                       className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-indigo-600/30 transition-all flex items-center gap-1.5 cursor-pointer"
                     >
-                      <Calendar size={13} /> Book Slot
+                      <FontAwesomeIcon icon={faCalendar} style={{ fontSize: 13 }} /> Book Slot
                     </button>
                   </div>
                 </div>
@@ -2432,7 +2445,7 @@ export default function App() {
                 onClick={() => setActiveTab('doctors')}
                 className="px-3.5 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-semibold flex items-center gap-1.5"
               >
-                <Plus size={13} /> Book Another Appointment
+                <FontAwesomeIcon icon={faPlus} style={{ fontSize: 13 }} /> Book Another Appointment
               </button>
             </div>
 
@@ -2464,7 +2477,7 @@ export default function App() {
                         <p className="text-xs text-indigo-300 font-medium">{apt.specialty}</p>
                       </div>
                       <span className="px-2.5 py-1 bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded-full text-xs font-bold flex items-center gap-1">
-                        <CheckCircle2 size={12} /> {apt.status}
+                        <FontAwesomeIcon icon={faCircleCheck} style={{ fontSize: 12 }} /> {apt.status}
                       </span>
                     </div>
 
@@ -2489,7 +2502,7 @@ export default function App() {
                         onClick={() => handleCancelAppointment(apt.id)}
                         className="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors"
                       >
-                        <Trash2 size={12} /> Cancel Slot
+                        <FontAwesomeIcon icon={faTrashCan} style={{ fontSize: 12 }} /> Cancel Slot
                       </button>
                     </div>
                   </div>
@@ -2516,7 +2529,7 @@ export default function App() {
                 onClick={() => setBookingModalOpen(false)}
                 className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
               >
-                <X size={18} />
+                <FontAwesomeIcon icon={faXmark} style={{ fontSize: 18 }} />
               </button>
             </div>
 
@@ -2697,7 +2710,7 @@ function getMovieTicketBookingBlueprint(name, title, prompt) {
         version: '1.0.0',
         private: true,
         scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview', start: 'node server.js' },
-        dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1', 'lucide-react': '^0.460.0' },
+        dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1', '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0' },
         devDependencies: { '@vitejs/plugin-react': '^4.3.4', vite: '^6.0.1' }
       }, null, 2)
     },
@@ -2813,7 +2826,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);`
     {
       path: 'src/App.jsx',
       content: `import React, { useState, useEffect } from 'react';
-import { Search, Film, Calendar, Clock, Sparkles, CheckCircle2, Ticket, X, Trash2 } from 'lucide-react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faMagnifyingGlass, faFilm, faCalendar, faClock, faWandMagicSparkles, faCircleCheck, faTicket, faXmark, faTrashCan } from '@fortawesome/free-solid-svg-icons';
 import { fetchMovies, createBooking } from './services/api';
 
 const ROWS = ['A', 'B', 'C', 'D', 'E', 'F'];
@@ -2909,7 +2923,7 @@ export default function App() {
                 <p className="text-xs text-slate-400 mt-0.5">Pick movie, choose screen showtime and select your seats</p>
               </div>
               <div className="relative w-full md:w-80">
-                <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <FontAwesomeIcon icon={faMagnifyingGlass} style={{ fontSize: 15 }} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
                   placeholder="Search movies or genre..."
@@ -3108,7 +3122,7 @@ function getRestaurantFoodBlueprint(name, title, prompt) {
         version: '1.0.0',
         private: true,
         scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview', start: 'node server.js' },
-        dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1', 'lucide-react': '^0.460.0' },
+        dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1', '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0' },
         devDependencies: { '@vitejs/plugin-react': '^4.3.4', vite: '^6.0.1' }
       }, null, 2)
     },
@@ -3229,7 +3243,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);`
     {
       path: 'src/App.jsx',
       content: `import React, { useState, useEffect } from 'react';
-import { Search, ShoppingBag, Plus, Minus, CheckCircle2, Trash2, Clock, MapPin, X } from 'lucide-react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faMagnifyingGlass, faBagShopping, faPlus, faMinus, faCircleCheck, faTrashCan, faClock, faMapPin, faXmark } from '@fortawesome/free-solid-svg-icons';
 import { fetchMenu, placeOrder } from './services/api';
 
 const CATEGORIES_LIST = ['All', 'Pizza', 'Burgers', 'Pasta', 'Sides', 'Desserts', 'Drinks'];
@@ -3305,7 +3320,7 @@ export default function App() {
           onClick={() => setCartOpen(true)}
           className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg flex items-center gap-2 cursor-pointer hover:opacity-95"
         >
-          <ShoppingBag size={14} />
+          <FontAwesomeIcon icon={faBagShopping} style={{ fontSize: 14 }} />
           <span>Cart ({cartItemCount})</span>
           {cartTotal > 0 && <span>• ₹{cartTotal}</span>}
         </button>
@@ -3327,7 +3342,7 @@ export default function App() {
           </div>
 
           <div className="relative w-full md:w-72">
-            <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <FontAwesomeIcon icon={faMagnifyingGlass} style={{ fontSize: 15 }} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               placeholder="Search dishes or recipes..."
@@ -3364,9 +3379,9 @@ export default function App() {
                     </button>
                   ) : (
                     <div className="flex items-center gap-2 bg-[#171d2e] border border-amber-500/50 px-2 py-1 rounded-xl">
-                      <button onClick={() => removeFromCart(dish.id)} className="text-slate-300 hover:text-white"><Minus size={12} /></button>
+                      <button onClick={() => removeFromCart(dish.id)} className="text-slate-300 hover:text-white"><FontAwesomeIcon icon={faMinus} style={{ fontSize: 12 }} /></button>
                       <span className="text-xs font-bold text-amber-400">{countInCart}</span>
-                      <button onClick={() => addToCart(dish)} className="text-slate-300 hover:text-white"><Plus size={12} /></button>
+                      <button onClick={() => addToCart(dish)} className="text-slate-300 hover:text-white"><FontAwesomeIcon icon={faPlus} style={{ fontSize: 12 }} /></button>
                     </div>
                   )}
                 </div>
@@ -3383,9 +3398,9 @@ export default function App() {
             <div>
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <ShoppingBag size={16} className="text-amber-400" /> Your Order Cart
+                  <FontAwesomeIcon icon={faBagShopping} style={{ fontSize: 16 }} className="text-amber-400" /> Your Order Cart
                 </h3>
-                <button onClick={() => setCartOpen(false)} className="p-1 text-slate-400 hover:text-white"><X size={18} /></button>
+                <button onClick={() => setCartOpen(false)} className="p-1 text-slate-400 hover:text-white"><FontAwesomeIcon icon={faXmark} style={{ fontSize: 18 }} /></button>
               </div>
 
               <div className="mt-4 space-y-3 max-h-[60vh] overflow-y-auto">
@@ -3399,9 +3414,9 @@ export default function App() {
                         <span className="text-slate-400">₹{item.price} × {count}</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <button onClick={() => removeFromCart(item.id)} className="p-1 bg-slate-800 rounded text-slate-300"><Minus size={11} /></button>
+                        <button onClick={() => removeFromCart(item.id)} className="p-1 bg-slate-800 rounded text-slate-300"><FontAwesomeIcon icon={faMinus} style={{ fontSize: 11 }} /></button>
                         <span className="font-bold text-amber-400">{count}</span>
-                        <button onClick={() => addToCart(item)} className="p-1 bg-slate-800 rounded text-slate-300"><Plus size={11} /></button>
+                        <button onClick={() => addToCart(item)} className="p-1 bg-slate-800 rounded text-slate-300"><FontAwesomeIcon icon={faPlus} style={{ fontSize: 11 }} /></button>
                       </div>
                     </div>
                   ))
@@ -3473,7 +3488,7 @@ function getExpenseFinanceBlueprint(name, title, prompt) {
         version: '1.0.0',
         private: true,
         scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview', start: 'node server.js' },
-        dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1', 'lucide-react': '^0.460.0' },
+        dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1', '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0' },
         devDependencies: { '@vitejs/plugin-react': '^4.3.4', vite: '^6.0.1' }
       }, null, 2)
     },
@@ -3588,7 +3603,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);`
     {
       path: 'src/App.jsx',
       content: `import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, TrendingUp, TrendingDown, DollarSign, Wallet, PieChart, Filter, Download } from 'lucide-react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faPlus, faTrashCan, faArrowTrendUp, faArrowTrendDown, faDollarSign, faWallet, faChartPie, faFilter, faDownload } from '@fortawesome/free-solid-svg-icons';
 import { fetchTransactions, addTransaction } from './services/api';
 
 const CATEGORY_COLORS = {
@@ -3724,7 +3740,7 @@ export default function App() {
           title="Export all transactions to CSV file"
           className="px-3.5 py-1.5 bg-[#141928] hover:bg-[#1c2236] border border-slate-700 hover:border-slate-500 text-slate-200 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
         >
-          <Download size={13} className="text-emerald-400" />
+          <FontAwesomeIcon icon={faDownload} style={{ fontSize: 13 }} className="text-emerald-400" />
           <span>Export CSV</span>
         </button>
       </header>
@@ -3798,7 +3814,7 @@ export default function App() {
             type="submit"
             className="px-5 py-2 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg cursor-pointer flex items-center gap-1.5"
           >
-            <Plus size={14} /> Add Entry
+            <FontAwesomeIcon icon={faPlus} style={{ fontSize: 14 }} /> Add Entry
           </button>
         </form>
 
@@ -3809,7 +3825,7 @@ export default function App() {
             <div>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                  <PieChart size={16} className="text-emerald-400" />
+                  <FontAwesomeIcon icon={faChartPie} style={{ fontSize: 16 }} className="text-emerald-400" />
                   <h3 className="text-sm font-bold text-white">Expense Analytics</h3>
                 </div>
                 <span className="text-[10px] text-slate-400 uppercase font-mono tracking-wider">
@@ -3903,7 +3919,7 @@ export default function App() {
               </div>
             ) : (
               <div className="py-12 px-4 text-center rounded-xl bg-[#121624] border border-slate-800/60">
-                <PieChart className="w-8 h-8 mx-auto text-slate-600 mb-2 opacity-50" />
+                <FontAwesomeIcon icon={faChartPie} className="w-8 h-8 mx-auto text-slate-600 mb-2 opacity-50" />
                 <p className="text-xs text-slate-400 font-medium">No expense data recorded yet.</p>
                 <p className="text-[11px] text-slate-500 mt-1">
                   Add an expense entry above to see category analytics and donut breakdown.
@@ -3953,7 +3969,7 @@ export default function App() {
                         aria-label="Delete transaction"
                         className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
                       >
-                        <Trash2 size={13} />
+                        <FontAwesomeIcon icon={faTrashCan} style={{ fontSize: 13 }} />
                       </button>
                     </div>
                   </div>
@@ -3993,7 +4009,7 @@ function getGeneralFullstackBlueprint(name, title, prompt) {
         dependencies: {
           react: '^18.2.0',
           'react-dom': '^18.2.0',
-          'lucide-react': '^0.344.0',
+          '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0',
           express: '^4.18.2',
           cors: '^2.8.5'
         },
@@ -4108,7 +4124,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);`
     {
       path: 'src/App.jsx',
       content: `import React, { useState } from 'react';
-import { Search, Plus, Sparkles, Activity, ShieldCheck, Trash2, ArrowRight } from 'lucide-react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faMagnifyingGlass, faPlus, faWandMagicSparkles, faWaveSquare, faShieldHalved, faTrashCan, faArrowRight } from '@fortawesome/free-solid-svg-icons';
 
 export default function App() {
   const [items, setItems] = useState([
@@ -4159,7 +4176,7 @@ export default function App() {
             className="w-32 px-3 py-2 bg-[#141928] border border-slate-700 rounded-xl text-xs text-white focus:outline-none"
           />
           <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl flex items-center gap-1">
-            <Plus size={14} /> Add
+            <FontAwesomeIcon icon={faPlus} style={{ fontSize: 14 }} /> Add
           </button>
         </form>
 
@@ -4175,7 +4192,7 @@ export default function App() {
                 onClick={() => setItems(items.filter(i => i.id !== item.id))}
                 className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10"
               >
-                <Trash2 size={13} />
+                <FontAwesomeIcon icon={faTrashCan} style={{ fontSize: 13 }} />
               </button>
             </div>
           ))}

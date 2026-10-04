@@ -245,6 +245,31 @@ test('GET /api/sandbox files unknown id -> 404', async () => {
   assert.equal(status, 404);
 });
 
+// ── Project memory (workspace load must never 404-noise the console) ─────
+// CopilotIDE calls GET /memory/project/<sessionId> on every mount. Session ids
+// like 'copilot-session-<ts>' are not auto-created (anti-DoS: only
+// 'default'/'copilot-workspace' are), so this used to 404 on every load.
+test('GET /api/v1/memory/project unknown session id -> 200 with empty files', async () => {
+  const { status, body } = await req('GET', '/api/v1/memory/project/copilot-session-000000000000');
+  assert.equal(status, 200, 'workspace load is a read, missing project = empty workspace');
+  assert.ok(body, 'should return a JSON body');
+  assert.deepEqual(body.files, [], 'no files yet');
+  assert.equal(body.project_id, 'copilot-session-000000000000');
+});
+
+test('GET /api/v1/memory/project/default -> 200 (auto-created shared workspace)', async () => {
+  const { status, body } = await req('GET', '/api/v1/memory/project/default');
+  assert.equal(status, 200);
+  assert.ok(Array.isArray(body.files), 'files must be an array');
+});
+
+test('DELETE /api/v1/memory/project unknown session id -> still reports an error envelope', async () => {
+  // Writes keep their 404 semantics — only the GET read was softened.
+  const { status, body } = await req('DELETE', '/api/v1/memory/project/copilot-session-000000000000');
+  assert.ok(status === 403 || status === 404, `expected 403/404, got ${status}`);
+  assert.ok(body && (body.error || body.success === false), 'error envelope preserved');
+});
+
 // ── JSON body parsing round-trip ────────────────────────────────────────
 test('deep JSON body parses correctly (chat validation fires, not parser)', async () => {
   const { status, body } = await req('POST', '/api/chat/', { message: 'hi', history: [{ role: 'user', content: 'x' }] });
@@ -290,6 +315,51 @@ test('POST /api/agent/rollback valid empty checkpoint -> 200', async () => {
   assert.equal(status, 200);
   assert.equal(body.success, true);
   assert.equal(body.restoredFiles, 0);
+});
+
+// ── Phase 1c: pre-run checkpoint + file-rollback contract ────────────────────
+test('POST /api/agent/checkpoint unknown projectId workspace -> success:false (no git needed)', async () => {
+  const { status, body } = await req('POST', '/api/agent/checkpoint', {
+    projectId: `it-ck-nope-${Date.now()}`,
+    message: 'pre-run test'
+  });
+  assert.equal(status, 200);
+  assert.equal(body.success, false);
+  assert.match(body.error, /does not exist/);
+});
+
+test('POST /api/agent/checkpoint workDir outside allowed roots -> 400', async () => {
+  const { status, body } = await req('POST', '/api/agent/checkpoint', { workDir: '/definitely/not/allowed' });
+  assert.equal(status, 400);
+  assert.ok(body.error);
+});
+
+test('POST /api/agent/checkpoint projectId escaping tmp root -> 400', async () => {
+  // 'agent-ws-' prefix swallows one '..' segment, so we need three to escape.
+  const { status, body } = await req('POST', '/api/agent/checkpoint', { projectId: '../../../evil' });
+  assert.equal(status, 400);
+  assert.match(body.error, /tmp root/);
+});
+
+test('POST /api/agent/rollback file payload restores files to disk (Phase 1c contract)', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const projectId = `it-ck-rollback-${Date.now()}`;
+  const wsDir = path.join(os.tmpdir(), `agent-ws-${projectId}`);
+  try {
+    const { status, body } = await req('POST', '/api/agent/rollback', {
+      checkpoint: { files: [{ path: 'src/hello.js', content: 'console.log(1)' }] },
+      projectId
+    });
+    assert.equal(status, 200);
+    assert.equal(body.success, true);
+    assert.equal(body.restoredFiles, 1);
+    const disk = fs.readFileSync(path.join(wsDir, 'src', 'hello.js'), 'utf8');
+    assert.equal(disk, 'console.log(1)');
+  } finally {
+    fs.rmSync(wsDir, { recursive: true, force: true });
+  }
 });
 
 test('POST /api/agent/revert-file missing parameters -> 400', async () => {
@@ -608,4 +678,132 @@ test('P2 #9: static deploy validate rejects targetDir outside allowed roots', as
   });
   assert.equal(inside.status, 200);
   assert.equal(inside.body.valid, true);
+});
+
+// -- Phase 3b: watch mode SSE (workspace change stream) ------------------
+test('GET /api/agent/watch/:projectId streams watch_started + file_changed', async () => {
+  const { saveProjectFile, deleteProjectFile } = require('../projectStore');
+  const projectId = 'proj_watch_sse_test';
+  const ac = new AbortController();
+  const withTimeout = (p, ms, label) => Promise.race([
+    p,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout: ${label}`)), ms)),
+  ]);
+
+  const res = await withTimeout(
+    fetch(base + `/api/agent/watch/${projectId}`, { signal: ac.signal }),
+    5000, 'watch connect'
+  );
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type') || '', /text\/event-stream/);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  const readData = async (label) => withTimeout((async () => {
+    for (;;) {
+      const idx = buf.indexOf('\n\n');
+      if (idx !== -1) {
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const line = frame.split('\n').find((l) => l.startsWith('data: '));
+        if (line) return JSON.parse(line.slice(6));
+        continue; // keepalive comment frames
+      }
+      const { value, done } = await reader.read();
+      if (done) throw new Error('stream ended before ' + label);
+      buf += decoder.decode(value, { stream: true });
+    }
+  })(), 5000, label);
+
+  try {
+    const started = await readData('watch_started');
+    assert.equal(started.type, 'watch_started');
+    assert.equal(started.projectId, projectId);
+
+    // Write through the same module instance the app subscribes to.
+    assert.equal(saveProjectFile(projectId, 'watch-probe.txt', 'hello watch'), true);
+    const evt = await readData('file_changed');
+    assert.equal(evt.type, 'file_changed');
+    assert.equal(evt.path, 'watch-probe.txt');
+    assert.equal(evt.action, 'write');
+    assert.equal(typeof evt.at, 'number');
+  } finally {
+    try { ac.abort(); } catch {}
+    try { deleteProjectFile(projectId, 'watch-probe.txt'); } catch {}
+    try { db.prepare('DELETE FROM projects WHERE id = ?').run(projectId); } catch {}
+  }
+});
+
+test('GET /api/agent/watch/:projectId rejects a blank projectId', async () => {
+  const { status } = await req('GET', '/api/agent/watch/%20');
+  assert.equal(status, 400);
+});
+
+// -- Self-learning memory API (user-level durable notes) -----------------
+test('POST /api/copilot/memory/learn -> list -> dedupe -> delete -> clear', async () => {
+  const learn = await req('POST', '/api/copilot/memory/learn', {
+    notes: [{ kind: 'lesson', content: 'integration lesson: keep sqlite pragmas', tags: ['sqlite'] }],
+    projectId: 'proj_note_api',
+    source: 'manual',
+  });
+  assert.equal(learn.status, 200);
+  assert.equal(learn.body.success, true);
+  assert.equal(learn.body.saved, 1);
+
+  const list = await req('GET', '/api/copilot/memory/list?projectId=proj_note_api');
+  assert.equal(list.status, 200);
+  const note = (list.body.notes || []).find(n => n.content.includes('keep sqlite pragmas'));
+  assert.ok(note, 'saved note visible in list');
+  assert.deepEqual(note.tags, ['sqlite']);
+
+  const dup = await req('POST', '/api/copilot/memory/learn', {
+    notes: [{ content: 'integration lesson: keep sqlite pragmas' }],
+  });
+  assert.equal(dup.body.deduped, 1);
+  assert.equal(dup.body.saved, 0);
+
+  const del = await req('DELETE', `/api/copilot/memory/${note.id}`);
+  assert.equal(del.status, 200);
+  assert.equal(del.body.success, true);
+
+  const missing = await req('DELETE', '/api/copilot/memory/note_does_not_exist');
+  assert.equal(missing.status, 404);
+
+  const clear = await req('DELETE', '/api/copilot/memory/clear', { projectId: 'proj_note_api' });
+  assert.equal(clear.status, 200);
+  assert.ok(typeof clear.body.removed === 'number');
+});
+
+test('copilot notes survive project deletion (user-level memory, no FK)', async () => {
+  const projectId = 'proj_del_notes_test';
+  db.prepare(
+    "INSERT OR IGNORE INTO projects (id, user_id, name, slug, created_at, updated_at) VALUES (?, 'local-user', ?, ?, datetime('now'), datetime('now'))"
+  ).run(projectId, projectId, projectId);
+  const learn = await req('POST', '/api/copilot/memory/learn', {
+    notes: [{ kind: 'lesson', content: 'durable lesson: project deletion must not erase me' }],
+    projectId,
+  });
+  assert.equal(learn.body.success, true);
+
+  db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
+
+  const list = await req('GET', '/api/copilot/memory/list?q=durable%20lesson');
+  assert.equal(list.status, 200);
+  assert.ok(
+    (list.body.notes || []).some(n => n.content.includes('project deletion must not erase me')),
+    'note outlives its deleted project'
+  );
+});
+
+test('GET /api/copilot/memory/retrieve returns ranked notes for a prompt', async () => {
+  await req('POST', '/api/copilot/memory/learn', {
+    notes: [{ kind: 'lesson', content: 'nextjs app router lesson: use server components', tags: ['nextjs'] }],
+    projectId: 'proj_retrieve_test',
+  });
+  const r = await req('GET', '/api/copilot/memory/retrieve?prompt=build%20a%20nextjs%20app&projectId=proj_retrieve_test');
+  assert.equal(r.status, 200);
+  assert.equal(r.body.success, true);
+  assert.ok(r.body.notes.length >= 1);
+  assert.match(r.body.formatted, /nextjs app router lesson/);
 });

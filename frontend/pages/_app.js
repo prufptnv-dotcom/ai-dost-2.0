@@ -1,4 +1,10 @@
 import "@/styles/globals.css";
+// Font Awesome (official docs: Next.js needs the CSS import + autoAddCss=false,
+// warna icons bina CSS ke HUGE render hote hain). Individual imports per-file
+// (AppIcon) — poora pack library me nahi (bundle bloat).
+import { config } from '@fortawesome/fontawesome-svg-core';
+import '@fortawesome/fontawesome-svg-core/styles.css';
+config.autoAddCss = false;
 import { ToastProvider } from "../context/ToastContext";
 import { SocketProvider } from "../context/SocketContext";
 import { ModeProvider } from "../context/ModeContext";

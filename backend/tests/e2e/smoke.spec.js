@@ -6,13 +6,15 @@
 const { test, expect } = require('@playwright/test');
 
 const NAV_LABELS = [
-  'Chat', 'Projects', 'Copilot IDE', 'Agent', 'Voice',
-  'MCP Connectors', 'Images', 'Resume', 'History', 'Settings',
+  'Chat', 'Copilot IDE', 'Agent Workbench', 'Projects', 'Studios & Tools', 'History', 'Settings'
 ];
 
 // Sidebar nav buttons (there are duplicate-named buttons elsewhere on the page)
-const navMenu = (page) => page.getByRole('navigation', { name: 'Main menu' });
-const navButton = (page, label) => navMenu(page).getByRole('button', { name: label, exact: true });
+const navMenu = (page) => page.getByLabel('Sidebar navigation');
+const navButton = (page, label) => {
+  if (label === 'Studios & Tools') return navMenu(page).getByRole('button', { name: /Studios & Tools/ });
+  return navMenu(page).getByRole('button', { name: label, exact: true });
+};
 
 test.describe('Page availability', () => {
   for (const [path, name] of [
@@ -43,7 +45,7 @@ test.describe('Sidebar navigation', () => {
     await page.goto('/dashboard');
     await page.waitForLoadState('networkidle');
 
-    const historyLabel = page.locator('nav span').filter({ hasText: 'History' }).first();
+    const historyLabel = page.locator('aside span').filter({ hasText: 'Projects' }).first();
     await expect(historyLabel).toBeVisible();
 
     await page.keyboard.press('Control+Shift+S');
@@ -57,21 +59,21 @@ test.describe('Sidebar navigation', () => {
     await page.goto('/dashboard');
     await page.waitForLoadState('networkidle');
     await navButton(page, 'History').click();
-    await expect(page.getByText(/History/i).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('Conversation & Task History')).toBeVisible({ timeout: 20_000 });
   });
 
   test('clicking Projects opens ProjectsView with project list', async ({ page }) => {
     await page.goto('/dashboard');
     await page.waitForLoadState('networkidle');
     await navButton(page, 'Projects').click();
-    await expect(page.getByText('Your Projects')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('Persistent Project Workspace Graph')).toBeVisible({ timeout: 20_000 });
   });
 
   test('clicking Settings opens SettingsView', async ({ page }) => {
     await page.goto('/dashboard');
     await page.waitForLoadState('networkidle');
     await navButton(page, 'Settings').click();
-    await expect(page.getByText(/Settings/i).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('Workspace Settings')).toBeVisible({ timeout: 20_000 });
   });
 });
 
@@ -80,12 +82,12 @@ test.describe('Chat flow', () => {
     await page.goto('/dashboard');
     await page.waitForLoadState('networkidle');
 
-    const input = page.getByPlaceholder(/AI-Dost se kuch bhi pucho/i);
+    const input = page.getByPlaceholder(/Ask AI-Dost anything/i);
     await expect(input).toBeVisible();
     await input.fill('E2E test message');
     await input.press('Enter');
 
-    await expect(page.getByText('E2E test message')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('E2E test message').first()).toBeVisible({ timeout: 10_000 });
 
     // Soft check: assistant bubble eventually appears (LLM-dependent).
     const assistant = page.locator('text=AI-Dost').last();
@@ -98,16 +100,16 @@ test.describe('Command palette', () => {
     await page.goto('/dashboard');
     await page.waitForLoadState('networkidle');
     await page.keyboard.press('Control+K');
-    await expect(page.getByPlaceholder('Kya karna hai? Type karo...')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByPlaceholder(/Type a command or jump/i)).toBeVisible({ timeout: 10_000 });
   });
 });
 
 test.describe('Voice view', () => {
-  test('opens via sidebar and renders voice UI', async ({ page }) => {
+  test('opens via shortcut and renders voice UI', async ({ page }) => {
     await page.goto('/dashboard');
     await page.waitForLoadState('networkidle');
-    await navButton(page, 'Voice').click();
-    await expect(page.getByPlaceholder(/Ya yahan type karke bhejo/i)).toBeVisible({ timeout: 20_000 });
+    await page.keyboard.press('Control+6');
+    await expect(page.getByPlaceholder(/Type your message if microphone is unavailable/i)).toBeVisible({ timeout: 20_000 });
   });
 });
 
@@ -115,9 +117,9 @@ test.describe('Agent view', () => {
   test('agent planner renders and plan request fires', async ({ page }) => {
     await page.goto('/dashboard');
     await page.waitForLoadState('networkidle');
-    await navButton(page, 'Agent').click();
+    await navButton(page, 'Agent Workbench').click();
 
-    const agentInput = page.getByPlaceholder(/Agent se kuch bhi bol/i);
+    const agentInput = page.getByPlaceholder(/Instruct the autonomous agent/i);
     await expect(agentInput).toBeVisible({ timeout: 20_000 });
 
     // Plan mode should reach the backend (400/200 both prove wiring).

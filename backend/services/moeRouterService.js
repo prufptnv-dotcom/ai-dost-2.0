@@ -17,20 +17,17 @@ class MoERouterService {
      * Determines the most appropriate expert model for a given prompt
      */
     static analyzeAndRoute(message, section, isCodingIntent, isMathIntent, isWritingIntent, isTranslationIntent) {
-        // High-Complexity Coding / Math -> DeepSeek / NVIDIA
         if (isMathIntent) {
             return { expert: 'nvidia', reason: 'High-precision mathematical reasoning required' };
         }
         
         if (isCodingIntent) {
-            // If the code prompt is huge or requires architectural thinking
             if (message.length > 500 || message.toLowerCase().includes('architecture') || message.toLowerCase().includes('fullstack')) {
                 return { expert: 'deepseek', reason: 'Complex software architecture and long-context coding' };
             }
             return { expert: 'groq-llama3', reason: 'Fast interactive coding and debugging' };
         }
 
-        // Translation / Creative Writing -> Gemini / Mistral
         if (isTranslationIntent) {
             return { expert: 'mistral', reason: 'Nuanced multilingual translation capabilities' };
         }
@@ -42,42 +39,77 @@ class MoERouterService {
             return { expert: 'groq-llama3', reason: 'Fast short-form creative drafting' };
         }
 
-        // Default General Chat
         return { expert: 'auto-cascade', reason: 'General conversation, falling back to reliability cascade' };
     }
 
     /**
-     * Executes the query using the assigned Expert Model
+     * Executes the query using the assigned Expert Model with a reasoning wrapper.
      */
     static async executeExpert(route, message, groqMsg, cleanHistory, fileContent, mode, customKeys) {
         logger.info(`🧠 [MoE Router] Assigned Expert: ${route.expert} (Reason: ${route.reason})`);
 
+        // HYPER-COGNITION: Enforce Inner Monologue
+        const reasoningWrapper = `
+            Please follow this structure for your response:
+            <thought>
+            [Analyze the request, identify edge cases, plan your steps, and challenge your own assumptions here]
+            </thought>
+            <response>
+            [Your final, polished answer here]
+            </response>
+        `;
+        
+        const enhancedMessage = `${reasoningWrapper}\n\nUSER REQUEST: ${message}`;
+
         try {
+            let rawResponse;
             switch (route.expert) {
                 case 'nvidia':
-                    return { response: await NvidiaService.chat(groqMsg, cleanHistory, customKeys?.nvidia), model: 'nvidia' };
-                
+                    rawResponse = await NvidiaService.chat(enhancedMessage, cleanHistory, customKeys?.nvidia);
+                    break;
                 case 'deepseek':
-                    return { response: await DeepseekService.chat(message, cleanHistory, fileContent, mode, customKeys?.deepseek), model: 'deepseek' };
-                
+                    rawResponse = await DeepseekService.chat(enhancedMessage, cleanHistory, fileContent, mode, customKeys?.deepseek);
+                    break;
                 case 'groq-llama3':
-                    return { response: await GroqService.chat(groqMsg, cleanHistory, customKeys?.groq), model: 'groq' };
-                
+                    rawResponse = await GroqService.chat(enhancedMessage, cleanHistory, customKeys?.groq);
+                    break;
                 case 'mistral':
-                    return { response: await MistralService.chat(message, cleanHistory, fileContent, mode, customKeys?.mistral), model: 'mistral' };
-                
+                    rawResponse = await MistralService.chat(enhancedMessage, cleanHistory, fileContent, mode, customKeys?.mistral);
+                    break;
                 case 'gemini':
-                    return { response: await GeminiService.chat(message, cleanHistory, fileContent, mode, customKeys?.gemini), model: 'gemini' };
-                
+                    rawResponse = await GeminiService.chat(enhancedMessage, cleanHistory, fileContent, mode, customKeys?.gemini);
+                    break;
                 case 'auto-cascade':
                 default:
-                    return { response: await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys), model: 'auto-general' };
+                    rawResponse = await executeCascadingFailover(enhancedMessage, groqMsg, cleanHistory, fileContent, mode, customKeys);
             }
+
+            // Parse the <thought> and <response> blocks
+            const thoughtMatch = rawResponse.match(/<thought>([\s\S]*?)<\/thought>/i);
+            const responseMatch = rawResponse.match(/<response>([\s\S]*?)<\/response>/i);
+
+            const thought = thoughtMatch ? thoughtMatch[1].trim() : '';
+            const finalResponse = responseMatch ? responseMatch[1].trim() : rawResponse;
+
+            return { 
+                response: finalResponse, 
+                thought: thought, 
+                model: route.expert === 'auto-cascade' ? 'auto-general' : route.expert 
+            };
+
         } catch (error) {
             logger.warn(`⚠️ [MoE Router] Primary Expert '${route.expert}' failed. Reason: ${error.message}. Initiating failover cascade.`);
-            // Fallback to cascade if the specialized expert fails (API limits, network issues, etc.)
-            const fallbackResponse = await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
-            return { response: fallbackResponse, model: `failover-${route.expert}` };
+            const fallbackResponse = await executeCascadingFailover(enhancedMessage, groqMsg, cleanHistory, fileContent, mode, customKeys);
+            
+            // Try to extract thought from fallback too
+            const thoughtMatch = fallbackResponse.match(/<thought>([\s\S]*?)<\/thought>/i);
+            const responseMatch = fallbackResponse.match(/<response>([\s\S]*?)<\/response>/i);
+            
+            return { 
+                response: responseMatch ? responseMatch[1].trim() : fallbackResponse, 
+                thought: thoughtMatch ? thoughtMatch[1].trim() : '',
+                model: `failover-${route.expert}` 
+            };
         }
     }
 }

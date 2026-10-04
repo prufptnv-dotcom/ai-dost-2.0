@@ -195,6 +195,121 @@ async function codeAnalyze(code, language = 'python') {
   return engineFetch('/ai/code/analyze', { code, language }, 10000);
 }
 
+/**
+ * Query custom fine-tuned VKP-Omni-2B multimodal model (NandiAi/VKP-Omni-2B)
+ */
+async function queryVkpOmni(prompt, opts = {}) {
+  const { maxTokens = 512, temperature = 0.01, repetitionPenalty = 1.15 } = opts || {};
+  
+  // 1. Try standalone VKP-Omni runner (port 8002) first
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 60000);
+    const res8002 = await fetch('http://127.0.0.1:8002/api/ai-dost/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, max_tokens: maxTokens, temperature, repetition_penalty: repetitionPenalty }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (res8002.ok) {
+      const data = await res8002.json();
+      return { ok: true, data };
+    }
+  } catch (_) {}
+
+  // 2. Try main ai-engine (port 8001) as fallback
+  let res = await engineFetch('/ai/vkp-omni/chat', {
+    prompt,
+    max_tokens: maxTokens,
+    temperature,
+    repetition_penalty: repetitionPenalty,
+  }, 10000);
+
+  if (res && res.ok && res.data && (res.data.response || res.data.message)) {
+    return res;
+  }
+
+  return res;
+}
+
+/**
+ * Streams tokens from VKP-Omni-2B in real time.
+ * @param {string} prompt
+ * @param {function(string): void} onChunk
+ * @param {object} [opts]
+ * @returns {Promise<boolean>} true if streamed successfully
+ */
+async function streamVkpOmni(prompt, onChunk, opts = {}) {
+  const { maxTokens = 600, temperature = 0.01, repetitionPenalty = 1.1 } = opts || {};
+  
+  // 1. Try port 8002 stream endpoint first
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 90000);
+    const res8002 = await fetch('http://127.0.0.1:8002/api/ai-dost/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, max_tokens: maxTokens, temperature, repetition_penalty: repetitionPenalty }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (res8002.ok && res8002.body) {
+      const reader = res8002.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let receivedAnyChunk = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        let doneReceived = false;
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const dataStr = trimmed.slice(5).trim();
+          if (dataStr === '[DONE]') {
+            doneReceived = true;
+            break;
+          }
+          try {
+            const parsed = JSON.parse(dataStr);
+            if (parsed.chunk) {
+              receivedAnyChunk = true;
+              onChunk(parsed.chunk);
+            }
+          } catch (_) {}
+        }
+        if (doneReceived) break;
+      }
+      if (receivedAnyChunk) return true;
+    }
+  } catch (_) {}
+
+  // 2. Fallback to non-streaming queryVkpOmni if streaming failed
+  const fallbackRes = await queryVkpOmni(prompt, opts);
+  if (fallbackRes && fallbackRes.ok && fallbackRes.data && fallbackRes.data.response) {
+    onChunk(fallbackRes.data.response);
+    return true;
+  }
+  return false;
+}
+
+async function getVkpOmniStatus() {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 4000);
+    const res = await fetch(`${BASE}/ai/vkp-omni/status`, { headers: engineHeaders(), signal: ctrl.signal });
+    clearTimeout(t);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
 module.exports = {
   health,
   queryRag,
@@ -208,5 +323,8 @@ module.exports = {
   generate,
   codeComplete,
   codeAnalyze,
+  queryVkpOmni,
+  streamVkpOmni,
+  getVkpOmniStatus,
   BASE
-};
+};

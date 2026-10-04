@@ -77,12 +77,87 @@ export async function streamChatResponse({
           }
           if (parsed.type === 'web_search_start') {
             setThinking(true);
-            setThinkingLabel(parsed.intent === 'URL_FETCH' ? 'Reading webpage…' : 'Searching the web…');
+            const searchLbl = parsed.intent === 'URL_FETCH' ? 'Reading webpage…' : 'Searching the web…';
+            setThinkingLabel(searchLbl);
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === aiMsgId
+                  ? {
+                      ...m,
+                      isSearching: true,
+                      searchQuery: parsed.query || parsed.url || '',
+                      searchStatus: parsed.status || searchLbl,
+                    }
+                  : m
+              )
+            );
           }
           if (parsed.type === 'web_search_sources' && parsed.sources) {
-            setMessages((prev) => prev.map((m) => (m.id === aiMsgId ? { ...m, sources: parsed.sources } : m)));
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === aiMsgId
+                  ? {
+                      ...m,
+                      sources: parsed.sources,
+                      searchStatus: `Found ${parsed.sources.length} sources`,
+                    }
+                  : m
+              )
+            );
           }
-          if (parsed.type === 'web_search_done') setThinking(false);
+          if (parsed.type === 'web_search_done') {
+            setThinking(false);
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === aiMsgId
+                  ? {
+                      ...m,
+                      isSearching: false,
+                      searchStatus: 'Research complete',
+                      totalSources: parsed.totalResults,
+                    }
+                  : m
+              )
+            );
+          }
+          if (parsed.type === 'tool_start' || parsed.type === 'tool_call_start' || parsed.type === 'tool_calling') {
+            const toolName = parsed.tool || parsed.name || 'tool_call';
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === aiMsgId
+                  ? {
+                      ...m,
+                      toolCalls: [
+                        ...(m.toolCalls || []).filter((t) => t.tool !== toolName),
+                        {
+                          tool: toolName,
+                          target: parsed.target || parsed.args?.path || parsed.args?.query,
+                          status: 'running',
+                        },
+                      ],
+                    }
+                  : m
+              )
+            );
+          }
+          if (parsed.type === 'tool_done' || parsed.type === 'tool_result') {
+            const toolName = parsed.tool || parsed.name;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === aiMsgId
+                  ? {
+                      ...m,
+                      toolCalls: (m.toolCalls || []).map((t) =>
+                        !toolName || t.tool === toolName
+                          ? { ...t, status: parsed.status || 'success', output: parsed.output || parsed.result }
+                          : t
+                      ),
+                    }
+                  : m
+              )
+            );
+          }
+
           if (parsed.type === 'assessment_creating') {
             setThinking(true);
             setThinkingLabel(parsed.status || 'Preparing assessment...');

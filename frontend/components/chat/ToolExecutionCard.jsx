@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Terminal, FileCode2, FilePlus, Search, ShieldCheck, ChevronDown, ChevronRight, Check, X, Loader2 } from 'lucide-react';
+import { Terminal, FileCode2, FilePlus, Search, ShieldCheck, ChevronDown, ChevronRight, Check, X, Loader2, Globe, Cpu, FileText } from 'lucide-react';
 import { Badge } from '../ui/Badge';
 
 const TOOL_ICONS = {
@@ -8,6 +8,10 @@ const TOOL_ICONS = {
   run_command: Terminal,
   search_code: Search,
   verify: ShieldCheck,
+  web_search: Globe,
+  python: Cpu,
+  python_runner: Cpu,
+  create_document: FileText,
   default: Terminal,
 };
 
@@ -29,13 +33,24 @@ export function ToolExecutionCard({
     error: 'error',
   };
 
+  const isRunning = status === 'running';
+
   return (
-    <div className={`my-2 rounded-md border border-border bg-canvas-surface overflow-hidden transition-fast ${className}`}>
-      {/* Tool Header Summary */}
+    <div
+      className={`my-2 rounded-xl border ${
+        isRunning
+          ? 'border-amber-500/40 bg-amber-950/15 shadow-[0_0_15px_rgba(245,158,11,0.2)] animate-pulse'
+          : status === 'error'
+          ? 'border-red-500/30 bg-red-950/10'
+          : 'border-border bg-canvas-surface'
+      } overflow-hidden transition-all duration-200 backdrop-blur-sm select-none ${className}`}
+      data-testid="tool-calling-animation"
+    >
+      {/* 4. Tool Calling Header Summary */}
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-3 py-2 text-left bg-canvas-subtle/60 hover:bg-canvas-subtle transition-fast cursor-pointer select-none"
+        className="w-full flex items-center justify-between px-3.5 py-2 text-left bg-canvas-subtle/60 hover:bg-canvas-subtle transition-fast cursor-pointer select-none"
         aria-expanded={expanded}
       >
         <div className="flex items-center gap-2.5 min-w-0">

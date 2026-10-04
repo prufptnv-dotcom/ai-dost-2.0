@@ -1,19 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
-import {
-  FolderTree, Search, GitBranch, Puzzle, X, Plus, Save,
-  Send, Sparkles, Play, Terminal as TerminalIcon,
-  Loader2, Bot, Eraser, Eye, Download, Square, RotateCcw, Settings2,
-  FolderPlus, Pencil, Trash2, SaveAll, PanelLeftClose, PanelLeftOpen, ChevronRight, ChevronDown, GitCompareArrows, Database,
-  Smartphone, Tablet, Monitor, Crosshair,
-  Mic, MicOff, LayoutGrid, Zap, Bug, Code2, RefreshCw, ExternalLink, Copy, Check, ArrowRight,
-  Code, ShieldCheck, ShoppingCart, BarChart3, Kanban, MessageSquare, Flame,
-  BrainCircuit, Workflow, ArrowUp, Paperclip,
-  Columns2, Package, KeyRound, History, AlertTriangle, AlertCircle,
-  Volume2, AudioWaveform, Wrench, TableProperties, FileDiff
-} from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 import api from '../../services/api';
+import { isImageCreateRequest } from '../../lib/imageIntent';
+import { runCopilotImageRequest } from '../../lib/copilotImageRequest';
+import { cancelAgentRun } from '../../lib/copilotStop';
+import { filePathOf, detectMention, parseMentionPaths } from '../../lib/copilotMentions';
 import { LANG_BY_EXT, TreeView, fileTreeFromFiles } from './CopilotTree';
 import { PromptModal, QuickOpen, CommandPalette, SearchOverlay, MODAL_ICONS } from './IDEOverlays';
 import DiffReviewModal from './DiffReviewModal';
@@ -42,6 +35,12 @@ import { IdeFooter } from '../ide/IdeFooter';
 import { generateLiveAppHtml, PREVIEW_TELEMETRY_SCRIPT } from '../ide/PreviewEngine';
 import { syncFileToWebContainer } from '../../lib/webcontainer';
 import { marked } from 'marked';
+
+function isPathInFolder(filePath, folderPath) {
+  const file = normalizePath(filePath).toLowerCase();
+  const folder = normalizePath(folderPath).toLowerCase().replace(/\/+$/, '');
+  return Boolean(file && folder && (file === folder || file.startsWith(`${folder}/`)));
+}
 
 marked.setOptions({
   breaks: true,
@@ -114,7 +113,7 @@ function AiStudioResponseCard({ message, onSelectFile, onOpenDiff, onRollback, o
   return (
     <div className="flex gap-3 items-start animate-in fade-in slide-in-from-bottom-2 duration-200">
       <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5 bg-accent text-white shadow-md">
-        <Code2 size={15} />
+        <AppIcon name="code" size={15} />
       </div>
 
       <div className="flex-1 space-y-3 rounded-2xl p-4 border bg-canvas-surface/95 backdrop-blur-md shadow-xl border-border">
@@ -169,7 +168,7 @@ function AiStudioResponseCard({ message, onSelectFile, onOpenDiff, onRollback, o
             onClick={onOpenDiff}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white font-medium cursor-pointer transition-colors border border-zinc-700"
           >
-            <GitCompareArrows size={12} className="text-amber-400" />
+            <AppIcon name="compare" size={12} className="text-amber-400" />
             Review Diff
           </button>
 
@@ -177,7 +176,7 @@ function AiStudioResponseCard({ message, onSelectFile, onOpenDiff, onRollback, o
             onClick={onOpenPreview}
             className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-accent hover:bg-accent-hover text-white font-semibold cursor-pointer transition-colors"
           >
-            <Play size={11} className="fill-white" />
+            <AppIcon name="play" size={11} className="fill-white" />
             Live Preview
           </button>
 
@@ -186,7 +185,7 @@ function AiStudioResponseCard({ message, onSelectFile, onOpenDiff, onRollback, o
               onClick={() => onRollback && onRollback(message.checkpointDir)}
               className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-300 font-medium cursor-pointer transition-colors border border-red-500/30"
             >
-              <RotateCcw size={12} className="text-red-400" />
+              <AppIcon name="rotate" size={12} className="text-red-400" />
               Restore
             </button>
           )}
@@ -303,6 +302,10 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     });
   }, []);
   const [copilotInput, setCopilotInput] = useState('');
+  // Devin-style @file mentions: active query after '@' + highlighted index.
+  const [mentionQuery, setMentionQuery] = useState(null);
+  const [mentionIdx, setMentionIdx] = useState(0);
+  const composerRef = useRef(null);
   const [running, setRunning] = useState(false);
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [problems, setProblems] = useState(0);
@@ -335,7 +338,41 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     return () => clearInterval(id);
   }, [running]);
   const [planTasks, setPlanTasks] = useState([]);
-  const [planGate, setPlanGate] = useState(false); // Default to Autopilot (Replit/Bolt style)
+  // Devin-style agent mode: ask = answer only (no files), plan = review & edit
+  // the plan before building, code = autonomous execution (default).
+  const [agentMode, setAgentMode] = useState('code');
+  // Devin-style permission level: ask = approve every run, auto = canonical
+  // policy, turbo = auto-approve (BLOCK still blocks).
+  const [permissionLevel, setPermissionLevel] = useState('auto');
+  // Devin-style watch mode: SSE (GET /api/agent/watch/:projectId) live-pushes
+  // workspace file changes → auto-refresh tree + activity rows without polling.
+  const [watching, setWatching] = useState(false);
+  const watchSourceRef = useRef(null);
+  const watchDebounceRef = useRef(null);
+  // Self-learning memory: durable notes (user-level — survive project delete)
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [memoryNotes, setMemoryNotes] = useState([]);
+  const [memoryCount, setMemoryCount] = useState(0);
+
+  const loadMemoryNotes = async () => {
+    try {
+      const res = await api.get('/copilot/memory/list?limit=40');
+      setMemoryNotes(res.data?.notes || []);
+      if (typeof res.data?.total === 'number') setMemoryCount(res.data.total);
+    } catch (_) { /* panel stays empty offline */ }
+  };
+  const deleteMemoryNote = async (id) => {
+    try {
+      await api.delete(`/copilot/memory/${id}`);
+      await loadMemoryNotes();
+    } catch (_) { /* ignore */ }
+  };
+  const clearMemoryNotes = async () => {
+    try {
+      await api.delete('/copilot/memory/clear');
+      await loadMemoryNotes();
+    } catch (_) { /* ignore */ }
+  };
   const [pendingPlan, setPendingPlan] = useState(null);
   const [isLight, setIsLight] = useState(false);
 
@@ -343,7 +380,23 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     try {
       const saved = window.localStorage.getItem('ai_dost_copilot_model');
       if (saved && MODEL_OPTIONS.some(o => o.v === saved)) setPreferredModel(saved);
+      const savedMode = window.localStorage.getItem('ai_dost_copilot_mode');
+      if (savedMode === 'ask' || savedMode === 'plan' || savedMode === 'code') setAgentMode(savedMode);
+      const savedPerm = window.localStorage.getItem('ai_dost_copilot_permissions');
+      if (savedPerm === 'ask' || savedPerm === 'auto' || savedPerm === 'turbo') setPermissionLevel(savedPerm);
+      if (window.localStorage.getItem('ai_dost_copilot_watch') === '1') setWatching(true);
     } catch (_) { /* storage unavailable */ }
+  }, []);
+
+  // Learning-notes badge count (panel loads the full list on open)
+  useEffect(() => {
+    let alive = true;
+    api.get('/copilot/memory/count')
+      .then((res) => {
+        if (alive && typeof res.data?.count === 'number') setMemoryCount(res.data.count);
+      })
+      .catch(() => { /* backend offline */ });
+    return () => { alive = false; };
   }, []);
 
   // Dynamic session project name
@@ -396,6 +449,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   const latestRunIdRef = useRef(null);
   const [saving, setSaving] = useState(false);
   const [diffModalOpen, setDiffModalOpen] = useState(false);
+  const [promptModal, setPromptModal] = useState(null);
 
   // Voice Coding State
   const [isListening, setIsListening] = useState(false);
@@ -414,10 +468,27 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   const terminalRef = useRef(null);
   const iframeRef = useRef(null);
   const abortRef = useRef(null);
+  const runTaskIdRef = useRef(null);
+  // Id of the pre-run time-travel snapshot created for the CURRENT run —
+  // attached to done cards as checkpointDir so the Revert button works.
+  const preRunCheckpointRef = useRef(null);
+  // Last run inputs — lets the approval banner resume a paused 'ask' run.
+  const lastRunRef = useRef(null);
   const activePathRef = useRef(null);
   const endRef = useRef(null);
   const diagTimerRef = useRef(null);
   const [visualDebuggerOpen, setVisualDebuggerOpen] = useState(false);
+
+  // Devin-style Stop: abort the local stream AND cancel server-side so the
+  // director loop (signal.aborted) actually halts instead of running headless.
+  // Declared early because the global hotkey effect (Esc → stop) runs above it.
+  const handleStopRun = useCallback(() => {
+    const taskId = runTaskIdRef.current;
+    cancelAgentRun({ backend: BACKEND, taskId, controller: abortRef.current });
+    setCopilotStatus({ label: '⏹ Stopped by user', tone: 'error' });
+    setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: '⏹ Run stopped by user — agent halted at the current step.' }]);
+    setRunning(false);
+  }, [setCopilotMessages]);
 
   const showToast = useCallback((msg, type = 'info') => {
     if (onToast) onToast(msg, type);
@@ -551,14 +622,14 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
       source.connect(analyser);
       voiceAnalyserRef.current = { analyser, audioCtx, source };
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      const animate = () => {
+const animate = () => {
         analyser.getByteFrequencyData(dataArray);
         const bars = Array.from({ length: 5 }, (_, i) => {
           const idx = Math.floor((i / 5) * dataArray.length);
           return Math.min(100, (dataArray[idx] / 255) * 100);
         });
         setVoiceWaveform(bars);
-        voiceAnimFrameRef.current = requestAnimationFrame(animate);
+        voiceAnimFrameRef.current = setTimeout(animate, 33); // ~30fps cap
       };
       animate();
     } catch (_) {}
@@ -752,11 +823,15 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
       } else if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
         e.preventDefault();
         setWorkspaceMode(m => m === 'split' ? 'code' : 'split');
+      } else if (e.key === 'Escape' && running && !paletteOpen && !quickOpenOpen && !searchOpen) {
+        // Devin-style: Esc stops a running agent (unless an overlay owns Escape)
+        e.preventDefault();
+        handleStopRun();
       }
     };
     window.addEventListener('keydown', handleGlobalKey);
     return () => window.removeEventListener('keydown', handleGlobalKey);
-  }, [handleReplitRun]);
+  }, [handleReplitRun, handleStopRun, running, paletteOpen, quickOpenOpen, searchOpen]);
 
   const handleUpdatePackageJson = async (newContent) => {
     try {
@@ -863,13 +938,11 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
 
   // Auto scroll chat messages
   useEffect(() => {
-    const rafId = window.requestAnimationFrame(() => {
-      if (endRef.current) {
-        endRef.current.scrollTop = endRef.current.scrollHeight;
-      }
-    });
-    return () => window.cancelAnimationFrame(rafId);
-  }, [copilotMessages, copilotStatus, planTasks]);
+    let rafId = null;
+    const request = () => { rafId = window.requestAnimationFrame(() => { if (endRef.current) { endRef.current.scrollTop = endRef.current.scrollHeight; } }); };
+    request(); // initial
+    return () => { if (rafId) window.cancelAnimationFrame(rafId); };
+  }, [copilotMessages, copilotStatus, planTasks, endRef]);
 
   // Suppress benign Monaco editor unmount cancellation errors
   useEffect(() => {
@@ -943,7 +1016,9 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
 
         if (target.files && target.files.length > 0) {
           setFiles(target.files);
-          setContents(target.contents || {});
+          const targetContents = target.contents || {};
+          contentsRef.current = targetContents;
+          setContents(targetContents);
           setOpenTabs(target.openTabs || (target.files[0] ? [target.files[0].path] : []));
           setActivePath(target.activePath || (target.files[0] ? target.files[0].path : null));
           if (target.messages && target.messages.length > 0) setCopilotMessages(target.messages);
@@ -1036,6 +1111,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     };
 
     setFiles([]);
+    contentsRef.current = {};
     setContents({});
     setOpenTabs([]);
     setActivePath(null);
@@ -1049,6 +1125,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     setPreviewZoom(100);
     setRuntimeError(null);
     setSelectedInspectorElement(null);
+    setDirtyPaths(new Set());
 
     setActiveSessionId(newId);
     const listWithNew = [newSession, ...sessionsRef.current];
@@ -1077,7 +1154,9 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     try { localStorage.setItem('copilot_current_session_id', sessionId); } catch (_) {}
 
     setFiles(target.files || []);
-    setContents(target.contents || {});
+    const targetContents = target.contents || {};
+    contentsRef.current = targetContents;
+    setContents(targetContents);
     setOpenTabs(target.openTabs || []);
     const defFile = target.activePath || (target.files && target.files[0] ? target.files[0].path : null);
     setActivePath(defFile);
@@ -1091,6 +1170,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     setCopilotStatus({ label: '', tone: 'info' });
     setRuntimeError(null);
     setSelectedInspectorElement(null);
+    setDirtyPaths(new Set());
 
     showToast(`📂 Switched to session: "${target.title || 'Untitled'}"`, 'info');
   }, [activeSessionId, sessions, saveCurrentSession, showToast, setCopilotMessages]);
@@ -1161,6 +1241,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
       setFiles(fileList);
       const map = {};
       fileList.forEach(f => { map[f.path] = f.content; });
+      contentsRef.current = map;
       setContents(map);
 
       const priority = ['src/App.jsx', 'src/App.js', 'src/main.jsx', 'src/index.js', 'App.jsx', 'index.html', 'server.js', 'package.json'];
@@ -1187,6 +1268,40 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   useEffect(() => {
     loadWorkspaceFiles();
   }, [loadWorkspaceFiles]);
+
+  // Phase 3b watch mode: live workspace change stream (SSE). While a run is
+  // active the run stream already streams file_written/file_changed rows, so
+  // watch events are ignored mid-run to avoid duplicate activity noise.
+  useEffect(() => {
+    if (!watching || !projectId) return undefined;
+    let es;
+    try {
+      es = new EventSource(`/api/agent/watch/${encodeURIComponent(projectId)}`);
+    } catch (_) {
+      return undefined;
+    }
+    watchSourceRef.current = es;
+    const refresh = () => {
+      clearTimeout(watchDebounceRef.current);
+      watchDebounceRef.current = setTimeout(() => { loadWorkspaceFiles(); }, 400);
+    };
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type !== 'file_changed' || running) return;
+        setCopilotMessages((prev) => [...prev, {
+          kind: 'thought',
+          content: `↻ watch · ${data.action || 'write'}: ${data.path}`,
+        }]);
+        refresh();
+      } catch (_) { /* malformed frame */ }
+    };
+    return () => {
+      clearTimeout(watchDebounceRef.current);
+      try { es.close(); } catch (_) { /* already closed */ }
+      watchSourceRef.current = null;
+    };
+  }, [watching, projectId, running, loadWorkspaceFiles, setCopilotMessages]);
 
   // Unified Cross-Module Bridge: Import code or artifacts from Chat / Agent into active editor
   useEffect(() => {
@@ -1505,16 +1620,45 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     terminalRef.current?.runCommand(cmd);
   };
 
-  const rollbackTo = async (dir) => {
-    if (!dir) return;
+  // Revert to the pre-run snapshot (Devin-style /revert): restores the client
+  // workspace immediately and pushes the same files to the backend store so a
+  // reload (loadWorkspaceFiles) cannot resurrect the bad state.
+  const rollbackTo = async (checkpointId) => {
+    if (!checkpointId) return;
+    const snap = snapshots.find(s => s.id === checkpointId);
+    if (!snap) {
+      showToast('Snapshot not found — it may already be restored', 'error');
+      return;
+    }
+    // Backend payload contract: { checkpoint: { files: [{path, content}] }, projectId }
+    const filesPayload = [];
+    let budget = 4_000_000;
+    for (const [filePath, raw] of Object.entries(snap.contents || {})) {
+      const content = typeof raw === 'string' ? raw : '';
+      if (content.length > 500_000 || budget - content.length < 0) continue;
+      budget -= content.length;
+      filesPayload.push({ path: filePath, content });
+    }
+
+    let serverOk = false;
+    let serverError = null;
     try {
-      const res = await api.post('/agent/rollback', { dir });
-      if (res.data?.success) {
-        showToast('Restored workspace snapshot successfully', 'success');
-        await loadWorkspaceFiles();
-      }
+      const res = await api.post('/agent/rollback', {
+        checkpoint: { files: filesPayload },
+        projectId
+      });
+      serverOk = Boolean(res.data?.success);
+      if (!serverOk) serverError = res.data?.error || 'server refused';
     } catch (err) {
-      showToast(`Rollback failed: ${err.message}`, 'error');
+      serverError = err.message;
+    }
+
+    // Always restore local state (preview/editor usable even offline).
+    handleRollbackSnapshot(snap);
+    if (serverOk) {
+      await loadWorkspaceFiles();
+    } else {
+      showToast(`Server rollback failed (${serverError}) — local snapshot restored only`, 'warning');
     }
   };
 
@@ -1547,10 +1691,24 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   };
 
   // Main SSE Agent Stream Runner
-  const runCopilot = async (prompt, attachedImages = []) => {
+  const runCopilot = async (prompt, attachedImages = [], planOverride = null, runOptions = {}) => {
     if (!prompt || running) return;
+    // Resume inputs for a paused 'ask' run (approval banner → Approve) and
+    // for Retry after a failed run.
+    lastRunRef.current = { mode: 'code', prompt, attachedImages, planOverride };
+    // @file mentions → mentioned files first in projectFiles + contextFiles
+    // for the backend (ReAct slices the first 5; director gets the priority list).
+    const mentionedFiles = parseMentionPaths(prompt);
+    const mentionedSet = new Set(mentionedFiles);
+    const orderedFiles = mentionedFiles.length
+      ? [
+          ...files.filter(f => mentionedSet.has(filePathOf(f))),
+          ...files.filter(f => !mentionedSet.has(filePathOf(f))),
+        ]
+      : files;
 
     // Automatically record an internal Time-Travel Snapshot before executing AI prompt
+    preRunCheckpointRef.current = null;
     if (files.length > 0) {
       const snap = {
         id: `snap_${Date.now()}`,
@@ -1562,7 +1720,16 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
         activePath
       };
       setSnapshots(prev => [snap, ...prev.slice(0, 19)]);
+      preRunCheckpointRef.current = snap.id;
     }
+
+    // Best-effort git checkpoint of the workspace BEFORE the run (Devin-style
+    // /revert safety net). Failure is non-fatal — the client snapshot above is
+    // the primary rollback source.
+    api.post('/agent/checkpoint', {
+      projectId,
+      message: `copilot pre-run: ${prompt.slice(0, 120)}`
+    }).catch(() => {});
 
     setRunning(true);
     runStartRef.current = Date.now();
@@ -1572,22 +1739,33 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     setExpandedDiffIdx(null);
     setCopilotStatus({ label: '🤖 Agent thinking & planning...', tone: 'info' });
     const cleanDisplay = prompt.replace(/\[IMAGE_BASE64:[^\]]+\]/g, '').trim() || 'Analyze screenshot & apply upgrades';
-    setCopilotMessages(prev => [...prev, { role: 'user', content: cleanDisplay, images: attachedImages }]);
+    // Approval resume re-sends the SAME prompt — don't duplicate the user row.
+    if (!runOptions.approvalToken) {
+      setCopilotMessages(prev => [...prev, { role: 'user', content: cleanDisplay, images: attachedImages }]);
+    }
     setCopilotInput('');
     setPastedImages([]);
 
     const controller = new AbortController();
     abortRef.current = controller;
+    // Devin-style Stop: a stable task id lets us cancel the run server-side
+    // (POST /api/chat/tasks/:id/cancel) instead of only dropping the stream.
+    runTaskIdRef.current = `copilot-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const runTaskId = runTaskIdRef.current;
     const createdFilesTracker = [];
+    // Per-run de-dup for unknown SSE event types (see the catch-all branch below)
+    const unknownEventCounts = new Map();
 
     try {
       const response = await fetch(`${BACKEND}/api/agent/run`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-ai-dost-task-id': runTaskId },
         body: JSON.stringify({
           userPrompt: prompt,
           projectId,
-          projectFiles: files,
+          taskId: runTaskId,
+          projectFiles: orderedFiles,
+          ...(mentionedFiles.length ? { contextFiles: mentionedFiles } : {}),
           chatHistory: copilotMessages.slice(-20).map(m => ({
             role: m.role,
             content: (m.content || '').substring(0, 500),
@@ -1595,6 +1773,12 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
             file: m.file
           })),
           copilotDirector: true,
+          // User-approved (possibly edited) plan — backend executes this instead
+          // of generating its own. Absent in code mode / planner fallbacks.
+          ...(planOverride ? { plan: planOverride } : {}),
+          // Devin-style permission level + single-use approval token resume.
+          permissionLevel,
+          ...(runOptions.approvalToken ? { approvalToken: runOptions.approvalToken } : {}),
           preferredModel
         }),
         signal: controller.signal
@@ -1702,7 +1886,8 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                   duration: `${Math.max(6, parseInt(taskCount) * 8 || 12)}s`,
                   files: finalFiles,
                   content: data.message || `🎉 Copilot Director completed ${taskCount} autonomous specialist task(s) with verification.`,
-                  summary: data.message || `Director completed ${taskCount} tasks`
+                  summary: data.message || `Director completed ${taskCount} tasks`,
+                  checkpointDir: preRunCheckpointRef.current
                 }
               ]);
 
@@ -1717,7 +1902,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
             else if (data.type === 'director_error') {
               const errMsg = data.error || 'Director encountered an error';
               setCopilotStatus({ label: `❌ ${errMsg.substring(0, 40)}`, tone: 'error' });
-              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: `❌ Director Error: ${errMsg}` }]);
+              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'error', content: `❌ Director Error: ${errMsg}` }]);
               setPlanTasks(prev => prev.map(t => t.status === 'in_progress' ? { ...t, status: 'error' } : t));
             }
             // ── Director Canceled: Show cancellation and reset ──
@@ -1879,7 +2064,8 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                   duration: `${Math.max(6, parseInt(stepCount) * 4 || 12)}s`,
                   files: finalFiles,
                   content: data.message || `🎉 Fullstack task completed successfully across ${stepCount} steps.`,
-                  summary: data.message
+                  summary: data.message,
+                  checkpointDir: preRunCheckpointRef.current
                 }
               ]);
 
@@ -1890,19 +2076,149 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
               }
               setWorkspaceMode('preview');
             }
+            // ── ReAct-loop events (defensive: non-director run shapes must stay visible) ──
+            else if (data.type === 'start') {
+              const msg = data.message || 'Analyzing prompt & generating dynamic task plan...';
+              setCopilotStatus({ label: `🚀 ${msg}`, tone: 'work' });
+              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: `🚀 ${msg}` }]);
+            }
+            else if (data.type === 'error') {
+              const errMsg = String(data.message || data.error || 'Agent run failed');
+              setCopilotStatus({ label: `⚠️ ${errMsg.substring(0, 40)}`, tone: 'error' });
+              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'error', content: `⚠️ ${errMsg}` }]);
+              setPlanTasks(prev => prev.map(t => t.status === 'in_progress' ? { ...t, status: 'error' } : t));
+            }
+            else if (data.type === 'terminal_output') {
+              const out = String(data.output || data.text || '').trim();
+              if (out) {
+                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'step', content: `🖥️ Terminal:\n${out.slice(0, 2000)}` }]);
+              }
+            }
+            else if (data.type === 'self_heal') {
+              const healMsg = String(data.message || data.reason || data.error || 'Agent detected a failure and is repairing it...');
+              setCopilotStatus({ label: `🛠️ Self-heal: ${healMsg.substring(0, 35)}`, tone: 'work' });
+              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: `🛠️ Self-heal: ${healMsg}` }]);
+            }
+            // ── Approval gates (ReAct path with REQUIRE_EXPLICIT_APPROVAL) ──
+            else if (data.type === 'gate_approval_required' || data.type === 'gate_blocked' || data.type === 'gate_approved' || data.type === 'gate_approval_invalid') {
+              const emoji = data.type === 'gate_approved' ? '✅' : data.type === 'gate_approval_invalid' ? '⚠️' : '🔐';
+              const label = String(data.message || data.reason || data.type.replace(/_/g, ' '));
+              setCopilotStatus({ label: `${emoji} ${label}`.substring(0, 60), tone: data.type === 'gate_approved' ? 'success' : 'work' });
+              setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: `${emoji} ${label}` }]);
+              // Ask-mode pause with a real token → actionable Approve/Reject banner
+              if (data.type === 'gate_approval_required' && data.gate && data.gate.approval_token) {
+                setCopilotMessages(prev => [...prev, {
+                  role: 'assistant',
+                  kind: 'approval',
+                  token: data.gate.approval_token,
+                  gate: data.gate
+                }]);
+              }
+            }
+            // ── Unknown event: never silently drop (first 2 per type as rows, then count in status) ──
+            else {
+              const evtType = String(data.type || 'event');
+              const seen = unknownEventCounts.get(evtType) || 0;
+              unknownEventCounts.set(evtType, seen + 1);
+              if (seen < 2) {
+                const detail = data.message || data.status || data.summary || data.error || '';
+                setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: `· [${evtType}]${detail ? ` ${String(detail).slice(0, 160)}` : ''}` }]);
+              } else {
+                setCopilotStatus({ label: `· [${evtType}] ×${seen + 1}`, tone: 'neutral' });
+              }
+            }
           } catch (_) {}
         }
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
         setCopilotStatus({ label: `⚠️ ${err.message}`, tone: 'error' });
+        setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'error', content: `⚠️ ${err.message}` }]);
         showToast(err.message, 'error');
       }
     } finally {
-      setRunning(false);
-      // Force-save session after every agent run completes to prevent data loss
-      setTimeout(() => saveCurrentSession(), 500);
+      // Only the still-active run may clear the running state — a stopped run's
+      // finally must not kill a newer run that started in the meantime.
+      if (abortRef.current === controller) {
+        setRunning(false);
+        // Force-save session after every agent run completes to prevent data loss
+        setTimeout(() => saveCurrentSession(), 500);
+      }
     }
+  };
+
+  // Ask mode (Devin parity): answer the question through the chat cascade —
+  // never touches the workspace, never calls /agent/run.
+  const runAskMode = async (prompt) => {
+    lastRunRef.current = { mode: 'ask', prompt };
+    setCopilotInput('');
+    setPastedImages([]);
+    setCopilotMessages(prev => [...prev, { role: 'user', content: prompt }]);
+    setCopilotStatus({ label: '💬 Ask mode — answering (workspace untouched)', tone: 'work' });
+    try {
+      const res = await api.post('/chat', { message: prompt });
+      const reply = res.data?.reply || '';
+      if (!reply || !String(reply).trim()) throw new Error('Empty reply from provider');
+      setCopilotMessages(prev => [...prev, { role: 'assistant', content: String(reply), model: res.data?.model }]);
+      setCopilotStatus({ label: '💬 Ask answered', tone: 'success' });
+    } catch (err) {
+      setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'error', content: `⚠️ Ask mode failed: ${err.message}` }]);
+      setCopilotStatus({ label: '⚠️ Ask mode failed', tone: 'error' });
+    }
+  };
+
+  // ── /btw side question: ask WITHOUT interrupting the running agent ──────
+  const askSideChat = async (question) => {
+    setCopilotInput('');
+    setMentionQuery(null);
+    setPastedImages([]);
+    setCopilotMessages(prev => [...prev, { role: 'user', content: `/btw ${question}` }]);
+    try {
+      const res = await api.post('/chat', { message: question });
+      const reply = res.data?.reply || '';
+      if (!reply || !String(reply).trim()) throw new Error('Empty reply from provider');
+      setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'sidechat', content: String(reply) }]);
+    } catch (err) {
+      setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'sidechat', content: `⚠️ Side question failed: ${err.message}` }]);
+    }
+  };
+
+  // ── @file mentions (composer autocomplete) ────────────────────────────────
+  const handleComposerChange = (e) => {
+    const value = e.target.value;
+    setCopilotInput(value);
+    const caret = e.target.selectionStart ?? value.length;
+    setMentionQuery(detectMention(value, caret));
+    setMentionIdx(0);
+  };
+
+  const mentionMatches = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const q = mentionQuery.toLowerCase();
+    return files
+      .map(filePathOf)
+      .filter(p => p && p.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [mentionQuery, files]);
+
+  const insertMention = (filePath) => {
+    const el = composerRef.current;
+    const value = copilotInput;
+    const caret = el && typeof el.selectionStart === 'number' ? el.selectionStart : value.length;
+    const before = value.slice(0, caret);
+    const after = value.slice(caret);
+    const token = before.match(/@[^\s@]*$/);
+    const start = token ? before.length - token[0].length : before.length;
+    const next = `${before.slice(0, start)}@${filePath} ${after}`;
+    setCopilotInput(next);
+    setMentionQuery(null);
+    setMentionIdx(0);
+    requestAnimationFrame(() => {
+      if (!el) return;
+      el.focus();
+      const pos = start + filePath.length + 2;
+      el.setSelectionRange(pos, pos);
+    });
   };
 
   const handleSend = async (text, isWizardPrompt = false) => {
@@ -1910,7 +2226,30 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
       return openProjectWizard(text || copilotInput);
     }
     const rawPrompt = (text || copilotInput).trim();
+    // /btw side question works even WHILE a run is in progress — it only
+    // calls /chat and never touches the run pipeline.
+    if (rawPrompt.startsWith('/btw')) {
+      const question = rawPrompt.replace(/^\/btw\s*/, '');
+      if (!question) return;
+      return askSideChat(question);
+    }
     if ((!rawPrompt && pastedImages.length === 0) || running) return;
+
+    // Image generation is NOT a build task. Short-circuit BEFORE /agent/plan —
+    // the planner used to turn "ek cat ka images banao" into a multi-file plan
+    // and started writing code instead of rendering the picture. (Screenshot
+    // attachments keep the normal copilot path — those are edit requests.)
+    if (pastedImages.length === 0 && isImageCreateRequest(rawPrompt)) {
+      setCopilotInput('');
+      setPastedImages([]);
+      await runCopilotImageRequest({
+        prompt: rawPrompt,
+        api,
+        pushMessage: (m) => setCopilotMessages(prev => [...prev, m]),
+        setStatus: setCopilotStatus,
+      });
+      return;
+    }
 
     const currentImages = [...pastedImages];
     let finalPrompt = rawPrompt || 'Please review this screenshot reference and apply the requested UI changes or upgrades.';
@@ -1922,7 +2261,12 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
       finalPrompt = `${finalPrompt}\n\n${imgTags}`;
     }
 
-    if (!planGate) {
+    if (agentMode === 'ask') {
+      // Ask never sends base64 image tags to /chat — answer from text only.
+      return runAskMode(rawPrompt || 'Review the attached screenshot reference and describe what you see.');
+    }
+
+    if (agentMode !== 'plan') {
       setPastedImages([]);
       return runCopilot(finalPrompt, currentImages.map(i => i.dataUrl));
     }
@@ -1946,13 +2290,59 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     if (!pendingPlan) return;
     const prompt = pendingPlan.prompt;
     const images = pendingPlan.images || [];
+    // Approved plan is OVERRIDDEN into the run (backend executes this plan,
+    // not a freshly LLM-generated one) — title → objective, sequential chain.
+    const cleanSteps = (pendingPlan.tasks || []).filter(t => (t.title || '').trim());
+    const presetPlan = {
+      summary: pendingPlan.summary || undefined,
+      tasks: cleanSteps.map((t, i) => ({
+        id: `task-${i + 1}`,
+        objective: String(t.title).trim().slice(0, 12000),
+        ...(t.specialty ? { specialty: t.specialty } : {}),
+        dependsOn: i > 0 ? [`task-${i}`] : [],
+        expectedOutput: `Completed step: ${String(t.title).trim().slice(0, 400)}`
+      }))
+    };
     setPendingPlan(null);
-    runCopilot(prompt, images);
+    runCopilot(prompt, images, presetPlan.tasks.length ? presetPlan : null);
   };
 
   const cancelPlan = () => {
     setPendingPlan(null);
     setCopilotStatus({ label: 'Plan cancelled', tone: 'neutral' });
+  };
+
+  // ── Ask-mode approval (single-use gatekeeper token) ──────────────────────
+  const approveRun = (token) => {
+    const last = lastRunRef.current;
+    setCopilotMessages(prev => prev.map(m => (
+      m.kind === 'approval' && m.token === token ? { ...m, resolved: 'approved' } : m
+    )));
+    if (!last) {
+      setCopilotStatus({ label: 'No paused run to resume', tone: 'neutral' });
+      return;
+    }
+    runCopilot(last.prompt, last.attachedImages || [], last.planOverride || null, { approvalToken: token });
+  };
+
+  const rejectApproval = (token) => {
+    setCopilotMessages(prev => prev.map(m => (
+      m.kind === 'approval' && m.token === token ? { ...m, resolved: 'rejected' } : m
+    )));
+    setCopilotStatus({ label: 'Run rejected by user', tone: 'neutral' });
+    showToast('Run rejected — nothing was changed', 'info');
+  };
+
+  // ── Retry the last run from a failed (kind:'error') message row ─────────
+  const retryLastRun = () => {
+    if (running) return;
+    const last = lastRunRef.current;
+    if (!last) {
+      showToast('No previous run to retry', 'info');
+      return;
+    }
+    if (last.mode === 'ask') return runAskMode(last.prompt);
+    runCopilot(last.prompt, last.attachedImages || [], last.planOverride || null);
   };
 
   const handleSendRef = useRef(handleSend);
@@ -2088,9 +2478,12 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   const handleRollbackSnapshot = useCallback((snap) => {
     if (!snap) return;
     setFiles(snap.files || []);
-    setContents(snap.contents || {});
+    const snapshotContents = snap.contents || {};
+    contentsRef.current = snapshotContents;
+    setContents(snapshotContents);
     setActivePath(snap.activePath || (snap.files && snap.files[0] ? snap.files[0].path : null));
     setOpenTabs(snap.files ? snap.files.slice(0, 4).map(f => f.path) : []);
+    setDirtyPaths(new Set());
     setSnapshotMenuOpen(false);
     showToast(`⏪ Reverted workspace to snapshot before: "${snap.prompt}"`, 'info');
   }, [showToast]);
@@ -2245,9 +2638,14 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
       fullPath = target.trim();
     } else {
       const parentFolder = typeof target === 'string' ? target.trim() : '';
-      const name = window.prompt(parentFolder ? `Create new file inside "${parentFolder}":` : 'Enter new file name (e.g. src/components/Card.jsx):');
-      if (!name || !name.trim()) return;
-      fullPath = parentFolder ? `${parentFolder}/${name.trim()}` : name.trim();
+      setPromptModal({
+        type: 'file',
+        parentFolder,
+        title: parentFolder ? `Create file inside "${parentFolder}"` : 'Create new file',
+        hint: 'Use a path such as src/components/Card.jsx.',
+        placeholder: 'src/components/Card.jsx'
+      });
+      return;
     }
     fullPath = normalizePath(fullPath);
     if (!fullPath) return;
@@ -2282,9 +2680,14 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
       fullPath = target.trim();
     } else {
       const parentFolder = typeof target === 'string' ? target.trim() : '';
-      const name = window.prompt(parentFolder ? `Create folder inside "${parentFolder}":` : 'Enter new folder name (e.g. src/utils):');
-      if (!name || !name.trim()) return;
-      fullPath = parentFolder ? `${parentFolder}/${name.trim()}` : name.trim();
+      setPromptModal({
+        type: 'folder',
+        parentFolder,
+        title: parentFolder ? `Create folder inside "${parentFolder}"` : 'Create new folder',
+        hint: 'Use a path such as src/components.',
+        placeholder: 'src/components'
+      });
+      return;
     }
     fullPath = normalizePath(fullPath);
     if (!fullPath) return;
@@ -2315,9 +2718,20 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
 
   const handleRename = async (oldPath) => {
     const cleanOld = normalizePath(oldPath);
-    const newName = window.prompt(`Rename "${cleanOld}" to:`, cleanOld);
-    if (!newName || !newName.trim() || normalizePath(newName) === cleanOld) return;
-    const newPath = normalizePath(newName);
+    setPromptModal({
+      type: 'rename',
+      oldPath: cleanOld,
+      title: `Rename "${cleanOld}"`,
+      hint: 'Enter the new file or folder path.',
+      placeholder: cleanOld,
+      initial: cleanOld
+    });
+  };
+
+  const renamePath = async (oldPath, requestedPath) => {
+    const cleanOld = normalizePath(oldPath);
+    if (!requestedPath || !requestedPath.trim() || normalizePath(requestedPath) === cleanOld) return;
+    const newPath = normalizePath(requestedPath);
     
     // Check collision
     if (files.some(f => normalizePath(f.path).toLowerCase() === newPath.toLowerCase())) {
@@ -2364,16 +2778,16 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     if (!window.confirm(`Are you sure you want to delete folder "${folderPath}" and all its contents?`)) return;
     try {
       await api.delete(`/memory/project/${projectId}/folder`, { data: { path: folderPath } });
-      setFiles(prev => prev.filter(f => !f.path.startsWith(folderPath)));
-      setContents(prev => {
-        const next = { ...prev };
-        Object.keys(next).forEach(k => {
-          if (k.startsWith(folderPath)) delete next[k];
-        });
-        return next;
+      setFiles(prev => prev.filter(f => !isPathInFolder(f.path, folderPath)));
+      const nextContents = { ...contentsRef.current };
+      Object.keys(nextContents).forEach(k => {
+        if (isPathInFolder(k, folderPath)) delete nextContents[k];
       });
-      setOpenTabs(prev => prev.filter(t => !t.startsWith(folderPath)));
-      if (activePath && activePath.startsWith(folderPath)) setActivePath(null);
+      contentsRef.current = nextContents;
+      setContents(nextContents);
+      setOpenTabs(prev => prev.filter(t => !isPathInFolder(t, folderPath)));
+      setDirtyPaths(prev => new Set(Array.from(prev).filter(p => !isPathInFolder(p, folderPath))));
+      if (activePath && isPathInFolder(activePath, folderPath)) setActivePath(null);
       showToast(`🗑️ Deleted folder ${folderPath}`, 'info');
     } catch (err) {
       showToast(`Delete folder failed: ${err.message}`, 'error');
@@ -2385,9 +2799,11 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     try {
       await api.delete(`/memory/project/${projectId}`);
       setFiles([]);
+      contentsRef.current = {};
       setContents({});
       setOpenTabs([]);
       setActivePath(null);
+      setDirtyPaths(new Set());
       setCopilotMessages([]);
       setPlanTasks([]);
       setCopilotStatus({ label: '', tone: 'info' });
@@ -2453,16 +2869,18 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
       <div className="flex-1 flex overflow-hidden min-h-0">
 
         {/* ── LEFT PANE: AI COPILOT CHAT & AUTONOMOUS ENGINE ─────────────────── */}
-        <aside className="w-[430px] shrink-0 flex flex-col bg-canvas-base border-r border-border z-10">
+        <aside className="w-[390px] shrink-0 flex flex-col bg-canvas-base border-r border-border z-10">
 
           {/* Copilot Header */}
-          <div className="flex items-center justify-between px-4 py-2.5 bg-canvas-surface border-b border-border">
+          <div className="flex items-center justify-between px-4 py-3 bg-canvas-base border-b border-border">
             <div className="flex items-center gap-2">
               <div className="relative">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
-                <span className="w-2 h-2 rounded-full bg-emerald-400 absolute inset-0 animate-ping opacity-75" />
+                <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block shadow-[0_0_8px_rgba(52,211,153,.65)]" />
               </div>
-              <span className="text-xs font-bold text-paper-100 tracking-wide">Copilot</span>
+              <div>
+                <span className="text-xs font-semibold text-paper-100 tracking-wide block">Copilot</span>
+                <span className="text-[9px] uppercase tracking-[0.14em] text-ink-muted">Agent workspace</span>
+              </div>
               <div className="relative">
                 <button
                   type="button"
@@ -2471,9 +2889,9 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                   title="Preferred model — failure still falls back through the cascade"
                   data-testid="model-picker-btn"
                 >
-                  <Zap size={9} className="text-accent" />
+                  <AppIcon name="zap" size={9} className="text-accent" />
                   {MODEL_OPTIONS.find(o => o.v === preferredModel)?.l || 'auto'}
-                  <ChevronDown size={9} />
+                  <AppIcon name="chevronDown" size={9} />
                 </button>
                 {modelMenuOpen && (
                   <>
@@ -2494,7 +2912,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                           }`}
                         >
                           <span>{opt.l}</span>
-                          {preferredModel === opt.v && <Check size={11} />}
+                          {preferredModel === opt.v && <AppIcon name="check" size={11} />}
                         </button>
                       ))}
                       <div className="px-3 pt-1.5 pb-1 text-[9px] text-ink-muted border-t border-border-subtle mt-1">
@@ -2507,16 +2925,114 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
             </div>
 
             <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => setPlanGate(g => !g)}
-                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
-                  planGate
-                    ? 'bg-accent/20 text-accent border-accent/40 shadow-xs'
-                    : 'bg-canvas-elevated text-ink-muted border-border'
-                }`}
-                title={planGate ? 'Plan Gate ON (Review plan before execution)' : 'Autopilot ON (Instant execution)'}
+              <div
+                className="flex items-center rounded-lg border border-border overflow-hidden"
+                role="radiogroup"
+                aria-label="Agent mode"
+                data-testid="agent-mode-switch"
               >
-                {planGate ? 'Plan first' : 'Run mode'}
+                {[
+                  { v: 'ask', l: 'Ask', t: 'Ask mode — answers only, never touches files' },
+                  { v: 'plan', l: 'Plan', t: 'Plan mode — review & edit the plan, then approve' },
+                  { v: 'code', l: 'Code', t: 'Code mode — autonomous execution (default)' },
+                ].map(opt => (
+                  <button
+                    key={opt.v}
+                    role="radio"
+                    aria-checked={agentMode === opt.v}
+                    onClick={() => {
+                      setAgentMode(opt.v);
+                      try { window.localStorage.setItem('ai_dost_copilot_mode', opt.v); } catch (_) { /* ignore */ }
+                      showToast(`Mode: ${opt.l}`, 'info');
+                    }}
+                    title={opt.t}
+                    className={`px-2.5 py-1 text-[10px] font-bold transition-all cursor-pointer ${
+                      agentMode === opt.v
+                        ? 'bg-accent/20 text-accent'
+                        : 'bg-canvas-elevated text-ink-muted hover:text-paper-200'
+                    }`}
+                  >
+                    {opt.l}
+                  </button>
+                ))}
+              </div>
+
+              <div
+                className="flex items-center rounded-lg border border-border overflow-hidden"
+                role="radiogroup"
+                aria-label="Agent permission level"
+                data-testid="permission-switch"
+              >
+                {[
+                  { v: 'ask', l: 'Ask', t: 'Ask — pause & require approval before every run' },
+                  { v: 'auto', l: 'Auto', t: 'Auto — canonical safety policy decides' },
+                  { v: 'turbo', l: 'Turbo', t: 'Turbo — auto-approve (hard blocks still apply)' },
+                ].map(opt => (
+                  <button
+                    key={opt.v}
+                    role="radio"
+                    aria-checked={permissionLevel === opt.v}
+                    onClick={() => {
+                      setPermissionLevel(opt.v);
+                      try { window.localStorage.setItem('ai_dost_copilot_permissions', opt.v); } catch (_) { /* ignore */ }
+                      showToast(`Permissions: ${opt.l}`, 'info');
+                    }}
+                    title={opt.t}
+                    className={`px-2 py-1 text-[10px] font-bold transition-all cursor-pointer ${
+                      permissionLevel === opt.v
+                        ? 'bg-amber-400/15 text-amber-400'
+                        : 'bg-canvas-elevated text-ink-muted hover:text-paper-200'
+                    }`}
+                  >
+                    {opt.l}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                data-testid="watch-toggle"
+                aria-pressed={watching}
+                onClick={() => {
+                  setWatching((prev) => {
+                    const next = !prev;
+                    try { window.localStorage.setItem('ai_dost_copilot_watch', next ? '1' : '0'); } catch (_) { /* ignore */ }
+                    showToast(next ? 'Watch mode ON — live workspace updates' : 'Watch mode OFF', 'info');
+                    return next;
+                  });
+                }}
+                title={watching
+                  ? 'Watch mode: streaming workspace file changes (click to stop)'
+                  : 'Watch mode: live-refresh workspace file changes (click to start)'}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  watching
+                    ? 'bg-emerald-400/15 text-emerald-400 shadow-glow-sm'
+                    : 'hover:bg-canvas-elevated text-ink-muted hover:text-paper-100'
+                }`}
+              >
+                <AppIcon name="eye" size={14} />
+              </button>
+
+              <button
+                data-testid="memory-btn"
+                aria-expanded={memoryOpen}
+                onClick={() => {
+                  const next = !memoryOpen;
+                  setMemoryOpen(next);
+                  if (next) loadMemoryNotes();
+                }}
+                title={`Self-learning notes (${memoryCount} saved — survive project deletion)`}
+                className={`relative p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  memoryOpen
+                    ? 'bg-accent/15 text-accent'
+                    : 'hover:bg-canvas-elevated text-ink-muted hover:text-paper-100'
+                }`}
+              >
+                <AppIcon name="brain" size={14} />
+                {memoryCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-[3px] rounded-full bg-accent/90 text-canvas text-[8px] font-bold leading-[14px] text-center pointer-events-none">
+                    {memoryCount > 99 ? '99+' : memoryCount}
+                  </span>
+                )}
               </button>
 
               <button
@@ -2529,10 +3045,94 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                 className="p-1.5 rounded-lg hover:bg-canvas-elevated text-ink-muted hover:text-paper-100 transition-colors cursor-pointer"
                 title="Clear Conversation"
               >
-                <Trash2 size={14} />
+                <AppIcon name="trash" size={14} />
               </button>
             </div>
           </div>
+
+          {/* Self-learning memory panel (notes survive project deletion) */}
+          {memoryOpen && (
+            <div
+              data-testid="memory-panel"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/55"
+              onClick={() => setMemoryOpen(false)}
+            >
+              <div
+                className="w-[520px] max-w-[92vw] max-h-[72vh] overflow-y-auto bg-canvas-surface border border-border rounded-xl p-4 space-y-2.5 shadow-surface-card"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <AppIcon name="brain" size={15} className="text-accent" />
+                    <span className="text-sm font-bold text-paper-100">Learning Notes</span>
+                    <span className="px-1.5 py-0.5 rounded-md bg-accent/10 text-accent text-[10px] font-bold font-mono">
+                      {memoryCount}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {memoryNotes.length > 0 && (
+                      <button
+                        data-testid="memory-clear-btn"
+                        onClick={clearMemoryNotes}
+                        className="px-2 py-1 rounded-md bg-red-500/10 text-red-400 text-[10px] font-bold hover:bg-red-500/20 transition-colors cursor-pointer"
+                      >
+                        Clear all
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setMemoryOpen(false)}
+                      className="p-1 rounded-md hover:bg-canvas-elevated text-ink-muted hover:text-paper-100 transition-colors cursor-pointer"
+                      title="Close"
+                    >
+                      <AppIcon name="close" size={14} />
+                    </button>
+                  </div>
+                </div>
+
+                {memoryNotes.length === 0 ? (
+                  <p className="text-xs text-ink-muted leading-relaxed py-3 text-center">
+                    No notes yet — build a project and the Copilot will save lessons automatically.
+                    Notes stay even if you delete the project.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {memoryNotes.map((n) => (
+                      <div
+                        key={n.id}
+                        data-testid="memory-note-row"
+                        className="flex items-start gap-2 p-2 rounded-lg bg-canvas-elevated/60 border border-border-subtle group"
+                      >
+                        <span
+                          className={`shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold font-mono uppercase ${
+                            n.kind === 'fix'
+                              ? 'bg-amber-400/15 text-amber-400'
+                              : 'bg-emerald-400/15 text-emerald-400'
+                          }`}
+                        >
+                          {n.kind}
+                        </span>
+                        <span className="flex-1 text-[11px] text-paper-200 leading-snug break-words">
+                          {n.content}
+                        </span>
+                        <button
+                          data-testid="memory-note-delete"
+                          onClick={() => deleteMemoryNote(n.id)}
+                          className="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 text-ink-muted hover:text-red-400 transition-opacity cursor-pointer"
+                          title="Delete note"
+                        >
+                          <AppIcon name="trash" size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <p className="text-[10px] text-ink-muted leading-snug pt-1 border-t border-border-subtle">
+                  Notes are saved per user and survive project deletion — future runs reuse them for higher accuracy.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Plan Checklist Card (Devin-style) */}
           <CopilotPlanCard
@@ -2549,7 +3149,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
               <div className="space-y-4 py-2">
                 <div className="p-4 rounded-xl bg-canvas-surface border border-border shadow-surface-card text-center space-y-2">
                   <div className="w-9 h-9 mx-auto rounded-lg flex items-center justify-center bg-accent/10 text-accent border border-accent/20 shadow-glow-sm">
-                    <Code2 size={18} />
+                    <AppIcon name="code" size={18} />
                   </div>
                   <h3 className="text-sm font-bold text-paper-100 tracking-tight">What would you like to build?</h3>
                   <p className="text-xs text-ink-muted leading-relaxed font-sans">
@@ -2586,24 +3186,51 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
               <div className="rounded-xl p-4 bg-canvas-surface border border-accent/30 space-y-3 shadow-surface-card">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-accent uppercase tracking-wider flex items-center gap-1.5">
-                    <ShieldCheck size={14} /> Plan ready for approval
+                    <AppIcon name="shield" size={14} /> Plan ready for approval
                   </span>
                   <span className="text-[10px] text-ink-muted font-mono">Approve to proceed</span>
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-1.5" data-testid="plan-editor">
                   {pendingPlan.tasks.map((t, i) => (
-                    <div key={i} className="flex items-start gap-2 text-xs text-paper-300 font-mono">
-                      <span className="text-accent">▸</span>
-                      <span>{t.title}</span>
+                    <div key={i} className="flex items-center gap-2 text-xs font-mono">
+                      <span className="text-accent shrink-0">▸</span>
+                      <input
+                        value={t.title || ''}
+                        onChange={(e) => setPendingPlan(p => p ? ({
+                          ...p,
+                          tasks: p.tasks.map((x, idx) => idx === i ? { ...x, title: e.target.value } : x)
+                        }) : p)}
+                        aria-label={`Plan step ${i + 1}`}
+                        data-testid="plan-step-input"
+                        className="flex-1 min-w-0 bg-canvas-base border border-border rounded px-2 py-1 text-paper-200 text-[11px] focus:outline-none focus:border-accent/50"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setPendingPlan(p => p ? ({ ...p, tasks: p.tasks.filter((_, idx) => idx !== i) }) : p)}
+                        title="Remove step"
+                        className="p-1 text-ink-muted hover:text-red-400 transition-colors cursor-pointer shrink-0"
+                      >
+                        <AppIcon name="close" size={11} />
+                      </button>
                     </div>
                   ))}
+                  <button
+                    type="button"
+                    onClick={() => setPendingPlan(p => p ? ({ ...p, tasks: [...p.tasks, { id: `manual-${Date.now()}`, title: '' }] }) : p)}
+                    className="text-[10px] text-accent hover:underline cursor-pointer flex items-center gap-1 pt-0.5"
+                    data-testid="plan-add-step"
+                  >
+                    <AppIcon name="plus" size={10} /> Add step
+                  </button>
                 </div>
                 <div className="flex gap-2 pt-2 border-t border-border">
                   <button
                     onClick={approvePlan}
-                    className="flex-1 py-2 rounded-lg text-xs font-bold bg-accent hover:bg-accent-hover text-white transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                    disabled={!pendingPlan.tasks.some(t => (t.title || '').trim())}
+                    className="flex-1 py-2 rounded-lg text-xs font-bold bg-accent hover:bg-accent-hover text-white transition-colors cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                    data-testid="plan-approve-btn"
                   >
-                    <Play size={12} className="fill-white" /> Approve &amp; Build
+                    <AppIcon name="play" size={12} className="fill-white" /> Approve &amp; Build
                   </button>
                   <button
                     onClick={cancelPlan}
@@ -2617,6 +3244,95 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
 
             {/* Chat Timeline */}
             {copilotMessages.map((m, i) => {
+              if (m.kind === 'error') {
+                return (
+                  <div
+                    key={i}
+                    className="rounded-lg border border-red-400/40 bg-red-400/10 px-3 py-2 flex flex-col gap-1.5"
+                    data-testid="error-row"
+                  >
+                    <div className="flex items-start gap-2 text-[11px] font-mono text-red-300">
+                      <AppIcon name="alert" size={12} className="shrink-0 mt-0.5" />
+                      <span className="break-words whitespace-pre-wrap">{m.content}</span>
+                      <span className="ml-auto shrink-0 text-[9px] text-ink-muted tabular-nums">{fmtTs(m.ts)}</span>
+                    </div>
+                    {!running && lastRunRef.current && (
+                      <div className="pl-5">
+                        <button
+                          type="button"
+                          onClick={retryLastRun}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold bg-red-400/15 hover:bg-red-400/25 text-red-200 border border-red-400/40 transition-colors cursor-pointer"
+                          data-testid="msg-retry-btn"
+                        >
+                          <AppIcon name="rotate" size={10} /> Retry
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+              if (m.kind === 'sidechat') {
+                const failedSide = String(m.content || '').startsWith('⚠️');
+                return (
+                  <div
+                    key={i}
+                    className={`rounded-lg border px-3 py-2 flex flex-col gap-1 ${
+                      failedSide
+                        ? 'border-red-400/40 bg-red-400/10'
+                        : 'border-indigo-400/40 bg-indigo-400/10'
+                    }`}
+                    data-testid="sidechat-row"
+                  >
+                    <div className={`flex items-center gap-2 text-[9px] uppercase tracking-wider font-bold ${failedSide ? 'text-red-300' : 'text-indigo-300'}`}>
+                      <AppIcon name="message" size={11} />
+                      BTW — side question (run uninterrupted)
+                      <span className="ml-auto text-ink-muted tabular-nums">{fmtTs(m.ts)}</span>
+                    </div>
+                    <div className="text-[11px] font-mono text-paper-200 whitespace-pre-wrap break-words">{m.content}</div>
+                  </div>
+                );
+              }
+              if (m.kind === 'approval') {
+                const resolved = m.resolved;
+                return (
+                  <div
+                    key={i}
+                    className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2.5 flex flex-col gap-2"
+                    data-testid="approval-banner"
+                  >
+                    <div className="flex items-center gap-2 text-[11px] font-mono text-amber-300">
+                      <AppIcon name="shield" size={13} />
+                      <span className="font-bold uppercase tracking-wider text-[9px]">Approval required — ask mode paused this run</span>
+                      <span className="ml-auto shrink-0 text-[9px] text-ink-muted tabular-nums">{fmtTs(m.ts)}</span>
+                    </div>
+                    {!resolved ? (
+                      <div className="flex items-center gap-2 pl-5">
+                        <button
+                          type="button"
+                          onClick={() => approveRun(m.token)}
+                          className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-amber-400 text-black hover:bg-amber-300 transition-colors cursor-pointer"
+                          data-testid="approval-approve-btn"
+                        >
+                          Approve &amp; Run
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => rejectApproval(m.token)}
+                          className="px-3 py-1.5 rounded-lg text-[11px] font-medium bg-canvas-elevated hover:bg-canvas-overlay text-paper-300 border border-border transition-all cursor-pointer"
+                          data-testid="approval-reject-btn"
+                        >
+                          Reject
+                        </button>
+                        <span className="text-[9px] text-ink-muted">token {String(m.token || '').slice(0, 8)}…</span>
+                      </div>
+                    ) : (
+                      <div className={`pl-5 text-[11px] ${resolved === 'approved' ? 'text-emerald-400' : 'text-ink-muted'}`}>
+                        {resolved === 'approved' ? '✓ Approved — resuming run…' : '✗ Rejected — run cancelled'}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
               if (m.kind === 'thought') {
                 const longThought = (m.content || '').length > 120;
                 const thoughtOpen = openThoughts.has(i) || !longThought;
@@ -2628,11 +3344,11 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                       className={`flex items-center gap-2 text-left ${longThought ? 'cursor-pointer' : 'cursor-default'}`}
                       title={longThought ? (thoughtOpen ? 'Collapse thought' : 'Expand thought') : undefined}
                     >
-                      <Sparkles size={12} className="text-accent/70 shrink-0" />
+                      <AppIcon name="sparkles" size={12} className="text-accent/70 shrink-0" />
                       <span className="font-bold text-ink-muted text-[9px] uppercase tracking-wider">{m.agent || 'thinking'}</span>
                       <span className="ml-auto shrink-0 text-[9px] text-ink-muted tabular-nums">{fmtTs(m.ts)}</span>
                       {longThought && (
-                        <ChevronRight size={11} className={`shrink-0 text-ink-muted transition-transform ${thoughtOpen ? 'rotate-90' : ''}`} />
+                        <AppIcon name="chevronRight" size={11} className={`shrink-0 text-ink-muted transition-transform ${thoughtOpen ? 'rotate-90' : ''}`} />
                       )}
                     </button>
                     {thoughtOpen ? (
@@ -2646,7 +3362,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
               if (m.kind === 'tool') {
                 return (
                   <div key={i} className="flex items-center gap-2 text-[11px] font-mono text-paper-300 bg-canvas-subtle/70 px-3 py-2 rounded-lg border border-border-subtle">
-                    <Zap size={12} className="text-accent shrink-0" />
+                    <AppIcon name="zap" size={12} className="text-accent shrink-0" />
                     <span className="truncate">{stripEmoji(typeof m.label === 'object' ? JSON.stringify(m.label) : String(m.label || ''))}</span>
                     <span className="ml-auto shrink-0 text-[9px] text-ink-muted tabular-nums">{fmtTs(m.ts)}</span>
                   </div>
@@ -2674,7 +3390,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                         data-testid="file-row-main"
                         title={canExpand ? (diffExpanded ? 'Collapse diff' : 'Show inline diff') : `Open ${m.file || ''} in editor`}
                       >
-                        <FileDiff size={12} className="text-accent shrink-0" />
+                        <AppIcon name="fileDiff" size={12} className="text-accent shrink-0" />
                         <span className="flex-1 min-w-0 text-[11px] font-mono text-paper-300 truncate">
                           {m.file || m.content}
                         </span>
@@ -2696,7 +3412,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                         title="Open in editor"
                         data-testid="file-row-open"
                       >
-                        <ChevronRight size={12} className={`transition-transform ${diffExpanded ? 'rotate-90' : ''}`} />
+                        <AppIcon name="chevronRight" size={12} className={`transition-transform ${diffExpanded ? 'rotate-90' : ''}`} />
                       </button>
                     </div>
                     {diffOps && (
@@ -2800,7 +3516,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
               return (
                 <div key={i} className="flex gap-2.5 items-start">
                   <div className="w-6 h-6 mt-0.5 rounded-md flex items-center justify-center shrink-0 bg-canvas-elevated border border-border text-ink-muted">
-                    <Bot size={12} />
+                    <AppIcon name="bot" size={12} />
                   </div>
                   <div className="max-w-[92%] px-3.5 py-2.5 rounded-xl rounded-tl-sm text-xs leading-relaxed bg-canvas-surface border border-border text-paper-200 space-y-1">
                     <CopilotMarkdown text={m.content} />
@@ -2820,7 +3536,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
               {selectedInspectorElement && (
                 <div className="flex items-center justify-between px-3 py-1 bg-accent/15 border-b border-accent/25 text-[11px] font-mono text-accent">
                   <span className="truncate flex items-center gap-1.5">
-                    <Crosshair size={12} className="text-accent shrink-0" />
+                    <AppIcon name="crosshair" size={12} className="text-accent shrink-0" />
                     <span>Target: &lt;{selectedInspectorElement.tag}&gt;</span>
                     {selectedInspectorElement.text && (
                       <span className="text-paper-200 truncate">&quot;{selectedInspectorElement.text.slice(0, 25)}&quot;</span>
@@ -2832,7 +3548,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                     className="text-ink-muted hover:text-paper-100 p-0.5 ml-2 cursor-pointer"
                     title="Clear element selection"
                   >
-                    <X size={12} />
+                    <AppIcon name="close" size={12} />
                   </button>
                 </div>
               )}
@@ -2857,24 +3573,72 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                         className="w-4 h-4 rounded-full bg-red-500/80 hover:bg-red-500 text-white flex items-center justify-center text-[10px] cursor-pointer transition-colors"
                         title="Remove image"
                       >
-                        <X size={10} />
+                        <AppIcon name="close" size={10} />
                       </button>
                     </div>
                   ))}
                   <span className="text-[10px] text-accent/80 font-mono flex items-center gap-1">
-                    <Sparkles size={11} /> Multimodal Prompt Active
+                    <AppIcon name="sparkles" size={11} /> Multimodal Prompt Active
                   </span>
                 </div>
               )}
 
+              {mentionQuery !== null && mentionMatches.length > 0 && (
+                <div
+                  className="absolute bottom-full left-0 right-0 mb-2 max-h-52 overflow-auto rounded-lg border border-border bg-canvas-elevated shadow-xl z-20 py-1"
+                  data-testid="file-mention-dropdown"
+                  role="listbox"
+                  aria-label="File mentions"
+                >
+                  {mentionMatches.map((p, i) => (
+                    <button
+                      key={p}
+                      type="button"
+                      role="option"
+                      aria-selected={i === mentionIdx}
+                      onClick={() => insertMention(p)}
+                      className={`w-full text-left px-2.5 py-1.5 text-[11px] font-mono truncate flex items-center gap-2 cursor-pointer ${
+                        i === mentionIdx
+                          ? 'bg-accent/15 text-paper-100'
+                          : 'text-ink-muted hover:bg-canvas-overlay'
+                      }`}
+                    >
+                      <AppIcon name="file" size={11} className="shrink-0 opacity-70" />
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <textarea
+                ref={composerRef}
                 value={copilotInput}
-                onChange={(e) => setCopilotInput(e.target.value)}
+                onChange={handleComposerChange}
                 onPaste={handlePaste}
                 onKeyDown={(e) => {
+                  const mentionOpen = mentionQuery !== null && mentionMatches.length > 0;
+                  if (mentionOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                    e.preventDefault();
+                    setMentionIdx(prev => (e.key === 'ArrowDown'
+                      ? (prev + 1) % mentionMatches.length
+                      : (prev - 1 + mentionMatches.length) % mentionMatches.length));
+                    return;
+                  }
+                  if (mentionOpen && (e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) {
+                    e.preventDefault();
+                    insertMention(mentionMatches[mentionIdx] || mentionMatches[0]);
+                    return;
+                  }
+                  if (e.key === 'Escape' && mentionQuery !== null) {
+                    e.stopPropagation();
+                    setMentionQuery(null);
+                    return;
+                  }
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    if ((copilotInput.trim() || pastedImages.length > 0) && !running) handleSend();
+                    const raw = copilotInput.trim();
+                    const sideAsk = raw.startsWith('/btw');
+                    if ((raw && (!running || sideAsk)) || (pastedImages.length > 0 && !running)) handleSend();
                   }
                 }}
                 rows={2}
@@ -2919,14 +3683,14 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                     }`}
                     title="🎙️ Voice-to-Code: Speak in Hindi, Hinglish or English to generate code"
                   >
-                    {isListening ? <MicOff size={13} /> : <Mic size={13} />}
+                    {isListening ? <AppIcon name="micOff" size={13} /> : <AppIcon name="mic" size={13} />}
                   </button>
 
                   <label
                     className="p-1.5 rounded-md flex items-center justify-center text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated transition-colors cursor-pointer"
                     title="Attach screenshot or image (or Ctrl+V directly)"
                   >
-                    <Paperclip className="w-3.5 h-3.5" />
+                    <AppIcon name="paperclip" className="w-3.5 h-3.5" />
                     <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} />
                   </label>
 
@@ -2936,7 +3700,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                     className="p-1.5 rounded-md flex items-center justify-center text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated transition-colors cursor-pointer"
                     title="Toggle Terminal"
                   >
-                    <TerminalIcon className="w-3.5 h-3.5" />
+                    <AppIcon name="terminal" className="w-3.5 h-3.5" />
                   </button>
 
                   <button
@@ -2945,7 +3709,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                     className="p-1.5 rounded-md flex items-center justify-center text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated transition-colors cursor-pointer"
                     title="Open Database Explorer"
                   >
-                    <Database className="w-3.5 h-3.5" />
+                    <AppIcon name="database" className="w-3.5 h-3.5" />
                   </button>
                 </div>
 
@@ -2953,20 +3717,31 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                 <div className="flex items-center gap-2">
                   {healCount > 0 && (
                     <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                      <Wrench size={9} /> {healCount} healed
+                      <AppIcon name="wrench" size={9} /> {healCount} healed
                     </span>
                   )}
                   <span className="text-[10px] text-ink-muted font-mono hidden sm:inline-flex items-center gap-1">
                     <kbd className="px-1 py-px rounded border border-border-subtle bg-canvas-base text-[9px]">↵</kbd> send
                     <kbd className="px-1 py-px rounded border border-border-subtle bg-canvas-base text-[9px]">⇧↵</kbd> line
                   </span>
-                  <button
-                    onClick={() => handleSend()}
-                    disabled={(!copilotInput.trim() && pastedImages.length === 0) || running}
-                    className="w-7 h-7 rounded-full bg-accent hover:bg-accent/90 disabled:opacity-30 disabled:hover:bg-accent text-white flex items-center justify-center transition-all shadow-glow-sm cursor-pointer"
-                  >
-                    {running ? <Loader2 size={13} className="animate-spin" /> : <ArrowUp className="w-4 h-4 stroke-[2.5]" />}
-                  </button>
+                  {running ? (
+                    <button
+                      onClick={handleStopRun}
+                      title="Stop run (Esc)"
+                      className="w-7 h-7 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-all shadow-[0_0_10px_rgba(239,68,68,0.4)] cursor-pointer"
+                      data-testid="copilot-stop-btn"
+                    >
+                      <AppIcon name="square" size={10} />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleSend()}
+                      disabled={!copilotInput.trim() && pastedImages.length === 0}
+                      className="w-7 h-7 rounded-full bg-accent hover:bg-accent/90 disabled:opacity-30 disabled:hover:bg-accent text-white flex items-center justify-center transition-all shadow-glow-sm cursor-pointer"
+                    >
+                      <AppIcon name="arrowUp" className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -2988,7 +3763,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                     className="px-2.5 h-8 border-r border-border text-ink-muted hover:text-paper-100 hover:bg-canvas-surface cursor-pointer transition-fast flex items-center justify-center flex-shrink-0"
                     title={sidebarOpen ? 'Hide Files' : 'Show Files'}
                   >
-                    <FolderTree size={14} />
+                    <AppIcon name="folderTree" size={14} />
                   </button>
                   <WorkspaceTabs
                     tabs={openTabs}
@@ -3042,7 +3817,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                     {detectedMissingPackages.length > 0 && (
                       <div className="bg-indigo-950/90 border-b border-indigo-500/40 px-3 py-1.5 flex items-center justify-between text-xs animate-in slide-in-from-top-1 z-20 shrink-0">
                         <div className="flex items-center gap-2 text-indigo-200 min-w-0">
-                          <Package size={14} className="text-indigo-400 shrink-0 animate-pulse" />
+                          <AppIcon name="package" size={14} className="text-indigo-400 shrink-0 animate-pulse" />
                           <span className="truncate">Missing packages detected:</span>
                           <div className="flex gap-1.5 flex-wrap">
                             {detectedMissingPackages.map(pkg => (
@@ -3056,7 +3831,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                           onClick={() => handleInstallMissingPackages(detectedMissingPackages)}
                           className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs flex items-center gap-1.5 cursor-pointer transition-colors shadow-xs shrink-0"
                         >
-                          <Zap size={11} />
+                          <AppIcon name="zap" size={11} />
                           Install to Project
                         </button>
                       </div>
@@ -3073,7 +3848,6 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                             if (!activePath) return;
                             setFileContent(activePath, v || '');
                             markDirty(activePath);
-                            // eslint-disable-next-line react-hooks/refs
                             runDiagnostics(activePath, v || '');
                           }}
                           theme="aidost-dark"
@@ -3093,7 +3867,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                           <div className="h-full flex flex-col items-center justify-center p-6 text-center select-none overflow-y-auto">
                             <div className="max-w-md w-full space-y-4">
                               <div className="w-12 h-12 rounded-2xl bg-accent/10 border border-accent/25 flex items-center justify-center mx-auto text-accent shadow-xs">
-                                <Sparkles size={24} />
+                                <AppIcon name="sparkles" size={24} />
                               </div>
                               <div>
                                 <h3 className="text-sm font-bold text-paper-100">Empty Workspace</h3>
@@ -3142,7 +3916,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                           </div>
                         ) : (
                           <div className="h-full flex flex-col items-center justify-center gap-3 text-xs text-ink-muted select-none">
-                            <Code2 size={28} className="text-ink-muted/40" />
+                            <AppIcon name="code" size={28} className="text-ink-muted/40" />
                             <p>Select a file from the explorer on the left</p>
                           </div>
                         )
@@ -3178,7 +3952,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                               : 'text-ink-muted border-transparent hover:text-paper-200 hover:bg-canvas-surface/30'
                           }`}
                         >
-                          <TerminalIcon size={12} /> Terminal
+                          <AppIcon name="terminal" size={12} /> Terminal
                         </button>
                         <button
                           onClick={() => setBottomPanelTab('database')}
@@ -3188,7 +3962,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                               : 'text-ink-muted border-transparent hover:text-paper-200 hover:bg-canvas-surface/30'
                           }`}
                         >
-                          <Database size={12} /> Database
+                          <AppIcon name="database" size={12} /> Database
                         </button>
                       </div>
                       <div className="flex items-center gap-2">
@@ -3198,14 +3972,14 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                               onClick={runSingleFile}
                               className="px-2 py-0.5 rounded-xs text-[10px] font-medium bg-canvas-surface hover:bg-canvas-elevated text-paper-200 border border-border cursor-pointer transition-fast"
                             >
-                              <Play size={10} className="inline mr-1" /> Run File
+                              <AppIcon name="play" size={10} className="inline mr-1" /> Run File
                             </button>
                             <button
                               onClick={() => terminalRef.current?.clear()}
                               className="p-1 rounded-xs hover:bg-canvas-elevated text-ink-muted hover:text-paper-100 cursor-pointer transition-fast"
                               title="Clear Terminal"
                             >
-                              <Eraser size={13} />
+                              <AppIcon name="eraser" size={13} />
                             </button>
                           </>
                         )}
@@ -3214,7 +3988,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                           className="p-1 rounded-xs hover:bg-canvas-elevated text-ink-muted hover:text-paper-100 cursor-pointer transition-fast"
                           title="Close Panel"
                         >
-                          <X size={13} />
+                          <AppIcon name="close" size={13} />
                         </button>
                       </div>
                     </div>
@@ -3299,7 +4073,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
           <div className="w-full max-w-xl bg-[#12141e] border border-indigo-500/40 rounded-2xl shadow-2xl p-4 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-indigo-400" />
+                <AppIcon name="sparkles" className="w-4 h-4 text-indigo-400" />
                 <span className="text-xs font-bold text-white uppercase tracking-wider">Cursor-Style Inline AI (Ctrl+K)</span>
               </div>
               <span className="text-[10px] font-mono text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded">{activePath || 'active file'}</span>
@@ -3317,7 +4091,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
                 disabled={!inlineEditPrompt.trim() || inlineEditLoading}
                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 disabled:opacity-40 cursor-pointer"
               >
-                {inlineEditLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                {inlineEditLoading ? <AppIcon name="loader" className="w-3.5 h-3.5" /> : <AppIcon name="sparkles" className="w-3.5 h-3.5" />}
                 Apply
               </button>
               <button
@@ -3419,6 +4193,18 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
           onClose={() => setSearchOpen(false)}
         />
       )}
+      <PromptModal
+        modal={promptModal}
+        onClose={() => setPromptModal(null)}
+        onSubmit={(value) => {
+          const modal = promptModal;
+          setPromptModal(null);
+          const path = modal?.parentFolder ? `${modal.parentFolder}/${value}` : value;
+          if (modal?.type === 'folder') handleCreateFolder(path);
+          else if (modal?.type === 'file') handleCreateFile(path);
+          else if (modal?.type === 'rename') renamePath(modal.oldPath, value);
+        }}
+      />
 
       {/* ── 4. STATUS BAR ──────────────────────────────────────────────────────── */}
       <IdeFooter

@@ -15,7 +15,7 @@ function getChatSocialBlueprint(name, title, prompt) {
         dependencies: {
           react: '^19.0.0',
           'react-dom': '^19.0.0',
-          'lucide-react': '^1.16.0',
+          '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0',
           express: '^4.18.2',
           cors: '^2.8.5'
         },
@@ -51,7 +51,8 @@ export default defineConfig({ plugins: [react()] });`
     {
       path: 'src/App.jsx',
       content: `import React, { useState } from 'react';
-import { MessageSquare, Send, User, Hash, Users, Sparkles } from 'lucide-react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faMessage, faPaperPlane, faUser, faHashtag, faUsers, faWandMagicSparkles } from '@fortawesome/free-solid-svg-icons';
 
 const INITIAL_MESSAGES = [
   { id: '1', user: 'Alex', content: 'Hey team! Real-time workspace is live 🚀', time: '12:04 PM', isMe: false },
@@ -73,16 +74,16 @@ export default function App() {
     <div className="flex h-screen bg-[#0c101c] text-zinc-100">
       <aside className="w-64 border-r border-zinc-800 p-4 space-y-4 hidden md:block">
         <div className="flex items-center gap-2 font-bold text-sm text-indigo-400">
-          <MessageSquare size={18} />
+          <FontAwesomeIcon icon={faMessage} style={{ fontSize: 18 }} />
           <span>Chat Space</span>
         </div>
         <div className="space-y-1">
           <div className="flex items-center gap-2 px-3 py-2 bg-indigo-600/20 text-indigo-300 rounded-xl text-xs font-bold">
-            <Hash size={14} />
+            <FontAwesomeIcon icon={faHashtag} style={{ fontSize: 14 }} />
             <span>#general</span>
           </div>
           <div className="flex items-center gap-2 px-3 py-2 text-zinc-400 hover:bg-zinc-800/40 rounded-xl text-xs font-semibold">
-            <Hash size={14} />
+            <FontAwesomeIcon icon={faHashtag} style={{ fontSize: 14 }} />
             <span>#announcements</span>
           </div>
         </div>
@@ -91,7 +92,7 @@ export default function App() {
       <main className="flex-1 flex flex-col min-w-0">
         <header className="p-4 border-b border-zinc-800 flex items-center justify-between">
           <div className="flex items-center gap-2 font-bold text-sm">
-            <Hash size={16} className="text-zinc-400" />
+            <FontAwesomeIcon icon={faHashtag} style={{ fontSize: 16 }} className="text-zinc-400" />
             <span>general</span>
           </div>
           <span className="text-xs text-emerald-400 font-mono">🟢 14 Members Online</span>
@@ -120,7 +121,7 @@ export default function App() {
             className="flex-1 bg-zinc-900 border border-zinc-800 text-xs px-4 py-2.5 rounded-xl focus:outline-none focus:border-indigo-500"
           />
           <button type="submit" className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs flex items-center gap-1.5">
-            <Send size={14} />
+            <FontAwesomeIcon icon={faPaperPlane} style={{ fontSize: 14 }} />
             <span>Send</span>
           </button>
         </form>

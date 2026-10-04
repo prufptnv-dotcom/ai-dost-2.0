@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, CheckCircle2, CircleDot, AlertCircle } from 'lucide-react';
 import TaskStepItem from '../views/TaskStepItem';
 
 // Devin-style plan card: always-visible checklist with progress + collapse.
@@ -13,21 +13,22 @@ export default function CopilotPlanCard({ tasks = [], expanded = true, onToggle 
   const pct = Math.round((doneCount / total) * 100);
 
   return (
-    <div data-testid="copilot-plan-card" className="border-b border-border bg-canvas-base">
+    <div data-testid="copilot-plan-card" className="mx-3 my-3 overflow-hidden rounded-xl border border-border bg-canvas-surface shadow-sm">
       {/* Header: label + progress + toggle */}
       <button
         type="button"
         onClick={onToggle}
-        className="w-full px-4 py-2.5 flex items-center gap-2.5 hover:bg-canvas-subtle transition-colors cursor-pointer text-left"
+        className="w-full px-3.5 py-3 flex items-center gap-2.5 hover:bg-canvas-elevated transition-colors cursor-pointer text-left"
         aria-expanded={expanded}
         title={expanded ? 'Collapse plan' : 'Expand plan'}
       >
-        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-ink-muted">
-          Plan
+        <span className="flex items-center gap-1.5 text-[10px] font-mono font-bold uppercase tracking-[0.14em] text-ink-muted">
+          {allDone ? <CheckCircle2 size={12} className="text-emerald-400" /> : hasError ? <AlertCircle size={12} className="text-red-400" /> : <CircleDot size={12} className="text-accent" />}
+          {allDone ? 'Completed plan' : hasError ? 'Plan needs attention' : 'Working plan'}
         </span>
 
         {/* Mini progress bar */}
-        <span className="flex-1 h-1 rounded-full bg-canvas-elevated overflow-hidden max-w-[140px]">
+        <span className="flex-1 h-1 rounded-full bg-canvas-elevated overflow-hidden         max-w-[180px]">
           <span
             className={`block h-full rounded-full transition-all duration-500 ${
               hasError ? 'bg-red-500' : allDone ? 'bg-emerald-500' : 'bg-accent'
@@ -54,7 +55,7 @@ export default function CopilotPlanCard({ tasks = [], expanded = true, onToggle 
 
       {/* Checklist rows */}
       {expanded && (
-        <div className="px-2 pb-2 space-y-0.5 max-h-44 overflow-y-auto" data-testid="plan-rows">
+        <div className="px-2 pb-2 space-y-0.5 max-h-52 overflow-y-auto" data-testid="plan-rows">
           {tasks.map((t, idx) => (
             <TaskStepItem key={t.id || idx} step={t} index={idx} />
           ))}

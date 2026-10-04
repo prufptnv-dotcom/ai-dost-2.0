@@ -41,6 +41,28 @@ export const PREVIEW_TELEMETRY_SCRIPT = `
 })();
 </script>`;
 
+/**
+ * Resolve the alias the in-browser mount needs so `<App />` resolves.
+ * Returns `{ rootAlias }` — either '' (workspace already declares App, or no
+ * default export at all) or a `const App = <rootName>;` statement.
+ * Exported for tests: a silently-wrong alias means a blank preview.
+ */
+export function resolveRootAlias(appCode, cleanedCode = '') {
+  const match =
+    (appCode || '').match(/export\s+default\s+(?:async\s+)?function\s+(\w+)/) ||
+    (appCode || '').match(/export\s+default\s+const\s+(\w+)\s*=/) ||
+    (appCode || '').match(/export\s+default\s+class\s+(\w+)/) ||
+    (appCode || '').match(/export\s+default\s+(\w+)\s*;?\s*(?:\/\/[^\n]*)?$/m);
+  const rootName = match && !/^(?:function|async|const|let|var|class)$/.test(match[1])
+    ? match[1] : '';
+  const declaresApp = /\b(?:function|class|const|let|var)\s+App\b/.test(cleanedCode);
+  if (declaresApp || !rootName || rootName === 'App') return { rootAlias: '', rootName };
+  return {
+    rootAlias: `const App = typeof ${rootName} !== 'undefined' ? ${rootName} : undefined;`,
+    rootName,
+  };
+}
+
 export function generateLiveAppHtml(files = [], contents = {}, inspectorActive = false) {
   const norm = (p) => (p || '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '').trim();
 
@@ -136,6 +158,11 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
     .replace(/export\s+(?:const|let|var)\s+(\w+)/g, 'const $1')
     .replace(/export\s+\{[\s\S]*?\};?/g, '');
 
+  // The mount below hardcodes <App />, but generated apps often export the
+  // root as HomePage/Dashboard/TodoApp. Capture that name so we can alias it,
+  // and skip the alias when the workspace really does declare `App`.
+  const { rootAlias } = resolveRootAlias(appCode, cleanedCode);
+
   // Extract all imported API functions (from ./services/api, ./api, etc.)
   const apiImports = [];
   const apiMatches = (appCode || '').matchAll(/import\s+(?:\{([^}]+)\}|(\w+))\s+from\s+['"][^'"]*api[^'"]*['"]/g);
@@ -208,7 +235,8 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
           .replace(/export\s+default\s+(\w+);?/g, '')
           .replace(/export\s+(?:async\s+)?function\s+(\w+)/g, 'function $1')
           .replace(/export\s+(?:const|let|var)\s+(\w+)/g, 'const $1')
-          .replace(/export\s+\{[\s\S]*?\};?/g, '');
+    .replace(/export\s+\{[\s\S]*?\};?/g, '');
+
         subComponentsCode += '\n' + cleanedSub + '\n';
       }
     }
@@ -471,13 +499,26 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
     // ── Primary App Component ──────────────────────────────────────────────
     ${cleanedCode}
 
+    ${rootAlias}
+
     const container = document.getElementById('root');
     const root = ReactDOM.createRoot(container);
-    root.render(
-      <GlobalErrorBoundary>
-        <App />
-      </GlobalErrorBoundary>
-    );
+    if (typeof App === 'undefined' || !App) {
+      // Mount failure is outside GlobalErrorBoundary's reach (the ReferenceError
+      // fires while evaluating <App />), so surface it as a readable card.
+      try { report('RUNTIME_ERROR', { error: 'Root component not found: no App export in workspace entry file' }); } catch (_) {}
+      container.innerHTML = '<div style="max-width:420px;text-align:center;padding:24px;border:1px solid #334155;border-radius:16px;background:#0f172a;color:#94a3b8;font-family:Inter,sans-serif">' +
+        '<div style="font-size:20px;margin-bottom:8px">🧩</div>' +
+        '<div style="color:#e2e8f0;font-weight:600;margin-bottom:6px">Preview could not mount a root component</div>' +
+        '<div style="font-size:12px;line-height:1.6">No <code style="color:#818cf8">App</code> (or default export) was found in <code style="color:#818cf8">src/App.jsx</code>.<br>Check the entry file and retry.</div>' +
+        '</div>';
+    } else {
+      root.render(
+        <GlobalErrorBoundary>
+          <App />
+        </GlobalErrorBoundary>
+      );
+    }
 
     // ── Visual Element Inspector Instrumentation ────────────────────────────
     let _inspectorActive = ${inspectorActive ? 'true' : 'false'};

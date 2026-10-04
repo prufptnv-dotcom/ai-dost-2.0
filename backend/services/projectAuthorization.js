@@ -108,7 +108,12 @@ class ProjectAuthorizationService {
     // 2. Fetch project
     let project = this.projects.getById(targetId);
     if (!project) {
-      if (options.autoCreateIfMissing && (targetId === 'default' || targetId === 'copilot-workspace')) {
+      const isCopilotSession = /^copilot-session-[a-z0-9-]+$/i.test(targetId);
+      if (options.autoCreateIfMissing && (
+        targetId === 'default' ||
+        targetId === 'copilot-workspace' ||
+        (options.autoCreateSessionProject && isCopilotSession)
+      )) {
         const name = targetId === 'default' ? 'Copilot Workspace' : targetId;
         project = this.projects.create({
           id: targetId,

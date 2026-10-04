@@ -1,9 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Plus, Search, History, Settings, Moon, Sun, MessageSquare,
-  Pencil, Trash2, Share2, Check, X, PanelLeftClose, Terminal, Droplets, Puzzle,
-  Move3d, Building2, Code2, Bot, FolderOpen, Sparkles
-} from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 import { AiDostMark } from '../brand/AiDostMark';
 import CapabilitiesHubModal from './CapabilitiesHubModal';
 
@@ -163,7 +159,7 @@ export function CommandRail({
                 title="Hide sidebar (Ctrl+B)"
                 aria-label="Collapse sidebar"
               >
-                <PanelLeftClose size={16} />
+                <AppIcon name="collapse" size={16} />
               </button>
             )}
           </div>
@@ -174,7 +170,7 @@ export function CommandRail({
             onClick={onNewChat}
             aria-label="New chat"
           >
-            <Plus size={16} />
+            <AppIcon name="plus" size={16} />
             <span>New chat</span>
           </button>
 
@@ -184,7 +180,7 @@ export function CommandRail({
             onClick={onOpenCommandPalette}
             aria-label="Search chats"
           >
-            <Search size={15} />
+            <AppIcon name="search" size={15} />
             <span>Search & actions</span>
             <kbd>Ctrl K</kbd>
           </button>
@@ -199,7 +195,7 @@ export function CommandRail({
               currentView === 'chat' ? 'active font-semibold' : 'text-ink-muted hover:text-paper-100 hover:bg-canvas-surface'
             }`}
           >
-            <MessageSquare size={14} className={currentView === 'chat' ? 'text-accent' : 'opacity-70'} />
+            <AppIcon name="message" size={14} className={currentView === 'chat' ? 'text-accent' : 'opacity-70'} />
             <span>Chat</span>
           </button>
 
@@ -210,7 +206,7 @@ export function CommandRail({
               currentView === 'copilot' ? 'active font-semibold' : 'text-ink-muted hover:text-paper-100 hover:bg-canvas-surface'
             }`}
           >
-            <Code2 size={14} className={currentView === 'copilot' ? 'text-accent' : 'opacity-70'} />
+            <AppIcon name="code" size={14} className={currentView === 'copilot' ? 'text-accent' : 'opacity-70'} />
             <span>Copilot IDE</span>
           </button>
 
@@ -221,7 +217,7 @@ export function CommandRail({
               currentView === 'agent' ? 'active font-semibold' : 'text-ink-muted hover:text-paper-100 hover:bg-canvas-surface'
             }`}
           >
-            <Bot size={14} className={currentView === 'agent' ? 'text-accent' : 'opacity-70'} />
+            <AppIcon name="bot" size={14} className={currentView === 'agent' ? 'text-accent' : 'opacity-70'} />
             <span>Agent Workbench</span>
           </button>
 
@@ -232,7 +228,7 @@ export function CommandRail({
               currentView === 'projects' ? 'active font-semibold' : 'text-ink-muted hover:text-paper-100 hover:bg-canvas-surface'
             }`}
           >
-            <FolderOpen size={14} className={currentView === 'projects' ? 'text-accent' : 'opacity-70'} />
+            <AppIcon name="folderOpen" size={14} className={currentView === 'projects' ? 'text-accent' : 'opacity-70'} />
             <span>Projects</span>
           </button>
 
@@ -244,7 +240,7 @@ export function CommandRail({
             }`}
           >
             <div className="flex items-center gap-2 min-w-0">
-              <Sparkles size={14} className={isSecondaryStudio ? 'text-accent' : 'text-accent/80'} />
+              <AppIcon name="sparkles" size={14} className={isSecondaryStudio ? 'text-accent' : 'text-accent/80'} />
               <span className="truncate">{isSecondaryStudio ? activeStudioLabel : 'Studios & Tools'}</span>
             </div>
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent font-mono shrink-0">
@@ -282,7 +278,7 @@ export function CommandRail({
                         className="p-1 text-emerald-500 hover:text-emerald-400 cursor-pointer"
                         title="Save name"
                       >
-                        <Check size={12} />
+                        <AppIcon name="check" size={12} />
                       </button>
                       <button
                         type="button"
@@ -290,7 +286,7 @@ export function CommandRail({
                         className="p-1 text-ink-muted hover:text-paper-100 cursor-pointer"
                         title="Cancel"
                       >
-                        <X size={12} />
+                        <AppIcon name="close" size={12} />
                       </button>
                     </div>
                   );
@@ -308,7 +304,7 @@ export function CommandRail({
                     tabIndex={0}
                   >
                     <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <MessageSquare size={13} className="shrink-0 opacity-70" />
+                      <AppIcon name="message" size={13} className="shrink-0 opacity-70" />
                       <span className="truncate text-xs">{displayName}</span>
                     </div>
 
@@ -321,7 +317,7 @@ export function CommandRail({
                         title="Rename chat"
                         aria-label="Rename chat"
                       >
-                        <Pencil size={11} />
+                        <AppIcon name="pencil" size={11} />
                       </button>
                       <button
                         type="button"
@@ -330,7 +326,7 @@ export function CommandRail({
                         title="Share chat"
                         aria-label="Share chat"
                       >
-                        <Share2 size={11} />
+                        <AppIcon name="share" size={11} />
                       </button>
                       <button
                         type="button"
@@ -339,7 +335,7 @@ export function CommandRail({
                         title="Delete chat"
                         aria-label="Delete chat"
                       >
-                        <Trash2 size={11} />
+                        <AppIcon name="trash" size={11} />
                       </button>
                     </div>
                   </div>
@@ -362,7 +358,7 @@ export function CommandRail({
             className="chat-sidebar-icon-button"
             title="Chat History"
           >
-            <History size={16} />
+            <AppIcon name="history" size={16} />
           </button>
           <button
             type="button"
@@ -371,7 +367,7 @@ export function CommandRail({
             className="chat-sidebar-icon-button"
             title="Settings"
           >
-            <Settings size={16} />
+            <AppIcon name="settings" size={16} />
           </button>
           <button
             type="button"
@@ -380,10 +376,10 @@ export function CommandRail({
             className="chat-sidebar-icon-button ml-auto"
             title={`Theme: ${theme.charAt(0).toUpperCase() + theme.slice(1)}`}
           >
-            {theme === 'dark' && <Moon size={16} />}
-            {theme === 'light' && <Sun size={16} />}
-            {theme === 'hacker' && <Terminal size={16} />}
-            {theme === 'ocean' && <Droplets size={16} />}
+            {theme === 'dark' && <AppIcon name="moon" size={16} />}
+            {theme === 'light' && <AppIcon name="sun" size={16} />}
+            {theme === 'hacker' && <AppIcon name="terminal" size={16} />}
+            {theme === 'ocean' && <AppIcon name="droplets" size={16} />}
           </button>
         </div>
       </aside>

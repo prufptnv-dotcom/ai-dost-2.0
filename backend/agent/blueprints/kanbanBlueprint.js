@@ -15,7 +15,7 @@ function getKanbanBlueprint(name, title, prompt) {
         dependencies: {
           react: '^19.0.0',
           'react-dom': '^19.0.0',
-          'lucide-react': '^1.16.0',
+          '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0',
           express: '^4.18.2',
           cors: '^2.8.5'
         },
@@ -51,7 +51,8 @@ export default defineConfig({ plugins: [react()] });`
     {
       path: 'src/App.jsx',
       content: `import React, { useState } from 'react';
-import { Kanban, Plus, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faTableColumns, faPlus, faCircleCheck, faClock, faCircleExclamation } from '@fortawesome/free-solid-svg-icons';
 
 const INITIAL_COLUMNS = [
   { id: 'todo', title: 'To Do', color: '#6366f1', tasks: [{ id: '1', title: 'Design system tokens', tag: 'UI' }] },
@@ -72,7 +73,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0f111a] text-zinc-100 p-6">
       <header className="flex items-center gap-3 mb-6">
-        <Kanban className="w-6 h-6 text-indigo-400" />
+        <FontAwesomeIcon icon={faTableColumns} className="w-6 h-6 text-indigo-400" />
         <h1 className="text-xl font-bold">Agile Kanban Flow</h1>
       </header>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -103,7 +104,7 @@ export default function App() {
                 className="w-full bg-zinc-900 border border-zinc-800 text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:border-indigo-500"
               />
               <button onClick={() => addTask(col.id)} className="bg-indigo-600 hover:bg-indigo-500 p-1.5 rounded-lg text-white">
-                <Plus size={14} />
+                <FontAwesomeIcon icon={faPlus} style={{ fontSize: 14 }} />
               </button>
             </div>
           </div>

@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Mic, Paperclip, Sparkles, Code2, FileText, ShieldCheck } from 'lucide-react';
 import api from '../../services/api';
 import { ImageLightbox } from './ImageLightbox';
 import ChatArtifactsCanvas from '../chat/ChatArtifactsCanvas';
@@ -21,12 +20,6 @@ const STORAGE_KEY = 'ai_dost_messages_chat';
 const SESSIONS_KEY = 'ai_dost_chat_sessions';
 const PERSONA_KEY = 'ai_dost_persona';
 const getMsgKey = (id) => (id === 'default' ? STORAGE_KEY : `ai_dost_messages_${id}`);
-
-const IMAGE_CREATE_INTENT =
-  /\b(create|generate|make|draw|design)\b.*\b(image|photo|picture|logo|wallpaper|cartoon|anime|illustration|poster|meme|sketch|painting|drawing|art)\b|\b(image|photo|picture|logo|wallpaper|cartoon|anime|illustration|poster|meme|sketch|painting|drawing|art)\b.*\b(banao|bana|banake|make|create|generate|draw|design)\b/i;
-
-const PROJECT_INTENT =
-  /\b(fullstack|project|app|website|web ?site|portfolio|mern|crud|clone|todo|blog|e-?commerce|chatbot|dashboard|landing page)\b.*\b(banao|bana|banake|make|create|build|generate)\b|\b(banao|bana|banake|make|create|build|generate)\b.*\b(project|app|website|web ?site|fullstack)\b/i;
 
 const DOC_KEYWORDS = [
   { type: 'pdf', re: /pdf\b|pdf notes|syllabus|research paper|lab assignment|curriculum/i },
@@ -55,6 +48,7 @@ const EXPLICIT_3D_SIMULATION_INTENT =
 
 const MODEL_OPTIONS = [
   { id: 'auto', label: 'Auto' },
+  { id: 'vkp-omni', label: 'VKP-Omni-2B (Custom Trained)' },
   { id: 'groq', label: 'Groq' },
   { id: 'gemini', label: 'Gemini' },
   { id: 'nvidia', label: 'NVIDIA' },
@@ -154,8 +148,9 @@ export default function ChatView({
   const isWriting = displayMessages.some((m) => m.isStreaming && m.content);
 
   return (
-    <div className="h-full flex flex-row overflow-hidden bg-canvas-base">
-      <div className="relative flex-1 flex flex-col h-full overflow-hidden min-w-0">
+    <div className="h-full flex flex-row overflow-hidden bg-canvas-base relative">
+      {/* LEFT PANE: Chat Interface */}
+      <div className={`relative flex flex-col h-full overflow-hidden transition-all duration-500 ease-in-out ${activeArtifact ? 'flex-1 max-w-2xl' : 'flex-1 max-w-4xl mx-auto'}`}>
         <SmartChatHeader
           sessionName={currentSessionName}
           sessions={sessions}
@@ -212,8 +207,23 @@ export default function ChatView({
         />
       </div>
 
+      {/* RIGHT PANE: Artifacts Workspace */}
       <AnimatePresence>
-        {activeArtifact && <ChatArtifactsCanvas artifact={activeArtifact} onClose={() => setActiveArtifact(null)} onOpenInCopilot={handleOpenArtifactInCopilot} />}
+        {activeArtifact && (
+          <motion.div 
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: '50%', opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ type: 'spring', damping: 20, stiffness: 100 }}
+            className="h-full border-l border-slate-800 bg-slate-950 overflow-hidden"
+          >
+            <ChatArtifactsCanvas 
+              artifact={activeArtifact} 
+              onClose={() => setActiveArtifact(null)} 
+              onOpenInCopilot={handleOpenArtifactInCopilot} 
+            />
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {lightboxUrl && <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
@@ -229,7 +239,6 @@ export default function ChatView({
           }}
         />
       )}
-      {false && <><ChatMessageBubble /><ThinkingDot /></>}
     </div>
   );
 }

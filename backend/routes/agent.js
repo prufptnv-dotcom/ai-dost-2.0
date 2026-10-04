@@ -35,7 +35,8 @@ const SpecService       = require('../services/specService');
 const verifierService   = require('../services/verifierService');
 const deterministicCodeGuard = require('../services/DeterministicCodeGuard');
 const { detectCategory, buildFullstackSystemPrompt, generateGoldenScaffold } = require('../agent/fullstackTrainer');
-const { saveProjectFile, deleteProjectFile, getProjectFiles } = require('../projectStore');
+const { saveProjectFile, deleteProjectFile, getProjectFiles, onWorkspaceChange } = require('../projectStore');
+const { learnNotes, retrieveNotes, formatNotes, extractRunNotes } = require('../services/copilotMemory');
 const DiffEngine = require('../agent/diffEngine');
 const { capabilityDiscovery } = require('../agent/registry/CapabilityDiscovery');
 const { capabilityGatekeeper } = require('../agent/policy/CapabilityGatekeeper');
@@ -85,6 +86,11 @@ MULTILINGUAL PROMPT UNDERSTANDING:
 - User prompts may be in English, Hindi, Hinglish (e.g. "ek html page banao index.html naam se", "main.py me error fix karo"), or mixed phrasing.
 - ALWAYS extract the core intent: what file to create/read/modify, what code to write, what terminal command to run.
 - Convert the user's request directly into concrete tool actions.
+
+IMAGE REQUESTS ARE NOT BUILD TASKS (CRITICAL):
+- If the user asks to create an image, picture, photo, logo, wallpaper, poster, meme, sketch, drawing or illustration (English, Hinglish, singular or plural — e.g. "ek cat ka images banao", "meri photos banao", "logo banao"), do NOT create a plan, do NOT write files, do NOT run terminal commands, and do NOT emit Pillow/PIL/matplotlib/SVG/canvas code.
+- Reply directly in chat with at most two sentences and include the tag [GENERATE_IMAGE: <clean english description>]. Then STOP.
+- Exceptions: animation / 3D / game / simulation / Three.js / WebGL requests remain build tasks; and if the user explicitly asks for code ("image ka code do", "pillow se banao") you should build it.
 
 TOOLS AVAILABLE:
 1. write_file(path, content) — Create or completely write full content to a file
@@ -884,11 +890,11 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
               const { chromium } = await import('playwright');
               const browser = await chromium.launch({ headless: true });
               const page = await browser.newPage({ viewport: { width: 440, height: 760 } });
-              await page.setContent(previewHtml, { waitUntil: 'load', timeout: 15000 });
-              await page.waitForSelector('#root > div', { timeout: 8000 }).catch(() => {});
-              const shotBuffer = await page.screenshot({ fullPage: false, type: 'png' });
-              await browser.close();
-              shotBase64 = shotBuffer.toString('base64');
+              await page.setContent(previewHtml, { waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
+              await page.waitForSelector('#root > div', { timeout: 3000 }).catch(() => {});
+              const shotBuffer = await page.screenshot({ fullPage: false, type: 'png', timeout: 3000 }).catch(() => null);
+              await browser.close().catch(() => {});
+              if (shotBuffer) shotBase64 = shotBuffer.toString('base64');
             } catch (shotErr) {
               logger.info('[Agent] Playwright auto-screenshot fallback:', shotErr.message);
             }
@@ -1372,31 +1378,27 @@ async function callScaffoldLLM(scaffoldPrompt, customKeys = null, reqHeaders = {
 
   const hasImage = typeof scaffoldPrompt === 'string' && scaffoldPrompt.includes('[IMAGE_BASE64:');
 
-  const providers = hasImage ? [
-    { name: 'Gemini (Flash Vision)', fn: () => GeminiService.chat(scaffoldPrompt, [], null, 'agent', customKeys?.gemini) },
-    { name: 'Groq (Qwen Coder)', fn: () => GroqService.chat(scaffoldPrompt, [], 'agent', customKeys?.groq) },
-    { name: 'OpenAI (GPT-4o)', fn: () => OpenAIService.chat(scaffoldPrompt, [], 'agent', customKeys?.openai) },
-    { name: 'NVIDIA', fn: () => NvidiaService.chat(scaffoldPrompt, [], customKeys?.nvidia, 'agent') },
-    { name: 'Together', fn: () => TogetherService.chat(scaffoldPrompt, [], customKeys?.together) },
-    { name: 'DeepSeek', fn: () => DeepSeekService.chat(scaffoldPrompt, [], customKeys?.deepseek) },
-    { name: 'Mistral', fn: () => MistralService.chat(scaffoldPrompt, [], customKeys?.mistral, 'agent') },
-    { name: 'Cerebras', fn: () => CerebrasService.chat(scaffoldPrompt, [], 'agent', customKeys?.cerebras) },
-    { name: 'HuggingFace', fn: () => HuggingFaceService.chat(scaffoldPrompt) },
-    { name: 'OpenRouter', fn: () => OpenRouterService.chat(scaffoldPrompt, [], customKeys?.openrouter, 'agent') },
+  const hasKey = (providerName, envVar) => {
+    const custom = customKeys?.[providerName];
+    if (custom && typeof custom === 'string' && custom.length > 5) return true;
+    const envVal = process.env[envVar];
+    return Boolean(envVal && typeof envVal === 'string' && envVal.length > 5 && !envVal.includes('your_key_here'));
+  };
+
+  const rawProviders = hasImage ? [
+    { name: 'Gemini (Flash Vision)', key: 'gemini', env: 'GEMINI_API_KEY', fn: () => GeminiService.chat(scaffoldPrompt, [], null, 'agent', customKeys?.gemini) },
+    { name: 'Groq (Qwen Coder)', key: 'groq', env: 'GROQ_API_KEY', fn: () => GroqService.chat(scaffoldPrompt, [], 'agent', customKeys?.groq, { max_tokens: 3500 }) },
+    { name: 'OpenAI (GPT-4o)', key: 'openai', env: 'OPENAI_API_KEY', fn: () => OpenAIService.chat(scaffoldPrompt, [], 'agent', customKeys?.openai) },
+    { name: 'OpenRouter', key: 'openrouter', env: 'OPENROUTER_API_KEY', fn: () => OpenRouterService.chat(scaffoldPrompt, [], customKeys?.openrouter, 'agent') },
   ] : [
-    { name: 'Groq (Qwen Coder)', fn: () => GroqService.chat(scaffoldPrompt, [], 'agent', customKeys?.groq) },
-    { name: 'Gemini (Flash)', fn: () => GeminiService.chat(scaffoldPrompt, [], null, 'agent', customKeys?.gemini) },
-    { name: 'OpenAI (GPT-4o)', fn: () => OpenAIService.chat(scaffoldPrompt, [], 'agent', customKeys?.openai) },
-    { name: 'NVIDIA', fn: () => NvidiaService.chat(scaffoldPrompt, [], customKeys?.nvidia, 'agent') },
-    { name: 'Together', fn: () => TogetherService.chat(scaffoldPrompt, [], customKeys?.together) },
-    { name: 'DeepSeek', fn: () => DeepSeekService.chat(scaffoldPrompt, [], customKeys?.deepseek) },
-    { name: 'Mistral', fn: () => MistralService.chat(scaffoldPrompt, [], customKeys?.mistral, 'agent') },
-    { name: 'Cerebras', fn: () => CerebrasService.chat(scaffoldPrompt, [], 'agent', customKeys?.cerebras) },
-    { name: 'HuggingFace', fn: () => HuggingFaceService.chat(scaffoldPrompt) },
-    { name: 'OpenRouter', fn: () => OpenRouterService.chat(scaffoldPrompt, [], customKeys?.openrouter, 'agent') },
+    { name: 'Groq (Qwen Coder)', key: 'groq', env: 'GROQ_API_KEY', fn: () => GroqService.chat(scaffoldPrompt, [], 'agent', customKeys?.groq, { max_tokens: 3500 }) },
+    { name: 'Gemini (Flash)', key: 'gemini', env: 'GEMINI_API_KEY', fn: () => GeminiService.chat(scaffoldPrompt, [], null, 'agent', customKeys?.gemini) },
+    { name: 'OpenRouter', key: 'openrouter', env: 'OPENROUTER_API_KEY', fn: () => OpenRouterService.chat(scaffoldPrompt, [], customKeys?.openrouter, 'agent') },
   ];
 
-  const withProviderTimeout = (promise, ms = 18000) => {
+  const providers = rawProviders.filter(p => hasKey(p.key, p.env));
+
+  const withProviderTimeout = (promise, ms = 12000) => {
     let timeoutId;
     const timeoutPromise = new Promise((_, rej) => {
       timeoutId = setTimeout(() => rej(new Error('Provider timeout')), ms);
@@ -1409,7 +1411,7 @@ async function callScaffoldLLM(scaffoldPrompt, customKeys = null, reqHeaders = {
   } else {
     for (const provider of providers) {
       try {
-        const resp = await withProviderTimeout(provider.fn(), 18000);
+        const resp = await withProviderTimeout(provider.fn(), 12000);
         if (isErrorResp(resp)) continue;
         const files = extractFiles(resp);
         if (files && files.length >= 1) {
@@ -1550,7 +1552,7 @@ function parseLLMAction(raw) {
 }
 
 // ── Dynamic Input Analysis & Task Plan Generator ──────────────────────────────
-function generateTaskPlan(userPrompt) {
+function generateTaskPlan(userPrompt, options = {}) {
   const prompt = (userPrompt || '').trim();
   const clean = prompt.toLowerCase();
   let tasks = [];
@@ -1683,10 +1685,10 @@ function generateTaskPlan(userPrompt) {
 
   let gate = null;
   try {
-    gate = capabilityGatekeeper.evaluate(capabilities, {
+    gate = capabilityGatekeeper.evaluateWithLevel(capabilities, {
       prompt,
       source: 'generateTaskPlan'
-    });
+    }, options.permissionLevel);
   } catch (_) {}
 
   return { summary, tasks, capabilities, gate };
@@ -1698,7 +1700,7 @@ router.post('/plan', (req, res) => {
   if (!userPrompt || typeof userPrompt !== 'string' || !userPrompt.trim()) {
     return res.status(400).json({ error: 'userPrompt is required and must be a non-empty string' });
   }
-  const plan = generateTaskPlan(userPrompt.trim());
+  const plan = generateTaskPlan(userPrompt.trim(), { permissionLevel: req.body?.permissionLevel });
   return res.json({ success: true, plan });
 });
 
@@ -2307,9 +2309,69 @@ REQUIREMENTS:
   }
 });
 
-// ── Kanban task list (client-side state; no persistence layer yet) ────────────
-router.get('/tasks', (_req, res) => {
-  return res.json({ success: true, tasks: [] });
+// -- Run history / Kanban task list (REAL durable store: agent_tasks + agent_runs) --
+router.get('/tasks', (req, res) => {
+  try {
+    const { getDatabase } = require('../db');
+    const { listRunHistory } = require('../services/runHistory');
+    const projectId = String(req.query.projectId || '').trim() || null;
+    const parsedLimit = parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 200) : 50;
+    const tasks = listRunHistory({ db: getDatabase(), projectId, limit });
+    return res.json({ success: true, tasks });
+  } catch (err) {
+    logger.error('[Agent] GET /tasks history failed:', err?.message || err);
+    return res.status(500).json({ success: false, error: 'Failed to load run history', tasks: [] });
+  }
+});
+
+// ── Watch mode: SSE stream of workspace file changes (Phase 3b) ─────────────
+// Workspace lives in SQLite workspace_files (projectStore / server.js helpers).
+// Those write paths emit on the projectStore bus; this endpoint forwards them
+// so CopilotIDE can live-refresh without polling. Client closes → unsubscribe.
+router.get('/watch/:projectId', (req, res) => {
+  const projectId = String(req.params.projectId || '').trim();
+  if (!projectId) return res.status(400).json({ success: false, error: 'projectId is required' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+  let closed = false;
+  const send = (payload) => {
+    if (closed) return;
+    try {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      if (typeof res.flush === 'function') res.flush();
+    } catch (_) { /* client gone — close handler cleans up */ }
+  };
+
+  const unsubscribe = onWorkspaceChange((evt) => {
+    if (!evt || evt.projectId !== projectId) return;
+    send({ type: 'file_changed', path: evt.path, action: evt.action, at: evt.at });
+  });
+
+  const keepalive = setInterval(() => {
+    if (closed) return;
+    try { res.write(': ping\n\n'); } catch (_) { /* closed */ }
+  }, 25000);
+  if (typeof keepalive.unref === 'function') keepalive.unref();
+
+  const teardown = () => {
+    if (closed) return;
+    closed = true;
+    clearInterval(keepalive);
+    try { unsubscribe(); } catch (_) { /* already off */ }
+    try { res.end(); } catch (_) { /* already ended */ }
+  };
+  req.on('close', teardown);
+  req.on('aborted', teardown);
+  res.on('close', teardown);
+
+  send({ type: 'watch_started', projectId, at: Date.now() });
 });
 
 // ── ReAct Loop API Endpoint (SSE Streaming) ───────────────────────────────────
@@ -2331,12 +2393,52 @@ router.post('/run', async (req, res) => {
   let isAborted = false;
   const abortHandler = () => {
     isAborted = true;
+    clearInterval(keepAliveTimer);
     logger.info('[Agent] Client disconnected. Cancelling ReAct loop.');
   };
   res.on('close', abortHandler);
+  res.on('finish', () => clearInterval(keepAliveTimer));
+
+  const keepAliveTimer = setInterval(() => {
+    if (isAborted) return;
+    try {
+      res.write(': keepalive\n\n');
+      if (typeof res.flush === 'function') res.flush();
+    } catch (_) {}
+  }, 4000);
+
+  // ── Self-learning: durable notes on run end (deterministic, zero LLM) ─────
+  const runHeals = [];
+  let filesTouched = 0;
+  let learnDone = false;
+  const autoLearn = (status, message) => {
+    if (learnDone) return;
+    learnDone = true;
+    try {
+      const notes = extractRunNotes({ prompt: userPrompt, status, message, heals: runHeals, filesTouched });
+      if (notes.length) {
+        learnNotes(notes, {
+          userId: req.headers['x-user-id'] || 'local-user',
+          projectId: projectId || null,
+          source: 'run',
+        }).catch(() => { /* memory must never break a run */ });
+      }
+    } catch (e) {
+      logger.info(`[Agent] auto-learn skipped: ${e.message}`);
+    }
+  };
 
   const send = (data) => {
     if (isAborted) return;
+    if (data && data.type === 'self_heal') {
+      runHeals.push({ error: data.errorHint || data.message || '' });
+    } else if (data && (data.type === 'file_written' || data.type === 'file_changed')) {
+      filesTouched += 1;
+    } else if (data && data.type === 'done') {
+      autoLearn('success', data.message || '');
+    } else if (data && data.type === 'error') {
+      autoLearn('error', data.message || '');
+    }
     try {
       res.write(`data: ${JSON.stringify(data)}\n\n`);
       if (typeof res.flush === 'function') res.flush();
@@ -2348,7 +2450,7 @@ router.post('/run', async (req, res) => {
     try { fs.mkdirSync(workspacePath, { recursive: true }); } catch (_) {}
   }
 
-  const plan = generateTaskPlan(userPrompt);
+  const plan = generateTaskPlan(userPrompt, { permissionLevel: req.body?.permissionLevel });
 
   // Early force-local handling: UI can hint backend to prefer deterministic
   // local intent execution (useful when LLMs are offline or to avoid simulated outputs).
@@ -2532,9 +2634,26 @@ router.post('/run', async (req, res) => {
       '\nUse Shape 1 (Tool Call) to invoke these exactly like standard tools (e.g., action: "mcp_server_toolname", parameters: {...}).';
   }
 
+  // ── Self-learning injection: durable lessons from earlier runs (≤5 notes) ──
+  // Ranked by prompt overlap + same-project scope; never throws (memory is
+  // best-effort context, a run must start even if the notes table is missing).
+  let lessonsContext = '';
+  try {
+    const priorNotes = retrieveNotes({
+      userId: req.headers['x-user-id'] || 'local-user',
+      projectId: projectId || null,
+      prompt: userPrompt,
+      limit: 5,
+    });
+    const lessonsText = formatNotes(priorNotes);
+    if (lessonsText) {
+      lessonsContext = `\n\n=== LESSONS FROM YOUR EARLIER RUNS (user-level memory — apply when relevant) ===\n${lessonsText}\n=== END LESSONS ===`;
+    }
+  } catch (_) { /* memory must never break a run */ }
+
   const messages = [{
     role: 'user',
-    content: `WORKSPACE FILES:\n${fileContext || '(No files yet)'}${conversationContext}${dynamicToolsContext}\n\nUSER TASK: ${userPrompt}\n\nDYNAMIC TASK BREAKDOWN:\n${taskListText}`
+    content: `WORKSPACE FILES:\n${fileContext || '(No files yet)'}${conversationContext}${dynamicToolsContext}${lessonsContext}\n\nUSER TASK: ${userPrompt}\n\nDYNAMIC TASK BREAKDOWN:\n${taskListText}`
   }];
 
   const MAX_STEPS = 50;
@@ -2636,6 +2755,7 @@ ${targetFilesContext}
 INSTRUCTIONS:
 1. Modify the relevant file(s) (e.g. src/App.jsx, server.js, src/index.css) to fully implement the user's requested change.
 2. Maintain all existing working features and dependencies.
+3. ICON RULE (Font Awesome ONLY): any icon you add or keep MUST be a real Font Awesome Free icon via @fortawesome/react-fontawesome with individual imports (e.g. "import { faPlus } from '@fortawesome/free-solid-svg-icons'" + "<FontAwesomeIcon icon={faPlus} />"; brand logos from '@fortawesome/free-brands-svg-icons'). NEVER use lucide-react, emoji-as-icons, or hand-written <svg> icon markup. If package.json lacks the @fortawesome/* dependencies, add them.
 3. Output the COMPLETE updated file(s) in this EXACT format (no ellipses, no placeholders):
 FILE: <filepath>
 \`\`\`<language>
@@ -2854,6 +2974,7 @@ FILE: <filepath>
         send({
           type: 'self_heal',
           step: step + 1,
+          errorHint: String(errorContext).slice(0, 200),
           message: `🔧 Self-healing (attempt ${selfHealAttempts}/3): Command failed — analyzing error and fixing...`
         });
         messages.push({ role: 'assistant', content: JSON.stringify({ thought: parsed.thought, action: parsed.action, parameters: parsed.parameters }) });
@@ -3533,8 +3654,11 @@ router.post('/apply-diff', (req, res) => {
 });
 
 // ── Agent Git Checkpoint ──────────────────────────────────────────────────────
+// Pre-run safety net (Devin-style /revert support). Two modes:
+//   { workDir }            → explicit dir (allowed: os.tmpdir or repo root)
+//   { projectId }          → %TEMP%\agent-ws-<projectId> (same path /rollback restores)
 router.post('/checkpoint', (req, res) => {
-  const { message, workDir } = req.body;
+  const { message, workDir, projectId } = req.body;
   const os = require('os');
   const defaultDir = path.join(__dirname, '../../');
   let dir = defaultDir;
@@ -3545,21 +3669,44 @@ router.post('/checkpoint', (req, res) => {
     if (!inAllowed) {
       return res.status(400).json({ success: false, error: 'workDir outside allowed workspace roots' });
     }
+  } else if (projectId && typeof projectId === 'string') {
+    dir = path.resolve(path.join(os.tmpdir(), `agent-ws-${projectId}`));
+    const tmpRoot = path.resolve(os.tmpdir());
+    if (dir !== tmpRoot && !dir.startsWith(tmpRoot + path.sep)) {
+      return res.status(400).json({ success: false, error: 'project workspace outside tmp root' });
+    }
+    if (!fs.existsSync(dir)) {
+      return res.json({ success: false, error: 'workspace directory does not exist yet', dir });
+    }
   }
   const safeMsg = String(message || `AI-Dost Agent checkpoint — ${new Date().toISOString()}`)
     .replace(/[\r\n]/g, ' ')
     .slice(0, 200);
-  execFile('git', ['add', '-A'], { cwd: dir, shell: false }, (addErr) => {
+  const revParse = (fallback) => execFile('git', ['rev-parse', 'HEAD'], { cwd: dir, shell: false }, (hErr, hashOut) => {
+    const commit = hErr ? null : String(hashOut || '').trim();
+    res.json({ success: Boolean(commit) || fallback === 'ok', commit, dir, unchanged: fallback === 'unchanged', message: fallback === 'unchanged' ? 'No changes to commit' : safeMsg });
+  });
+  const commit = () => execFile('git', ['commit', '-m', safeMsg], { cwd: dir, shell: false }, (err, stdout, stderr) => {
+    if (err) {
+      if (/nothing to commit|no changes added/i.test((stderr || '') + (err.message || ''))) return revParse('unchanged');
+      return res.json({ success: false, message: stderr || err.message });
+    }
+    revParse('ok');
+  });
+  const add = (retry) => execFile('git', ['add', '-A'], { cwd: dir, shell: false }, (addErr) => {
     if (addErr && !/nothing to commit/i.test(addErr.message || '')) {
+      if (!retry && /not a git repository/i.test(addErr.message || '')) {
+        // First checkpoint on a fresh workspace: init the repo, then retry once.
+        return execFile('git', ['init'], { cwd: dir, shell: false }, (initErr) => {
+          if (initErr) return res.json({ success: false, message: initErr.message });
+          add(true);
+        });
+      }
       return res.json({ success: false, message: addErr.message });
     }
-    execFile('git', ['commit', '-m', safeMsg], { cwd: dir, shell: false }, (err, stdout, stderr) => {
-      res.json({
-        success: !err,
-        message: err ? (stderr || err.message) : (stdout || '').trim()
-      });
-    });
+    commit();
   });
+  add(false);
 });
 
 // ── Python AI Engine: LlamaIndex RAG (semantic Q&A over a directory) ──────────

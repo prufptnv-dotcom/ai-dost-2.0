@@ -15,6 +15,7 @@ import { getFuturistic2030Html, getThreeJsSolarSystemHtml } from '../lib/threeJs
 import ChatComposerDock from '../components/chat/ChatComposerDock';
 import { streamChatResponse } from './useChatStream';
 import { useChatHistory } from './useChatHistory';
+import { isImageCreateRequest, extractImageSubject } from '../lib/imageIntent';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -22,9 +23,6 @@ const STORAGE_KEY = 'ai_dost_messages_chat';
 const SESSIONS_KEY = 'ai_dost_chat_sessions';
 const PERSONA_KEY = 'ai_dost_persona';
 const getMsgKey = (id) => (id === 'default' ? STORAGE_KEY : `ai_dost_messages_${id}`);
-
-const IMAGE_CREATE_INTENT =
-  /\b(create|generate|make|draw|design)\b.*\b(image|photo|picture|logo|wallpaper|cartoon|anime|illustration|poster|meme|sketch|painting|drawing|art)\b|\b(image|photo|picture|logo|wallpaper|cartoon|anime|illustration|poster|meme|sketch|painting|drawing|art)\b.*\b(banao|bana|banake|make|create|generate|draw|design)\b/i;
 
 const PROJECT_INTENT =
   /\b(fullstack|project|app|website|web ?site|portfolio|mern|crud|clone|todo|blog|e-?commerce|chatbot|dashboard|landing page)\b.*\b(banao|bana|banake|make|create|build|generate)\b|\b(banao|bana|banake|make|create|build|generate)\b.*\b(project|app|website|web ?site|fullstack)\b/i;
@@ -51,7 +49,7 @@ const SEARCH_INTENT =
   /\b(research|deep research)\b|\b(search|google|pata karo|dhundho)\b.*\b(karo|kar|karke|do)\b|\b(latest|current|today'?s|aaj ki)\b.*\b(news|update|price|weather|score|status)\b|\b(news|weather|stock price|cricket score|football score|match result|trending)\b.*\b(batao|bata|dikhao|kya hai|do|kar)\b/i;
 
 const EXPLICIT_3D_SIMULATION_INTENT =
-  /\b(endless highway|cyberpunk highway|dark road|procedural highway|cyberpunk car|hovercar|supercar|dna|double helix|chromosome|cyberpunk city|neo tokyo|metropolis|polyhedron|tesseract|icosahedron|particle system|stardust|solar system|solar-system|celestial simulation|gravity simulation|n-body simulation|fluid simulation|sorting visualizer|neural network 3d|earth 3d|3d earth globe|periodic table 3d|kinetic typography|kinetic text|space ship game)\b/i;
+  /\b(endless highway|cyberpunk highway|dark road|procedural highway|cyberpunk car|hovercar|supercar|dna|double helix|chromosome|cyberpunk city|neo tokyo|metropolis|polyhedron|tesseract|icosahedron|particle system|stardust|solar system|solar-system|celestial simulation|gravity simulation|n-body simulation|fluid simulation|sorting visualizer|neural network 3d|earth 3d|3d earth globe|periodic table 3d|kinetic typography|kinetic text|space ship game|quantum|quantum field|quantum realm|wormhole|black hole|animation|3d animation|microverse|entanglement|subatomic)\b/i;
 
 
 const MODEL_OPTIONS = [
@@ -81,13 +79,15 @@ export function useChatView({
   const {
     messages,
     setMessages,
-    sessionId,
+sessionId,
+    setSessionId,
     switchSession: switchSessionHistory,
     sessions,
     setSessions,
-    persona,
+persona,
     setPersona,
     backendHistory,
+    setBackendHistory,
     loadBackendHistory,
     createNewChat,
     clearChat
@@ -322,25 +322,50 @@ export function useChatView({
       } catch (_) { setAttachments([]); }
     }
 
-    if (!isExplicitChat && IMAGE_CREATE_INTENT.test(content)) {
+    if (!isExplicitChat && isImageCreateRequest(content)) {
       setThinkingLabel('⚡ Z-Image Turbo rendering…');
-      try {
-        const r1 = await api.post('/image/turbo', { prompt: content, style: 'general' });
-        const urls = [r1.data?.imageUrl].filter(Boolean);
-        if (urls.length > 0) {
-          const imageReply = {
-            id: Date.now() + 1,
-            role: 'assistant',
-            content: `⚡ **Z-Image Turbo Generated!** 🎨\n\n![Image](${urls[0]})\n\n[⬇️ Download Image](${urls[0]})\n\n*Prompt: ${content}*`,
-            timestamp: new Date().toISOString(),
-          };
-          setMessages((prev) => [...prev, imageReply]);
-          setLastReply(imageReply.content);
-          setShowFollowUps(true);
-          setThinking(false);
-          return;
+      const imagePrompt = extractImageSubject(content);
+      // Two attempts, then an explicit failure bubble. We must NEVER fall
+      // through to the plain LLM here — that is exactly what produced a
+      // "Plan → Assumptions" Python/Pillow answer instead of a picture.
+      let imageUrl = '';
+      let lastError = '';
+      for (let attempt = 0; attempt < 2 && !imageUrl; attempt += 1) {
+        try {
+          const r1 = await api.post('/image/turbo', { prompt: imagePrompt, style: 'general' });
+          imageUrl = r1.data?.imageUrl || '';
+          if (!imageUrl) lastError = r1.data?.error || 'Image model ne URL return nahi kiya.';
+        } catch (err) {
+          lastError = err?.response?.data?.error || err?.message || 'Image model unavailable.';
         }
-      } catch (_) {}
+        if (!imageUrl && attempt === 0) await new Promise((r) => setTimeout(r, 700));
+      }
+
+      if (imageUrl) {
+        const imageReply = {
+          id: Date.now() + 1,
+          role: 'assistant',
+          content: `⚡ **Z-Image Turbo Generated!** 🎨\n\n![Image](${imageUrl})\n\n[⬇️ Download Image](${imageUrl})\n\n*Prompt: ${imagePrompt}*`,
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, imageReply]);
+        setLastReply(imageReply.content);
+        setShowFollowUps(true);
+        setThinking(false);
+        return;
+      }
+
+      const failReply = {
+        id: Date.now() + 1,
+        role: 'assistant',
+        content: `⚠️ **Image generate nahi ho payi.**\n\n${lastError || 'Image model unavailable.'}\n\n*Request:* "${content}"\n\n*Try again* dabake retry karo — ya prompt thoda simple likho.`,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, failReply]);
+      setLastReply(failReply.content);
+      setShowFollowUps(true);
+      setThinking(false);
+      return;
     }
 
     const DOC_CREATE_INTENT = /\b(banao|bana\s*do|bana\s*de|chahiye|taiyar\s*karo|likhdo|draft|export|nikalo|bana\s*kar\s*do)\b|\b(create|generate|make|build|write|draft|prepare)\b.*?\b(pdf|docx?|pptx?|csv|xlsx|file|doc|report|document|presentation|slides?|notes|syllabus|resume|cv|cover letter|proposal|tdd|readme|documentation|assignment|letter|paper|mom)\b/i;
@@ -629,7 +654,7 @@ export function useChatView({
     } catch (_) {}
 
     if (!loaded) setMessages([WELCOME]);
-  }, [saveCurrentToStorage, setMessages]);
+  }, [saveCurrentToStorage, setMessages, setSessionId, setBackendHistory]);
 
   useEffect(() => {
     const handleCustomSwitch = (e) => {

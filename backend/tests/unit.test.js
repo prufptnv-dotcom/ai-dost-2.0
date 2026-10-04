@@ -611,6 +611,753 @@ describe('Project Intent: CREATE_NEW_PROJECT vs MODIFY_EXISTING_PROJECT', () => 
   });
 });
 
-// ── Orchestrator Security Boundary Tests ────────────────────────────────────
-require('./orchestratorSecurityBoundary.test');
+// ── Shared image-intent matcher (plural-safe Hinglish) ───────────────────────
+describe('services/imageIntent', () => {
+  const { isImageCreateRequest, extractImageSubject } = require('../services/imageIntent');
 
+  const MATCH = [
+    'ek cat ka images banao',
+    'cat ki images banao',
+    'meri photos banao',
+    'logos banao',
+    'cat ka images banado',
+    'sunset over bihar ki image banao',
+    'youtube thumbnail banao',
+    'taasveer banao',
+  ];
+  const NO_MATCH = [
+    'cat banao',
+    'ek cute cat banao',
+    'image ka python code do',
+    'pillow se image banane ka code likho',
+    'image generate karna kaise hai',
+    'how to generate images',
+    '3d cat animation banao',
+    'pdf banao',
+    'todo app banao',
+    'meri images dikhao',
+    'maine tumse image banane ko kaha to tum copilot ki tarah behave kyo karne lage?',
+    '',
+  ];
+
+  test('plural and Hinglish phrasings match (the reported regression)', () => {
+    // The old regex used \bimage\b, which cannot match "images".
+    assert.equal(/\bimage\b/.test('images'), false);
+    for (const phrase of MATCH) {
+      assert.equal(isImageCreateRequest(phrase), true, `expected match: ${phrase}`);
+    }
+  });
+
+  test('code asks, how-tos, 3D, docs and non-image nouns never match', () => {
+    for (const phrase of NO_MATCH) {
+      assert.equal(isImageCreateRequest(phrase), false, `expected no match: ${phrase}`);
+    }
+  });
+
+  test('extractImageSubject strips Hinglish scaffolding', () => {
+    assert.equal(extractImageSubject('ek cat ka images banao'), 'cat');
+    assert.equal(extractImageSubject('sunset over bihar ki image banao'), 'sunset over bihar');
+    assert.equal(extractImageSubject('picture of a cat'), 'cat');
+    assert.equal(extractImageSubject(''), '');
+  });
+
+  test('matcher agrees with the frontend twin on every regex source line', () => {
+    // Both runtimes ship their own copy; drift is a silent double-failure.
+    const fs = require('fs');
+    const path = require('path');
+    const pick = (file) => fs.readFileSync(file, 'utf8')
+      .split('\n')
+      .filter((l) => /^\s*const (IMAGE_NOUN|MAKE_VERB|CODE_ASK|NON_STATIC|HOW_TO|SUBJECT_STOP) =/.test(l))
+      .map((l) => l.trim());
+    const backend = pick(path.resolve(__dirname, '../services/imageIntent.js'));
+    const frontend = pick(path.resolve(__dirname, '../../frontend/lib/imageIntent.js'));
+    assert.equal(backend.length, 6);
+    assert.deepEqual(frontend, backend);
+  });
+});
+
+// ── Orchestrator Security Boundary Tests ────────────────────────────────────
+// Removed require('./orchestratorSecurityBoundary.test'); to avoid test-importing-test error.
+
+
+
+// -- Phase 1d: Plan-mode override (approved plan replaces LLM plan) ----------
+describe('CopilotDirector plan override', () => {
+  const { normalizePlan, fallbackPlan } = require('../agent/runtime/CopilotDirector');
+
+  test('approved preset plan passes through (objectives, ids, dependsOn chain)', () => {
+    const plan = normalizePlan({
+      summary: 'Approved by user',
+      tasks: [
+        { id: 'task-1', objective: 'Write auth module' },
+        { id: 'task-2', objective: 'Wire routes', dependsOn: ['task-1'] },
+      ],
+    }, 'build todo app');
+    assert.equal(plan.summary, 'Approved by user');
+    assert.equal(plan.tasks.length, 2);
+    assert.equal(plan.tasks[0].objective, 'Write auth module');
+    assert.equal(plan.tasks[0].role, 'CODER');
+    assert.equal(plan.tasks[0].specialty, 'integration');
+    assert.deepEqual(plan.tasks[1].dependsOn, ['task-1']);
+  });
+
+  test('duplicate ids dropped, self/unknown deps filtered', () => {
+    const plan = normalizePlan({
+      tasks: [
+        { id: 'a', objective: 'first' },
+        { id: 'a', objective: 'duplicate dropped' },
+        { id: 'b', objective: 'second', dependsOn: ['a', 'b', 'ghost'] },
+      ],
+    }, 'req');
+    assert.equal(plan.tasks.length, 2);
+    assert.deepEqual(plan.tasks[1].dependsOn, ['a']);
+  });
+
+  test('dependency cycle falls back to the generic plan (never crashes)', () => {
+    const plan = normalizePlan({
+      tasks: [
+        { id: 'a', objective: 'x', dependsOn: ['b'] },
+        { id: 'b', objective: 'y', dependsOn: ['a'] },
+      ],
+    }, 'req');
+    assert.deepEqual(plan, fallbackPlan('req'));
+  });
+
+test('null / empty / garbage preset -> fallback plan', () => {
+    // Semantic compare: normalizePlan re-normalizes a fallback input (adds
+    // role fields), so raw deepEqual against fallbackPlan() is too strict.
+    const strip = (p) => ({
+      summary: p.summary,
+      tasks: p.tasks.map(({ role, ...rest }) => rest),
+    });
+    assert.deepEqual(strip(normalizePlan(null, 'req')), strip(fallbackPlan('req')));
+    assert.deepEqual(normalizePlan({ tasks: [] }, 'req'), fallbackPlan('req'));
+    assert.deepEqual(strip(normalizePlan('not-an-object', 'req')), strip(fallbackPlan('req')));
+  });
+
+  test('preset tasks are capped at MAX_TASKS', () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({ id: `t${i}`, objective: `step ${i}` }));
+    const plan = normalizePlan({ tasks: many }, 'req');
+    const { MAX_TASKS } = require('../agent/runtime/CopilotDirector');
+    assert.equal(plan.tasks.length, MAX_TASKS);
+  });
+});
+
+describe('copilotDirectorHandler preset plan forwarding', () => {
+  const { handleCopilotDirectorRequest } = require('../agent/runtime/copilotDirectorHandler');
+
+  function makeRes() {
+    return {
+      writableEnded: false,
+      statusCode: 200,
+      headers: {},
+      setHeader(k, v) { this.headers[k] = v; },
+      flushHeaders() {},
+      writes: [],
+      write(chunk) { this.writes.push(String(chunk)); },
+      end() { this.writableEnded = true; },
+      status(code) { this.statusCode = code; return this; },
+      json(payload) { this.payload = payload; this.writableEnded = true; return this; },
+    };
+  }
+
+  const deps = (capture) => ({
+    projectAuthorization: {
+      authorize: () => ({ authorized: true, user: { id: 'u1' }, project: { id: 'p1' } }),
+    },
+    runtime: {
+      director: {
+        run: async (args) => { capture.push(args); return { status: 'COMPLETED' }; },
+      },
+    },
+  });
+
+  test('body.plan is forwarded to director.run', async () => {
+    const runs = [];
+    const req = {
+      body: {
+        copilotDirector: true,
+        userPrompt: 'build todo app',
+        plan: { summary: 'mine', tasks: [{ id: 'task-1', objective: 'do the thing' }] },
+      },
+      get: (h) => (h === 'x-ai-dost-task-id' ? 't-plan-1' : undefined),
+    };
+    const res = makeRes();
+    await handleCopilotDirectorRequest(req, res, () => { throw new Error('should not fall through'); }, deps(runs));
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].plan.tasks[0].objective, 'do the thing');
+    assert.equal(runs[0].plan.summary, 'mine');
+    assert.ok(res.writableEnded);
+  });
+
+  test('absent/invalid body.plan ? director generates its own (no plan key)', async () => {
+    for (const badPlan of [undefined, null, 'x', { tasks: [] }]) {
+      const runs = [];
+      const req = {
+        body: { copilotDirector: true, userPrompt: 'build', ...(badPlan !== undefined ? { plan: badPlan } : {}) },
+        get: (h) => (h === 'x-ai-dost-task-id' ? `t-bad-${typeof badPlan}` : undefined),
+      };
+      const res = makeRes();
+      await handleCopilotDirectorRequest(req, res, () => {}, deps(runs));
+      assert.equal(runs.length, 1);
+      assert.equal('plan' in runs[0], false, `plan key must be absent for ${JSON.stringify(badPlan)}`);
+    }
+  });
+});
+
+// -- Devin-style permission levels (Ask / Auto / Turbo) --------------------
+describe('CapabilityGatekeeper evaluateWithLevel (permission levels)', () => {
+  const { CapabilityGatekeeper, DECISION } = require('../agent/policy/CapabilityGatekeeper');
+
+  test('ask escalates an auto-allow capability to explicit approval + single-use token', () => {
+    const g = new CapabilityGatekeeper();
+    const gate = g.evaluateWithLevel(['coding.code_explanation'], { requestId: 'req-ask-1' }, 'ask');
+    assert.equal(gate.decision, DECISION.REQUIRE_EXPLICIT_APPROVAL);
+    assert.equal(gate.requires_user_action, true);
+    assert.ok(gate.approval_token && gate.approval_token.length > 8);
+    const v = g.validateApproval({
+      token: gate.approval_token,
+      requestId: 'req-ask-1',
+      capabilityIds: (gate.capabilities || []).map(c => c.capability_id),
+    });
+    assert.equal(v.valid, true);
+  });
+
+  test('ask leaves conversational (empty capability) requests untouched', () => {
+    const gate = new CapabilityGatekeeper().evaluateWithLevel([], { requestId: 'r' }, 'ask');
+    assert.equal(gate.decision, DECISION.ALLOW);
+    assert.equal(gate.requires_user_action, false);
+    assert.equal(gate.approval_token, null);
+  });
+
+  test('ask passes canonical approval through (exactly one token minted, no double escalation)', () => {
+    const g = new CapabilityGatekeeper();
+    const before = g._approvalTokens.size;
+    const gate = g.evaluateWithLevel(['devops.terminal'], { requestId: 'req-reuse' }, 'ask');
+    assert.equal(gate.decision, DECISION.REQUIRE_EXPLICIT_APPROVAL);
+    assert.equal(gate.requires_user_action, true);
+    assert.ok(gate.approval_token);
+    assert.equal(g._approvalTokens.size - before, 1, 'ask must not mint a second token on top of canonical approval');
+  });
+
+  test('turbo downgrades canonical approval to ALLOW (no token, no pause)', () => {
+    const gate = new CapabilityGatekeeper().evaluateWithLevel(['devops.terminal'], {}, 'turbo');
+    assert.equal(gate.decision, DECISION.ALLOW);
+    assert.equal(gate.requires_user_action, false);
+    assert.equal(gate.approval_token, null);
+  });
+
+  test('turbo NEVER overrides a hard BLOCK', () => {
+    const gate = new CapabilityGatekeeper().evaluateWithLevel(['saas.payments'], {}, 'turbo');
+    assert.equal(gate.decision, DECISION.BLOCK);
+    assert.equal(gate.requires_user_action, false);
+  });
+
+  test('ask NEVER overrides a hard BLOCK either (no dead approval loop)', () => {
+    const gate = new CapabilityGatekeeper().evaluateWithLevel(['saas.payments'], {}, 'ask');
+    assert.equal(gate.decision, DECISION.BLOCK);
+    assert.equal(gate.approval_token, null);
+  });
+
+  test('auto matches canonical evaluate(); unknown level falls back to auto', () => {
+    const g = new CapabilityGatekeeper();
+    const viaLevel = g.evaluateWithLevel(['coding.database_schema_generation'], {}, 'auto');
+    const canonical = g.evaluate(['coding.database_schema_generation'], {});
+    assert.equal(viaLevel.decision, canonical.decision);
+    assert.equal(viaLevel.requires_user_action, canonical.requires_user_action);
+    const garbage = g.evaluateWithLevel(['coding.code_explanation'], {}, 'banana');
+    assert.equal(garbage.decision, DECISION.ALLOW);
+    assert.equal(garbage.requires_user_action, false);
+  });
+});
+
+describe('copilotDirectorHandler ask-mode permission gate', () => {
+  const { handleCopilotDirectorRequest } = require('../agent/runtime/copilotDirectorHandler');
+  const { capabilityDiscovery } = require('../agent/registry/CapabilityDiscovery');
+
+  function makeRes() {
+    return {
+      writableEnded: false,
+      statusCode: 200,
+      headers: {},
+      setHeader(k, v) { this.headers[k] = v; },
+      flushHeaders() {},
+      writes: [],
+      write(chunk) { this.writes.push(String(chunk)); },
+      end() { this.writableEnded = true; },
+      status(code) { this.statusCode = code; return this; },
+      json(payload) { this.payload = payload; this.writableEnded = true; return this; },
+    };
+  }
+
+  const deps = (capture) => ({
+    projectAuthorization: {
+      authorize: () => ({ authorized: true, user: { id: 'u1' }, project: { id: 'p1' } }),
+    },
+    runtime: {
+      director: {
+        run: async (args) => { capture.push(args); return { status: 'COMPLETED' }; },
+      },
+    },
+  });
+
+  const makeReq = (body, taskId) => ({
+    body: { copilotDirector: true, ...body },
+    get: (h) => (h === 'x-ai-dost-task-id' ? taskId : undefined),
+  });
+
+  const eventsOf = (res) => res.writes
+    .map(w => w.split('\n').find(l => l.startsWith('data: ')))
+    .filter(Boolean)
+    .map(l => JSON.parse(l.slice(6)));
+
+  test('ask without approval token pauses with a minted token (director.run never called)', async () => {
+    // Precondition: this prompt discovers =1 non-BLOCK capability.
+    const caps = capabilityDiscovery.discover('create production code for api');
+    assert.ok((caps.matched || []).length + (caps.dependencies || []).length > 0);
+
+    const runs = [];
+    const res = makeRes();
+    await handleCopilotDirectorRequest(
+      makeReq({ userPrompt: 'create production code for api', permissionLevel: 'ask' }, 't-ask-1'),
+      res,
+      () => { throw new Error('must not fall through'); },
+      deps(runs)
+    );
+    assert.equal(runs.length, 0, 'director.run must not execute before approval');
+    assert.ok(res.writableEnded);
+    const events = eventsOf(res);
+    const gateEvent = events.find(e => e.type === 'gate_approval_required');
+    assert.ok(gateEvent, 'gate_approval_required must be emitted');
+    assert.ok(gateEvent.gate && gateEvent.gate.approval_token, 'a real approval token must be attached');
+    assert.ok(events.some(e => e.type === 'done'));
+  });
+
+  test('ask resume with the exact token validates (gate_approved) and runs', async () => {
+    const runs = [];
+    const firstRes = makeRes();
+    await handleCopilotDirectorRequest(
+      makeReq({ userPrompt: 'create production code for api', permissionLevel: 'ask' }, 't-ask-2'),
+      firstRes,
+      () => {},
+      deps(runs)
+    );
+    const token = eventsOf(firstRes).find(e => e.type === 'gate_approval_required')?.gate?.approval_token;
+    assert.ok(token, 'first call must issue a token');
+
+    const resumeRes = makeRes();
+    await handleCopilotDirectorRequest(
+      makeReq({ userPrompt: 'create production code for api', permissionLevel: 'ask', approvalToken: token }, 't-ask-2'),
+      resumeRes,
+      () => {},
+      deps(runs)
+    );
+    const resumeEvents = eventsOf(resumeRes);
+    assert.ok(resumeEvents.some(e => e.type === 'gate_approved'), 'valid token must be accepted');
+    assert.equal(runs.length, 1, 'director.run executes exactly once after approval');
+    assert.ok(resumeRes.writableEnded);
+  });
+
+  test('tampered/unknown approval token is rejected (no run)', async () => {
+    const runs = [];
+    const res = makeRes();
+    await handleCopilotDirectorRequest(
+      makeReq({ userPrompt: 'create production code for api', permissionLevel: 'ask', approvalToken: 'forged-token-123' }, 't-ask-3'),
+      res,
+      () => {},
+      deps(runs)
+    );
+    const events = eventsOf(res);
+    assert.ok(events.some(e => e.type === 'gate_approval_invalid'), 'forged token must fail validation');
+    assert.equal(runs.length, 0);
+    assert.ok(res.writableEnded);
+  });
+
+  test('hard BLOCK prompt short-circuits with gate_blocked (no dead approval loop)', async () => {
+    const runs = [];
+    const res = makeRes();
+    await handleCopilotDirectorRequest(
+      makeReq({ userPrompt: 'make a website with payments', permissionLevel: 'ask' }, 't-ask-4'),
+      res,
+      () => {},
+      deps(runs)
+    );
+    const events = eventsOf(res);
+    assert.ok(events.some(e => e.type === 'gate_blocked'), 'BLOCK capability must not enter the approval flow');
+    assert.equal(runs.length, 0);
+    assert.ok(res.writableEnded);
+  });
+
+  test('auto / turbo / missing permissionLevel runs without gating', async () => {
+    for (const level of [undefined, 'auto', 'turbo']) {
+      const runs = [];
+      const res = makeRes();
+      await handleCopilotDirectorRequest(
+        makeReq({ userPrompt: 'create production code for api', ...(level ? { permissionLevel: level } : {}) }, `t-lvl-${level || 'none'}`),
+        res,
+        () => {},
+        deps(runs)
+      );
+      const events = eventsOf(res);
+      assert.equal(runs.length, 1, `${level} must run directly`);
+      assert.ok(!events.some(e => e.type === 'gate_approval_required'), `${level} must not pause`);
+    }
+  });
+});
+
+describe('copilotDirectorHandler contextFiles priority (@file mentions)', () => {
+  const { handleCopilotDirectorRequest } = require('../agent/runtime/copilotDirectorHandler');
+
+  function makeRes() {
+    return {
+      writableEnded: false,
+      statusCode: 200,
+      headers: {},
+      setHeader(k, v) { this.headers[k] = v; },
+      flushHeaders() {},
+      writes: [],
+      write(chunk) { this.writes.push(String(chunk)); },
+      end() { this.writableEnded = true; },
+      status(code) { this.statusCode = code; return this; },
+      json(payload) { this.payload = payload; this.writableEnded = true; return this; },
+    };
+  }
+
+  const deps = (capture) => ({
+    projectAuthorization: {
+      authorize: () => ({ authorized: true, user: { id: 'u1' }, project: { id: 'p1' } }),
+    },
+    runtime: {
+      director: {
+        run: async (args) => { capture.push(args); return { status: 'COMPLETED' }; },
+      },
+    },
+  });
+
+  const makeReq = (body, taskId) => ({
+    body: { copilotDirector: true, ...body },
+    get: (h) => (h === 'x-ai-dost-task-id' ? taskId : undefined),
+  });
+
+  test('@-mentioned files are appended to the director request', async () => {
+    const runs = [];
+    const res = makeRes();
+    await handleCopilotDirectorRequest(
+      makeReq({ userPrompt: 'refactor this', contextFiles: ['src/App.jsx', 'lib/util.js'] }, 't-mf-1'),
+      res,
+      () => {},
+      deps(runs)
+    );
+    assert.equal(runs.length, 1);
+    assert.match(runs[0].request, /@-mentioned files/);
+    assert.match(runs[0].request, /src\/App\.jsx/);
+    assert.match(runs[0].request, /lib\/util\.js/);
+    assert.ok(runs[0].request.startsWith('refactor this'), 'original prompt stays first');
+  });
+
+  test('traversal / non-string / blank / oversize entries are filtered', async () => {
+    const runs = [];
+    await handleCopilotDirectorRequest(
+      makeReq({
+        userPrompt: 'go',
+        contextFiles: ['../secrets.env', 42, '   ', 'a'.repeat(500), 'ok.js'],
+      }, 't-mf-2'),
+      makeRes(),
+      () => {},
+      deps(runs)
+    );
+    assert.equal(runs.length, 1);
+    assert.ok(!runs[0].request.includes('secrets.env'), 'path traversal must be dropped');
+    assert.ok(!runs[0].request.includes('a'.repeat(50)), 'oversize entries must be dropped');
+    assert.match(runs[0].request, /ok\.js/);
+  });
+
+  test('absent or empty contextFiles leaves the request untouched', async () => {
+    for (const cf of [undefined, [], 'not-an-array']) {
+      const runs = [];
+      await handleCopilotDirectorRequest(
+        makeReq({ userPrompt: 'plain request', ...(cf !== undefined ? { contextFiles: cf } : {}) }, `t-mf-${typeof cf}`),
+        makeRes(),
+        () => {},
+        deps(runs)
+      );
+      assert.equal(runs.length, 1);
+      assert.equal(runs[0].request, 'plain request');
+    }
+  });
+
+  test('contextFiles list is capped at 20 entries', async () => {
+    const runs = [];
+    const many = Array.from({ length: 30 }, (_, i) => `f${i}.js`);
+    await handleCopilotDirectorRequest(
+      makeReq({ userPrompt: 'x', contextFiles: many }, 't-mf-4'),
+      makeRes(),
+      () => {},
+      deps(runs)
+    );
+    const mentioned = runs[0].request.split('User @-mentioned files (prioritize reading/editing these): ')[1] || '';
+    assert.equal(mentioned.split(', ').length, 20);
+  });
+});
+
+// -- Phase 3a: real run history store (GET /api/agent/tasks) -------------
+describe('runHistory (agent_tasks + agent_runs ? GET /tasks)', () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const { STATUS_TO_COLUMN, mapTaskRow, listRunHistory } = require('../services/runHistory');
+  const AgentTaskDAO = require('../db/dao/AgentTaskDAO');
+  const AgentRunDAO = require('../db/dao/AgentRunDAO');
+
+  function makeDb() {
+    const db = new DatabaseSync(':memory:');
+    db.exec(`
+      CREATE TABLE agent_tasks (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        conversation_id TEXT,
+        user_id TEXT NOT NULL,
+        title TEXT,
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        completed_at DATETIME,
+        failed_at DATETIME
+      );
+      CREATE TABLE agent_runs (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        attempt INTEGER DEFAULT 1,
+        started_at DATETIME,
+        completed_at DATETIME,
+        error_info TEXT,
+        runtime_metadata TEXT
+      );
+    `);
+    return db;
+  }
+
+  test('STATUS_TO_COLUMN maps every agent_tasks status to a Kanban column', () => {
+    assert.equal(STATUS_TO_COLUMN.PENDING, 'planned');
+    assert.equal(STATUS_TO_COLUMN.RUNNING, 'running');
+    assert.equal(STATUS_TO_COLUMN.VERIFYING, 'running');
+    assert.equal(STATUS_TO_COLUMN.COMPLETED, 'done');
+    assert.equal(STATUS_TO_COLUMN.SUCCEEDED, 'done');
+    assert.equal(STATUS_TO_COLUMN.FAILED, 'review');
+    assert.equal(STATUS_TO_COLUMN.CANCELLED, 'backlog');
+  });
+
+  test('listRunHistory returns newest tasks with latest-run details', () => {
+    const db = makeDb();
+    const taskDao = new AgentTaskDAO(db);
+    const runDao = new AgentRunDAO(db);
+
+    taskDao.create({ id: 't1', projectId: 'p1', title: 'Build API', status: 'RUNNING' });
+    runDao.create({ id: 'r1', taskId: 't1', status: 'RUNNING', attempt: 1, metadata: { goal: 'Build REST API' } });
+
+    taskDao.create({ id: 't2', projectId: 'p1', title: 'Ship it', status: 'FAILED' });
+    runDao.create({ id: 'r2a', taskId: 't2', status: 'FAILED', attempt: 1, metadata: null });
+    runDao.updateStatus('r2a', 'FAILED', 'provider exploded');
+    runDao.create({ id: 'r2b', taskId: 't2', status: 'SUCCEEDED', attempt: 2 });
+
+    taskDao.create({ id: 't3', projectId: 'p2', title: 'No runs yet', status: 'COMPLETED' });
+
+    const all = listRunHistory({ db });
+    assert.equal(all.length, 3);
+    // Newest first (t3 created last ? first).
+    assert.equal(all[0].id, 't3');
+    assert.equal(all[0].column, 'done');
+    assert.equal(all[0].runCount, 0);
+    assert.equal(all[0].runStatus, null);
+
+    const t1 = all.find(x => x.id === 't1');
+    assert.equal(t1.column, 'running');
+    assert.equal(t1.runStatus, 'RUNNING');
+    assert.equal(t1.attempt, 1);
+    assert.equal(t1.runCount, 1);
+    assert.equal(t1.description, 'Build REST API');
+    assert.equal(t1.projectId, 'p1');
+
+    const t2 = all.find(x => x.id === 't2');
+    // Latest attempt (2) wins; task column still reflects task status.
+    assert.equal(t2.runStatus, 'SUCCEEDED');
+    assert.equal(t2.attempt, 2);
+    assert.equal(t2.runCount, 2);
+    assert.equal(t2.column, 'review');
+    // Error comes from the LATEST attempt (attempt 2 succeeded → none),
+    // not from the older failed attempt.
+    assert.equal(t2.error, null);
+
+    // projectId + limit filters.
+    const p2Only = listRunHistory({ db, projectId: 'p2' });
+    assert.equal(p2Only.length, 1);
+    assert.equal(p2Only[0].id, 't3');
+    const limited = listRunHistory({ db, limit: 1 });
+    assert.equal(limited.length, 1);
+    db.close();
+  });
+
+  test('mapTaskRow survives corrupt metadata/error JSON', () => {
+    const row = {
+      id: 'tx', project_id: 'p1', title: 'Title fallback',
+      status: 'PENDING', created_at: '2026-01-01', updated_at: '2026-01-01',
+      completed_at: null,
+    };
+    const runs = [{
+      id: 'r', attempt: 1, status: 'FAILED',
+      started_at: null, completed_at: null,
+      runtime_metadata: '{not json',
+      error_info: '{broken',
+    }];
+    const mapped = mapTaskRow(row, runs);
+    assert.equal(mapped.description, 'Title fallback');
+    assert.equal(mapped.error, '{broken');
+    assert.equal(mapped.column, 'planned');
+    assert.equal(mapped.runCount, 1);
+  });
+
+  test('listRunHistory without a db returns [] (never throws)', () => {
+    assert.deepEqual(listRunHistory({ db: null }), []);
+  });
+});
+
+// -- Phase 3b: workspace change bus (watch mode event push) --------------
+describe('workspace change bus (projectStore onWorkspaceChange)', () => {
+  const { onWorkspaceChange, notifyWorkspaceChange } = require('../projectStore');
+
+  test('subscribers receive notify events with projectId/path/action', () => {
+    const seen = [];
+    const off = onWorkspaceChange((evt) => seen.push(evt));
+    notifyWorkspaceChange('p-watch', 'src/App.jsx', 'write');
+    notifyWorkspaceChange('p-watch', 'old.js', 'delete');
+    off();
+    assert.equal(seen.length, 2);
+    assert.equal(seen[0].projectId, 'p-watch');
+    assert.equal(seen[0].path, 'src/App.jsx');
+    assert.equal(seen[0].action, 'write');
+    assert.equal(seen[1].action, 'delete');
+    assert.equal(typeof seen[0].at, 'number');
+  });
+
+  test('unsubscribe stops delivery; later emits do not reach it', () => {
+    const seen = [];
+    const off = onWorkspaceChange((evt) => seen.push(evt));
+    off();
+    notifyWorkspaceChange('p-watch', 'a.txt', 'write');
+    assert.equal(seen.length, 0);
+  });
+
+  test('multiple subscribers all receive the same event', () => {
+    const a = [];
+    const b = [];
+    const offA = onWorkspaceChange((evt) => a.push(evt));
+    const offB = onWorkspaceChange((evt) => b.push(evt));
+    notifyWorkspaceChange('p2', 'x.js', 'write');
+    offA();
+    offB();
+    assert.equal(a.length, 1);
+    assert.equal(b.length, 1);
+  });
+
+  test('a throwing subscriber never propagates to the caller', () => {
+    const off = onWorkspaceChange(() => { throw new Error('boom'); });
+    assert.doesNotThrow(() => notifyWorkspaceChange('p3', 'y.js', 'write'));
+    off();
+  });
+
+  test('unsubscribing twice is safe (idempotent teardown)', () => {
+    const seen = [];
+    const off = onWorkspaceChange((evt) => seen.push(evt));
+    off();
+    assert.doesNotThrow(() => off());
+    notifyWorkspaceChange('p4', 'z.js', 'write');
+    assert.equal(seen.length, 0);
+  });
+});
+
+// -- Self-learning: durable copilot notes (survive project deletion) -----
+describe('copilotMemory (self-learning notes)', () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const migration010 = require('../db/migrations/010_copilot_memory');
+  const CopilotNoteDAO = require('../db/dao/CopilotNoteDAO');
+  const { learnNotes, retrieveNotes, formatNotes, extractRunNotes } = require('../services/copilotMemory');
+
+  function makeDb() {
+    const db = new DatabaseSync(':memory:');
+    db.exec('CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT)');
+    migration010.up(db);
+    return db;
+  }
+
+  test('learnNotes saves, dedupes by content, bumps success_count, caps batch at 10', () => {
+    const db = makeDb();
+    const r1 = learnNotes([{ kind: 'lesson', content: 'Use vite for react apps', tags: ['react'] }], { projectId: 'p1', db });
+    assert.deepEqual(r1, { saved: 1, deduped: 0, failed: 0 });
+    const r2 = learnNotes([{ content: 'Use vite for react apps' }], { db });
+    assert.equal(r2.deduped, 1);
+    assert.equal(r2.saved, 0);
+    const dao = new CopilotNoteDAO(db);
+    assert.equal(dao.count('local-user'), 1);
+    assert.equal(dao.listByUser('local-user')[0].success_count, 2);
+    const many = Array.from({ length: 15 }, (_, i) => ({ content: `distinct note ${i}` }));
+    const r3 = learnNotes(many, { db });
+    assert.equal(r3.saved + r3.deduped, 10);
+    db.close();
+  });
+
+  test('retrieveNotes ranks prompt-overlap + same-project, excludes unrelated noise', () => {
+    const db = makeDb();
+    learnNotes([
+      { content: 'React dashboard chart layout worked well', tags: ['react', 'dashboard'], projectId: 'pA' },
+      { content: 'Express api jwt auth pattern', tags: ['express'], projectId: 'pB' },
+      { content: 'Totally unrelated gardening tips', tags: ['garden'], projectId: 'pC' },
+    ], { db });
+    const hit = retrieveNotes({ prompt: 'make a react dashboard with charts', projectId: 'pA', db });
+    assert.ok(hit.length >= 1);
+    assert.match(hit[0].content, /React dashboard/);
+    assert.ok(!hit.some(r => r.content.includes('gardening')), 'unrelated note excluded');
+    // Same-project note surfaces even when the prompt shares no keywords.
+    learnNotes([{ content: 'zzz qqq unique-only-here', projectId: 'pA' }], { db });
+    const same = retrieveNotes({ prompt: 'completely different words xyz', projectId: 'pA', db });
+    assert.ok(same.some(r => r.content.includes('unique-only-here')));
+    db.close();
+  });
+
+  test('notes survive project deletion (NO foreign key cascade)', () => {
+    const db = makeDb();
+    db.prepare("INSERT INTO projects (id, name) VALUES ('proj_gone', 'Temp')").run();
+    learnNotes([{ content: 'PWA service worker caching lesson', projectId: 'proj_gone' }], { db });
+    db.prepare("DELETE FROM projects WHERE id = 'proj_gone'").run();
+    const after = retrieveNotes({ prompt: 'pwa service worker offline app', projectId: 'proj_gone', db });
+    assert.ok(after.some(r => r.content.includes('PWA service worker')));
+    assert.equal(new CopilotNoteDAO(db).count('local-user'), 1);
+    db.close();
+  });
+
+  test('extractRunNotes builds deterministic success/error/heal notes with tags', () => {
+    const ok = extractRunNotes({ prompt: 'banao react express todo app', status: 'success', filesTouched: 12 });
+    assert.equal(ok.length, 1);
+    assert.equal(ok[0].kind, 'lesson');
+    assert.match(ok[0].content, /12 files/);
+    assert.ok(ok[0].tags.includes('react'));
+    const bad = extractRunNotes({
+      prompt: 'create docker deploy',
+      status: 'error',
+      message: 'port 5000 busy',
+      heals: [{ error: 'EADDRINUSE 5000' }, { error: '' }],
+    });
+    assert.equal(bad.length, 2); // failure note + one non-empty heal note
+    assert.equal(bad[0].kind, 'fix');
+    assert.match(bad[0].content, /port 5000 busy/);
+    assert.match(bad[1].content, /EADDRINUSE/);
+    assert.deepEqual(extractRunNotes({ prompt: '   ' }), []);
+  });
+
+  test('formatNotes keeps injected prompt block compact (<=700 chars)', () => {
+    const notes = Array.from({ length: 20 }, (_, i) => ({ kind: 'lesson', content: `x${i} `.repeat(60) }));
+    const out = formatNotes(notes);
+    assert.ok(out.length <= 700);
+    assert.ok(out.split('\n').length < 20);
+    assert.equal(formatNotes([]), '');
+    assert.equal(formatNotes(null), '');
+  });
+});

@@ -32,6 +32,19 @@ function collectCodeBlocks(content) {
 export function extractArtifact(content) {
   if (!content || typeof content !== 'string') return null;
 
+  // NEW: Support for PDF/DOC/XLSX artifacts triggered by the backend
+  // These often come as specific download links or markers in the text
+  const docMatch = content.match(/\[DOWNLOAD_ARTIFACT:\s*([^\]]+)\]/i);
+  if (docMatch) {
+    return {
+      id: docMatch[1],
+      title: 'Generated Document',
+      type: 'pdf', // Default to pdf, can be extended
+      downloadUrl: docMatch[1],
+      code: 'File generated successfully. Use the download button to view.'
+    };
+  }
+
   const blocks = collectCodeBlocks(content);
   if (blocks.length === 0) return null;
 

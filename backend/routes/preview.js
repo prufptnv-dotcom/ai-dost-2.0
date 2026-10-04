@@ -339,6 +339,25 @@ function buildStandaloneReactHtml(projectId) {
       });
     }
   }
+  // Font Awesome: collect component + icon-definition imports so the preview
+  // renders REAL FA glyphs (not ✦ stubs). Covers @fortawesome/* and react-icons/fa.
+  const faCompMatches = combinedCode.matchAll(/import\s+\{([^}]+)\}\s+from\s+['"](?:@fortawesome\/react-fontawesome|react-icons\/fa)['"]/g);
+  for (const m of faCompMatches) {
+    if (m[1]) {
+      m[1].split(',').forEach(id => {
+        const parts = id.trim().split(/\s+as\s+/);
+        if (parts[0]) allTags.add(parts[0].trim());
+        if (parts[1]) allTags.add(parts[1].trim());
+      });
+    }
+  }
+  // fa* icon-definition values used as icon={faPlus} — imports are stripped, so
+  // synthesize { prefix, iconName } definitions from the identifier itself.
+  const faValueDefs = new Set();
+  const faValMatches = combinedCode.matchAll(/\b(fa[A-Z][A-Za-z0-9]*)\b/g);
+  for (const m of faValMatches) {
+    if (m[1] && m[1] !== 'FontAwesomeIcon') faValueDefs.add(m[1]);
+  }
 
   const declaredComponents = new Set();
   const declMatches = combinedCode.matchAll(/(?:function|class|const|let|var)\s+([A-Z][A-Za-z0-9_]*)/g);
@@ -349,8 +368,47 @@ function buildStandaloneReactHtml(projectId) {
   const missingComponents = Array.from(allTags)
     .filter(name => !declaredComponents.has(name) && !['App', 'Main', 'Root', 'React', 'ReactDOM', 'Fragment', 'GlobalErrorBoundary'].includes(name));
 
+  const FA_BRAND_COMPONENTS = new Set(['Github', 'Twitter', 'XTwitter', 'Google', 'Facebook', 'Instagram', 'Linkedin', 'Youtube', 'Discord', 'Slack', 'Apple', 'Windows', 'Android', 'Chrome', 'Firefox', 'Npm', 'NodeJs', 'React', 'Vuejs', 'Angular', 'Python', 'Java', 'Php', 'Aws', 'Docker', 'GitAlt', 'StackOverflow', 'Codepen', 'Dribbble', 'Behance', 'Medium', 'Reddit', 'Twitch', 'Spotify', 'Telegram', 'Whatsapp']);
+  const faKebab = (faName) => faName.slice(2).replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+  const faValueJs = Array.from(faValueDefs)
+    .map(name => {
+      const base = name.slice(2);
+      const iconName = base.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+      const prefix = FA_BRAND_COMPONENTS.has(base) ? 'fab' : 'fas';
+      return `if (typeof window['${name}'] === 'undefined') { window['${name}'] = { prefix: '${prefix}', iconName: '${iconName}' }; }`;
+    }).join('\n');
+
   const iconStubsJs = missingComponents
-    .map(name => `if (typeof window['${name}'] === 'undefined') {
+    .map(name => {
+      if (name === 'FontAwesomeIcon') {
+        return `if (typeof window['FontAwesomeIcon'] === 'undefined') {
+      window['FontAwesomeIcon'] = function FontAwesomeIconStub(props) {
+        const def = props?.icon || {};
+        const prefix = def.prefix === 'fab' ? 'fa-brands' : 'fa-solid';
+        const icon = def.iconName || 'circle';
+        const s = props?.fontSize || (typeof props?.size === 'number' ? props.size : 16);
+        return React.createElement('i', {
+          className: 'fa ' + prefix + ' fa-' + icon + ' ' + (props?.className || ''),
+          style: Object.assign({ fontSize: s }, props?.style || {})
+        });
+      };
+    }`;
+      }
+      if (/^Fa[A-Z]/.test(name)) {
+        const base = name.slice(2);
+        const icon = faKebab(name);
+        const prefix = FA_BRAND_COMPONENTS.has(base) ? 'fa-brands' : 'fa-solid';
+        return `if (typeof window['${name}'] === 'undefined') {
+      window['${name}'] = function ${name}Stub(props) {
+        const s = props?.size || props?.fontSize || 16;
+        return React.createElement('i', {
+          className: 'fa ${prefix} fa-${icon} ' + (props?.className || ''),
+          style: Object.assign({ fontSize: typeof s === 'number' ? s : 16 }, props?.style || {})
+        });
+      };
+    }`;
+      }
+      return `if (typeof window['${name}'] === 'undefined') {
       window['${name}'] = function ${name}Stub(props) {
         const s = props?.size || 16;
         return React.createElement('span', {
@@ -358,7 +416,8 @@ function buildStandaloneReactHtml(projectId) {
           style: { width: s, height: s, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }
         }, '✦');
       };
-    }`).join('\n');
+    }`;
+    }).join('\n') + '\n' + faValueJs;
 
   const scopeBindings = missingComponents
     .map(name => `var ${name} = window['${name}'];`).join('\n');
@@ -370,7 +429,8 @@ function buildStandaloneReactHtml(projectId) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Live Preview — ${esc(projectId)}</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>

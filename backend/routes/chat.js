@@ -2,21 +2,22 @@ const express = require('express');
 const logger = require('../logger');
 const { ReasoningStreamFilter } = require('../utils/streamUtils');
 const { OUTPUT_QUALITY_STANDARD } = require('../services/outputQualityStandard');
-const DEEP_REASONING_SYSTEM_PROMPT = `You are AI-Dost — an elite autonomous AI system combining the depth of a principal engineer and research analyst with the execution autonomy of a Devin-class AI developer (ChatGPT/Claude-level output quality is the minimum bar).
+const { isImageCreateRequest } = require('../services/imageIntent');
+const DEEP_REASONING_SYSTEM_PROMPT = `You are AI-Dost 2.0 — a supreme autonomous AI system designed to compete directly with ChatGPT-4 and Claude 3.5 Sonnet. You combine the deep analytical reasoning of a principal engineer with the creative flexibility of an elite polymath.
 
 [THINKING PROTOCOL]
-Before producing the final reply, reason step-by-step INTERNALLY inside <think>...</think> tags.
-Do NOT reveal these tags or the raw chain-of-thought in the conversational reply — the frontend parses them into a visible "thought trace". If the model emits native reasoning (reasoning_content), prefer that; otherwise use the <think>...</think> wrapper.
+Before producing the final reply, reason step-by-step INTERNALLY inside <think>...</think> tags. Breakdown complex problems into logic paths, verify your knowledge, and plan your response structure. Do NOT reveal these tags in the conversational reply.
 
 [PRIMARY DIRECTIVE]
-Deliver complete, expert-level, actionable answers: depth, precision, and working solutions over brevity. Do the thinking for the user — never offload basic reasoning as follow-up questions. For build/fix requests, work like an autonomous agent: Plan -> Assumptions -> Implementation -> Verify -> Next steps.
+Deliver complete, expert-level, actionable answers: unrivaled depth, extreme precision, and bulletproof working solutions. Do the thinking for the user — never offload basic reasoning as follow-up questions. Handle ANY topic thrown at you (coding, math, creative writing, analysis) flawlessly.
 
 ${OUTPUT_QUALITY_STANDARD}
 
-Always communicate conversationally in Hinglish unless requested otherwise.`;
+Always respect the language directive provided by the system, or naturally adapt to the language the user speaks in. Your conversational tone is confident, helpful, and exceptionally smart.`;
 const router = express.Router();
 const { handleWebSearch } = require('../controllers/searchController');
 const { handleFileAnalysis } = require('../controllers/analyzeController');
+const { fetchSafeUrl } = require('../services/urlFetcher');
 const { handleExecute } = require('../controllers/executeController');
 const MoERouterService = require('../services/moeRouterService');
 const VllmService = require('../services/vllmService');
@@ -32,13 +33,17 @@ const TogetherService = require('../services/togetherService');
 const CerebrasService = require('../services/cerebrasService');
 const OpenAIService = require('../services/openaiService');
 const webSearchService = require('../services/webSearchService');
-const { fetchSafeUrl } = require('../services/urlFetcherService');
+const { executeAutonomousLoop } = require('../services/agenticOrchestrator');
+const swarmController = require('../services/swarmController');
+const memoryService = require('../services/memoryService');
+
 const { classifyWebIntent } = require('../services/webIntentClassifier');
 const { getPublicConfig } = require('../config/webAccessConfig');
 const { classifyAssessmentIntent, INTENTS: ASSESS_INTENTS } = require('../services/assessmentIntentClassifier');
 const { generateAssessment } = require('../services/assessmentGeneratorService');
 const { sanitizeAssessmentForClient } = require('../services/assessmentSchema');
 const assessmentDAO = require('../db/dao/AssessmentDAO');
+const pythonEngineService = require('../services/pythonEngineService');
 const bharatService = require('../services/bharatApis');
 const { getDatabase } = require('../db');
 const MemoryService = require('../services/memoryService');
@@ -162,11 +167,48 @@ router.get('/local-models', async (req, res) => {
                 details: m.details
             };
         });
-        
+
+        // Add custom fine-tuned VKP-Omni-2B model by Vikash Kumar Pandit
+        const vkpModel = {
+            id: 'vkp-omni',
+            name: 'VKP-Omni-2B (NandiAi/VKP-Omni-2B)',
+            size: '2.0 GB',
+            weight: 'Lightweight',
+            category: 'Fine-Tuned Multimodal',
+            isCompatible: true,
+            warning: '',
+            details: {
+                family: 'qwen2-vl',
+                parameter_size: '2B',
+                quantization_level: '4-bit nf4',
+                author: 'Vikash Kumar Pandit',
+                model_id: 'NandiAi/VKP-Omni-2B'
+            }
+        };
+        formattedModels.unshift(vkpModel);
+
         res.json({ success: true, models: formattedModels });
     } catch (error) {
-        // Return empty list if Ollama is not running
-        res.json({ success: true, models: [] });
+        // Return VKP-Omni-2B even if Ollama is not running
+        res.json({
+            success: true,
+            models: [{
+                id: 'vkp-omni',
+                name: 'VKP-Omni-2B (NandiAi/VKP-Omni-2B)',
+                size: '2.0 GB',
+                weight: 'Lightweight',
+                category: 'Fine-Tuned Multimodal',
+                isCompatible: true,
+                warning: '',
+                details: {
+                    family: 'qwen2-vl',
+                    parameter_size: '2B',
+                    quantization_level: '4-bit nf4',
+                    author: 'Vikash Kumar Pandit',
+                    model_id: 'NandiAi/VKP-Omni-2B'
+                }
+            }]
+        });
     }
 });
 
@@ -217,8 +259,40 @@ function buildCleanHistory(history, maxMessages = 20, maxTotalChars = 24000) {
     return result;
 }
 
+// ── Agentic Action Processor (The "Doing" Part) ────────────────────────
+async function processAgenticTags(response, projectId = 'default') {
+    if (typeof response !== 'string') return response;
+    
+    let updatedResponse = response;
+    const docTagMatch = response.match(/\[GENERATE_(PDF|DOCX|PPTX|CSV|XLSX):\s*([^\]]+)\]/i);
+    
+    if (docTagMatch) {
+        const [fullTag, type, topic] = docTagMatch;
+        logger.info(`🤖 [Agentic Trigger] Detected document request: ${type} for "${topic}"`);
+        try {
+            const docRes = await fetch(`http://localhost:5020/api/document/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: type.toLowerCase(), topic: topic.trim(), projectId })
+            });
+            const docData = await docRes.json();
+            if (docData.success) {
+                updatedResponse = updatedResponse.replace(fullTag, `✅ **${type} Ready!** [Download Here](${docData.downloadUrl})`);
+                logger.info(`✅ [Agentic Trigger] Successfully generated ${type} for ${topic}`);
+            } else {
+                updatedResponse = updatedResponse.replace(fullTag, `⚠️ Failed to generate ${type}: ${docData.error}`);
+            }
+        } catch (e) {
+            logger.error(`🤖 [Agentic Trigger] Error during doc generation: ${e.message}`);
+            updatedResponse = updatedResponse.replace(fullTag, `⚠️ Error generating ${type} file.`);
+        }
+    }
+    return updatedResponse;
+}
+
 // Main chat endpoint
 router.post('/', async (req, res) => {
+
     const startTime = Date.now();
     try {
         let { message, model, section, fileContent, history, mode, customKeys, uploadedDocs, persona } = req.body;
@@ -254,20 +328,23 @@ router.post('/', async (req, res) => {
         const GLOBAL_SYSTEM_RULES = `
 [CRITICAL SYSTEM RULES & REAL-TIME CONTEXT]
 1. Current Date: Today is ${todayStr}. NEVER hallucinate past dates.
-2. Crypto & Financial Data: Do NOT fabricate or guess prices, market caps, or numbers. If you don't have real-time data, state it clearly. Always provide actual URLs (e.g. CoinGecko/CoinMarketCap) when discussing crypto.
-3. Book & PDF Links: Do NOT hallucinate direct PDF links (e.g. .pdf files) unless you are 100% sure they exist. Instead, provide the official website or download page URL.
-4. Interactive UI Elements: Do NOT hallucinate or pretend to generate interactive UI buttons like "Launch Assessment" in plain text chat. Present quizzes or questions directly in plain text or markdown.
-5. Language Consistency: The user has chosen a specific language (e.g., Hinglish). You MUST reply entirely in that chosen language. Do not switch back to English except for technical terms.
+2. Financial & Factual Accuracy: Do NOT fabricate or guess prices, market caps, numbers, or facts. If you don't have real-time data, state it clearly. Always provide actual URLs when discussing facts or crypto.
+3. Link Accuracy: Do NOT hallucinate direct links (e.g., .pdf files or GitHub repos) unless you are 100% sure they exist. Instead, provide the official website or download page URL.
+4. Interactive UI Elements: Do NOT hallucinate interactive UI buttons like "Launch Assessment" in plain text chat. Present quizzes or questions directly in plain text or markdown.
+5. Hyper-Multilingual: You MUST reply entirely in the language determined by the system or requested by the user. Switch seamlessly (English, Hindi, Hinglish, Marathi, Bengali, etc.). Do not switch back to English except for technical terms.
 6. Citation Style: When citing sources, ALWAYS include the full clickable URL in this format: [1] https://... (do not just write [1] without the link).
-7. Completeness (MANDATORY): Never truncate an answer mid-way, never use placeholder code ("// rest of code here", "// TODO", "your_code_here"), and never give a shallow one-liner when the question needs depth. Code must be complete and runnable with imports + error handling.
-8. Self-Verification: Before finalizing, confirm silently — the actual question is answered, every code block is complete, steps are in runnable order, citations are real, and filler is removed.
+7. Extreme Completeness (MANDATORY): Never truncate an answer mid-way, never use placeholder code ("// rest of code here"), and never give a shallow one-liner when the question needs depth. Code must be complete and runnable.
+8. Zero Hallucinations: If you don't know something, admit it. Never invent APIs, packages, or tools.
 `;
         processedMessage = `${GLOBAL_SYSTEM_RULES}\n\n${langInfo.instruction}\n\n${processedMessage}`;
 
-        // 100% Accuracy: Inject user verified memory corrections & learned rules
-        const learnedMemory = getLearnedMemoryDirectives(req.body.projectId || 'default');
-        if (learnedMemory) {
-            processedMessage += learnedMemory;
+        // ── Memory Recall: Inject past experiences and preferences ────────────────
+        const projectId = req.body.projectId || 'default';
+        const recalledMemories = await memoryService.recallSimilarExperiences(projectId, message);
+        const userPrefs = await memoryService.getPreferences(projectId);
+        
+        if (recalledMemories || userPrefs) {
+            processedMessage += `\n\n[RECALLED_MEMORIES]\n${recalledMemories}\n\n[USER_PREFERENCES]\n${userPrefs}\n\nInstruction: Use these past experiences and preferences to optimize the current task. Avoid repeating past mistakes.`;
         }
 
         // Production-Grade Web Intent Classification & Live Data Injection
@@ -359,7 +436,9 @@ router.post('/', async (req, res) => {
             }
 
             // 6. Category 3: Image Generation & Editing Intent (All 17 Types)
-            const isImageIntent = /(?:image banao|fast image|turbo image|photo banao|generate image|picture of|logo banao|banner banao|poster banao|thumbnail banao|character design|portrait banao|infographic|concept art|mockup|book cover|social media post|background remove|remove background|object add|style transform|enhance image)/i.test(message) && !/(?:animation|3d scene|three\.?js|webgl|playable game|simulation|kinetic|typography reveal|runner)/i.test(message);
+            // Shared matcher first (plural-safe: "ek cat ka images banao"), then the
+            // specialised studio categories the narrower matcher doesn't name.
+            const isImageIntent = isImageCreateRequest(message) || /(?:image banao|fast image|turbo image|photo banao|generate image|picture of|logo banao|banner banao|poster banao|thumbnail banao|character design|portrait banao|infographic|concept art|mockup|book cover|social media post|background remove|remove background|object add|style transform|enhance image)/i.test(message) && !/(?:animation|3d scene|three\.?js|webgl|playable game|simulation|kinetic|typography reveal|runner)/i.test(message);
             if (isImageIntent) {
                 const detectedCat = detectImageCategory(message);
                 const reqSpec = buildEnhancedImageRequest(message, detectedCat);
@@ -593,7 +672,23 @@ Structure the answer clearly, use appropriate diagrams, code, tables, or step-by
         let fallbacksAttempted = [];
         const groqMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
 
-        if (model === 'ollama' || (model && model.startsWith('local:'))) {
+        // Custom fine-tuned VKP-Omni-2B Multimodal model (NandiAi/VKP-Omni-2B)
+        if (model === 'vkp-omni' || model === 'vkp' || model === 'nandiai/vkp-omni-2b') {
+            logger.info('🚀 Routing request to custom fine-tuned model: VKP-Omni-2B (NandiAi/VKP-Omni-2B)');
+            try {
+                const vkpPrompt = message ? message.trim() : groqMsg;
+                const vkpRes = await pythonEngineService.queryVkpOmni(vkpPrompt);
+                if (vkpRes && vkpRes.ok && vkpRes.data && vkpRes.data.response) {
+                    response = vkpRes.data.response;
+                    usedModel = 'VKP-Omni-2B';
+                }
+            } catch (err) {
+                logger.warn('VKP-Omni query fallback note:', err.message);
+                fallbacksAttempted.push('vkp-omni-fallback');
+            }
+        }
+
+        if (!response && (model === 'ollama' || (model && model.startsWith('local:')))) {
             const localModelName = model.startsWith('local:') ? model.substring(6) : (process.env.OLLAMA_MODEL || 'qwen2.5-coder:7b');
             const localMsg = fileContent ? `File content:\n${fileContent}\n\nUser message: ${processedMessage}` : processedMessage;
             
@@ -735,8 +830,38 @@ Structure the answer clearly, use appropriate diagrams, code, tables, or step-by
             }
         }
         
+        // ── Agentic Action Trigger (The "Doing" Part) ────────────────────────
+        // Scan response for [GENERATE_X: topic] tags and execute them autonomously
+        if (typeof response === 'string') {
+            const docTagMatch = response.match(/\[GENERATE_(PDF|DOCX|PPTX|CSV|XLSX):\s*([^\]]+)\]/i);
+            if (docTagMatch) {
+                const [fullTag, type, topic] = docTagMatch;
+                logger.info(`🤖 [Agentic Trigger] Detected document request: ${type} for "${topic}"`);
+                try {
+                    const backendPort = process.env.PORT || 5000;
+                    const docRes = await fetch(`http://localhost:${backendPort}/api/document/generate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ type: type.toLowerCase(), topic: topic.trim() })
+                    });
+                    const docData = await docRes.json();
+                    if (docData.success) {
+                        response = response.replace(fullTag, `✅ **${type} Ready!** [Download Here](${docData.downloadUrl})`);
+                        logger.info(`✅ [Agentic Trigger] Successfully generated ${type} for ${topic}`);
+                    } else {
+                        response = response.replace(fullTag, `⚠️ Failed to generate ${type}: ${docData.error}`);
+                    }
+                } catch (e) {
+                    logger.error(`🤖 [Agentic Trigger] Error during doc generation: ${e.message}`);
+                    response = response.replace(fullTag, `⚠️ Error generating ${type} file.`);
+                }
+            }
+        }
+
         // Final fallback if all models failed
         if (!isValidResponse(response)) {
+
+
             logger.warn(`⚠️ Primary selected model failed (${usedModel}), attempting global cascading failover...`);
             try {
                 const fallbackResult = await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
@@ -770,6 +895,24 @@ Structure the answer clearly, use appropriate diagrams, code, tables, or step-by
         const duration = Date.now() - startTime;
         logger.info(`✅ Chat completed in ${duration}ms using model: ${usedModel}`);
         
+        // ── Swarm Orchestration (Ultra-Complex Tasks) ────────────────────────
+        // If the prompt is identified as a "Complex Project" or "Deep Research",
+        // we bypass the standard loop and use the Multi-Agent Swarm.
+        const isComplexTask = /research report|market analysis|strategic roadmap|full stack|competitor analysis/i.test(message);
+        
+        if (isComplexTask) {
+            logger.info(`🐝 [ChatRouter] High-complexity task detected. Triggering Swarm Intelligence...`);
+            const swarmResponse = await swarmController.coordinate(message, req);
+            
+            // The swarm returns the final result, but we still run it through the 
+            // Agentic Orchestrator to handle any final [GENERATE_X] tags.
+            response = await executeAutonomousLoop(swarmResponse, req);
+            usedModel = 'Swarm-Intelligence';
+        } else {
+            // Standard Agentic Loop for simple/medium tasks
+            response = await executeAutonomousLoop(response, req);
+        }
+
         res.json({
             success: true,
             reply: response,
@@ -792,6 +935,7 @@ Structure the answer clearly, use appropriate diagrams, code, tables, or step-by
             duration
         });
     } catch (error) {
+
         const duration = Date.now() - startTime;
         logger.error('Chat error:', error);
         res.status(500).json({
@@ -938,7 +1082,8 @@ const CREATIVE_CANVAS_SYSTEM_PROMPT = `You are AI-Dost, an elite Senior Software
 Key Directives & Mandates:
 1. Tone & Responsibility: Be confident, proactive, and authoritative. STRICT LANGUAGE RULE: Always respond in the EXACT language and script detected from the user's latest prompt (e.g. English for English questions, Hindi in Devanagari script for Hindi questions, Hinglish for Romanized Hindi, Bengali for Bengali, etc.). Never force Hinglish if the user asks in pure English or another language.
 2. Multimodal Intents:
-   - IMAGE REQUEST: If user asks ONLY for a static 2D image, drawing, or picture (e.g. "image banao", "photo draw karo"), respond ONLY with: [GENERATE_IMAGE: detailed English description]. 
+   - IMAGE REQUEST: If user asks for a static 2D image, drawing, or picture (e.g. "image banao", "photo draw karo", "ek cat ka images banao", "meri photos banao"), respond ONLY with: [GENERATE_IMAGE: detailed English description]. 
+     NEVER answer an image request with source code (Pillow/PIL, matplotlib, SVG, canvas, HTML/JS), a Plan/Assumptions/Implementation breakdown, or "pip install" steps — rendering the picture is the deliverable.
      CRITICAL: DO NOT use [GENERATE_IMAGE: ...] if the user asks for an animation, 3D, game, simulation, Three.js, WebGL, logo reveal, kinetic text/font, or interactive code! For animations/games/3D, you MUST generate the interactive runnable HTML code!
    - PDF / REPORT: If user asks for a PDF or document, wrap in [GENERATE_PDF: Title] content [/GENERATE_PDF].
 3. HIGH-FIDELITY CREATIVE CODING & ANIMATION RULES (STRICT AUTONOMOUS MANDATE):
@@ -986,7 +1131,7 @@ router.post('/stream', async (req, res) => {
     };
 
     try {
-        const { message, model, section, fileContent, history, mode, customKeys, uploadedDocs, persona } = req.body;
+        const { message, model, section, fileContent, history, mode, customKeys, uploadedDocs, persona, webSearch, enableWebSearch } = req.body;
         if (!message || !message.trim()) {
             sendEvent({ error: 'Message is required' });
             sendEvent('[DONE]');
@@ -1079,7 +1224,10 @@ router.post('/stream', async (req, res) => {
 
         // Production-Grade Web Intent Classification & Live Data Injection for SSE
         let attachedSources = [];
-        const webIntent = classifyWebIntent(message);
+        const explicitWebSearch = webSearch === true || enableWebSearch === true;
+        const webIntent = explicitWebSearch
+            ? { needsWeb: true, intent: 'WEB_SEARCH', query: message.trim(), extractedUrls: [] }
+            : classifyWebIntent(message);
 
         if (webIntent.needsWeb) {
             logger.info(`🌐 [Stream Router] Web intent: ${webIntent.intent} for query: "${webIntent.query}"`);
@@ -1195,16 +1343,18 @@ router.post('/stream', async (req, res) => {
                 processedMessage += `\n\n[BHARAT_OPEN_API: ISRO SPACE & BHUVAN]\nAgency: ${isroRes.agency}\nBhuvan 2D/3D Portal: ${isroRes.bhuvanGeoPortal}\nMissions:\n${missionsSummary}\n\nInstructions: Explain India's indigenous ISRO achievements and Bhuvan Geo-Portal access in ${langInfo.languageName}.`;
             }
 
-            // 5. Indian Holidays Intent
-            if (/(?:holiday|holidays|chhutti|chhutiyan|festival|diwali|holi|eid|republic day|independence day|2026)/i.test(message) && !message.toLowerCase().includes('vacation booking')) {
+            // 5. Indian Holidays Intent (Exclude leave applications / personal leave requests)
+            const isPersonalLeaveRequest = /(?:application|letter|likh|likho|liko|chahiye|sick leave|casual leave|leave request|two days|2 dino|2 din|ek din|1 din)/i.test(message);
+            if (!isPersonalLeaveRequest && /(?:holiday|holidays|festival|diwali|holi|eid|republic day|independence day|gazetted)/i.test(message) && !message.toLowerCase().includes('vacation booking')) {
                 const holRes = bharatService.getIndianHolidays(2026);
                 const holSummary = holRes.holidays.map(h => `• ${h.date} (${h.day}): ${h.name} - ${h.type}`).join('\n');
                 processedMessage += `\n\n[BHARAT_OPEN_API: INDIAN NATIONAL GAZETTED HOLIDAYS 2026]\nOfficial Holidays:\n${holSummary}\n\nInstructions: Provide the official Indian holiday list in ${langInfo.languageName}.`;
             }
 
             // 6. Z-Image Turbo Intent (ONLY for static image generation, never for 3D/animation/games)
-            if (/(?:image banao|fast image|turbo image|photo banao|generate image|picture of)/i.test(message) && !/(?:animation|3d|three\.?js|webgl|game|simulation|kinetic|typography|reveal|code|runner)/i.test(message)) {
-                processedMessage += `\n\n[INSTRUCTION: The user is requesting static image generation. You MUST include the tag '[GENERATE_IMAGE: <clean english prompt>]' in your response. Since Z-Image Turbo is active, optimize the prompt for vibrant, high-detail generation.]`;
+            // Shared matcher: old literal phrase list missed plurals ("ek cat ka images banao").
+            if (isImageCreateRequest(message)) {
+                processedMessage += `\n\n[INSTRUCTION: The user is requesting static image generation. You MUST include the tag '[GENERATE_IMAGE: <clean english prompt>]' in your response and keep any prose to one or two short sentences. HARD RULE: do NOT reply with source code (Pillow/PIL, matplotlib, SVG, canvas, HTML), do NOT produce a Plan/Assumptions/Implementation breakdown, and do NOT suggest installing packages — render the picture instead. Since Z-Image Turbo is active, optimize the prompt for vibrant, high-detail generation.]`;
             }
 
             // 7. Anime.js 3D Animation Intent
@@ -1234,8 +1384,43 @@ Include:
         let streamedSuccessfully = false;
         let usedModel = 'auto';
 
+        // 0. If Custom Fine-Tuned VKP-Omni-2B requested
+        const isVkpRequested = model === 'vkp-omni' || model === 'vkp-omni-2b' || model === 'vkp' || model === 'nandiai/vkp-omni-2b' || (typeof model === 'string' && model.toLowerCase().includes('vkp'));
+        if (isVkpRequested) {
+            logger.info('🚀 Streaming via custom fine-tuned model: VKP-Omni-2B (NandiAi/VKP-Omni-2B)');
+            try {
+                let vkpPrompt = message ? message.trim() : groqMsg;
+                if (attachedSources && attachedSources.length > 0) {
+                    const webContextText = attachedSources.map(s => `[${s.citationId}] "${s.title}" (${s.domain})\nURL: ${s.url}\nSnippet: ${s.snippet}`).join('\n\n');
+                    vkpPrompt = `User Query: ${message.trim()}\n\nLive Web Search Results:\n${webContextText}\n\nAnswer the user query factually based on the web search results above with [1], [2] citations:`;
+                }
+                let capturedThoughts = [];
+                let capturedContent = [];
+                const filter = new ReasoningStreamFilter(
+                    (t) => { capturedThoughts.push(t); sendEvent({ type: 'thought_chunk', thought: t }); },
+                    (c) => { capturedContent.push(c); sendEvent({ chunk: c }); streamedSuccessfully = true; }
+                );
+                const streamed = await pythonEngineService.streamVkpOmni(vkpPrompt, (chunk) => {
+                    filter.pushContentDelta(chunk);
+                });
+                filter.flush();
+                if (filter.hasEmittedThought) sendEvent({ type: 'thought_done' });
+                if (capturedContent.length === 0 && capturedThoughts.length > 0) {
+                    const fullThoughtText = capturedThoughts.join('').trim();
+                    sendEvent({ chunk: fullThoughtText });
+                    streamedSuccessfully = true;
+                }
+                if (streamed || streamedSuccessfully) {
+                    streamedSuccessfully = true;
+                    usedModel = 'VKP-Omni-2B';
+                }
+            } catch (err) {
+                logger.warn('VKP-Omni streaming fallback note:', err.message);
+            }
+        }
+
         // 1. If Local Ollama requested
-        if (model === 'ollama' || (model && model.startsWith('local:'))) {
+        if (!streamedSuccessfully && (model === 'ollama' || (model && model.startsWith('local:')))) {
             const localModelName = model.startsWith('local:') ? model.substring(6) : (process.env.OLLAMA_MODEL || 'qwen2.5-coder:7b');
             try {
                 const ollamaRes = await fetch('http://127.0.0.1:11434/api/chat', {
@@ -1509,7 +1694,12 @@ Include:
 
         // 5. Fallback to normal cascading chat if streaming had no output
         if (!streamedSuccessfully) {
-            if (model === 'ollama' || (model && model.startsWith('local:'))) {
+            if (model === 'vkp-omni' || model === 'vkp' || model === 'nandiai/vkp-omni-2b') {
+                sendEvent({
+                    chunk: '⚠️ **VKP-Omni-2B Engine Abhi Start Nahi Hai**\n\nAapne apna custom fine-tuned model **VKP-Omni-2B (NandiAi/VKP-Omni-2B)** select kiya hai, lekin Python sidecar engine (Port 8001 ya 8002) abhi run nahi ho raha hai.\n\n**Ise chalane ke liye:**\n1. Ek naya terminal open karke yeh run karein:\n   ```powershell\n   cd "C:\\Users\\vikash kumar\\Pictures\\ai dost 3.0\\ai-engine"\n   start_vkp_omni.bat\n   ```\n   *(Ya `python vkp_omni_engine.py`)*\n2. Engine start hone ke baad aapka **VKP-Omni-2B** model load hokar sidhe chat handle karega!'
+                });
+                usedModel = 'VKP-Omni-2B (Offline)';
+            } else if (model === 'ollama' || (model && model.startsWith('local:'))) {
                 const ollamaModelName = process.env.OLLAMA_MODEL || 'qwen2.5-coder:7b';
                 sendEvent({ chunk: 'Ai-Dost: Local Ollama model (' + ollamaModelName + ') connect nahi ho pa raha.\nKripya check karein:\n1. Kya "ollama serve" terminal me chal raha hai?\n2. Kya apne model download kiya hai? ("ollama pull ' + ollamaModelName + '")' });
                 usedModel = 'ollama-error';

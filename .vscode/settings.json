@@ -45,6 +45,10 @@
         "/^Set-Location 'c:\\\\Users\\\\vikash kumar\\\\Desktop\\\\ai-dost version 2\\.o\\\\frontend'; npm run dev$/": {
             "approve": true,
             "matchCommandLine": true
+        },
+        "/^cd frontend; npm run lint$/": {
+            "approve": true,
+            "matchCommandLine": true
         }
     }
 }

@@ -34,7 +34,7 @@ export default function CopilotStatusBar({ running = false, status, elapsedSec =
   return (
     <div
       data-testid="copilot-status-bar"
-      className="px-4 py-2 flex items-center gap-2 border-t border-border bg-canvas-base min-h-[32px]"
+      className="mx-3 mb-2 px-3 py-2 flex items-center gap-2 rounded-lg border border-border bg-canvas-surface min-h-[34px] shadow-sm"
       role="status"
       aria-live="polite"
     >
@@ -52,7 +52,10 @@ export default function CopilotStatusBar({ running = false, status, elapsedSec =
         />
       )}
 
-      <span className={`text-[11px] font-mono truncate ${TONE_CLASS[tone] || TONE_CLASS.info}`}>
+      <span className="text-[9px] font-mono uppercase tracking-widest text-ink-muted shrink-0">
+        {running ? 'Agent' : 'Last action'}
+      </span>
+      <span className={`text-[11px] truncate ${TONE_CLASS[tone] || TONE_CLASS.info}`}>
         {label || (running ? 'Working…' : '')}
       </span>
 

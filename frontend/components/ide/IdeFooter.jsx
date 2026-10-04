@@ -1,5 +1,5 @@
 import React from 'react';
-import { GitBranch, AlertCircle, Check, Zap } from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 import { formatElapsed } from './CopilotStatusBar';
 
 export function IdeFooter({
@@ -13,13 +13,13 @@ export function IdeFooter({
   modelLabel = 'Auto (cascade)',
 }) {
   return (
-    <footer className="h-6 shrink-0 flex items-center justify-between px-4 bg-canvas-surface border-t border-border text-[10px] text-ink-muted font-mono select-none">
+    <footer className="h-7 shrink-0 flex items-center justify-between px-4 bg-canvas-surface border-t border-border text-[10px] text-ink-muted font-mono select-none">
       <div className="flex items-center gap-4">
         <span className="flex items-center gap-1.5 text-paper-200">
-          <GitBranch size={12} className="text-accent" /> main
+          <AppIcon name="branch" size={12} className="text-accent" /> main
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,.7)]" />
           {activePath ? activePath : 'No active file'}
         </span>
         <button
@@ -35,13 +35,13 @@ export function IdeFooter({
         >
           {problems > 0 ? (
             <>
-              <AlertCircle size={11} className="text-amber-400" />
+              <AppIcon name="alertCircle" size={11} className="text-amber-400" />
               <span>⚠ {problems} problems</span>
               <span className="ml-1 px-1.5 py-0.2 rounded bg-amber-500/25 text-[9px] uppercase tracking-wider text-amber-300 border border-amber-500/30">Auto-Fix ⚡</span>
             </>
           ) : (
             <>
-              <Check size={11} className="text-emerald-400" />
+              <AppIcon name="check" size={11} className="text-emerald-400" />
               <span>✓ 0 errors</span>
             </>
           )}
@@ -63,7 +63,7 @@ export function IdeFooter({
           ≈{approxTokens >= 1000 ? `${(approxTokens / 1000).toFixed(1)}k` : approxTokens} tok · ₹0
         </span>
         <span className="text-ink-muted flex items-center gap-1" title="Preferred model — cascade fallback active">
-          <Zap size={10} className="text-emerald-500" /> {modelLabel}
+          <AppIcon name="zap" size={10} className="text-emerald-500" /> {modelLabel}
         </span>
         <span>UTF-8</span>
         <span className="text-paper-200">AI-Dost v3.0</span>

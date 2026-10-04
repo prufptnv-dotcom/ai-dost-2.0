@@ -15,7 +15,7 @@ function getAiStudioBlueprint(name, title, prompt) {
         dependencies: {
           react: '^19.0.0',
           'react-dom': '^19.0.0',
-          'lucide-react': '^1.16.0',
+          '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0',
           express: '^4.18.2',
           cors: '^2.8.5'
         },
@@ -51,7 +51,8 @@ export default defineConfig({ plugins: [react()] });`
     {
       path: 'src/App.jsx',
       content: `import React, { useState } from 'react';
-import { Sparkles, Bot, Zap, Copy, Check, Sliders } from 'lucide-react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faWandMagicSparkles, faRobot, faBolt, faCopy, faCheck, faSliders } from '@fortawesome/free-solid-svg-icons';
 
 export default function App() {
   const [prompt, setPrompt] = useState('');
@@ -73,7 +74,7 @@ export default function App() {
     <div className="min-h-screen bg-[#0c0f1d] text-zinc-100 p-6 max-w-4xl mx-auto space-y-6">
       <header className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg">
-          <Sparkles className="w-5 h-5 text-white" />
+          <FontAwesomeIcon icon={faWandMagicSparkles} className="w-5 h-5 text-white" />
         </div>
         <div>
           <h1 className="text-lg font-bold">Generative AI Studio Pro</h1>
@@ -95,7 +96,7 @@ export default function App() {
           disabled={loading}
           className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
         >
-          <Zap size={14} />
+          <FontAwesomeIcon icon={faBolt} style={{ fontSize: 14 }} />
           <span>{loading ? 'Generating...' : 'Run Generation'}</span>
         </button>
       </form>
@@ -108,7 +109,7 @@ export default function App() {
               onClick={() => { navigator.clipboard.writeText(output); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
               className="p-1 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-lg transition-all"
             >
-              {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+              {copied ? <FontAwesomeIcon icon={faCheck} style={{ fontSize: 14 }} className="text-emerald-400" /> : <FontAwesomeIcon icon={faCopy} style={{ fontSize: 14 }} />}
             </button>
           </div>
           <pre className="text-xs bg-zinc-900/80 p-4 rounded-xl text-zinc-300 font-mono whitespace-pre-wrap">{output}</pre>

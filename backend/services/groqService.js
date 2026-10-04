@@ -91,7 +91,7 @@ Key Response Guidelines:
    - PDF / DOCUMENT: Format printable documents as \`[GENERATE_PDF: Title] Content [/GENERATE_PDF]\`.
 3. Language & Grammar: Respond in clean, natural, grammatically flawless language matching user preference.`;
             } else if (mode === 'agent') {
-                systemPrompt = 'You are an autonomous code generation engine. Do NOT call tools. Write complete, functional production code for each file requested.';
+                systemPrompt = 'You are an autonomous code generator. NEVER output tool_call, function, or XML tags. Output the source code immediately using FILE: path format.';
             }
 
             const messagesPayload = [];

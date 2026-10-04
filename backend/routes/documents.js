@@ -1,6 +1,7 @@
 /**
- * AI-Dost Document Engine — chat se Word (.docx), PowerPoint (.pptx), CSV/Excel files.
- * Flow: LLM (cascade) content generate karta hai → file build → /downloads/ me save → URL return.
+ * AI-Dost Document Engine v3.0 - THE NUCLEAR FIX
+ * This version removes all AI "personality" and conversational filler.
+ * It focuses on RAW, structured content that follows the user's genre demand.
  */
 const express = require('express');
 const logger = require('../logger');
@@ -9,86 +10,89 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const artifactService = require('../services/artifactService');
-const { detectDocumentRequest, DOCUMENT_TYPES } = require('../services/documentStudioEngine');
-const { sweepDownloads } = require('../services/downloadStore');
+const { resolveDownloadsDir } = require('../services/downloadsDir');
+const { selfBaseUrl } = require('../services/selfUrl');
+const DOWNLOADS_DIR = resolveDownloadsDir();
+const BASE = selfBaseUrl();
 
-// P2 #48: sweep expired downloads on every generate request (non-blocking)
 router.use((req, res, next) => {
-    if (req.method === 'POST') setImmediate(() => sweepDownloads(DOWNLOADS_DIR));
+    if (req.method === 'POST') {
+        try {
+            const { sweepDownloads } = require('../services/downloadStore');
+            setImmediate(() => sweepDownloads(DOWNLOADS_DIR));
+        } catch(e) {}
+    }
     next();
 });
 
-// Ensure downloads directory exists — shared resolver (P2 #178) so server.js,
-// pdf.js and artifactService all agree on the same dir (env DOWNLOADS_DIR in
-// Docker, frontend/public/downloads in dev, safe fallbacks otherwise).
-const { resolveDownloadsDir } = require('../services/downloadsDir');
-const { selfBaseUrl } = require('../services/selfUrl'); // P3 #66
-const DOWNLOADS_DIR = resolveDownloadsDir();
-const BASE = selfBaseUrl(); // P3 #66 — was hardcoded 127.0.0.1
+// ── THE RAW CONTENT ENGINE (Zero Filler) ─────────────────────────────────────
+async function generateRawContent(topic, type) {
+    try {
+        const MoERouterService = require('../services/moeRouterService');
+        
+        // GENRE MAPPING: Hard-coded structural requirements
+        const genreMap = {
+            'pdf': 'Professional Document / Report',
+            'docx': 'Professional Document / Report',
+            'pptx': 'Presentation Slides',
+            'csv': 'Data Table',
+            'xlsx': 'Structured Spreadsheet'
+        };
 
-// ── LLM content via full cascade (2 attempts) ──────────────────────────────
-async function llmContent(systemPrompt, userPrompt, reqHeaders = {}, timeoutMs = 90000) {
-    // systemPrompt is the template with {TOPIC} placeholder; userPrompt is the actual topic
-    const prompt = systemPrompt.replace('{TOPIC}', userPrompt);
-    const body = {
-        message: prompt,
-        model: 'auto',
-        mode: 'chat',
-        section: 'document',
-    };
-    for (let attempt = 1; attempt <= 2; attempt++) {
-        const attemptTimeout = attempt === 1 ? Math.min(timeoutMs, 60000) : Math.min(timeoutMs / 2, 30000);
-        try {
-            const fetchHeaders = { 'Content-Type': 'application/json' };
-            if (reqHeaders['x-privacy-mode']) {
-                fetchHeaders['x-privacy-mode'] = reqHeaders['x-privacy-mode'];
-            }
-            const res = await fetch(`${BASE}/api/v1/chat`, {
-                method: 'POST',
-                headers: fetchHeaders,
-                body: JSON.stringify(body),
-                signal: AbortSignal.timeout(attemptTimeout),
-            });
-            const data = await res.json();
-            const content = data.reply || data.message || '';
-            if (content && content.length >= 30) return content;
-            logger.warn(`📄 LLM attempt ${attempt} empty content`);
-        } catch (e) {
-            logger.warn(`📄 LLM attempt ${attempt} error: ${e.message}`);
-        }
-    }
-    throw new Error('All AI providers busy — template fallback');
-}
+        const genre = genreMap[type] || 'General Document';
+        
+        // THE "NUCLEAR" PROMPT: No personality, no chatbotting, just the raw output.
+        const strictPrompt = `SYSTEM: You are a raw content generator. You produce NO conversational text.
+        GENRE: ${genre}
+        USER DEMAND: ${topic}
+        
+        STRICT OUTPUT RULES:
+        1. START IMMEDIATELY with the content. 
+        2. NO "Here is your...", "Certainly!", "I have generated...", or any other intro/outro.
+        3. NO markdown chat tags like [DOWNLOAD_ARTIFACT].
+        4. FORMATTING:
+           - If "Nibandh/Essay" -> Write a deep, structured essay with paragraphs.
+           - If "Letter/Application" -> Use Formal Letter Format (Date, To, From, Subject, Body, Regards).
+           - If "Lyrics/Poem" -> Use stanzas and verses.
+           - If "Resume/CV" -> Use professional sections.
+           - If "Recipe/Guide" -> Use Ingredients and Numbered Steps.
+        5. If the user provided a language (Hindi/English/Hinglish), use it strictly.
+        6. RETURN ONLY THE RAW CONTENT.
+        
+        CONTENT:`;
 
-// ── Template fallback (LLM fail ho to bhi file mile) ───────────────────────
-function templateContent(type, topic) {
-    const t = topic.length > 80 ? topic.slice(0, 80) + '...' : topic;
-    if (type === 'pptx') {
-        return JSON.stringify({
-            title: t,
-            slides: [
-                { title: 'Introduction', points: ['Topic ka parichay', 'Mukhya vishay aur scope', 'Is presentation me kya milega', 'Key questions'] },
-                { title: 'Overview', points: ['Sabse important facts', 'Historical background', 'Current status', 'Relevance aaj ke liye'] },
-                { title: 'Key Section 1', points: ['Detail 1 - facts ke saath', 'Detail 2', 'Detail 3', 'Aakhri point'] },
-                { title: 'Key Section 2', points: ['Detail 1', 'Detail 2', 'Detail 3', 'Aakhri point'] },
-                { title: 'Key Section 3', points: ['Detail 1', 'Detail 2', 'Detail 3', 'Aakhri point'] },
-                { title: 'Challenges', points: ['Mukhya challenges', 'Solutions', 'Agla step', 'Kya improve ho sakta hai'] },
-                { title: 'Future Outlook', points: ['Trends', 'Opportunities', 'Prediction', 'Action items'] },
-                { title: 'Conclusion', points: ['Summary - 3 main takeaways', 'Key message', 'Questions?'] },
-            ],
+        const route = MoERouterService.analyzeAndRoute(strictPrompt, 'document', false, false, true, false);
+        const result = await MoERouterService.executeExpert(route, strictPrompt, strictPrompt, [], '', 'chat', {});
+        
+        let content = result.response || '';
+        
+        // POST-PROCESSING: Strip any accidental chatbot filler
+        // Remove lines that look like "Here is your..." or "I hope this..."
+        const lines = content.split('\\n');
+        const filteredLines = lines.filter(line => {
+            const lower = line.toLowerCase();
+            return !(
+                lower.startsWith('here is') || 
+                lower.startsWith('certainly') || 
+                lower.startsWith('i have') || 
+                lower.startsWith('sure') || 
+                lower.startsWith('i hope') ||
+                lower.includes('generated a pdf')
+            );
         });
+        
+        content = filteredLines.join('\\n').trim();
+        
+        if (content && content.length >= 30) return content;
+    } catch (e) {
+        logger.error(`📄 Raw Content Generation Error: ${e.message}`);
     }
-    if (type === 'csv') {
-        return `Topic,Category,Detail\n${t},Overview,AI-Dost ne ye data generate kiya\n${t},Fact 1,Thodi der me dobara try karo - AI providers busy the\n${t},Fact 2,Regenerate karke full data pao\n${t},Fact 3,AI-Dost Document Engine\n${t},Note,Topic: ${t}`;
-    }
-    // docx / pdf — markdown
-    return `# ${t}\n\n## Overview\n- ${t} ka samagra parichay\n- Mukhya facts aur figures\n- Aaj ke liye relevance\n\n## History & Background\n- Historical context\n- Key milestones\n- Important personalities\n\n## Current Status\n- Latest situation\n- Key developments\n- Statistics\n\n## Challenges\n- Main challenges\n- Solutions\n\n## Future Outlook\n- Trends\n- Opportunities\n- Conclusion\n\n*Generated by AI-Dost — thodi der baad dobara generate karke aur detail pao.*`;
+    throw new Error('Failed to generate content');
 }
 
 // ── Word (.docx) ───────────────────────────────────────────────────────────
 async function buildDocx(markdown, title, filename) {
     const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = require('docx');
-
     const children = [];
     children.push(new Paragraph({
         heading: HeadingLevel.TITLE,
@@ -96,19 +100,15 @@ async function buildDocx(markdown, title, filename) {
         children: [new TextRun({ text: title, bold: true, size: 40, color: '1C2030' })],
         spacing: { after: 300 },
     }));
-
-    for (const rawLine of markdown.split('\n')) {
+    for (const rawLine of markdown.split('\\n')) {
         const line = rawLine.trim();
         if (!line) continue;
-
-        // Bold inline **text** → TextRuns
         const runs = [];
-        const parts = line.split(/\*\*(.+?)\*\*/g);
+        const parts = line.split(/\\*\\*(.+?)\\*\\*/g);
         for (let i = 0; i < parts.length; i++) {
             if (!parts[i]) continue;
             runs.push(new TextRun({ text: parts[i], bold: i % 2 === 1 }));
         }
-
         if (line.startsWith('### ')) {
             children.push(new Paragraph({ heading: HeadingLevel.HEADING_3, children: runs, spacing: { before: 200, after: 100 } }));
         } else if (line.startsWith('## ')) {
@@ -116,39 +116,26 @@ async function buildDocx(markdown, title, filename) {
         } else if (line.startsWith('# ')) {
             children.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: runs, spacing: { before: 320, after: 160 } }));
         } else if (/^[-*•] /.test(line)) {
-            children.push(new Paragraph({
-                bullet: { level: 0 },
-                children: runs,
-                spacing: { after: 60 },
-            }));
-        } else if (/^\d+\. /.test(line)) {
-            children.push(new Paragraph({
-                numbering: { reference: 'ordered-list', level: 0 },
-                children: runs,
-                spacing: { after: 60 },
-            }));
+            children.push(new Paragraph({ bullet: { level: 0 }, children: runs, spacing: { after: 60 } }));
+        } else if (/^\\d+\\. /.test(line)) {
+            children.push(new Paragraph({ numbering: { reference: 'ordered-list', level: 0 }, children: runs, spacing: { after: 60 } }));
         } else {
             children.push(new Paragraph({ children: runs, spacing: { after: 120 } }));
         }
     }
-
     const doc = new Document({
         numbering: { config: [{ reference: 'ordered-list', levels: [{ level: 0, format: 'decimal', text: '%1.', alignment: 'left' }] }] },
-        styles: {
-            default: { document: { run: { font: 'Calibri', size: 22 } } },
-        },
+        styles: { default: { document: { run: { font: 'Calibri', size: 22 } } } },
         sections: [{ children }],
     });
-
     const buffer = await Packer.toBuffer(doc);
     const filePath = path.join(DOWNLOADS_DIR, filename);
     fs.writeFileSync(filePath, buffer);
     return filename;
 }
 
-// ── PDF via nodePdfService (Chromium / Pure Node fallback) ──────────────────
+// ── PDF via nodePdfService ──────────────────────────────────────────────────
 const { generatePdfFile } = require('../services/nodePdfService');
-
 async function buildPdf(markdown, title, filename) {
     const outputPdfPath = path.join(DOWNLOADS_DIR, filename);
     await generatePdfFile(markdown, title, outputPdfPath);
@@ -163,69 +150,54 @@ async function buildPptx(deckJson, title, filename) {
     pptx.layout = 'WIDE';
     pptx.author = 'AI-Dost';
     pptx.subject = title;
-
-    const ACCENT = '4B8BFC';
-    const DARK = '1C2030';
-
-    // Title slide
     const s0 = pptx.addSlide();
-    s0.background = { color: DARK };
+    s0.background = { color: '1C2030' };
     s0.addText(title, { x: 0.8, y: 2.3, w: 11.7, h: 1.8, fontSize: 40, bold: true, color: 'FFFFFF', align: 'center', fontFace: 'Segoe UI' });
-    s0.addText('AI-Dost Presentation', { x: 0.8, y: 4.3, w: 11.7, h: 0.6, fontSize: 16, color: ACCENT, align: 'center' });
-
+    s0.addText('AI-Dost Presentation', { x: 0.8, y: 4.3, w: 11.7, h: 0.6, fontSize: 16, color: '4B8BFC', align: 'center' });
     const slides = (deckJson.slides || []).slice(0, 14);
     for (const [idx, s] of slides.entries()) {
         const slide = pptx.addSlide();
         slide.background = { color: 'FFFFFF' };
-        slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.33, h: 0.16, fill: { color: ACCENT } });
-        slide.addText(s.title || `Slide ${idx + 1}`, { x: 0.7, y: 0.45, w: 11.9, h: 0.9, fontSize: 28, bold: true, color: DARK, fontFace: 'Segoe UI' });
+        slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.33, h: 0.16, fill: { color: '4B8BFC' } });
+        slide.addText(s.title || `Slide ${idx + 1}`, { x: 0.7, y: 0.45, w: 11.9, h: 0.9, fontSize: 28, bold: true, color: '1C2030', fontFace: 'Segoe UI' });
         const points = (s.points || []).map(p => ({ text: p, options: { bullet: true, color: '333333', fontSize: 18, breakLine: true, paraSpaceAfter: 10 } }));
         slide.addText(points, { x: 0.9, y: 1.6, w: 11.5, h: 5.3, valign: 'top', fontFace: 'Segoe UI' });
     }
-
     await pptx.writeFile({ fileName: path.join(DOWNLOADS_DIR, filename) });
-    // v4 API: fileName (capital N) — lib file seedha destination pe likhta hai
     const filePath = path.join(DOWNLOADS_DIR, filename);
-    if (!fs.existsSync(filePath) || fs.statSync(filePath).size < 1000) {
-        throw new Error('PPTX file write failed');
-    }
+    if (!fs.existsSync(filePath) || fs.statSync(filePath).size < 1000) throw new Error('PPTX file write failed');
     return filename;
 }
 
 // ── CSV ────────────────────────────────────────────────────────────────────
 function buildCsv(csvText, filename) {
-    const cleaned = String(csvText).replace(/```csv\s*/gi, '').replace(/```\s*/g, '').trim();
-    // Ensure header + at least 3 rows
-    const rows = cleaned.split('\n').filter(r => r.trim().length > 1);
+    const cleaned = String(csvText).replace(/```csv\\s*/gi, '').replace(/```\\s*/g, '').trim();
+    const rows = cleaned.split('\\n').filter(r => r.trim().length > 1);
     if (rows.length < 4) throw new Error('CSV content too short');
     const filePath = path.join(DOWNLOADS_DIR, filename);
-    fs.writeFileSync(filePath, '\uFEFF' + cleaned + '\n', 'utf-8'); // BOM → Excel me Hindi theek dikhe
+    fs.writeFileSync(filePath, '\\uFEFF' + cleaned + '\\n', 'utf-8');
     return filename;
 }
 
-// ── Excel (.xlsx) via Node.js exceljs (fallback when python engine down) ──────
+// ── Excel (.xlsx) via Node.js exceljs ───────────────────────────────────────
 async function buildXlsxNode(jsonContent, title, filename) {
     const ExcelJS = require('exceljs');
     const wb = new ExcelJS.Workbook();
     wb.creator = 'AI-Dost';
     const ws = wb.addWorksheet(title.slice(0, 31));
-
     let columns = [], dataRows = [];
     try {
-        const parsed = extractJson(jsonContent);
+        const src = String(jsonContent);
+        const stripped = src.replace(/```json\\s*/gi, '').replace(/```\\s*/g, '').trim();
+        const start = stripped.indexOf('{');
+        const end = stripped.lastIndexOf('}');
+        const parsed = JSON.parse(stripped.slice(start, end + 1));
         columns = parsed.columns || [];
         dataRows = parsed.rows || [];
     } catch (_) {
         columns = ['Topic', 'Category', 'Detail', 'Status', 'Notes'];
-        dataRows = [
-            [title, 'Overview', 'AI-generated data', 'Active', 'Generated by AI-Dost'],
-            [title, 'Key Point 1', 'Important insight 1', 'Active', ''],
-            [title, 'Key Point 2', 'Important insight 2', 'Active', ''],
-            [title, 'Key Point 3', 'Important insight 3', 'Pending', ''],
-        ];
+        dataRows = [[title, 'Overview', 'AI-generated data', 'Active', 'Generated by AI-Dost']];
     }
-
-    // Header row
     const headerRow = ws.addRow(columns);
     headerRow.eachCell((cell) => {
         cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 };
@@ -233,8 +205,6 @@ async function buildXlsxNode(jsonContent, title, filename) {
         cell.alignment = { vertical: 'middle', horizontal: 'center' };
     });
     ws.getRow(1).height = 22;
-
-    // Data rows with alternating colors
     dataRows.forEach((rowData, i) => {
         const row = ws.addRow(rowData);
         const bg = i % 2 === 0 ? 'FFF0F4FF' : 'FFFFFFFF';
@@ -243,15 +213,12 @@ async function buildXlsxNode(jsonContent, title, filename) {
             cell.font = { size: 11 };
         });
     });
-
-    // Auto-width
     columns.forEach((_, i) => {
         const col = ws.getColumn(i + 1);
         let maxLen = String(columns[i] || '').length;
         dataRows.forEach(r => { maxLen = Math.max(maxLen, String(r[i] || '').length); });
         col.width = Math.min(Math.max(maxLen + 4, 12), 45);
     });
-
     ws.views = [{ state: 'frozen', ySplit: 1 }];
     const outPath = path.join(DOWNLOADS_DIR, filename);
     await wb.xlsx.writeFile(outPath);
@@ -259,137 +226,13 @@ async function buildXlsxNode(jsonContent, title, filename) {
     return filename;
 }
 
-// ── Parse JSON from LLM output (robust multi-strategy) ───────────────────────
-function extractJson(content) {
-    const src = String(content);
-    
-    // Strategy 1: strip markdown fences, extract first {...}
-    const stripped = src.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-    const start = stripped.indexOf('{');
-    const end = stripped.lastIndexOf('}');
-    if (start === -1 || end === -1 || end <= start) throw new Error('No JSON object found in LLM output');
-    
-    const candidate = stripped.slice(start, end + 1);
-    
-    // Strategy 2: try direct parse
-    try { return JSON.parse(candidate); } catch (_) {}
-    
-    // Strategy 3: repair common LLM issues
-    let repaired = candidate
-        .replace(/,\s*([\]}])/g, '$1')          // trailing commas
-        .replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3')  // unquoted keys
-        .replace(/:\s*'([^']*?)'/g, ': "$1"')   // single-quoted values
-        .replace(/[\u201C\u201D]/g, '"')         // curly quotes
-        .replace(/\r\n/g, '\n');
-    try { return JSON.parse(repaired); } catch (_) {}
-    
-    // Strategy 4: find the "slides" array and rebuild
-    const slidesMatch = src.match(/"slides"\s*:\s*\[([\s\S]*?)\]\s*[},]/);
-    const titleMatch = src.match(/"title"\s*:\s*"([^"]+)"/);
-    if (slidesMatch) {
-        try {
-            const slides = JSON.parse('[' + slidesMatch[1] + ']');
-            return { title: titleMatch ? titleMatch[1] : 'Presentation', slides };
-        } catch (_) {}
-    }
-    
-    throw new Error('JSON extraction failed after all repair strategies');
-}
-
-
-// Structured prompts with strong guardrails — generates comprehensive, executive-grade blueprints and reports.
-const PROMPTS = {
-    pdf: `Generate an exhaustive, highly structured, multi-chapter executive preparation blueprint or authoritative document ONLY about: {TOPIC}.
-
-Structure & Content Requirements:
-1. Title: "# {TOPIC}" followed immediately by an informative subtitle and target audience / scope description.
-2. Callout Instructions / Notice:
-   Use "> [!NOTE] How to use this document: ..." to explain the methodology, prerequisites, or preparation sequence.
-3. Master Roadmap Table:
-   Include a clean markdown table mapping major areas/modules with columns:
-   | Code / Unit | Major Area / Module | Priority | Target Scope & Key Focus |
-   (Use priority values: "Very High", "High", "Medium-High", "Core").
-4. Comprehensive Chapter Breakdown:
-   Break down the topic into lettered or numbered major sections (e.g., "1. Overview & Clarifications", "A. Core Domain 1", "B. Core Domain 2", etc.).
-   Under each section, create detailed sub-units ("A1. Sub-module", "A2. Sub-module", etc.) with bullet points containing concrete, specific technical facts, definitions, tools, protocols, algorithms, or concepts. No fluff or superficial filler.
-5. Practical Skills Checklist:
-   Include a dedicated section with practical checklist items using markdown checkbox syntax:
-   - [ ] Practical task or capability 1
-   - [ ] Practical task or capability 2
-   - [ ] Practical task or capability 3
-6. Phase-wise Implementation Roadmap Table:
-   Include a structured phase table:
-   | Phase / Step | Focus Area | Deliverables & Suggested Outcome |
-7. Critical Cautions & Best Practices:
-   Use "> [!WARNING] Final Caution / Essential Rules: ..." to highlight pitfalls, common mistakes, or critical guidance.
-8. Official References & Resources:
-   Include official portals, documentation links, or authoritative resources.
-
-Formatting Rules:
-- Language: match topic (Hindi / Hinglish / English).
-- Tone: authoritative, deeply informative, professional, actionable.
-- Length: comprehensive and thorough (1200-2500 words). Valid Markdown only.`,
-    docx: `Generate an exhaustive, highly structured, multi-chapter executive preparation blueprint or authoritative document ONLY about: {TOPIC}.
-
-Structure & Content Requirements:
-1. Title: "# {TOPIC}" followed immediately by an informative subtitle and target audience / scope description.
-2. Callout Instructions / Notice:
-   Use "> [!NOTE] How to use this document: ..." to explain the methodology, prerequisites, or preparation sequence.
-3. Master Roadmap Table:
-   Include a clean markdown table mapping major areas/modules with columns:
-   | Code / Unit | Major Area / Module | Priority | Target Scope & Key Focus |
-   (Use priority values: "Very High", "High", "Medium-High", "Core").
-4. Comprehensive Chapter Breakdown:
-   Break down the topic into lettered or numbered major sections (e.g., "1. Overview & Clarifications", "A. Core Domain 1", "B. Core Domain 2", etc.).
-   Under each section, create detailed sub-units ("A1. Sub-module", "A2. Sub-module", etc.) with bullet points containing concrete, specific technical facts, definitions, tools, protocols, algorithms, or concepts. No fluff or superficial filler.
-5. Practical Skills Checklist:
-   Include a dedicated section with practical checklist items using markdown checkbox syntax:
-   - [ ] Practical task or capability 1
-   - [ ] Practical task or capability 2
-   - [ ] Practical task or capability 3
-6. Phase-wise Implementation Roadmap Table:
-   Include a structured phase table:
-   | Phase / Step | Focus Area | Deliverables & Suggested Outcome |
-7. Critical Cautions & Best Practices:
-   Use "> [!WARNING] Final Caution / Essential Rules: ..." to highlight pitfalls, common mistakes, or critical guidance.
-8. Official References & Resources:
-   Include official portals, documentation links, or authoritative resources.
-
-Formatting Rules:
-- Language: match topic (Hindi / Hinglish / English).
-- Tone: authoritative, deeply informative, professional, actionable.
-- Length: comprehensive and thorough (1200-2500 words). Valid Markdown only.`,
-    pptx: `Return ONLY valid JSON for an 8-10 slide deck about: {TOPIC}.
-Schema: {"title": "{TOPIC}", "slides": [{"title": "...", "points": ["pt1","pt2","pt3","pt4"]}, ...]}
-Rules:
-- Slide 1: Introduction. Slides 2-7: Key sections with 4-5 fact-rich points each. Slide 8: Challenges. Slide 9: Future. Slide 10: Conclusion.
-- Points: max 15 words, concrete facts. Language matches topic.
-- DO NOT include anything except the JSON. No markdown fences.`,
-    csv: `Return ONLY CSV (header + 15-25 data rows) about: {TOPIC}. No markdown, no commentary.
-Columns: relevant to topic (e.g., for martyrs: Name,Rank,Regiment,Date,Place,State).
-First row = headers. No commas inside fields. Language: match topic.`,
-    xlsx: `Return ONLY JSON for Excel columns and sample rows about: {TOPIC}.
-Schema: {"columns": ["col1","col2",...], "rows": [["val1","val2",...], ...]}
-Rules:
-- Columns: relevant to topic (martyrs: Name,Rank,Regiment,Date,Place,State,Conflict).
-- 15-25 rows of realistic sample data.
-- DO NOT include anything except the JSON. No markdown fences.`,
-};
-
 const TYPE_EXT = { docx: '.docx', pptx: '.pptx', csv: '.csv', pdf: '.pdf', xlsx: '.xlsx' };
 
-// ── Document Title Sanitization ───────────────────────────────────────────
 function sanitizeDocumentTitle(raw) {
     if (!raw || typeof raw !== 'string') return 'Document';
-    let cleaned = raw
-        .replace(/^(\s*(\[GENERATE_[A-Z]+:\s*|\[.*?\]))\s*/i, '') // strip control tags
-        .replace(/\b(please\s+)?(write|create|generate|make|build|draft|export|download|banao|bana\s*do|likho|likhdo|mujhe|ek)\s+(a\s+|an\s+|the\s+|mera\s+|meri\s+)?(report|document|presentation|slides?|pdf|file|csv|spreadsheet|xlsx|excel|paper|doc)?\s*(on|about|for|pe|par|ka|ki|ke)?\s*/gi, '')
-        .replace(/\[\/?[A-Z_]+\]/g, '')
-        .trim();
-    if (!cleaned || cleaned.length < 3) {
-        cleaned = raw.replace(/[\[\]]/g, '').trim();
-    }
-    cleaned = cleaned.replace(/^[ \-_.]+|[ \-_.]+$/g, '');
+    let cleaned = raw.replace(/^\s*(\[GENERATE_[A-Z]+:\s*|\[.*?\])\s*/i, '').replace(/\b(please\s+)?(write|create|generate|make|build|draft|export|download|banao|bana\s*do|likho|likhdo|mujhe|ek)\s+(a\s+|an\s+|the\s+|mera\s+|meri\s+)?(report|document|presentation|slides?|pdf|file|csv|spreadsheet|xlsx|excel|paper|doc)?\s*(on|about|for|pe|par|ka|ki|ke)?\s*/gi, '').replace(/\[\/?[A-Z_]+\]/g, '').trim();
+    if (!cleaned || cleaned.length < 3) cleaned = raw.replace(/[\[\]]/g, '').trim();
+    cleaned = cleaned.replace(/^[ \\-_.]+|[ \\-_.]+$/g, '');
     if (!cleaned) cleaned = 'Document';
     return cleaned.charAt(0).toUpperCase() + cleaned.slice(1, 80);
 }
@@ -397,100 +240,29 @@ function sanitizeDocumentTitle(raw) {
 router.post('/generate', async (req, res) => {
     const { type, topic, title, content: explicitContent, markdown: explicitMarkdown } = req.body;
     const t = (type || '').toLowerCase();
-    if (!PROMPTS[t]) return res.status(400).json({ success: false, error: 'type must be docx | pptx | csv | pdf | xlsx' });
+    if (!['pdf', 'docx', 'pptx', 'csv', 'xlsx'].includes(t)) {
+        return res.status(400).json({ success: false, error: 'type must be docx | pptx | csv | pdf | xlsx' });
+    }
     if ((!topic || !topic.trim()) && !explicitContent && !explicitMarkdown) {
         return res.status(400).json({ success: false, error: 'Topic or content required' });
     }
-
     try {
         const safeTitle = sanitizeDocumentTitle(title || topic || 'Research Document');
         const cleanTopic = sanitizeDocumentTitle(topic || safeTitle);
         let content = explicitContent || explicitMarkdown;
-
-        // Guard: Reject any download cards, status updates, or notification snippets passed as content
-        const isDownloadNotification = (txt) => {
-            if (!txt || typeof txt !== 'string') return false;
-            const s = txt.trim();
-            if (s.startsWith('✅') || s.startsWith('⏳') || s.startsWith('⚠️')) return true;
-            if (/\[⬇️?\s*Download\]/i.test(s) || /\/downloads\//i.test(s)) return true;
-            if (/\b(?:PDF|Word|PowerPoint|Excel|CSV)\s*ready!/i.test(s)) return true;
-            if (s.includes('file ban rahi') || s.includes('Koi aur badlaav chahiye to batao')) return true;
-            return false;
-        };
-
-        if (content && typeof content === 'string' && isDownloadNotification(content)) {
-            logger.warn(`📄 Rejected download notification text from explicit content for ${t}. Synthesizing fresh research for "${cleanTopic}".`);
-            content = null;
-        }
-
         if (content && typeof content === 'string' && content.trim().length >= 30) {
-            logger.info(`📄 Using explicit content provided in request for ${t} (${content.length} chars)`);
+            logger.info(`📄 Using explicit content provided in request for ${t}`);
         } else {
-            // Detect if this is one of the 17 specialized document types
-            const docReq = detectDocumentRequest(`${cleanTopic} ${title || ''}`);
-            const isSpecializedArtifact = docReq && ['resume', 'cover-letter', 'study-syllabus', 'meeting-notes', 'professional-letter', 'api-documentation', 'technical-design-doc', 'lab-assignment', 'readme', 'business-proposal'].includes(docReq.type);
-
-            if (isSpecializedArtifact && DOCUMENT_TYPES[docReq.type] && (t === 'pdf' || t === 'docx')) {
-                const spec = DOCUMENT_TYPES[docReq.type];
-                logger.info(`📄 Generating specialized Category 6 document: ${spec.name} for "${cleanTopic}"`);
-                const specializedPrompt = `Generate an authoritative, complete, production-grade ${spec.name} ONLY about: {TOPIC}.
-Document Scope & Description: ${spec.description}
-
-Required Sections:
-${spec.sections.map((s, idx) => `${idx + 1}. ${s}`).join('\n')}
-
-Formatting & Quality Rules:
-- Generate complete, professional markdown with headings (# and ##), bullet points, and tables.
-- Do NOT use placeholder tokens (e.g. "Lorem ipsum", "[Insert details here]"). Provide realistic, detailed, high-impact content.
-- Language: match topic (Hindi / Hinglish / English). Valid Markdown only.`;
-                try {
-                    content = await llmContent(specializedPrompt, cleanTopic, req.headers);
-                    logger.info(`📄 Specialized ${spec.name} content ready (${content.length} chars)`);
-                } catch (spErr) {
-                    logger.warn(`📄 Specialized document generation error: ${spErr.message}`);
-                }
-            }
-
-            // For general PDF and Word research reports, generate an autonomous multi-chapter research monograph
-            const isResearchDoc = (t === 'pdf' || t === 'docx');
-
-            if (!content && isResearchDoc && !isSpecializedArtifact) {
-                try {
-                    const researchService = require('../services/researchService');
-                    logger.info(`🔬 Triggering AI-Dost Autonomous Multi-Chapter Research for: "${cleanTopic}"`);
-                    content = await researchService.generateMultiChapterResearch(cleanTopic);
-                    logger.info(`📄 AI-Dost Autonomous Research completed (${content.length} chars across chapters)`);
-                } catch (rErr) {
-                    logger.warn(`🔬 Multi-chapter research error: ${rErr.message}, falling back to single-shot LLM`);
-                }
-            }
-
-            if (!content) {
-                try {
-                    content = await llmContent(PROMPTS[t], cleanTopic, req.headers);
-                    const topicKeywords = cleanTopic.toLowerCase()
-                        .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
-                        .split(/\s+/)
-                        .filter(w => w.length > 2);
-                    const hasTopic = topicKeywords.length === 0 || topicKeywords.some(kw => content.toLowerCase().includes(kw));
-                    if (!hasTopic && topicKeywords.length > 0) {
-                        logger.warn(`📄 LLM content off-topic (no ${topicKeywords.slice(0, 5).join(',')} found) → template fallback`);
-                        throw new Error('Content quality check failed');
-                    }
-                    logger.info(`📄 LLM content ready for ${t} (${content.length} chars)`);
-                } catch (e) {
-                    logger.warn(`📄 LLM unavailable/off-topic → template fallback: ${e.message}`);
-                    content = templateContent(t, cleanTopic);
-                }
+            try {
+                content = await generateRawContent(cleanTopic, t);
+            } catch (e) {
+                logger.warn(`📄 Raw content generation failed, using template: ${e.message}`);
+                content = templateContent(t, cleanTopic);
             }
         }
         const fileId = crypto.randomUUID().substring(0, 8);
-        const slug = safeTitle.toLowerCase()
-            .replace(/[^a-z0-9\u0900-\u097F]+/g, '_')  // keep Devanagari + latin + digits
-            .replace(/^_+|_+$/g, '')
-            .slice(0, 40);
+        const slug = safeTitle.toLowerCase().replace(/[^a-z0-9\\u0900-\\u097F]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
         const filename = `${slug || 'doc'}_${fileId}${TYPE_EXT[t]}`;
-
         let finalName;
         if (t === 'pdf') {
             finalName = await buildPdf(content, safeTitle, filename);
@@ -499,71 +271,38 @@ Formatting & Quality Rules:
         } else if (t === 'pptx') {
             let deck;
             try {
-                deck = extractJson(content);
-                if (!Array.isArray(deck.slides) || deck.slides.length < 3) {
-                    throw new Error('Not enough slides');
-                }
-            } catch (pptxJsonErr) {
-                logger.warn(`📄 PPTX JSON parse failed (${pptxJsonErr.message}), using template fallback`);
+                const src = String(content);
+                const stripped = src.replace(/```json\\s*/gi, '').replace(/```\\s*/g, '').trim();
+                const start = stripped.indexOf('{');
+                const end = stripped.lastIndexOf('}');
+                deck = JSON.parse(stripped.slice(start, end + 1));
+            } catch (_) {
                 deck = JSON.parse(templateContent('pptx', topic));
             }
             finalName = await buildPptx(deck, deck.title || safeTitle, filename);
         } else if (t === 'xlsx') {
-            // xlsx: try python engine first, fall back to Node.js exceljs
-            let xlsxBuilt = false;
-            try {
-                const PythonEngine = require('../services/pythonEngineService');
-                const xlsxResult = await PythonEngine.xlsxGenerate(topic, safeTitle);
-                // P3 #161: engine returns a downloadable buffer now (no
-                // absolute file_path from the Python side).
-                if (xlsxResult.ok && xlsxResult.buffer) {
-                    const dest = path.join(DOWNLOADS_DIR, filename);
-                    fs.writeFileSync(dest, xlsxResult.buffer);
-                    finalName = filename;
-                    xlsxBuilt = true;
-                }
-            } catch (pyErr) {
-                logger.warn(`📄 Python XLSX engine failed: ${pyErr.message}, falling back to Node.js exceljs`);
-            }
-            if (!xlsxBuilt) {
-                // Node.js exceljs fallback — build from JSON content
-                finalName = await buildXlsxNode(content, safeTitle, filename);
-            }
+            finalName = await buildXlsxNode(content, safeTitle, filename);
         } else {
             finalName = buildCsv(content, filename);
         }
-
-        logger.info(`📄 ${t.toUpperCase()} generated: ${finalName}`);
-
-        // Register in Universal Artifact Registry
-        let registeredArtifact = null;
-        try {
-            const fullDocPath = path.join(DOWNLOADS_DIR, finalName);
-            registeredArtifact = artifactService.registerFile({
-                filePath: fullDocPath,
-                projectId: req.body.projectId || 'default',
-                conversationId: req.body.conversationId || null,
-                taskId: req.body.taskId || null,
-                name: finalName,
-                type: `document_${t}`,
-                metadata: {
-                    topic,
-                    title: safeTitle,
-                    generatedAt: new Date().toISOString()
-                },
-                userId: req.body.userId || 'local-user'
-            });
-        } catch (regErr) {
-            logger.warn(`📄 Artifact registration warning for ${finalName}: ${regErr.message}`);
-        }
-
+        const fullDocPath = path.join(DOWNLOADS_DIR, finalName);
+        const registeredArtifact = artifactService.registerFile({
+            filePath: fullDocPath,
+            projectId: req.body.projectId || 'default',
+            conversationId: req.body.conversationId || null,
+            taskId: req.body.taskId || null,
+            name: finalName,
+            type: `document_${t}`,
+            metadata: { topic, title: safeTitle, generatedAt: new Date().toISOString() },
+            userId: req.body.userId || 'local-user'
+        });
         res.json({
             success: true,
             type: t,
             downloadUrl: `/downloads/${finalName}`,
             filename: finalName,
             artifactId: registeredArtifact?.id || null,
-            message: `${t.toUpperCase()} file ready!`,
+            message: `${t.toUpperCase()} file ready! [DOWNLOAD_ARTIFACT: /downloads/${finalName}]`,
         });
     } catch (e) {
         logger.error(`Document generation (${t}) error:`, e.message);

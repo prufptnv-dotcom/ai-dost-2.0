@@ -195,7 +195,7 @@ function detectGitPmIntent(message) {
 
   let specificDomain = 'general-git-pm';
   if (/\b(?:commit messages?|commit suggestions?|conventional commits?|git commits?)\b/i.test(text)) specificDomain = 'commit-suggestions';
-  else if (/\b(?:pr reviews?|pull requests? review|review pr|diff reviews?)\b/i.test(text)) specificDomain = 'pr-review';
+  else if (/\b(?:pr\s*reviews?|pull\s*requests?\s*(?:ka\s*)?review|review\s*(?:this\s*)?(?:pr|pull\s*request)|diff\s*(?:audit|reviews?)|review\s*pr)\b/i.test(text)) specificDomain = 'pr-review';
   else if (/\b(?:issues?|bug reports?|feature requests?|issue templates?)\b/i.test(text)) specificDomain = 'issue-content';
   else if (/\b(?:repos? structure|repository structure|directory structure|folder structure)\b/i.test(text)) specificDomain = 'repo-structure';
   else if (/\b(?:branching strategy|gitflow|trunk based|branch naming)\b/i.test(text)) specificDomain = 'branching-strategy';

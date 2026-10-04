@@ -1,8 +1,5 @@
 import React from 'react';
-import {
-  Code2, Plus, Play, Loader2, Code, Columns2, Eye,
-  History, Package, KeyRound, SaveAll, Download
-} from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 
 export function IdeHeader({
   projectName = 'Copilot Workspace',
@@ -22,20 +19,20 @@ export function IdeHeader({
   backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000',
 }) {
   return (
-    <header className="h-13 shrink-0 flex items-center justify-between gap-3 px-4 bg-canvas-surface border-b border-border z-20 select-none whitespace-nowrap overflow-hidden">
+    <header className="h-14 shrink-0 flex items-center justify-between gap-3 px-4 bg-canvas-base border-b border-border z-20 select-none whitespace-nowrap overflow-hidden">
       {/* Left: Project identity + New Project button */}
       <div className="flex items-center gap-3 shrink-0 min-w-0">
-        <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-accent text-white shadow-glow-sm shrink-0">
-          <Code2 size={15} />
+        <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-accent/15 text-accent border border-accent/30 shrink-0">
+          <AppIcon name="code" size={15} />
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="text-xs font-bold text-paper-100 tracking-tight truncate">{projectName}</h1>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-medium shrink-0">
-              Live
+            <h1 className="text-xs font-semibold text-paper-100 tracking-tight truncate">{projectName}</h1>
+            <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium shrink-0">
+              Ready
             </span>
           </div>
-          <span className="text-[10px] text-ink-muted font-mono block truncate">React 19 • Express • Vite • SQLite</span>
+          <span className="text-[10px] text-ink-muted font-mono block truncate">workspace / {projectId}</span>
         </div>
 
         <button
@@ -44,7 +41,7 @@ export function IdeHeader({
           className="ml-2 flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 border border-border transition-all shadow-xs cursor-pointer"
           title="Create a fresh new session & project (saves existing project to History)"
         >
-          <Plus size={12} className="text-accent" /> New Project
+          <AppIcon name="plus" size={12} className="text-accent" /> New Project
         </button>
       </div>
 
@@ -59,13 +56,13 @@ export function IdeHeader({
         >
           {isReplitRunning ? (
             <>
-              <Loader2 size={13} className="animate-spin text-white" />
+              <AppIcon name="loader" size={13} className="text-white" />
               <span>Running...</span>
             </>
           ) : (
             <>
-              <Play size={12} className="fill-white text-white" />
-              <span>Run</span>
+              <AppIcon name="play" size={12} className="fill-white text-white" />
+              <span>Run project</span>
               <kbd className="text-[9px] font-mono opacity-80 bg-black/20 px-1 py-0.5 rounded">Ctrl+↵</kbd>
             </>
           )}
@@ -82,7 +79,7 @@ export function IdeHeader({
             }`}
             title="Code editor"
           >
-            <Code size={13} /> Code
+            <AppIcon name="code" size={13} /> Code
           </button>
 
           <button
@@ -95,7 +92,7 @@ export function IdeHeader({
             }`}
             title="Split View (Code & Live Preview side-by-side)"
           >
-            <Columns2 size={13} /> Split
+            <AppIcon name="columns" size={13} /> Split
           </button>
 
           <button
@@ -108,8 +105,8 @@ export function IdeHeader({
             }`}
             title="Live preview"
           >
-            <Eye size={13} /> Preview
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <AppIcon name="eye" size={13} /> Preview
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="Preview ready" />
           </button>
         </div>
       </div>
@@ -122,7 +119,7 @@ export function IdeHeader({
           className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 border border-border transition-all cursor-pointer shadow-xs"
           title="Copilot IDE Session History"
         >
-          <History size={13} className="text-accent" />
+          <AppIcon name="history" size={13} className="text-accent" />
           <span className="px-1.5 py-0.2 rounded-full text-[9px] font-mono bg-accent/15 text-accent border border-accent/20">
             {sessions.length}
           </span>
@@ -134,7 +131,7 @@ export function IdeHeader({
           className="p-1.5 rounded-md text-paper-200 hover:text-paper-100 hover:bg-canvas-elevated border border-border bg-canvas-surface transition-all cursor-pointer shadow-xs"
           title="Replit Package Manager (npm dependencies)"
         >
-          <Package size={13} className="text-indigo-400" />
+          <AppIcon name="package" size={13} className="text-indigo-400" />
         </button>
 
         <button
@@ -143,7 +140,7 @@ export function IdeHeader({
           className="p-1.5 rounded-md text-paper-200 hover:text-paper-100 hover:bg-canvas-elevated border border-border bg-canvas-surface transition-all cursor-pointer shadow-xs"
           title="Replit Secrets (.env environment variables)"
         >
-          <KeyRound size={13} className="text-amber-400" />
+          <AppIcon name="key" size={13} className="text-amber-400" />
         </button>
 
         <button
@@ -152,7 +149,7 @@ export function IdeHeader({
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated text-accent border border-accent/20 hover:border-accent/40 transition-all cursor-pointer shadow-xs"
           title="Launch Project Architect Wizard"
         >
-          <Code2 size={13} className="text-accent" /> Project setup
+          <AppIcon name="code" size={13} className="text-accent" /> Project setup
         </button>
 
         <button
@@ -162,7 +159,7 @@ export function IdeHeader({
           className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-canvas-surface hover:bg-canvas-elevated text-paper-200 hover:text-paper-100 border border-border transition-all disabled:opacity-40 cursor-pointer shadow-xs"
           title="Save all modified files"
         >
-          <SaveAll size={13} className="text-emerald-500" />
+          <AppIcon name="save" size={13} className="text-emerald-500" />
           {dirtyPaths.size > 0 && (
             <span className="px-1.5 py-0.2 rounded-full text-[9px] font-mono bg-emerald-500/15 text-emerald-500 border border-emerald-500/20">
               {dirtyPaths.size}
@@ -175,7 +172,7 @@ export function IdeHeader({
           className="p-1.5 rounded-md text-paper-200 hover:text-paper-100 hover:bg-canvas-elevated border border-border bg-canvas-surface transition-all cursor-pointer shadow-xs"
           title="Download ZIP with Windows & Mac double-click launchers"
         >
-          <Download size={13} className="text-accent" />
+          <AppIcon name="download" size={13} className="text-accent" />
         </a>
       </div>
     </header>

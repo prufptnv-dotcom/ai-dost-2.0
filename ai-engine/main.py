@@ -2113,9 +2113,45 @@ def rag_index(req: IndexRequest):
         chunks_created=chunks_created,
         chunks_deleted=chunks_deleted
     )
+
+# ── 16. VKP-Omni-2B Multimodal Engine Integration (NandiAi/VKP-Omni-2B) ───────
+class VkpQueryPayload(BaseModel):
+    prompt: str
+    max_tokens: int = 512
+    temperature: float = 0.3
+    repetition_penalty: float = 1.15
+    image_base64: Optional[str] = None
+
+@app.get("/api/ai-dost/vkp-omni/status")
+@app.get("/ai/vkp-omni/status")
+async def vkp_status_endpoint():
+    try:
+        from vkp_omni_engine import vkp_status
+        return await vkp_status()
+    except Exception as e:
+        return {"model_id": "NandiAi/VKP-Omni-2B", "loaded": False, "error": str(e)}
+
+@app.post("/api/ai-dost/chat")
+@app.post("/ai/vkp-omni/chat")
+async def vkp_chat_endpoint(payload: VkpQueryPayload):
+    try:
+        from vkp_omni_engine import run_vkp_inference
+        result = run_vkp_inference(
+            prompt=payload.prompt,
+            max_tokens=payload.max_tokens,
+            temperature=payload.temperature,
+            repetition_penalty=payload.repetition_penalty
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"VKP-Omni inference error: {e}")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8001)
+
 
 
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { Menu, X, ArrowRight, Sun, Moon, Sparkles } from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 import { AiDostMark } from '../brand/AiDostMark';
 
 const NAV_LINKS = [
@@ -42,7 +42,7 @@ export function PublicNavbar({ theme = 'dark', onToggleTheme }) {
           <AiDostMark size={28} />
           <span className="tracking-tight text-paper-100 font-semibold whitespace-nowrap">AI-Dost</span>
           <div className="gemini-shimmer-badge hidden md:inline-flex text-[10px] font-mono text-paper-200">
-            <Sparkles className="w-3 h-3 text-[#4893fc] gemini-sparkle-icon" />
+            <AppIcon name="sparkles" className="w-3 h-3 text-[#4893fc] gemini-sparkle-icon" />
             <span>Autonomous AI Workspace</span>
           </div>
         </Link>
@@ -76,7 +76,7 @@ export function PublicNavbar({ theme = 'dark', onToggleTheme }) {
               className="p-2.5 rounded-full text-ink-muted hover:text-paper-100 hover:bg-white/10 transition-fast cursor-pointer focus-ring"
               title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
             >
-              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              {theme === 'dark' ? <AppIcon name="sun" className="w-4 h-4" /> : <AppIcon name="moon" className="w-4 h-4" />}
             </button>
           )}
 
@@ -85,7 +85,7 @@ export function PublicNavbar({ theme = 'dark', onToggleTheme }) {
             className="gemini-btn-primary inline-flex items-center gap-2 px-5 py-2 rounded-full text-xs font-semibold transition-fast cursor-pointer focus-ring shadow-lg"
           >
             <span>Launch Workspace</span>
-            <ArrowRight className="w-3.5 h-3.5" />
+            <AppIcon name="arrowRight" className="w-3.5 h-3.5" />
           </Link>
         </div>
 
@@ -98,7 +98,7 @@ export function PublicNavbar({ theme = 'dark', onToggleTheme }) {
               aria-label="Toggle theme"
               className="p-2 rounded-xs text-ink-muted hover:text-paper-100 cursor-pointer focus-ring"
             >
-              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              {theme === 'dark' ? <AppIcon name="sun" className="w-4 h-4" /> : <AppIcon name="moon" className="w-4 h-4" />}
             </button>
           )}
           <button
@@ -108,7 +108,7 @@ export function PublicNavbar({ theme = 'dark', onToggleTheme }) {
             aria-expanded={mobileOpen}
             className="p-2 rounded-xs text-paper-100 hover:bg-canvas-surface cursor-pointer focus-ring"
           >
-            {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            {mobileOpen ? <AppIcon name="close" className="w-5 h-5" /> : <AppIcon name="menu" className="w-5 h-5" />}
           </button>
         </div>
       </div>
@@ -140,7 +140,7 @@ export function PublicNavbar({ theme = 'dark', onToggleTheme }) {
               className="gemini-btn-primary w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-semibold transition-fast cursor-pointer focus-ring"
             >
               <span>Launch Workspace</span>
-              <ArrowRight className="w-4 h-4" />
+              <AppIcon name="arrowRight" className="w-4 h-4" />
             </Link>
           </div>
         </div>

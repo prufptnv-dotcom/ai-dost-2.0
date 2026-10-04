@@ -24,6 +24,7 @@ chroma_db/
 
 # Local Configs & Keys
 .env
+.env.bak
 .env.local
 .env.development.local
 .env.test.local
@@ -69,6 +70,9 @@ frontend/test-results/
 frontend/playwright-report/
 backend/test-results/
 backend/playwright-report/
+/test-results/
+temp-jest*.json
+backend/tests/chat_test_report.json
 
 # Editor & Scratch
 .opencode/
