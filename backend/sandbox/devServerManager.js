@@ -104,6 +104,8 @@ class DevServerManager extends EventEmitter {
     this.servers = new Map();
     // Index mapping projectId -> serverInfo
     this.projectIndex = new Map();
+    // Index mapping vite HMR ws token -> projectId (see registerHmrToken)
+    this.hmrTokenIndex = new Map();
   }
 
   // Find an available port on the host
@@ -609,6 +611,22 @@ class DevServerManager extends EventEmitter {
   getServerByProject(projectId) {
     if (!projectId) return null;
     return this.projectIndex.get(projectId) || this.servers.get(projectId) || null;
+  }
+
+  // Vite HMR ws token → projectId. The browser's fallback handshake
+  // `ws://host/?token=X` carries NO project path (and WS handshakes send no
+  // Referer), so the server.js upgrade handler resolves the target dev server
+  // through this index. Populated by the preview proxy when it serves
+  // `/@vite/client` (the only response containing the token).
+  registerHmrToken(projectId, token) {
+    if (!projectId || !token) return false;
+    this.hmrTokenIndex.set(String(token), String(projectId));
+    return true;
+  }
+
+  getProjectByHmrToken(token) {
+    if (!token) return null;
+    return this.hmrTokenIndex.get(String(token)) || null;
   }
 
   getAllServers() {

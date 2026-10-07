@@ -379,8 +379,8 @@ The preview is served through the existing `GET /api/preview/:projectId/*` proxy
 
 **Live proofs** (`temp_ui_audit/e2e_p0_run.js`, `check_live_preview.js`, `scan_proxy_deep.js`): run `p5-live` (48.5s) and fresh `p5-live-2` (97s) — `verification verdict: true` → `dev_server READY` → proxied preview **HTTP 200, `#root children: 1`** with the full app UI text, **0 page errors, 0 failed requests**, deep module scan 0 parse failures.
 
-- **Known honest gap**: HMR WebSocket (`ws://localhost:5000/?token=…`) is not proxied — one cosmetic console error, the app renders and manual refresh works; edit→auto-hot-reload through the proxy is not wired (would need upgrade forwarding or `server.hmr.clientPort` in the generated project config).
-- Tests: `backend/tests/persistentRuntimeLearning.test.js` → **32** (fix-memory learn/retrieve/signature + wiring audits + preview rewrite regex-safety + **AST rewrite regressions** for the three corruption patterns + CORS `selfOrigins` + 8.3-path) → backend unit **282/282 (60 suites)**; integration 64/65 (same pre-existing memory-route failure); frontend 54 suites / 425 tests; eslint 0/0. Proxies: `devServerProxy.test.js` 10/10.
+- **HMR WebSocket — FIXED (2026-10-07; ye section ka last honest gap tha)**: vite ka pehla ws attempt `ws://host/?token=X` hota hai — na project path, na Referer (WS handshake me aata hi nahi) → backend catch-all socket destroy karta tha → console error → vite ka direct-fallback (`ws://localhost:<hostPort>`) se HMR chal raha tha (double attempt + noise). Fix: proxy `/@vite/client` serve karte waqt `wsToken` literal nikal ke `devServerManager.registerHmrToken(projectId, token)`; `server.js` upgrade handler `?token=` se project resolve karke existing TCP forwarder se pipe karta hai → **first attempt pe hi 101**. Forward me vite ke saare gates satisfy hote hain (`Sec-WebSocket-Protocol: vite-hmr`, `pathname === base`, `hasValidToken`, `isHostAllowed` — Host rewrite `127.0.0.1:<port>` pehle se tha). Proof: `temp_ui_audit/probe_hmr_ws_open.js` → `OPEN (backend-proxied HMR works)`; `check_live_preview` → **0 console errors** (pehle 1). Token map self-heals (har full page load `/@vite/client` dobara register karta hai).
+- Tests: `backend/tests/persistentRuntimeLearning.test.js` → **34** (fix-memory learn/retrieve/signature + wiring audits + preview rewrite regex-safety + **AST rewrite regressions** for the three corruption patterns + CORS `selfOrigins` + 8.3-path + **HMR upgrade routing**: token round-trip + proxy-register/server-resolve wiring) → backend unit **284/284 (61 suites)**; integration 64/65 (same pre-existing memory-route failure); frontend 54 suites / 425 tests; eslint 0/0. Proxies: `devServerProxy.test.js` 10/10.
 - Gotcha: backend must be **restarted** after edits to `routes/agent.js` / `routes/preview.js` / `security-hardening.js` (boot ≈30s).
 
 ## ⌃ Keyboard Shortcuts
@@ -505,7 +505,7 @@ npx playwright test         # 13 tests — real geometry, computed styles, Mutat
 
 # Backend: unit + integration (node:test, 0 LLM calls, ephemeral port)
 cd "C:\Users\vikash kumar\Pictures\ai dost 3.0\backend"
-npm run test:unit           # 282 tests / 60 suites (unit + project/auth/settings/cache + agent run history/watch bus + copilot memory + runtime/repair/retrieval/dep-cache/fix-memory)
+npm run test:unit           # 284 tests / 61 suites (unit + project/auth/settings/cache + agent run history/watch bus + copilot memory + runtime/repair/retrieval/dep-cache/fix-memory/HMR-routing)
 npm run test:integration    # 65 tests (real Express app on port 0)
 npm run test:all            # everything: unit(104) + integration(53) + security(14) + mcp(5) + api(12) + chat(13)
 node --test tests/unit.test.js tests/integration.test.js

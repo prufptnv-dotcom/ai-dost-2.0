@@ -334,6 +334,45 @@ describe('P5 — AST-based JS rewriting (regex corruption regression)', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+describe('P5 — HMR WebSocket upgrade routing (token → project)', () => {
+  const fs2 = require('fs');
+  const path2 = require('path');
+  const devServerManager = require('../sandbox/devServerManager');
+
+  it('registerHmrToken/getProjectByHmrToken round-trip + falsy guards', () => {
+    assert.strictEqual(devServerManager.registerHmrToken('', 'tokA'), false);
+    assert.strictEqual(devServerManager.registerHmrToken('projA', ''), false);
+    assert.strictEqual(devServerManager.getProjectByHmrToken(''), null);
+    assert.strictEqual(devServerManager.getProjectByHmrToken('never-registered'), null);
+
+    assert.strictEqual(devServerManager.registerHmrToken('hmr-proj-1', 'tokHmr1'), true);
+    assert.strictEqual(devServerManager.getProjectByHmrToken('tokHmr1'), 'hmr-proj-1');
+    // re-register (vite restart → new token) overwrites/adds, never throws
+    devServerManager.registerHmrToken('hmr-proj-1', 'tokHmr1b');
+    assert.strictEqual(devServerManager.getProjectByHmrToken('tokHmr1b'), 'hmr-proj-1');
+  });
+
+  it('wires the token: preview proxy registers it, server.js upgrade resolves it', () => {
+    const previewSrc = fs2.readFileSync(path2.join(__dirname, '..', 'routes', 'preview.js'), 'utf8');
+    assert.match(previewSrc, /targetPath\.includes\('\/@vite\/client'\)/,
+      'proxy must only trust the token from /@vite/client responses');
+    assert.ok(previewSrc.includes('text.match(/const\\s+wsToken'),
+      'proxy must extract vite\'s wsToken literal');
+    assert.match(previewSrc, /registerHmrToken\(server\.projectId \|\| firstSegment/,
+      'proxy must index the token under the project being proxied');
+
+    const serverSrc = fs2.readFileSync(path2.join(__dirname, '..', 'server.js'), 'utf8');
+    const upgradeIdx = serverSrc.indexOf('server.on(\'upgrade\'');
+    assert.ok(upgradeIdx > 0, 'server.js must register an upgrade handler');
+    const upgradeBlock = serverSrc.slice(upgradeIdx, upgradeIdx + 4000);
+    assert.match(upgradeBlock, /getProjectByHmrToken\(decodeURIComponent\(tok\)\)/,
+      'upgrade handler must resolve the project from ?token=');
+    assert.ok(upgradeBlock.indexOf('getProjectByHmrToken') < upgradeBlock.indexOf('__upgradeHandled'),
+      'token lookup must happen BEFORE the socket is claimed');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 describe('P5 — Windows 8.3 path fix (vite fs.allow mismatch)', () => {
   const mgrSrc = fs.readFileSync(path.join(__dirname, '..', 'sandbox', 'devServerManager.js'), 'utf8');
 

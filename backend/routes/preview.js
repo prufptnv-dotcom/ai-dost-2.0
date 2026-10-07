@@ -299,6 +299,13 @@ function proxyToDevServer(req, res, server, relPath = '') {
         let out = raw;
         if (!overflow) {
           const text = raw.toString('utf8');
+          // HMR: vite's per-server ws token (browser sends `ws://host/?token=X`
+          // with no project path) → index it so the upgrade handler can pick
+          // the right dev server. First full fetch of /@vite/client registers it.
+          if (targetPath.includes('/@vite/client')) {
+            const tm = text.match(/const\s+wsToken\s*=\s*["']([^"']+)["']/);
+            if (tm) devServerManager.registerHmrToken(server.projectId || firstSegment, tm[1]);
+          }
           const rewritten = isJsType(proxyRes.headers['content-type'])
             ? rewriteJsModule(text, prefix, targetPath)
             : rewriteProxiedUrls(text, prefix);

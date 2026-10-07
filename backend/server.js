@@ -1714,6 +1714,13 @@ server.on('upgrade', (request, socket, head) => {
     const referer = request.headers['referer'] || '';
     const refMatch = referer.match(/\/api\/preview\/([^\/\?]+)/);
     if (refMatch) projectId = refMatch[1];
+    if (!projectId) {
+      // Vite HMR fallback: `ws://host/?token=X` has no project in the path and
+      // WS handshakes carry no Referer — resolve the project through the token
+      // index the preview proxy fills when it serves `/@vite/client`.
+      const tok = (url.match(/[?&]token=([^&\s]+)/) || [])[1];
+      if (tok) projectId = devServerManager.getProjectByHmrToken(decodeURIComponent(tok));
+    }
   }
 
   if (projectId) {
