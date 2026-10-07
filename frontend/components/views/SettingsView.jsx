@@ -6,6 +6,7 @@ import {
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { Modal } from '../ui/Modal';
+import Toggle from '../ui/Toggle';
 import api from '../../services/api';
 import { saveSecret, deleteSecret, migrateLegacySecrets } from '../../services/secretSettings';
 
@@ -15,7 +16,18 @@ const MODEL_OPTIONS = [
   { value: 'groq', label: 'Groq Llama 3.3 70B (Fast Inference)' },
   { value: 'deepseek', label: 'DeepSeek R1 / V3' },
   { value: 'nvidia', label: 'NVIDIA Nemotron' },
-  { value: 'openrouter', label: 'OpenRouter Free Tier' },
+  { value: 'openrouter', label: 'OpenRouter Auto Free (openrouter/free)' },
+  { value: 'openrouter:nemotron_3_super', label: 'OpenRouter · Nemotron 3 Super (120B)' },
+  { value: 'openrouter:nemotron_3_ultra', label: 'OpenRouter · Nemotron 3 Ultra (550B)' },
+  { value: 'openrouter:nemotron_3_lightning', label: 'OpenRouter · Nemotron 3.5 Lightning' },
+  { value: 'openrouter:north_mini_code', label: 'OpenRouter · Cohere North Mini Code' },
+  { value: 'openrouter:laguna_s', label: 'OpenRouter · Poolside Laguna-S 2.1' },
+  { value: 'openrouter:lfm_reasoning', label: 'OpenRouter · Liquid LFM 2.5 (Reasoning)' },
+  { value: 'openrouter:gemma_26b', label: 'OpenRouter · Google Gemma 4 26B' },
+  { value: 'openrouter:dots_3_note', label: 'OpenRouter · Dots 3 Note Preview' },
+  { value: 'openrouter:ling_sante', label: 'OpenRouter · Ling 3.0 Santé (Medical)' },
+  { value: 'openrouter:apodex_mini', label: 'OpenRouter · Apodex 1.1 Mini (Research)' },
+  { value: 'openrouter:content_safety', label: 'OpenRouter · Nemotron Content Safety' },
   { value: 'local:qwen2.5-coder:7b', label: 'Local Ollama (qwen2.5-coder:7b)' },
 ];
 
@@ -386,18 +398,13 @@ export default function SettingsView({ onToast, onModelChange }) {
             </h2>
           </div>
 
-          <div className="flex items-center justify-between py-2">
-            <div>
-              <div className="text-xs font-medium text-paper-100">Auto-Save File Changes</div>
-              <div className="text-[11px] text-ink-muted">Automatically save modified files in Copilot IDE</div>
-            </div>
-            <input
-              type="checkbox"
-              checked={autosave}
-              onChange={(e) => setAutosave(e.target.checked)}
-              className="w-4 h-4 rounded-xs border-border text-accent-primary focus:ring-0 cursor-pointer"
-            />
-          </div>
+          <Toggle
+            checked={autosave}
+            onChange={setAutosave}
+            label="Auto-Save File Changes"
+            description="Automatically save modified files in Copilot IDE"
+            data-testid="autosave-toggle"
+          />
         </div>
       </div>
 

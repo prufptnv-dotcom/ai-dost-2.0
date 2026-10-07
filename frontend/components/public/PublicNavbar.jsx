@@ -42,7 +42,7 @@ export function PublicNavbar({ theme = 'dark', onToggleTheme }) {
           <AiDostMark size={28} />
           <span className="tracking-tight text-paper-100 font-semibold whitespace-nowrap">AI-Dost</span>
           <div className="gemini-shimmer-badge hidden md:inline-flex text-[10px] font-mono text-paper-200">
-            <AppIcon name="sparkles" className="w-3 h-3 text-[#4893fc] gemini-sparkle-icon" />
+            <AppIcon name="sparkles" className="w-3 h-3 text-[#6366f1] gemini-sparkle-icon" />
             <span>Autonomous AI Workspace</span>
           </div>
         </Link>

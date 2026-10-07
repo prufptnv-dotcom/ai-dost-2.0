@@ -7,7 +7,7 @@ export function PublicFooter() {
   const currentYear = new Date().getFullYear();
 
   return (
-    <footer className="relative border-t border-border bg-canvas-subtle text-paper-200 font-sans text-xs before:absolute before:top-0 before:left-0 before:right-0 before:h-[1px] before:bg-gradient-to-r before:from-transparent before:via-[#4893fc]/50 before:to-transparent">
+    <footer className="relative border-t border-border bg-canvas-subtle text-paper-200 font-sans text-xs before:absolute before:top-0 before:left-0 before:right-0 before:h-[1px] before:bg-gradient-to-r before:from-transparent before:via-[#6366f1]/50 before:to-transparent">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
         <div className="grid grid-cols-2 md:grid-cols-5 gap-8 lg:gap-12">
           {/* Brand Col */}

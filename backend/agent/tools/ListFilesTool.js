@@ -20,7 +20,12 @@ class ListFilesTool extends Tool {
     const resolvedPath = context.workspaceManager.resolvePath(context.projectId, targetDir, context.userId);
     
     if (!fs.existsSync(resolvedPath)) {
-      throw new Error(`Directory not found: ${targetDir}`);
+      return { 
+        success: true, 
+        files: [],
+        exists: false,
+        metadata: { path: targetDir || '/', count: 0 }
+      };
     }
 
     try {

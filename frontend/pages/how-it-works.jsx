@@ -106,11 +106,11 @@ export default function HowItWorksPage() {
       {/* ─── Header ─── */}
       <section className="relative pt-20 pb-16 md:pt-28 md:pb-20 border-b border-border bg-canvas-subtle overflow-hidden">
         {/* Google Gemini Dual Ambient Celestial Orbs */}
-        <div className="absolute -top-24 left-1/4 w-[500px] h-[300px] bg-gradient-to-tr from-[#4285f4]/20 via-[#9b72cb]/18 to-transparent blur-[120px] pointer-events-none rounded-full" />
-        <div className="absolute top-10 right-1/4 w-[450px] h-[300px] bg-gradient-to-bl from-[#d96570]/15 via-[#1ba1e2]/15 to-transparent blur-[120px] pointer-events-none rounded-full" />
+        <div className="absolute -top-24 left-1/4 w-[500px] h-[300px] bg-gradient-to-tr from-[#6366f1]/20 via-[#a5b4fc]/18 to-transparent blur-[120px] pointer-events-none rounded-full" />
+        <div className="absolute top-10 right-1/4 w-[450px] h-[300px] bg-gradient-to-bl from-[#4f46e5]/15 via-[#818cf8]/15 to-transparent blur-[120px] pointer-events-none rounded-full" />
 
         <RevealOnScroll direction="up" className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-4 relative z-10">
-          <div className="gemini-shimmer-badge text-[11px] font-mono text-[#4893fc]">
+          <div className="gemini-shimmer-badge text-[11px] font-mono text-[#6366f1]">
             <Sparkles className="w-3.5 h-3.5 gemini-sparkle-icon" />
             <span>Execution Architecture</span>
           </div>
@@ -127,7 +127,7 @@ export default function HowItWorksPage() {
       <section className="py-16 md:py-24 border-b border-border">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
           <RevealOnScroll direction="up" className="space-y-2 text-center sm:text-left">
-            <span className="text-xs font-mono uppercase tracking-[0.15em] text-[#4893fc] font-semibold block">
+            <span className="text-xs font-mono uppercase tracking-[0.15em] text-[#6366f1] font-semibold block">
               Execution Pipeline
             </span>
             <h2 className="text-2xl sm:text-3xl font-bold font-display text-paper-100">
@@ -135,7 +135,7 @@ export default function HowItWorksPage() {
             </h2>
           </RevealOnScroll>
 
-          <div className="space-y-6 relative before:absolute before:left-4 before:top-4 before:bottom-4 before:w-0.5 before:bg-gradient-to-b before:from-[#4893fc] before:via-[#9b72cb] before:to-[#d96570] hidden sm:block">
+          <div className="space-y-6 relative before:absolute before:left-4 before:top-4 before:bottom-4 before:w-0.5 before:bg-gradient-to-b before:from-[#6366f1] before:via-[#a5b4fc] before:to-[#4f46e5] hidden sm:block">
             {PIPELINE_STEPS.map((item, idx) => (
               <RevealOnScroll
                 key={item.step}
@@ -144,7 +144,7 @@ export default function HowItWorksPage() {
                 className="relative flex items-start gap-6 pl-12 group"
               >
                 {/* Circle Marker with Gemini Ping Glow */}
-                <span className="absolute left-1.5 top-2 w-6 h-6 rounded-full bg-canvas-base border-2 border-[#4893fc] group-hover:border-[#9b72cb] transition-all duration-300 flex items-center justify-center text-[10px] font-mono font-bold text-[#4893fc] shadow-[0_0_14px_rgba(66,133,244,0.4)] gemini-node-active">
+                <span className="absolute left-1.5 top-2 w-6 h-6 rounded-full bg-canvas-base border-2 border-[#6366f1] group-hover:border-[#a5b4fc] transition-all duration-300 flex items-center justify-center text-[10px] font-mono font-bold text-[#6366f1] shadow-[0_0_14px_rgba(99,102,241,0.4)] gemini-node-active">
                   {item.step}
                 </span>
 
@@ -154,7 +154,7 @@ export default function HowItWorksPage() {
                   className="gemini-glow-card w-full p-6 border border-white/10 space-y-2"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-mono uppercase tracking-wider text-[#4893fc] font-bold">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-[#6366f1] font-bold">
                       {item.name}
                     </span>
                     <span className="text-[10px] font-mono text-ink-muted">Phase {item.step}</span>
@@ -165,7 +165,7 @@ export default function HowItWorksPage() {
                   <p className="text-xs text-paper-200 leading-relaxed font-sans">
                     {item.summary}
                   </p>
-                  <p className="text-[11px] text-[#9b72cb] font-mono pt-1">
+                  <p className="text-[11px] text-[#a5b4fc] font-mono pt-1">
                     ↳ {item.detail}
                   </p>
                 </div>
@@ -178,7 +178,7 @@ export default function HowItWorksPage() {
             {PIPELINE_STEPS.map((item, idx) => (
               <RevealOnScroll key={item.step} delay={idx * 60} direction="up">
                 <div className="gemini-glow-card p-5 border border-white/10 space-y-2">
-                  <div className="flex items-center justify-between text-[11px] font-mono text-[#4893fc] font-bold">
+                  <div className="flex items-center justify-between text-[11px] font-mono text-[#6366f1] font-bold">
                     <span>{item.step} • {item.name}</span>
                   </div>
                   <h3 className="text-sm font-semibold text-paper-100">{item.title}</h3>
@@ -194,7 +194,7 @@ export default function HowItWorksPage() {
       <section className="py-16 md:py-24 bg-canvas-subtle border-b border-border">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
           <RevealOnScroll direction="up" className="space-y-2 text-center sm:text-left">
-            <span className="text-xs font-mono uppercase tracking-[0.15em] text-[#4893fc] font-semibold block">
+            <span className="text-xs font-mono uppercase tracking-[0.15em] text-[#6366f1] font-semibold block">
               Capability Boundaries
             </span>
             <h2 className="text-2xl sm:text-3xl font-bold font-display text-paper-100">
@@ -216,7 +216,7 @@ export default function HowItWorksPage() {
               >
                 <div className="flex items-center justify-between">
                   <h4 className="text-sm font-bold font-mono text-paper-100">{r.role}</h4>
-                  <span className="text-[10px] font-mono px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[#4893fc] shadow-[0_0_10px_rgba(66,133,244,0.15)]">
+                  <span className="text-[10px] font-mono px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[#6366f1] shadow-[0_0_10px_rgba(99,102,241,0.15)]">
                     {r.badge}
                   </span>
                 </div>

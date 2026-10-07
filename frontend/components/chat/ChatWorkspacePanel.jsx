@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FileText, ListChecks, X, ArrowUpRight } from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 import { clearWorkspaceState, readWorkspaceState, CHAT_WORKSPACE_KEY } from './chatWorkspaceState';
 
 function getPayloadItems(state) {
@@ -49,7 +49,7 @@ export default function ChatWorkspacePanel({ onClose, onOpenInCopilot }) {
           <h2 className="text-sm font-semibold text-paper-100 truncate">{state.title || 'AI-Dost Workspace'}</h2>
         </div>
         <button type="button" onClick={close} className="p-1.5 rounded-lg text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated" aria-label="Close workspace">
-          <X className="w-4 h-4" />
+          <AppIcon name="close" size={16} />
         </button>
       </div>
 
@@ -57,7 +57,7 @@ export default function ChatWorkspacePanel({ onClose, onOpenInCopilot }) {
         {plan && (
           <section className="rounded-xl border border-border bg-canvas-elevated p-3">
             <div className="flex items-center gap-2 mb-2 text-paper-100">
-              <ListChecks className="w-4 h-4 text-accent" />
+              <AppIcon name="list" size={16} className="text-accent" />
               <span className="text-xs font-semibold">Task plan</span>
             </div>
             <p className="text-sm text-paper-100 leading-relaxed">{plan.intent?.label || plan.intent?.target || 'Planned task'}</p>
@@ -83,7 +83,7 @@ export default function ChatWorkspacePanel({ onClose, onOpenInCopilot }) {
         {state.type === 'files' && (
           <section className="rounded-xl border border-border bg-canvas-elevated p-3">
             <div className="flex items-center gap-2 mb-3 text-paper-100">
-              <FileText className="w-4 h-4 text-accent" />
+              <AppIcon name="file" size={16} className="text-accent" />
               <span className="text-xs font-semibold">Files in context</span>
             </div>
             {steps.length > 0 ? (
@@ -95,7 +95,7 @@ export default function ChatWorkspacePanel({ onClose, onOpenInCopilot }) {
                   const type = typeof att === 'object' && att !== null ? (att.mime || att.type) : null;
                   return (
                     <li key={`${name}-${index}`} className="flex items-center gap-2 text-xs text-paper-100">
-                      <FileText className="w-3.5 h-3.5 text-accent shrink-0" />
+                      <AppIcon name="file" size={14} className="text-accent shrink-0" />
                       <span className="truncate" title={name}>{name}</span>
                       {type && <span className="ml-auto text-[10px] font-mono text-ink-muted shrink-0">{type}</span>}
                     </li>
@@ -114,7 +114,7 @@ export default function ChatWorkspacePanel({ onClose, onOpenInCopilot }) {
             <div className="mt-1 text-xs text-ink-muted">{artifact.language?.toUpperCase() || 'FILE'} • {artifact.code?.length || 0} characters</div>
             {onOpenInCopilot && (
               <button type="button" onClick={() => onOpenInCopilot(artifact)} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-black">
-                Open in Copilot <ArrowUpRight className="w-3 h-3" />
+                Open in Copilot <AppIcon name="external" size={12} />
               </button>
             )}
           </section>

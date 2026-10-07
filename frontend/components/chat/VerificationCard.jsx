@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, ShieldAlert, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 import { Badge } from '../ui/Badge';
 
 export function VerificationCard({
@@ -24,13 +24,13 @@ export function VerificationCard({
       <div className="flex items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-2">
           {isPass ? (
-            <ShieldCheck className="w-4 h-4 text-status-success" />
+            <AppIcon name="shield" size={16} className="text-emerald-400" />
           ) : isFail ? (
-            <ShieldAlert className="w-4 h-4 text-status-error" />
+            <AppIcon name="alert" size={16} className="text-red-400" />
           ) : (
-            <AlertCircle className="w-4 h-4 text-status-warning" />
+            <AppIcon name="alertCircle" size={16} className="text-amber-400" />
           )}
-          <span className="text-ui-default font-semibold text-txt-primary">
+          <span className="font-semibold text-paper-100">
             Independent Verification
           </span>
         </div>
@@ -43,12 +43,11 @@ export function VerificationCard({
       </div>
 
       {summary && (
-        <p className="text-xs text-txt-secondary mb-2.5 leading-relaxed">
+        <p className="text-xs text-paper-200 mb-2.5 leading-relaxed">
           {summary}
         </p>
       )}
 
-      {/* Check details grid */}
       {checks && checks.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 pt-2 border-t border-border-subtle">
           {checks.map((c, i) => {
@@ -56,12 +55,12 @@ export function VerificationCard({
             return (
               <div
                 key={i}
-                className="flex items-center gap-1.5 px-2 py-1 rounded-xs bg-canvas-base border border-border text-[11px] font-mono text-txt-secondary"
+                className="flex items-center gap-1.5 px-2 py-1 rounded-xs bg-canvas-base border border-border text-[11px] font-mono text-paper-200"
               >
                 {checkPass ? (
-                  <CheckCircle2 className="w-3 h-3 text-status-success flex-shrink-0" />
+                  <AppIcon name="checkCircle" size={12} className="text-emerald-400 flex-shrink-0" />
                 ) : (
-                  <XCircle className="w-3 h-3 text-status-error flex-shrink-0" />
+                  <AppIcon name="errorCircle" size={12} className="text-red-400 flex-shrink-0" />
                 )}
                 <span className="truncate">{c.name || c.check_type}</span>
               </div>

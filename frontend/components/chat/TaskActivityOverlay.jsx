@@ -1,18 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  Check,
-  ChevronDown,
-  ChevronUp,
-  CircleAlert,
-  ClipboardList,
-  FileDiff,
-  FilePlus2,
-  Loader2,
-  RotateCcw,
-  ShieldAlert,
-  Square,
-  XCircle,
-} from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 import { diffLines, diffStats } from '../../lib/lineDiff';
 
 const MAX_ITEMS = 10;
@@ -24,10 +11,10 @@ const TERMINAL_CLEANUP_MS = 6000;
 const COMPOSER_SELECTOR = 'textarea[aria-label="Ask AI-Dost anything"]';
 
 const phaseIcon = (status) => {
-  if (status === 'success') return Check;
-  if (status === 'canceled') return XCircle;
-  if (status === 'error') return CircleAlert;
-  return Loader2;
+  if (status === 'success') return 'check';
+  if (status === 'canceled') return 'errorCircle';
+  if (status === 'error') return 'alertCircle';
+  return 'loader';
 };
 
 function emptyTask(taskId) {
@@ -68,7 +55,7 @@ function FileDiffView({ file }) {
   return (
     <div className="mt-1 mb-1 overflow-hidden rounded-md border border-border bg-black/40" data-testid="file-diff">
       <div className="flex items-center gap-2 border-b border-border px-2 py-1 text-[9px] text-ink-muted">
-        <FileDiff className="w-3 h-3 shrink-0" />
+        <AppIcon name="fileDiff" className="w-3 h-3 shrink-0" />
         <span className="min-w-0 flex-1 truncate font-mono" title={file.path}>{file.path}</span>
         <span className="text-emerald-400">+{stats.added}</span>
         <span className="text-red-400">-{stats.removed}</span>
@@ -375,13 +362,13 @@ export default function TaskActivityOverlay() {
     return (
       <div className="fixed left-1/2 bottom-5 -translate-x-1/2 z-[75] w-[min(92vw,500px)] rounded-2xl border border-border bg-canvas-surface/95 backdrop-blur-xl shadow-2xl px-4 py-3" role="status" aria-live="polite">
         <div className="flex items-start gap-3">
-          <RotateCcw className="w-4 h-4 mt-0.5 shrink-0 text-paper-200" />
+          <AppIcon name="rotate" size={16} className="mt-0.5 shrink-0 text-paper-200" />
           <div className="min-w-0 flex-1">
             <div className="text-[12px] font-semibold text-paper-100">Pichla task ruk gaya tha</div>
             <div className="mt-1 text-[11px] text-ink-muted line-clamp-2">{recovery.message}</div>
             <div className="mt-3 flex items-center gap-2">
               <button type="button" onClick={retry} className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-[10px] font-medium text-paper-100 hover:bg-canvas-elevated" aria-label="Retry interrupted task">
-                <RotateCcw className="w-3 h-3" /> Retry
+                <AppIcon name="rotate" size={12} /> Retry
               </button>
               <button type="button" onClick={dismissRecovery} className="rounded-md px-2.5 py-1.5 text-[10px] text-ink-muted hover:text-paper-100" aria-label="Dismiss interrupted task recovery">
                 Dismiss
@@ -409,7 +396,7 @@ export default function TaskActivityOverlay() {
     <div className="fixed left-1/2 bottom-5 -translate-x-1/2 z-[75] w-[min(92vw,420px)] rounded-2xl border border-border bg-canvas-surface/95 backdrop-blur-xl shadow-2xl px-3 py-2.5" role="status" aria-live="polite" aria-busy={!active.terminal}>
       <div className="flex items-center justify-between mb-2 gap-3">
         <div className={`flex items-center gap-1.5 text-[11px] font-semibold ${titleTone}`}>
-          {active.approval ? <ShieldAlert className="w-3.5 h-3.5" /> : null}
+          {active.approval ? <AppIcon name="alert" size={14} /> : null}
           {title}
           {active.files.length > 0 ? (
             <span className="text-[10px] font-normal text-ink-muted">· {active.files.length} file{active.files.length === 1 ? '' : 's'}</span>
@@ -418,10 +405,10 @@ export default function TaskActivityOverlay() {
         <div className="flex items-center gap-2">
           <div className="text-[10px] text-ink-muted">{active.phase}</div>
           <button type="button" onClick={cancel} disabled={active.terminal} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated disabled:opacity-40" aria-label="Stop AI-Dost task" title="Stop task">
-            <Square className="w-3 h-3" /> Stop
+            <AppIcon name="square" size={12} /> Stop
           </button>
           <button type="button" onClick={() => setExpanded((v) => !v)} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated" aria-label={expanded ? 'Collapse task session' : 'Expand task session'} aria-expanded={expanded}>
-            {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
+            {expanded ? <AppIcon name="chevronDown" size={12} /> : <AppIcon name="chevronUp" size={12} />}
           </button>
         </div>
       </div>
@@ -429,7 +416,7 @@ export default function TaskActivityOverlay() {
       {active.approval ? (
         <div className="mb-2 rounded-lg border border-amber-400/40 bg-amber-400/10 px-2.5 py-2" data-testid="approval-banner">
           <div className="flex items-start gap-2 text-[11px] text-amber-200">
-            <ShieldAlert className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+            <AppIcon name="alert" size={14} className="mt-0.5 shrink-0" />
             <div className="min-w-0 flex-1">
               <div className="font-medium">{active.approval.reason || 'Sensitive operation blocked'}</div>
               {active.approval.capabilities?.length ? (
@@ -441,7 +428,7 @@ export default function TaskActivityOverlay() {
               ) : null}
               <div className="mt-2 flex items-center gap-2">
                 <button type="button" onClick={approve} disabled={approving} className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/90 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-500 disabled:opacity-60" aria-label="Approve task">
-                  {approving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                  {approving ? <AppIcon name="loader" size={12} /> : <AppIcon name="check" size={12} />}
                   {approving ? 'Resuming...' : 'Approve'}
                 </button>
                 <button type="button" onClick={reject} disabled={approving} className="rounded-md border border-border px-2.5 py-1.5 text-[10px] text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated" aria-label="Reject task">
@@ -456,13 +443,13 @@ export default function TaskActivityOverlay() {
       {expanded && steps.length > 0 ? (
         <div className="mb-2 rounded-lg border border-border bg-canvas-elevated/60 px-2.5 py-2" data-testid="plan-checklist">
           <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
-            <ClipboardList className="w-3 h-3" /> Plan
+            <AppIcon name="clipboard" size={12} /> Plan
           </div>
           <ol className="space-y-1">
             {steps.slice(0, 8).map((step, idx) => (
               <li key={step.key} className="flex items-center gap-1.5 text-[11px] text-paper-200">
                 {step.done ? (
-                  <Check className="w-3 h-3 shrink-0 text-emerald-400" />
+                  <AppIcon name="check" size={12} className="shrink-0 text-emerald-400" />
                 ) : (
                   <span className="w-3 shrink-0 text-center text-[9px] text-ink-muted">{idx + 1}</span>
                 )}
@@ -476,7 +463,7 @@ export default function TaskActivityOverlay() {
       {expanded && active.files.length > 0 ? (
         <div className="mb-2 rounded-lg border border-border bg-canvas-elevated/60 px-2.5 py-2" data-testid="files-list">
           <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
-            <FilePlus2 className="w-3 h-3" /> Files changed
+            <AppIcon name="filePlus" size={12} /> Files changed
           </div>
           <div className="space-y-1">
             {active.files.slice(-8).map((file) => {
@@ -498,7 +485,7 @@ export default function TaskActivityOverlay() {
                     </span>
                     <span className="min-w-0 flex-1 truncate font-mono" title={file.path}>{file.path}</span>
                     {canDiff ? (
-                      isOpen ? <ChevronUp className="w-3 h-3 shrink-0 text-ink-muted" /> : <ChevronDown className="w-3 h-3 shrink-0 text-ink-muted" />
+                      isOpen ? <AppIcon name="chevronUp" size={12} className="shrink-0 text-ink-muted" /> : <AppIcon name="chevronDown" size={12} className="shrink-0 text-ink-muted" />
                     ) : null}
                   </button>
                   {isOpen && canDiff ? <FileDiffView file={file} /> : null}
@@ -519,10 +506,10 @@ export default function TaskActivityOverlay() {
 
       <div className={expanded ? 'space-y-1.5 max-h-[34vh] overflow-y-auto pr-1' : 'space-y-1.5'}>
         {(expanded ? active.items : active.items.slice(-3)).map((item, idx) => {
-          const Icon = phaseIcon(item.status);
+          const iconName = phaseIcon(item.status);
           return (
             <div key={`${item.id || item.label || 'phase'}-${item.ts || ''}-${idx}`} className="flex items-center gap-2 text-[11px] text-paper-200">
-              <Icon className={`w-3.5 h-3.5 shrink-0 ${item.status === 'running' ? 'animate-spin' : ''}`} />
+              <AppIcon name={iconName} size={14} className={`shrink-0 ${item.status === 'running' ? 'animate-spin' : ''}`} />
               <span className="truncate" title={item.label}>{item.label}</span>
             </div>
           );
@@ -537,7 +524,7 @@ export default function TaskActivityOverlay() {
 
       {active.terminal && active.summary ? (
         <div className="mt-2 flex items-start gap-1.5 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-2 text-[11px] text-emerald-200" data-testid="completion-summary">
-          <Check className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <AppIcon name="check" size={14} className="mt-0.5 shrink-0" />
           <span className="min-w-0">{active.summary}{active.files.length > 0 ? ` · ${active.files.length} file${active.files.length === 1 ? '' : 's'} created/edited` : ''}</span>
         </div>
       ) : null}

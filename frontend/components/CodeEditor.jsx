@@ -880,7 +880,13 @@ const handleEditorChange = (newContent) => {
                     <option value="gemini">♊ Gemini 2.0 Flash</option>
                     <option value="deepseek">🐳 DeepSeek V3</option>
                     <option value="nvidia">💚 NVIDIA NIM</option>
-                    <option value="openrouter">🪐 OpenRouter</option>
+                    <optgroup label="OpenRouter Free Models">
+                      <option value="openrouter">🪐 OpenRouter (Auto Free)</option>
+                      <option value="openrouter:nemotron_3_super">🪐 Nemotron 3 Super</option>
+                      <option value="openrouter:north_mini_code">🪐 Cohere North Mini Code</option>
+                      <option value="openrouter:laguna_s">🪐 Poolside Laguna-S</option>
+                      <option value="openrouter:lfm_reasoning">🪐 Liquid LFM 2.5</option>
+                    </optgroup>
                   </select>
                 </div>
 

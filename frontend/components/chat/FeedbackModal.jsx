@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ThumbsUp, ThumbsDown, X, Check, Sparkles, Send, MessageSquareQuote, ShieldAlert } from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 import api from '../../services/api';
 
 const CATEGORIES = [
@@ -88,19 +88,18 @@ export default function FeedbackModal({
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 10 }}
           transition={{ duration: 0.2 }}
-          className="relative w-full max-w-md rounded-2xl border border-white/10 bg-[#0d111c]/95 shadow-2xl p-5 text-paper-100 overflow-hidden"
+          className="relative w-full max-w-md rounded-2xl border border-border bg-canvas-elevated shadow-2xl p-5 text-paper-100 overflow-hidden"
           role="dialog"
           aria-modal="true"
           aria-labelledby="feedback-title"
         >
-          {/* Header */}
-          <div className="flex items-center justify-between pb-3 border-b border-white/10">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center text-accent">
-                <MessageSquareQuote size={18} />
+          <div className="flex items-center justify-between pb-3 border-b border-border-subtle">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent">
+                <AppIcon name="message" size={16} />
               </div>
               <div>
-                <h3 id="feedback-title" className="text-sm font-semibold text-white">
+                <h3 id="feedback-title" className="text-sm font-semibold text-paper-100">
                   Feedback & Teach AI
                 </h3>
                 <p className="text-[11px] text-ink-muted">
@@ -111,52 +110,50 @@ export default function FeedbackModal({
             <button
               type="button"
               onClick={onClose}
-              className="p-1 rounded-lg text-ink-muted hover:text-white hover:bg-white/10 transition-colors"
+              className="p-1.5 rounded-lg text-ink-muted hover:text-paper-100 hover:bg-canvas-surface transition-colors cursor-pointer"
+              aria-label="Close"
             >
-              <X size={16} />
+              <AppIcon name="close" size={16} />
             </button>
           </div>
 
-          {/* Body */}
           {submitted ? (
-            <div className="py-8 flex flex-col items-center justify-center gap-2 text-center">
-              <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center animate-bounce">
-                <Check size={24} />
+            <div className="py-8 flex flex-col items-center justify-center gap-2.5 text-center">
+              <div className="w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 flex items-center justify-center">
+                <AppIcon name="check" size={22} />
               </div>
-              <h4 className="text-sm font-semibold text-white">Dhanyawad! Feedback Saved</h4>
+              <h4 className="text-sm font-semibold text-paper-100">Dhanyawad! Feedback Saved</h4>
               <p className="text-xs text-ink-muted">
                 AI-Dost ne aapka rule Personal Brain memory mein update kar liya hai.
               </p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-              {/* Type Switcher */}
-              <div className="flex items-center gap-2 bg-white/5 p-1 rounded-xl border border-white/10">
+              <div className="flex items-center gap-1 bg-canvas-surface p-1 rounded-xl border border-border-subtle">
                 <button
                   type="button"
                   onClick={() => setFeedbackType('positive')}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-all ${
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
                     feedbackType === 'positive'
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                      : 'text-ink-muted hover:text-white'
+                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                      : 'text-ink-muted hover:text-paper-100'
                   }`}
                 >
-                  <ThumbsUp size={14} /> Sahi Tha (Accurate)
+                  <AppIcon name="thumbsUp" size={13} /> Sahi Tha (Accurate)
                 </button>
                 <button
                   type="button"
                   onClick={() => setFeedbackType('negative')}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-all ${
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
                     feedbackType === 'negative'
-                      ? 'bg-red-500/20 text-red-300 border border-red-500/30'
-                      : 'text-ink-muted hover:text-white'
+                      ? 'bg-red-500/15 text-red-400 border border-red-500/25'
+                      : 'text-ink-muted hover:text-paper-100'
                   }`}
                 >
-                  <ThumbsDown size={14} /> Sudhar Chahiye (Incorrect)
+                  <AppIcon name="thumbsDown" size={13} /> Sudhar Chahiye (Incorrect)
                 </button>
               </div>
 
-              {/* Category Chips */}
               <div>
                 <label className="text-[11px] font-medium text-ink-muted mb-1.5 block">
                   Category chunein:
@@ -167,10 +164,10 @@ export default function FeedbackModal({
                       key={cat.id}
                       type="button"
                       onClick={() => setCategory(cat.id)}
-                      className={`text-[11px] px-2.5 py-1 rounded-lg border transition-all ${
+                      className={`text-[11px] px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
                         category === cat.id
-                          ? 'bg-accent/20 border-accent/40 text-accent font-medium'
-                          : 'bg-white/5 border-white/10 text-paper-200 hover:bg-white/10'
+                          ? 'bg-accent/15 border-accent/30 text-accent font-semibold'
+                          : 'bg-canvas-surface border-border text-paper-200 hover:bg-canvas-elevated'
                       }`}
                     >
                       {cat.label}
@@ -179,12 +176,11 @@ export default function FeedbackModal({
                 </div>
               </div>
 
-              {/* Correction / Instruction input */}
               <div>
                 <label className="text-[11px] font-medium text-ink-muted mb-1.5 flex items-center justify-between">
                   <span>Sahi answer ya rule kya hona chahiye?</span>
                   <span className="text-[10px] text-accent flex items-center gap-1">
-                    <Sparkles size={11} /> 100% Accuracy Engine
+                    <AppIcon name="sparkles" size={10} /> 100% Accuracy Engine
                   </span>
                 </label>
                 <textarea
@@ -192,20 +188,19 @@ export default function FeedbackModal({
                   onChange={(e) => setCorrection(e.target.value)}
                   placeholder="Jaise: 'Isko pure 3D Anime.js canvas me likhna tha' ya 'Bihar ki GDP sahi likho'..."
                   rows={3}
-                  className="w-full text-xs rounded-xl bg-black/40 border border-white/15 p-3 text-white placeholder-white/30 focus:outline-none focus:border-accent resize-none transition-colors"
+                  className="w-full text-xs rounded-xl bg-canvas-surface border border-border p-3 text-paper-100 placeholder:text-ink-muted focus:outline-none focus:border-accent/40 resize-none transition-colors"
                 />
               </div>
 
-              {/* Preset quick suggestions */}
               <div>
-                <span className="text-[10px] text-ink-muted block mb-1">Quick Suggestions:</span>
+                <span className="text-[10px] text-ink-muted block mb-1.5">Quick Suggestions:</span>
                 <div className="flex flex-wrap gap-1">
                   {PRESET_CORRECTIONS.map((preset, i) => (
                     <button
                       key={i}
                       type="button"
                       onClick={() => setCorrection(preset)}
-                      className="text-[10px] px-2 py-0.5 rounded-md bg-white/5 text-ink-muted hover:text-white hover:bg-white/10 border border-white/5 transition-colors"
+                      className="text-[10px] px-2 py-1 rounded-lg bg-canvas-surface text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated border border-border-subtle transition-colors cursor-pointer"
                     >
                       + {preset}
                     </button>
@@ -213,25 +208,24 @@ export default function FeedbackModal({
                 </div>
               </div>
 
-              {/* Actions */}
-              <div className="pt-2 flex items-center justify-end gap-2 border-t border-white/10">
+              <div className="pt-3 flex items-center justify-end gap-2 border-t border-border-subtle">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-3 py-1.5 rounded-xl text-xs text-ink-muted hover:text-white transition-colors"
+                  className="px-3 py-1.5 rounded-xl text-xs text-ink-muted hover:text-paper-100 transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-accent text-black hover:opacity-90 transition-all shadow-lg shadow-accent/20 disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-accent text-white hover:bg-accent-hover transition-all shadow-[0_0_12px_-2px_rgba(99,102,241,0.4)] disabled:opacity-50 cursor-pointer"
                 >
                   {submitting ? (
                     'Saving...'
                   ) : (
                     <>
-                      <Send size={13} /> Submit & Teach AI
+                      <AppIcon name="send" size={12} /> Submit & Teach AI
                     </>
                   )}
                 </button>

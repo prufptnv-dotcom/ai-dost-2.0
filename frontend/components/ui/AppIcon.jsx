@@ -127,6 +127,13 @@ import {
   faFileCirclePlus,
   faArrowTurnDown,
   faArrowDownAZ,
+  faArrowDown,
+  faVideo,
+  faVideoSlash,
+  faFileCode,
+  faFileCsv,
+  faFilePowerpoint,
+  faMicrochip,
 } from '@fortawesome/free-solid-svg-icons';
 import { faGithub, faGoogle, faXTwitter } from '@fortawesome/free-brands-svg-icons';
 
@@ -249,6 +256,13 @@ export const APP_ICONS = {
   filePlus: faFileCirclePlus,
   turnDown: faArrowTurnDown,
   caseSensitive: faArrowDownAZ,
+  arrowDown: faArrowDown,
+  video: faVideo,
+  videoOff: faVideoSlash,
+  fileCode: faFileCode,
+  fileSpreadsheet: faFileCsv,
+  presentation: faFilePowerpoint,
+  cpu: faMicrochip,
   github: faGithub,
   google: faGoogle,
   xBrand: faXTwitter,

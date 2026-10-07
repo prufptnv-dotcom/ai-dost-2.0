@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Paperclip, X } from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 
 export const MAX_CHAT_ATTACHMENTS = 15;
 export const MAX_CHAT_ATTACHMENT_CHARS = 30000;
@@ -149,7 +149,7 @@ export default function UnifiedChatAttachments() {
   return (
     <div className="fixed bottom-24 left-1/2 z-50 w-[min(92vw,768px)] -translate-x-1/2 rounded-xl border border-border bg-canvas-surface/95 p-2.5 shadow-lg backdrop-blur" role="region" aria-label="Selected chat files">
       <div className="flex items-center gap-2 px-1 pb-2 text-[11px] font-medium text-ink-muted">
-        <Paperclip className="h-3.5 w-3.5 text-accent" />
+        <AppIcon name="paperclip" size={14} className="text-accent" />
         <span>{attachments.length}/15 files ready for this chat</span>
       </div>
       <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
@@ -166,7 +166,7 @@ export default function UnifiedChatAttachments() {
                 setGlobalAttachments(next);
               }}
             >
-              <X className="h-3 w-3" />
+              <AppIcon name="close" size={12} />
             </button>
           </span>
         ))}

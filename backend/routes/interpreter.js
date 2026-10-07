@@ -22,7 +22,11 @@ const logger = require('../logger');
  *    (default: enabled in dev, disabled when NODE_ENV=production)
  */
 
-const SUPPORTED_LANGUAGES = new Set(['python', 'javascript', 'js']);
+const SUPPORTED_LANGUAGES = new Set([
+    'python', 'py', 'python3',
+    'javascript', 'js', 'node',
+    'sh', 'bash', 'shell', 'zsh', 'powershell', 'ps1'
+]);
 
 function isHostCodeExecEnabled() {
     const flag = process.env.ALLOW_HOST_CODE_EXEC;
@@ -40,7 +44,7 @@ router.post('/execute', async (req, res) => {
 
     // P0 FIX: validate BEFORE creating any file (previously an unsupported
     // language wrote a temp file and returned 400 without ever unlinking it).
-    const lang = String(language).toLowerCase();
+    const lang = String(language).toLowerCase().trim();
     if (!SUPPORTED_LANGUAGES.has(lang)) {
         return res.status(400).json({ success: false, error: "Unsupported language." });
     }
@@ -53,7 +57,9 @@ router.post('/execute', async (req, res) => {
 
     logger.info(`[Interpreter] Executing ${lang} code block (${code.length} bytes)...`);
 
-    const extension = lang === 'python' ? 'py' : 'js';
+    const isPy = ['python', 'py', 'python3'].includes(lang);
+    const isSh = ['sh', 'bash', 'shell', 'zsh', 'powershell', 'ps1'].includes(lang);
+    const extension = isPy ? 'py' : isSh ? (process.platform === 'win32' ? 'ps1' : 'sh') : 'js';
     const fileName = `interpreter_${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${extension}`;
     const filePath = path.join(os.tmpdir(), fileName);
 
@@ -61,8 +67,9 @@ router.post('/execute', async (req, res) => {
         await fs.writeFile(filePath, code, 'utf-8');
 
         // execFile with argv array — filePath is internal (no shell parsing)
-        const bin = lang === 'python' ? 'python' : 'node';
-        execFile(bin, [filePath], { timeout: 10000 }, async (error, stdout, stderr) => {
+        const bin = isPy ? 'python' : isSh ? (process.platform === 'win32' ? 'powershell' : 'bash') : 'node';
+        const args = isSh && process.platform === 'win32' ? ['-ExecutionPolicy', 'Bypass', '-File', filePath] : [filePath];
+        execFile(bin, args, { timeout: 10000 }, async (error, stdout, stderr) => {
             // Clean up the temp file on every completion path
             try { await fs.unlink(filePath); } catch (e) { /* ignore */ }
 

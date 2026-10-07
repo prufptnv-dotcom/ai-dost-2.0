@@ -24,7 +24,7 @@ export default function ThinkingDot({ label = 'Thinking…', elapsed = 0, activi
       <div className="relative flex items-center justify-center w-8 h-8 shrink-0" aria-hidden="true">
         {/* Outer Rotating Glowing Ring */}
         <div
-          className="absolute inset-0 rounded-full border-2 border-transparent border-t-accent border-r-purple-400 animate-spin"
+          className="absolute inset-0 rounded-full border-2 border-transparent border-t-accent border-r-amber-400 animate-spin"
           style={{ animationDuration: '2.5s' }}
         />
         {/* Middle Counter-Rotating Subtle Ring */}
@@ -33,7 +33,7 @@ export default function ThinkingDot({ label = 'Thinking…', elapsed = 0, activi
           style={{ animationDuration: '6s', animationDirection: 'reverse' }}
         />
         {/* Core Pulsing Glow Orb */}
-        <div className="w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-accent via-indigo-400 to-purple-400 animate-pulse shadow-[0_0_12px_rgba(99,102,241,0.8)]" />
+        <div className="w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-accent via-indigo-400 to-indigo-600 animate-pulse shadow-[0_0_12px_rgba(99,102,241,0.8)]" />
       </div>
 
       {/* Backward-compatible thinking signal for CSS compatibility */}

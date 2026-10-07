@@ -28,10 +28,19 @@ function parseCsv(value) {
     .filter(Boolean);
 }
 
+function selfOrigins() {
+  // The backend's OWN origin is always legitimate: browsers attach `Origin` to
+  // same-origin module-script / fetch requests too, and rejecting our own
+  // origin500'd every proxied Live Preview sub-module (`/src/main.jsx`…)
+  // loaded straight from :5000.
+  const port = process.env.PORT || '5000';
+  return [`http://localhost:${port}`, `http://127.0.0.1:${port}`];
+}
+
 function resolveCorsOrigins() {
   const configured = parseCsv(process.env.CORS_ORIGINS || process.env.FRONTEND_URL);
-  if (configured.length > 0) return configured;
-  return isProduction ? [] : ['http://localhost:3000', 'http://127.0.0.1:3000'];
+  const defaults = isProduction ? [] : ['http://localhost:3000', 'http://127.0.0.1:3000'];
+  return [...new Set([...defaults, ...configured, ...selfOrigins()])];
 }
 
 const corsOrigins = resolveCorsOrigins();

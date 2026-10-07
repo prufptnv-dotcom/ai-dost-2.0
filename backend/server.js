@@ -339,7 +339,13 @@ function createProjectFolder(projectId, folderPath) {
 function getProjectFiles(projectId) {
   try {
     const wsRoot = workspaceManager.getWorkspacePath(projectId);
-    if (!fs.existsSync(wsRoot)) return {};
+    if (!fs.existsSync(wsRoot)) {
+      const rows = db.prepare('SELECT path, content FROM workspace_files WHERE project_id = ?').all(projectId);
+      return rows.reduce((acc, { path, content }) => {
+        acc[path] = content || '';
+        return acc;
+      }, {});
+    }
     const result = {};
 
     // P2 #49: bounded read — this runs on project list/refresh, so an
@@ -553,6 +559,7 @@ const languageRoutes   = require('./routes/language');
 const decisionRoutes   = require('./routes/decision');
 const securityRoutes   = require('./routes/security');
 const catalogRoutes    = require('./routes/catalog');
+const openrouterRoutes = require('./routes/openrouter');
 const rateLimiter = require('./middleware/rateLimiter');
 const { apiGuard, execGuard, isLoopback, clientIp } = require('./middleware/localApiGuard');
 
@@ -603,6 +610,7 @@ app.use('/api/travel',    travelRoutes);
 app.use('/api/language',  languageRoutes);
 app.use('/api/decision',  decisionRoutes);
 app.use('/api/security',  securityRoutes);
+app.use('/api/openrouter', openrouterRoutes);
 
 const projectGraphRoutes = require('./routes/projectGraph');
 const workflowRoutes = require('./routes/workflows')(db);
@@ -648,6 +656,7 @@ app.use('/api/v1/language', languageRoutes);
 app.use('/api/v1/decision', decisionRoutes);
 app.use('/api/v1/security', securityRoutes);
 app.use('/api/v1/catalog',  catalogRoutes);
+app.use('/api/v1/openrouter', openrouterRoutes);
 
 // ── AI Assistant Endpoints (mounted at /api/v1/ai) ──────────────────────────
 // This allows frontend calls to /ai/code-suggestions and /ai/lsp-diagnostics
@@ -1083,6 +1092,9 @@ app.delete(['/api/copilot/sessions/:id', '/api/v1/copilot/sessions/:id'], (req, 
   try {
     const { id } = req.params;
     db.prepare('DELETE FROM copilot_sessions WHERE id = ?').run(id);
+    db.prepare('DELETE FROM workspace_files WHERE project_id = ? OR project_id = ?').run(id, `workspace_${id}`);
+    workspaceManager.deleteWorkspace(id);
+    workspaceManager.deleteWorkspace(`workspace_${id}`);
     res.json({ success: true, message: 'Session deleted' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -1151,12 +1163,16 @@ app.delete(['/api/v1/memory/project/:id', '/api/memory/project/:id', '/api/proje
 
     const projectDao = new ProjectDAO(db);
     projectDao.delete(id, auth.user.id);
+    db.prepare('DELETE FROM workspace_files WHERE project_id = ? OR project_id = ?').run(id, `workspace_${id}`);
+    db.prepare('DELETE FROM copilot_sessions WHERE id = ?').run(id);
+    workspaceManager.deleteWorkspace(id, auth.user.id);
+    workspaceManager.deleteWorkspace(`workspace_${id}`, auth.user.id);
     res.json({ success: true, message: 'Project deleted' });
 });
 
 app.get(['/api/v1/memory/project/:id', '/api/memory/project/:id', '/api/project/:id'], (req, res) => {
     const { id } = req.params;
-    const auth = projectAuth.authorize(id, req, { autoCreateIfMissing: true });
+    const auth = projectAuth.authorize(id, req, { autoCreateIfMissing: true, autoCreateSessionProject: true });
     if (!auth.authorized) {
         // A workspace load for a project that doesn't exist yet is NOT an error —
         // the editor wants an empty file list. autoCreateIfMissing only covers
@@ -1478,6 +1494,17 @@ function deleteChatHistory(req, res) {
         }
     }
     db.prepare('DELETE FROM chat_history WHERE session_id = ?').run(sessionId);
+
+    // Delete any workspace files, copilot sessions, and physical directories associated with this session!
+    // Fulfills: "Agar chat delete ho jaati hai, to IDE ka bhi code delete ho jaana chahiye"
+    db.prepare('DELETE FROM workspace_files WHERE project_id = ? OR project_id = ? OR project_id = ?').run(sessionId, `workspace_${sessionId}`, `chat_${sessionId}`);
+    db.prepare('DELETE FROM copilot_sessions WHERE id = ?').run(sessionId);
+    const projectDao = new ProjectDAO(db);
+    projectDao.delete(sessionId, userId);
+    projectDao.delete(`workspace_${sessionId}`, userId);
+    workspaceManager.deleteWorkspace(sessionId, userId);
+    workspaceManager.deleteWorkspace(`workspace_${sessionId}`, userId);
+
     res.json({ success: true, message: 'History cleared' });
 }
 

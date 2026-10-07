@@ -263,7 +263,7 @@ export function CrewPanel({ BACKEND = '', onToast, onCompleteProject }) {
                     !agent.active
                       ? 'bg-canvas-base border-border-subtle opacity-50'
                       : isWorking
-                      ? 'bg-canvas-surface border-accent shadow-[0_0_12px_rgba(66,133,244,0.15)] ring-1 ring-accent'
+                      ? 'bg-canvas-surface border-accent shadow-[0_0_12px_rgba(99,102,241,0.15)] ring-1 ring-accent'
                       : isDone
                       ? 'bg-canvas-surface border-signal-success/40'
                       : 'bg-canvas-surface border-border hover:border-border-strong hover:bg-canvas-elevated'

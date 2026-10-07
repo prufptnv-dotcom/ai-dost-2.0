@@ -41,6 +41,18 @@ class WorkspaceDAO {
     const res = this.db.prepare("UPDATE workspaces SET last_synced_at = datetime('now') WHERE project_id = ?").run(projectId);
     return res.changes > 0;
   }
+
+  delete(id) {
+    if (!id) return false;
+    const res = this.db.prepare('DELETE FROM workspaces WHERE id = ?').run(id);
+    return res.changes > 0;
+  }
+
+  deleteByProjectId(projectId) {
+    if (!projectId) return false;
+    const res = this.db.prepare('DELETE FROM workspaces WHERE project_id = ?').run(projectId);
+    return res.changes > 0;
+  }
 }
 
 module.exports = WorkspaceDAO;

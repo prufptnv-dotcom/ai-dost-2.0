@@ -12,7 +12,7 @@ const ArtifactDAO = require('../../db/dao/ArtifactDAO');
 const ConversationDAO = require('../../db/dao/ConversationDAO');
 const WorkspaceManager = require('../../services/workspaceManager');
 const projectAuthorization = require('../../services/projectAuthorization');
-const OpenAIService = require('../../services/openaiService');
+const AgentCascadeAiService = require('./AgentCascadeAiService');
 const ExecutionController = require('./ExecutionController');
 const ChatPlannerExecutionLoop = require('./ChatPlannerExecutionLoop');
 const TaskPlanner = require('./TaskPlanner');
@@ -47,8 +47,8 @@ function createChatTaskGateway({ db = getDatabase(), aiService = null, runtime =
     maxEvents: Number(process.env.AGENT_TASK_IDEMPOTENCY_MAX_EVENTS) || 100,
   });
 
-  const structuredPlanner = aiService || createStructuredAgentPlanner({ toolRegistry });
-  const directorAiService = runtime.directorAiService || aiService || OpenAIService;
+  const structuredPlanner = aiService || createStructuredAgentPlanner({ toolRegistry, openai: AgentCascadeAiService });
+  const directorAiService = runtime.directorAiService || aiService || AgentCascadeAiService;
 
   const executionController = runtime.executionController || new ExecutionController({
     db,

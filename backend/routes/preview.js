@@ -114,6 +114,146 @@ function findIndexHtml(dir) {
   return null;
 }
 
+// ── P5: proxied preview URL rewriting ───────────────────────────────────────
+//
+// The dev server emits ROOT-ABSOLUTE URLs (`/src/main.jsx`, `/@vite/client`,
+// `from "/@react-refresh"`, `url(/src/x.png)`). While the page lived at the
+// origin root that was fine — but the preview is served under
+// `/api/preview/<projectId>/`, so the browser resolved those against
+// `localhost:5000/` and every module request404/500'd (blank preview).
+//
+// `vite base` would be the other fix, but it changes proxy semantics for every
+// caller (sandbox, npm fallback, static). Rewriting the response keeps all
+// existing paths working. Only TEXT responses are rewritten; JSON/binary pass
+// through untouched. `/api/*` and `/socket.io/*` deliberately stay un-prefixed
+// so app backend calls keep hitting the backend directly (and Next's `/api/*`
+// rewrite keeps working when the preview is embedded from :3000).
+const REWRITE_MAX_BYTES = 8 * 1024 * 1024;
+
+// Backend paths that must stay origin-rooted even inside a string literal.
+// The regex path captures p WITHOUT the leading slash; the AST path passes the
+// full literal content WITH it — normalize so both stay correct.
+function keepBackendPath(p) {
+  if (!p) return true;
+  const s = p.charAt(0) === '/' ? p.slice(1) : p;
+  return /^(?:api|socket\.io)(?:\/|$)/.test(s);
+}
+
+function rewriteProxiedUrls(text, prefix) {
+  if (!prefix || !text) return text;
+
+  // HTML/CSS only — JS goes through the AST (see rewriteJsModule).
+
+  // 1. STRING LITERALS only: `"…/x"`, `'…/x'`, `` `…/x` ``. Deliberately NOT
+  //    `(…)`: `.render(/* @__PURE__ */ …)` is a COMMENT, and `.replace(/a\/b/)`
+  //    is a REGEX — prefixing those silently corrupts valid JS.
+  //    Lookbehind: a quote IMMEDIATELY after `/` (or another quote) is a quote
+  //    INSIDE a regex body — `replace(/"/g, "&quot;")` — not a string opener.
+  //    Real string openers sit after `=`, `(`, `[`, `:`, whitespace, etc.
+  let out = text.replace(/(?<!['"\/])(["'`])\/(?!\/)([^"'`\s]*)/g, (m, q, p) => (
+    keepBackendPath(p) ? m : `${q}${prefix}/${p}`
+  ));
+
+  // 2. CSS `url(…)` — bare or quoted (quotes are already covered above).
+  out = out.replace(/url\(\s*(['"]?)\/(?!\/)([^)'"\s]*)/gi, (m, q, p) => (
+    keepBackendPath(p) ? m : `url(${q}${prefix}/${p}`
+  ));
+
+  return out;
+}
+
+// ── JS rewriting: AST, not regex ─────────────────────────────────────────────
+//
+// Regex-rewriting arbitrary JavaScript is a losing game. Every one of these
+// LOOKS like a root-absolute string opener and each corrupted a real bundle:
+//   • `/"`    — a quote inside a regex body      → `replace(/"/api/…/g, …)`
+//   • `)"/g`  — a regex closer followed by flags → `…"/api/…/g, {`
+//   • `(/*…*/` — a comment after a call paren    → `.render(/api/…/* … */`
+// Each corruption produced `Invalid regular expression flags` and a blank
+// preview. Parsing the module and rewriting only genuine string literals makes
+// it structurally impossible: comments, regexes and code are never touched.
+let acorn = null;
+try { acorn = require('acorn'); } catch (_) { /* JS then passes through unrewritten */ }
+
+function walkAst(node, visit) {
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) { for (const n of node) walkAst(n, visit); return; }
+  if (typeof node.type === 'string') visit(node);
+  for (const key of Object.keys(node)) {
+    if (key === 'type' || key === 'start' || key === 'end' || key === 'loc' ||
+        key === 'range' || key === 'regex' || key === 'value') continue;
+    const child = node[key];
+    if (child && typeof child === 'object') walkAst(child, visit);
+  }
+}
+
+function rewriteJsModule(code, prefix, label = '') {
+  if (!prefix || !code || !acorn) return code;
+
+  let ast;
+  try {
+    ast = acorn.parse(code, {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      allowHashBang: true,
+      allowAwaitOutsideFunction: true,
+      allowReturnOutsideFunction: true,
+    });
+  } catch (_) {
+    try {
+      // Script-style responses (bundled IIFEs served as text/javascript) are
+      // rewritable too — just a different grammar.
+      ast = acorn.parse(code, {
+        ecmaVersion: 'latest',
+        sourceType: 'script',
+        allowHashBang: true,
+        allowReturnOutsideFunction: true,
+      });
+    } catch (e) {
+      // An unparseable response is served UNREWRITTEN rather than regex-rewritten:
+      // an unrewritten module fails loudly, a corrupted one fails silently.
+      logger.warn(`[Preview Proxy] JS parse failed (${label || 'unknown'}) — serving unrewritten:`,
+        String(e.message).slice(0, 140));
+      return code;
+    }
+  }
+
+  const ranges = [];
+  walkAst(ast, (node) => {
+    if (node.type === 'Literal' && typeof node.value === 'string' &&
+        typeof node.start === 'number' && typeof node.end === 'number') {
+      ranges.push([node.start, node.end]);                       // includes the quotes
+    } else if (node.type === 'TemplateLiteral' && node.expressions.length === 0 &&
+               node.quasis.length === 1) {
+      ranges.push([node.start, node.end]);   // includes the backticks (loop strips them)
+    }
+  });
+
+  // Apply back-to-front so earlier offsets stay valid.
+  let out = code;
+  for (const [s, e] of ranges.sort((a, b) => b[0] - a[0])) {
+    const raw = out.slice(s, e);
+    const q = raw.charAt(0);
+    if ((q !== '"' && q !== "'" && q !== '`') || raw.charAt(raw.length - 1) !== q) continue;
+    const inner = raw.slice(1, -1);
+    if (inner.length < 2) continue;
+    if (inner.charAt(0) !== '/' || inner.startsWith('//')) continue;   // not root-absolute
+    if (inner.includes('\\')) continue;                                // escaped — skip, conservative
+    if (keepBackendPath(inner)) continue;
+    // `inner` INCLUDES the leading slash (unlike the regex path above).
+    out = out.slice(0, s) + q + prefix + inner + q + out.slice(e);
+  }
+  return out;
+}
+
+function isRewritableType(ctype) {
+  return /text\/html|javascript|ecmascript|text\/css/i.test(String(ctype || ''));
+}
+
+function isJsType(ctype) {
+  return /javascript|ecmascript/i.test(String(ctype || ''));
+}
+
 // Helper: Proxy HTTP request to backend dev server
 function proxyToDevServer(req, res, server, relPath = '') {
   const hostPort = server.hostPort;
@@ -124,6 +264,8 @@ function proxyToDevServer(req, res, server, relPath = '') {
   headers['x-forwarded-for'] = req.ip || req.connection.remoteAddress;
   headers['x-forwarded-proto'] = req.protocol;
   headers['x-forwarded-host'] = req.headers.host;
+  // We may rewrite the body, so never hand back an encoded one we cannot edit.
+  delete headers['accept-encoding'];
 
   const proxyReq = http.request({
     host: '127.0.0.1',
@@ -133,8 +275,54 @@ function proxyToDevServer(req, res, server, relPath = '') {
     headers: headers,
     timeout: 30000
   }, (proxyRes) => {
-    res.writeHead(proxyRes.statusCode, proxyRes.headers);
-    proxyRes.pipe(res);
+    if (!isRewritableType(proxyRes.headers['content-type'])) {
+      res.writeHead(proxyRes.statusCode, proxyRes.headers);
+      proxyRes.pipe(res);
+      return;
+    }
+
+    // Text: buffer (capped), prefix root-absolute URLs, then send.
+    const firstSegment = String(req.url.split('?')[0]).replace(/^\/+/, '').split('/')[0] || '';
+    const prefix = `${req.baseUrl || '/api/preview'}/${server.projectId || firstSegment}`;
+
+    const chunks = [];
+    let size = 0;
+    let overflow = false;
+    proxyRes.on('data', (c) => {
+      size += c.length;
+      if (size > REWRITE_MAX_BYTES) overflow = true;
+      chunks.push(c);
+    });
+    proxyRes.on('end', () => {
+      try {
+        const raw = Buffer.concat(chunks);
+        let out = raw;
+        if (!overflow) {
+          const text = raw.toString('utf8');
+          const rewritten = isJsType(proxyRes.headers['content-type'])
+            ? rewriteJsModule(text, prefix, targetPath)
+            : rewriteProxiedUrls(text, prefix);
+          out = Buffer.from(rewritten, 'utf8');
+        }
+        const h = { ...proxyRes.headers };
+        delete h['content-length'];
+        delete h['content-encoding'];
+        delete h['transfer-encoding'];
+        h['content-length'] = String(out.length);
+        res.writeHead(proxyRes.statusCode, h);
+        res.end(out);
+      } catch (e) {
+        logger.warn('[Preview Proxy] rewrite failed, falling back to raw:', e.message);
+        if (!res.headersSent) {
+          res.writeHead(proxyRes.statusCode, proxyRes.headers);
+          res.end(Buffer.concat(chunks));
+        }
+      }
+    });
+    proxyRes.on('error', (e) => {
+      logger.warn('[Preview Proxy] upstream read error:', e.message);
+      if (!res.headersSent) res.status(502).end('Upstream dev server stream error');
+    });
   });
 
   proxyReq.on('error', (err) => {
@@ -706,4 +894,9 @@ router.all('/:projectId/*', (req, res) => {
   res.sendFile(fp);
 });
 
+// Exposed for unit tests (the router itself stays the default export).
 module.exports = router;
+module.exports.rewriteProxiedUrls = rewriteProxiedUrls;
+module.exports.rewriteJsModule = rewriteJsModule;
+module.exports.isRewritableType = isRewritableType;
+module.exports.isJsType = isJsType;

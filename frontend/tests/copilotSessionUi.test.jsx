@@ -120,8 +120,8 @@ describe('CopilotDevinUI - IdeFooter (run meter)', () => {
         modelLabel="Gemini first"
       />
     );
-    expect(screen.getByTestId('footer-step')).toHaveTextContent('step 4/6');
-    expect(screen.getByTestId('footer-tokens')).toHaveTextContent('12.4k tok · ₹0');
+    expect(screen.getByTestId('footer-step')).toHaveTextContent('4/6');
+    expect(screen.getByTestId('footer-tokens')).toHaveTextContent('≈12.4k');
     expect(screen.getByTestId('footer-elapsed')).toHaveTextContent('2:14');
     expect(screen.getByText('Gemini first')).toBeInTheDocument();
   });
@@ -130,7 +130,7 @@ describe('CopilotDevinUI - IdeFooter (run meter)', () => {
     render(<IdeFooter handleAutoFixProblems={noop} running={false} approxTokens={80} />);
     expect(screen.queryByTestId('footer-step')).toBeNull();
     expect(screen.queryByTestId('footer-elapsed')).toBeNull();
-    expect(screen.getByTestId('footer-tokens')).toHaveTextContent('80 tok · ₹0');
+    expect(screen.getByTestId('footer-tokens')).toHaveTextContent('≈80');
     expect(screen.getByText('Auto (cascade)')).toBeInTheDocument();
   });
 });

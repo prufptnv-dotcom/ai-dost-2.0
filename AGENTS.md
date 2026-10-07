@@ -235,6 +235,154 @@ start_ai_engine.bat
 - Tests: backend unit `copilotMemory (self-learning notes)` (5: dedupe+batch-cap, ranking+noise-exclusion+same-project, **project-delete survival**, extractRunNotes, formatNotes cap) → **140/140 (23 suites)**; integration (+3: learn→list→dedupe→delete→404→clear, survive project DELETE via real API, retrieve ranked formatted) → **65/65**; frontend `copilotMemory.test.js` (6 — state/loaders, count effect, button/panel UI, backend contract cross-check incl. `no REFERENCES projects` scan; mutation-verified: injection marker mutate → 1 fail → restore → green) → **53 suites / 418 tests**, eslint 0/0.
 - **Future (RTX 4050, budget>0)**: `copilot_notes` = ready training corpus — QLoRA fine-tune 7–8B local model on {prompt→plan/outcome} pairs; deploy: SQLite file = plain volume mount (docker-compose already ships backend+sqlite, koi extra service nahi).
 
+### 19. P0 — Runtime Foundation (2026-10-07) *"the no-more-lying layer"*
+
+**Problem P0 fixes:** the agent reported *"Headless Browser Screenshot QA: Passed — UI rendered with 0 console errors"* for a project it had **never installed, never built, and never executed**. It screenshotted a hand-assembled stub page containing only `App.jsx` with hardcoded `IconStub` / fake `API` objects, while every other generated file was discarded.
+
+**New module** `backend/services/runtimeBridge.js` — nothing in it throws; every fn returns `{ok, evidence}` so the SSE stream can never be wedged:
+- `installDependencies(dir)` — **awaited** npm install + `npm rebuild`, real exit codes. Skips in ~5ms when `package.json` declares no deps. `--ignore-scripts` is kept (LLM-authored package.json is untrusted) and `npm rebuild` restores native addons — same trade-off `devServerManager` documents.
+- `runBuild(dir)` / `runTests(dir)` — real `npm run build` / `npm test` exit code + stderr tail.
+- `serveStatic(root)` — contained static server (SPA fallback, rejects path traversal) for the built output.
+- `captureRealApp(url)` — headless Chromium: screenshot + **every** console error + **every** uncaught page error + whether `#root` actually rendered.
+- `startRealDevServer(dir, {projectId})` — real `devServerManager` dev server; used when there is no build output (a dev-mode `index.html` references raw `.jsx` that no static server can transpile).
+- `verifyBuild(dir, opts)` — composite; `describeVerification()` renders it.
+- **Honesty contract**: verdict is `pass` only when `rootRendered && pageErrors.length === 0`. An unverifiable run is reported **UNVERIFIED** — never as pass, never as fail.
+
+**`spawn EINVAL` (CVE-2024-27980) — silently broke npm everywhere on Windows.** Node ≥18.20.2/20.12.2/22 refuses to spawn a `.cmd` with `shell:false`. Every host-side `npm install` was failing with `spawn EINVAL`, the `error` handler swallowed it, and install "succeeded". Fixed via `resolveInvocation()` in `runtimeBridge` and applied to `devServerManager` (2 sites) + `agent/orchestrator.js`. Two rules inside it:
+- only **real `.exe`** binaries spawn directly with `shell:false` (keeps `C:\Program Files\…\node.exe` working);
+- **only `.cmd`/`.bat`** route through `cmd.exe /d /s /c` (they genuinely need a shell). Routing an `.exe` through cmd breaks spaced paths — `/s` strips the outer quotes and the bare path falls apart (`'C:\Program' is not recognized`).
+- `assertLiteralArgs()` rejects any arg containing `;&|<>`$()\n\r"^%!` so the command line cannot be restructured.
+
+**Vite space-path build killer.** Vite's `html-inline-proxy` plugin turns an inline `<style>` into a module id derived from the HTML's absolute path. On a path containing a space (this machine: `C:\Users\vikash kumar\…`) it cannot resolve and **every** build dies with `[vite:html-inline-proxy] Could not load …?html-proxy&inline-css`. Proven: the identical project builds clean in a space-free dir and fails in a space-containing one, purely because of that `<style>` block. Fix: `normalizeInlineHtmlStyles()` in `routes/agent.js` relocates inline styles into the stylesheet — applies to LLM-authored *and* golden `index.html`.
+
+**Scaffold coherence.** An LLM-authored `package.json` is routinely incoherent with the tree beside it (`react-scripts` next to a golden `vite.config.js`, a `client` script for a directory that doesn't exist, no `build` at all) → produced `'vite' is not recognized` builds. Now the **golden `package.json` is authoritative for `scripts`** and guarantees the toolchain, while LLM extras (deps, name, description, version) are merged on top; an unparseable LLM `package.json` falls back to the golden one.
+
+**Wired into** `routes/agent.js` `generate_project_from_prompt`: install → build → real browser check → `verified` / `verification` / `install` on the tool result. `success:true` still means "files written" (unchanged contract); whether the code *works* is the separate `verified` flag.
+
+**Verified live** (`/api/agent/run`, `projectId=p0-final-01`): `npm install` exit 0 (97.7s) → `npm run build` **exit 0** (8.6s) → real output served → HTTP 200, 0 page errors, 22KB screenshot of the actual Pomodoro UI. Failures are now reported with the compiler's own words (verbatim Vite/esbuild output in a `<details>` block).
+
+- Tests: `backend/tests/runtimeFoundation.test.js` (14 — spawn/EINVAL + injection guard, real exit codes, install skip logic, failed-build short-circuit, UNVERIFIED contract, real screenshot e2e, "0 console errors" never emitted, static-server traversal) → backend unit **162/162 (30 suites)**; frontend unchanged 54 suites / 425 tests; eslint 0/0. Known pre-existing: integration `DELETE /api/v1/memory/project` expects 403/404 but gets 200 (memory route untouched by P0).
+- **Remaining P0 gap**: install (≈2 min) and build run *before* the ReAct loop resumes, so the loop still cannot repair a failed build — that is **P1** (verification-driven repair, `agent.js:2992` re-runs the failed command after a patch).
+
+### 20. P1 — Deterministic verification + repair loop (2026-10-07) *"generate → verify → observe → repair"*
+
+P0 could *report* a failure. Replit / Bolt / Devin *fix* it. P1 closes the loop.
+
+**New module** `backend/services/projectRepair.js` — pure orchestrator, **no LLM import** (`callLLM` is injected by `routes/agent.js`, so there is no import cycle and one provider cascade stays authoritative):
+- `requestRepair({dir, evidence, summary, intent, callLLM, attempt})` — shows the model the **verbatim** compiler/runtime output plus the files the error actually implicates (error text is mined for `*.jsx|css|html` filenames to rank the prompt). Response contract is pinned to `{"files":[{path,content}]}`; `parseFilePayload` salvages fenced/prose-wrapped JSON and rejects junk.
+- `diffAgainstDisk()` — a "repair" that returns byte-identical files is **not a repair**; those are dropped so the loop stops instead of re-asking a model that already failed.
+- `hasActionableFailure()` — **UNVERIFIED is not a failure.** No build script, no `index.html`, missing playwright ⇒ *no* LLM call. Only a real build/runtime error enters the loop.
+- `repairUntilVerified({dir, verify, repair, maxAttempts})` — bounded (default 3, clamped 0–5 via `parameters.maxRepairAttempts`); **re-runs the real build + real browser check after every attempt**. The model's claim that it fixed something is never trusted.
+
+**Per-file real parsing** — `runtimeBridge.verifySourceFile(dir, relPath, content)` / `verifySources()`. Loads the **project's own esbuild** (vite's dependency, so the verdict matches the build that will actually run) and falls back to the backend's `acorn`, then to structural balance — and labels that last case `strength: 'weak'` with a `note`, so a bracket check can never be mistaken for a compile.
+
+**ReAct loop fixes** (`routes/agent.js`):
+- **Self-heal is pinned to the failing command.** `selfHealState = {command, signature}`; a genuinely *different* failure earns a fresh budget, and the budget only clears when the **same** `run_terminal` command succeeds. Previously *any* successful step (e.g. a `write_file`) zeroed the counter, so "3 attempts" was never a bound.
+- **The failed command is re-run after the patch.** The prompt now says *"apply the fix, then run the EXACT same command"* and the observation carries the real exit code.
+- **Exhaustion is announced.** On the 3rd identical failure the stream emits `self_heal {exhausted:true}` and the model is told to stop retrying and report honestly.
+- **A failed run can no longer report success.** `runStats {steps, failedSteps, lastError}` replaces the old `steps.length > 0` gate; an exhausted budget or any failed step now emits `error` + `done {completed:false}` instead of `"🎉 completed successfully"`.
+
+**Cascade junk fix.** `isErrorResp` accepted any response of ≤5 chars as success, letting `null` / `{}` / `[DONE]` halt the cascade and become the "generated" scaffold. It now requires an actual payload first, and the provider-failure substring checks run against *that* response — so a legitimate `write_file` whose code contains the words "API error" / "Rate limit" is no longer silently discarded.
+
+**Wired into** `generate_project_from_prompt`: P0 verify → repair loop (emits `agent_status agent:'Self-Heal'` + `file_written` per attempt) → report gains a **Repair Attempts (n/3)** section and a `repair: {attempts, repairs[]}` field alongside `verified`. Opt out with `repairEnabled: false`.
+
+**Proven with real builds** (`temp_ui_audit/prove_p1_repair_loop.js`): a genuinely broken project → `❌ exit 1 · src/App.jsx:1: ERROR: Unexpected token '}'` → rewrite → `✅ exit 0` → `HTTP 200, 0 page errors, rootSample "P1 REPAIRED"`, real PNG. Live route run (`p1-final-01`): install exit 0 → build exit 0 → **"Repair Attempts (0/3): No repair was needed"** (a passing build costs zero LLM calls).
+
+- Tests: `backend/tests/verificationRepair.test.js` (20 — payload salvage/junk rejection, actionable-vs-unverified, no-op-diff, loop exit conditions + budget + re-verify count, verbatim-error-in-prompt, weak-label honesty) → backend unit **182/182 (36 suites)**; integration 64/65 (same pre-existing memory-route failure); frontend unchanged 54 suites / 425 tests; eslint 0/0.
+
+### 21. P2 — Real codebase context: BM25 retrieval + code map (2026-10-07)
+
+Devin's edge over everyone else is not the model — it is that the model can **see the repository**. Before P2 the `/api/agent/run` path built its "semantic search" by counting substring occurrences:
+
+```js
+score += (text.match(new RegExp(`\\b${word}\\b`,'g')) || []).length * 3;   // routes/agent.js:184
+```
+
+which cannot rank by rarity, cannot match `useTimer` when asked about "timer", and has **zero** structural awareness. (That scorer also had a latent bug: `wordRegex.test()` on a `/g/` regex is stateful via `lastIndex`, so its "partial match" branch was unreliable.)
+
+**New module** `backend/services/codeContext.js` — dependency-free, synchronous, no model call:
+- **`tokenize()`** — code-aware. Splits `camelCase` / `PascalCase` / `SCREAMING_CASE` / `snake_case`, drops stopwords, and also indexes the full identifier so `"timer"` finds `useTimer`. `tokenizePath()` indexes path segments (path tokens weighted ×2 so a filename helps ranking without swamping the code).
+- **`buildIndex()` / `search()` — real BM25** (`k1=1.5`, `b=0.75`, standard defaults). Fixes both failures of raw term frequency: **tf saturation** (30 hits ≠ 30× more relevant) and **IDF** (a term in every file is worthless; a term in one file is a signal). Chunks are 40-line overlapping windows that keep `startLine`/`endLine`, so the model knows exactly where a snippet came from. Hits are **collapsed to one per file** (best + at most one close runner-up recorded as `extraChunks`) so three near-identical windows cannot eat the budget.
+- **`buildGraph()`** — import/dependency edges with **extensionless resolution** (`./useTimer` → `src/hooks/useTimer.js`, plus `/index.*`). Answers *"what else breaks if I change this file?"*, which substring counting never could. Bare package imports are correctly ignored (nothing in-repo to resolve).
+- **`extractSymbols()` / `describeFile()`** — regex symbol + **Express route** extraction (`GET /api/items`). Feeds the model navigation hints instead of making it re-read everything.
+- **`retrieveContext()`** — assembles `=== RELEVANT CODE (BM25 retrieval, N chunks) ===` with per-hit `[matched: …]` terms, plus a `=== CODE MAP (symbols + what imports what — read these before editing) ===` section. Returns `{block, empty, hits, stats}` so a caller can tell *"found relevant code"* from *"found nothing"* — a block that merely looks like context is exactly how the old scorer misled the model. **When nothing matches it returns an empty block rather than padding with irrelevant files.**
+
+**P2.1 — the hydration gap.** `projectFiles` came straight off `req.body`, so it was only as complete as the caller happened to send — which is why retrieval silently degraded to "no relevant code" for any caller that omitted it. Now, when the body has none: hydrate from the **SQLite workspace store** first, then from disk via `readWorkspaceFiles()` (bounded: ≤120 files, ≤120KB each, ≤900KB total, 6 levels, skips `node_modules`/`.git`/`dist`/… — this runs on the request path before the first token is emitted, so an unbounded read would stall the SSE stream).
+
+**Wired into** `/api/agent/run`: emits a new SSE event **`code_context` (`{hits, stats}`)** so the UI can show *why* those files were chosen. Server log: `BM25 retrieval: N hit(s) across M chunks (T terms, ~K tokens, Xms)`.
+
+**Measured head-to-head** (`temp_ui_audit/prove_p2_retrieval.js`, old scorer reproduced verbatim vs BM25, realistic repo): **top-1 accuracy 3/5 → 4/5**. The decisive case is `setInterval countdown timer`: the old scorer ranked the **consumer** (`components/Timer.jsx`) first; BM25 ranks the **definition** (`hooks/useTimer.js`) first — knowing *where it is defined* vs merely *that it is used*. Both correctly return **nothing** for a query absent from the repo (no hallucination). Live run (`p1-final-01`, client sent **no** `projectFiles`): `code_context: 6 hit(s)`, 10 files / 14 chunks / 320 terms indexed, 1255 tokens, **12ms**, top hit `src/App.jsx`.
+
+- Tests: `backend/tests/codeContextRetrieval.test.js` (28 — camel/snake tokenization, line provenance, BM25 ranking + IDF + determinism + per-file collapse, junk-file skipping, extensionless import resolution, symbol/route extraction, budget monotonicity, "empty is honest", degenerate-input safety) → backend unit **210/210 (42 suites)**; integration 64/65 (same pre-existing memory-route failure); frontend unchanged 54 suites / 425 tests; eslint 0/0.
+- **Known remaining gap (P3)**: the `step === 0` greenfield **and** existing-project short-circuits (`routes/agent.js` `isGreenfieldScaffold` / `hasExistingFiles && !isExplicitNewProject`) still `return` immediately after scaffolding — so the ReAct loop (and therefore the P1 repair loop) never runs on those prompts. A modification request is rewritten by one `callScaffoldLLM` full-rewrite pass and reports `done` with **no verification at all** — visible in the live P2 run (`install events: false, verification verdict: false`). P0/P1 evidence exists only on the greenfield scaffold path.
+
+### 22. P3 — True ReAct loop (2026-10-07) *"modifications get the same proof as scaffolds"*
+
+The P2 documentation ended with the gap that this phase closes: **verification evidence existed only on the greenfield scaffold path.** Both step-0 short-circuits hard-returned, so the ReAct loop (and with it P0/P1 verification + repair) never ran on the two most common prompt types.
+
+**P3.1 — Greenfield: return only when verified.** `if (toolResult.verified)` is now the gate. An unverified scaffold **falls through into the ReAct loop** with the real failure evidence in the observation, so the model repairs it with tools. `plan.tasks.forEach(completed)` lives strictly inside the verified branch.
+
+**P3.2 — Existing-project one-shot rewrite: deleted.** The old path dumped **every file** into one prompt, asked for complete rewrites, wrote them to disk (bypassing the `write_file` guard that refuses overwrites of existing files), and reported `done` with **zero** verification. Replaced by a normal ReAct turn with explicit ground rules (`read_file` the exact file first, `apply_diff` verbatim search/replace only, change only what was asked, prove with `npm run build`). Every edit now goes through `deterministicCodeGuard` + path security — and the evidence gate runs before completion.
+
+**P3.3 — Evidence gate before `done`.** `verifyRunOutcome()` in `routes/agent.js` runs `runtimeBridge.verifyBuild` (+ the P1 repair loop) whenever a run touched code files. Wired into the `FINAL_ANSWER` branch AND the loop-exhaustion path. Skips honestly when nothing changed; **reuses** the scaffold's fresh verification instead of paying ~10s for a duplicate build + Chromium launch (`alreadyVerified` + `initialVerification` plumbing). Emits a structured `verification` SSE event + `verified` flag on `done`.
+
+**P3.4 — Real budget.** `MAX_STEPS` now comes from `req.body.maxSteps` (clamped 1–100) instead of a magic 50; `maxRepairAttempts` clamped 0–5; both advertised in `run_started { budget, context }` so the UI meter is honest.
+
+**P3.5 — Provider errors are never an answer.** Two-tier failure: (a) every provider service resolves an error **string** instead of throwing, so a dead key looks like a short answer — `callLLM`'s own `isErrorResp` list missed `Invalid API Key` / `Service Error`; (b) `parseLLMAction`'s raw-text fallback then turned that string into `FINAL_ANSWER`, so a run "completed" with `Mistral Service Error: {"detail":"Invalid API Key"}` as its result. Now a single shared `isProviderErrorResponse()` (substring + structured-envelope detection) is used by both `callLLM` and `parseLLMAction`; the loop retries the cascade twice on `__PROVIDER_ERROR__` and then aborts with the real reason, instead of a fake success. Live bug that motivated this: a run ended with `GROQ_RATE_LIMITED` / Mistral `Invalid API Key` as the "answer".
+
+**package.json repair → forced re-install.** When a repair rewrites `package.json`, the next build would run against a stale `node_modules` and fail with `'vite' is not recognized` forever — and the model's workaround was to rewrite the build script as `npm install && vite build`, hiding the harness bug inside the project. Now `projectRepair.manifestChanged(written)` forces `runtimeBridge.installDependencies(dir)` before the next build.
+
+- Tests: `backend/tests/reactLoopStructure.test.js` (17 — static audits of every P3 invariant: one-shot rewrite is gone, greenfield gates on verified, provider-error ordering in parseLLMAction, honest abort, FINAL_ANSWER + exhaustion evidence gates, changed-file tracking, clamped budget, manifest re-install wiring) + `verificationRepair.test.js` +5 (manifestChanged, initialVerification skip + still-reverify-after-repair) → backend unit **234/234 (49 suites)**; integration 64/65 (same pre-existing memory-route failure); frontend unchanged 54 suites / 425 tests; eslint 0/0.
+- **Live proof**: modification prompt on an existing project now produces `Verify: building the project…` → `❌ npm run build FAILED (exit 1)` → 3 repair attempts with real re-verification → honest `⚠️ Not verified` report with verbatim compiler output. Greenfield dedup: the final `Self-Heal … build passed` duplicate verify is gone.
+- **Known remaining gap (P4 — speed)**: fresh `npm install` took 218s in the live run. Persistent node_modules / dependency caching is the next target; without it every run pays minutes before a token of code changes.
+
+### 23. P4 — Speed & Feedback: persistent deps + shared cache (2026-10-07) *"the 218s problem"*
+
+Live measurement exposed the real cost: a fresh `npm install` for the golden scaffold's standard Vite + React + Express dep set took **218s on this machine**, paid on EVERY run. Two root causes, both fixed.
+
+**P4.1 — Persistent node_modules (the dominant win).** The regeneration cleanup deleted every non-dotfile in the workspace — including `node_modules`. So a regenerate prompt paid a full reinstall. Now `node_modules` survives regeneration; the next install becomes `npm rebuild` only. **Measured: ~218s → ~4s (54x).**
+
+**P4.2 — Shared signature-keyed dependency cache (cross-project win).** `%TEMP%\aidost-deps-cache\<sha256-16>` stores a node_modules snapshot per dependency set. Key correctness rules: written **only after** a real install exited 0, read **only through** the `.ready` marker (a partial copy is never served), guarded by a `.lock` marker so concurrent installs never interleave. Override root with `AIDOST_DEPS_CACHE`.
+
+**P4.3 — The copy is the honest bottleneck.** `fs.cpSync` measured **146s** on 52,210 files — nearly as expensive as installing. `robocopy /E /MT:16` does it in **38s** (4x). `copyTreeFast()` uses robocopy on Windows (exit codes 0–7 = success, 8+ = error), falls back to `fs.cpSync` elsewhere. **Never ship a cache whose copy costs more than the install it replaces** — the cpSync-first version of this cache was exactly that.
+
+**P4.4 — Superset seeding (exact-match is the usual miss).** An LLM almost always adds one extra package, which changed the exact signature → miss. Each cache entry now stores `manifest.json`, and `findCacheCandidate()` finds a cached set covering ≥60% of the needed packages (highest coverage wins, fewest extras breaks ties). Seed from it, then `npm install` reconciles only the delta. **Measured: 88% coverage → 78s vs 218s (3x).**
+
+Final hierarchy on this machine:
+
+| Path | Time | vs cold 218s |
+|---|---|---|
+| Same project regenerate (node_modules preserved) | **~4s** | **54x** |
+| New project, deps ⊆ cached set (superset) | **~78s** | **3x** |
+| New project, exact cached set | **~53s** | **4x** |
+| New project, brand-new dep set | ~218s | 1x |
+
+- New APIs in `runtimeBridge`: `dependencySignature`, `depsCacheRoot`, `depsCacheDirFor`, `copyTreeFast`, `seedFromDependencyCache` (async), `recordDependencyCache`, `findCacheCandidate`, `manifestFor`.
+- Tests: `backend/tests/dependencyCache.test.js` (16 — signature determinism/order-freedom/version-sensitivity, `.ready`-only serving, no-throw on corrupt cache, copy engine reporting, superset candidate selection + coverage floor + junk safety, regeneration preserves node_modules, rebuild-only short-circuit) → backend unit **250/250 (54 suites)**; integration 64/65 (same pre-existing memory-route failure); frontend unchanged 54 suites / 425 tests; eslint 0/0.
+- **Honest note**: cache-hit still costs ~40–60s (copy + rebuild) — real, but not Bolt's WebContainer instant. The next frontier is a persistent dev server + HMR so a run starts an already-running app instead of booting one (needs long-lived processes + port management; deliberately not hacked into the scaffold path because a leaked dev server is worse than a slow install).
+
+### 24. P5 — Live preview + self-learning fix memory (2026-10-07) *"the app must actually run, and get smarter every time it doesn't"*
+
+**P5.1 — Live preview.** After a run's verification passes, `ensureLivePreview()` (`routes/agent.js`) starts a real dev server through `devServerManager` and emits SSE `dev_server {state, url, reused, hostPort}` — the DONE message carries a **Live Preview URL**. `ensureLivePreview` **reuses a READY server** for the same project (no duplicate spawns), takes `dir: workspacePath` (the old out-of-scope `targetDir` ReferenceError landed in the loop's catch → run "failed" *after* passing verification) and is wrapped in try/catch — a preview problem never fails an already-verified run. Greenfield scope fixed too: `isGreenfieldScaffold = isExplicitNewProject || (!hasExistingFiles && !isExistingProjectModification)` so an explicit "create a new app" greenfields even when the workspace already has files (before this it fell to the bare loop → no verification, no preview).
+
+The preview is served through the existing `GET /api/preview/:projectId/*` proxy, which needed three real fixes before a browser could actually render anything:
+
+1. **8.3 short-path mismatch (blank preview, raw JSX shipped).** Spawn cwd was `%TEMP%\agent-ws-…` in its **8.3 form** (`VIKASH~1`) while vite resolves module ids through `fs.realpathSync.native` (long form `vikash kumar`) → vite's `fs.allow` rejected every module. Fix: dev server spawns from `fs.realpathSync.native(rawWsDir)` (`sandbox/devServerManager.js`). Same trap exists on this machine because `TEMP` is short while `USERPROFILE`/`homedir` are long — `fs.realpathSync` does NOT expand 8.3, `fs.realpathSync.native` DOES.
+2. **CORS on same-origin module fetches.** Chromium sends `Origin` even on same-origin module-script fetches; `security-hardening.js` only allow-listed :3000 → every proxied sub-module 500'd `CORS origin is not allowed`. Fix: `selfOrigins()` unions `http://localhost:${PORT||5000}` into the allowlist.
+3. **URL rewriting — regex was the wrong tool for JS.** The proxy must prefix root-absolute URLs with `/api/preview/<id>/` (vite `base` was rejected: it changes semantics for every caller — sandbox, npm fallback, static — while the request-time prefix adapts). HTML/CSS keep the regex `rewriteProxiedUrls` (string-literal-only + CSS `url()`; a `(quote-or-paren)/` rule had corrupted `.render(/* @__PURE__ */ …)` comments). **JS now goes through `rewriteJsModule` — an acorn AST pass.** Regex-rewriting arbitrary JS is a losing game; each of these looked like a root-absolute string opener and each corrupted a *real* served bundle → `Invalid regular expression flags` → blank preview:
+   - `/"` — a quote **inside a regex body** (`replace(/"/g, "&quot;")`),
+   - `)"/g` — a regex **closer followed by flags** (`…+)"​/g, {`),
+   - `(/*` — a comment after a call paren.
+   The AST walk rewrites only genuine string literals and expression-less template literals (back-to-front ranges; `inner` INCLUDES the leading slash — the regex path's capture did not, which produced a `//` double-slash bug caught by the first test run). Unparseable input is served **UNREWRITTEN** (a loud failure beats a silent corruption), with module→script parse fallback; `/api/*` + `/socket.io/*` are never prefixed; `accept-encoding` deleted (buffered body); 8MB cap with unrewritten fallback.
+
+**P5.2 — Fix memory.** `services/fixMemory.js`: `errorSignature()` normalizes (durations → extension-bearing paths → mixed-alnum hash-before-extension → line:col → bare ≥2-digit numbers), `learnFix` records only **successful** repairs (`kind:'fix'` in the delete-proof `copilot_notes` table), and `retrieveFix`/`formatFix` inject known fixes into the repair prompt **before** `requestRepair` spends an LLM call — same error as yesterday costs zero tokens today.
+
+**Live proofs** (`temp_ui_audit/e2e_p0_run.js`, `check_live_preview.js`, `scan_proxy_deep.js`): run `p5-live` (48.5s) and fresh `p5-live-2` (97s) — `verification verdict: true` → `dev_server READY` → proxied preview **HTTP 200, `#root children: 1`** with the full app UI text, **0 page errors, 0 failed requests**, deep module scan 0 parse failures.
+
+- **Known honest gap**: HMR WebSocket (`ws://localhost:5000/?token=…`) is not proxied — one cosmetic console error, the app renders and manual refresh works; edit→auto-hot-reload through the proxy is not wired (would need upgrade forwarding or `server.hmr.clientPort` in the generated project config).
+- Tests: `backend/tests/persistentRuntimeLearning.test.js` → **32** (fix-memory learn/retrieve/signature + wiring audits + preview rewrite regex-safety + **AST rewrite regressions** for the three corruption patterns + CORS `selfOrigins` + 8.3-path) → backend unit **282/282 (60 suites)**; integration 64/65 (same pre-existing memory-route failure); frontend 54 suites / 425 tests; eslint 0/0. Proxies: `devServerProxy.test.js` 10/10.
+- Gotcha: backend must be **restarted** after edits to `routes/agent.js` / `routes/preview.js` / `security-hardening.js` (boot ≈30s).
+
 ## ⌃ Keyboard Shortcuts
 
 | Shortcut | Action |
@@ -347,7 +495,7 @@ ai-dost version 2.o/
 ```powershell
 # Frontend: unit + component (Jest 30 + RTL, jsdom, 0 LLM calls)
 cd "C:\Users\vikash kumar\Pictures\ai dost 3.0\frontend"
- npm test                    # 418 tests / 53 suites
+ npm test                    # 425 tests / 54 suites
 npm test -- --coverage      # coverage thresholds enforced (statements 18 / branches 15 / functions 14 / lines 19)
 
 # Frontend: real-browser VisualHealer suite (Playwright + Chromium, file:// fixtures)
@@ -357,7 +505,7 @@ npx playwright test         # 13 tests — real geometry, computed styles, Mutat
 
 # Backend: unit + integration (node:test, 0 LLM calls, ephemeral port)
 cd "C:\Users\vikash kumar\Pictures\ai dost 3.0\backend"
-npm run test:unit           # 140 tests / 23 suites (unit + project/auth/settings/cache + agent run history/watch bus + copilot memory)
+npm run test:unit           # 282 tests / 60 suites (unit + project/auth/settings/cache + agent run history/watch bus + copilot memory + runtime/repair/retrieval/dep-cache/fix-memory)
 npm run test:integration    # 65 tests (real Express app on port 0)
 npm run test:all            # everything: unit(104) + integration(53) + security(14) + mcp(5) + api(12) + chat(13)
 node --test tests/unit.test.js tests/integration.test.js
@@ -377,7 +525,7 @@ npm run lint
 - `backend/tests/unit.test.js` — agent `parseLLMAction`, RAG search, CircuitBreaker/RateLimiter/RobustApiClient, `utils/errors`, sandbox path-traversal guard. Zero network.
 - `backend/tests/integration.test.js` — boots real Express app on port 0 (no listener, no Telegram): health, error envelopes (BAD_JSON/404), chat validation, chat history save/load round-trip, agent plan/tasks, eval status + bad ID, document validation, figma 503, deploy targets, sandbox 404s, root redirect. Zero LLM.
 - `backend/tests/e2e/smoke.spec.js` + `backend/playwright.config.js` — UI-deterministic; LLM replies asserted softly so free-tier rate limits don't flake CI.
-- `frontend/tests/` — 53 suites / 418 tests total: KanbanBoard (add-task + TDZ crash regression), ProjectsView (api mocked via jest.mock), AICompanion, chatContent (internal-tag + image-command stripping), copilotIde, copilotSessionUi (23 tests: Devin-style plan card / status strip / checklist rows / IdeFooter run meter / PreviewPane QA badge + console drawer / CopilotMarkdown code-copy + wrapCodeBlocks), appIcon (6 tests: FA svg render / size passthrough / unknown-name fallback / map validity / loader spin / brand prefix), appIconSourceAudit (4 tests: static source scan — mangled `<AppIcon>` tags + literal `name=` vs `APP_ICONS` + map validity), previewEngine (11 tests: `resolveRootAlias` + `generateLiveAppHtml` mount guard), chatSessions (5 tests: `useChatHistory` exposes `setSessionId`/`setBackendHistory`, createSession/switchSession/deleteSession crash-free), SmartChatHeader bridge, agent/task timeline+planner+runtime, taskRuntime/taskActivityOverlay (chat approval gate + completion summary + per-file diff view), chatAgentFallback (agent marker vs REST cascade + live plan attach), lineDiff (unified LCS diff), universal intent, accessibility audit, public website smoke, design system (live primitives), chatStreamStop (SSE stream abort/meta regression), copilotStop/copilotSseEvents/copilotCheckpoint/copilotAgentModes/copilotPermissions/copilotMentions/copilotSideChat/copilotRetry/copilotWatch (Devin upgrade Phase 1a–3b: stop-cancel, SSE events, checkpoint-rollback, ask-plan-code modes, permission levels + approval resume, @file mentions, /btw side chat, message retry, watch mode), copilotMemory (self-learning memory panel + backend contract cross-check), etc.
+- `frontend/tests/` — 54 suites / 425 tests total: KanbanBoard (add-task + TDZ crash regression), ProjectsView (api mocked via jest.mock), AICompanion, chatContent (internal-tag + image-command stripping), copilotIde, copilotSessionUi (23 tests: Devin-style plan card / status strip / checklist rows / IdeFooter run meter / PreviewPane QA badge + console drawer / CopilotMarkdown code-copy + wrapCodeBlocks), appIcon (6 tests: FA svg render / size passthrough / unknown-name fallback / map validity / loader spin / brand prefix), appIconSourceAudit (4 tests: static source scan — mangled `<AppIcon>` tags + literal `name=` vs `APP_ICONS` + map validity), previewEngine (11 tests: `resolveRootAlias` + `generateLiveAppHtml` mount guard), chatSessions (5 tests: `useChatHistory` exposes `setSessionId`/`setBackendHistory`, createSession/switchSession/deleteSession crash-free), SmartChatHeader bridge, agent/task timeline+planner+runtime, taskRuntime/taskActivityOverlay (chat approval gate + completion summary + per-file diff view), chatAgentFallback (agent marker vs REST cascade + live plan attach), lineDiff (unified LCS diff), universal intent, accessibility audit, public website smoke, design system (live primitives), chatStreamStop (SSE stream abort/meta regression), copilotStop/copilotSseEvents/copilotCheckpoint/copilotAgentModes/copilotPermissions/copilotMentions/copilotSideChat/copilotRetry/copilotWatch (Devin upgrade Phase 1a–3b: stop-cancel, SSE events, checkpoint-rollback, ask-plan-code modes, permission levels + approval resume, @file mentions, /btw side chat, message retry, watch mode), copilotMemory (self-learning memory panel + backend contract cross-check), etc.
 - `jest.setup.js` polyfills TextEncoder/TextDecoder/Streams (jsdom lacks them).
 - **`frontend/jest.config.js` async wrapper**: next/jest apne factory se `transformIgnorePatterns` OVERWRITE karta tha (marked@18 ESM-only → `Unexpected token 'export'`); config ab `module.exports = async () => { … }` me `createJestConfig` await karke patterns ko map karta hai — `(?!(geist|` wale pattern me `marked|` inject. jsdom me `innerText` undefined hai → clipboard/copy asserts `textContent` use karein.
 - **Dead-code purge (2026-09-30)**: 41 unreferenced frontend modules + their 10 orphaned test suites were deleted (BFS import-graph verified from `pages/` entry points; live shell = `layout/AppShell` + `layout/CommandRail`, live chat = `views/ChatView`). Removed: legacy `Sidebar`/`TopBar`, old chat stack (`ActionSpine|ActionTimeline|ChatComposer|ChatExperienceLayerV4|ChatProcessingState|ComposerDock|MessageStream|QuickActionGrid|SessionInspector|SmartChatMessage|SmartComposer|TaskServerCancelBridge|ThinkingRail`), `HistoryModal|ProjectCard|ResumeBuilder|SettingsModal|TerminalModal`, `ui/{BrandLogo,ConfirmDialog,Input,Panel,ProjectSwitcher}`, `layout/{ContextInspector,SplitPane}`, `views/{AutonomousCopilotDirector,AutonomousCopilotWorkspace,ChatPromptBox,Header,TemplateHubModal}`, `sandbox/*`, `editor/*`, `CopilotWorkspace`, `agent/AgentDashboard`, `ide/CursorComposerHud`, `hooks/useWebContainer`, `lib/clientVisualHeuristics`, `services/FigmaMCPClient`, `public/audio-processor`. Also purged one-off scripts: frontend root `extract_*|refactor_*|test_overlay*`, `scripts/{e2e_full_project_test,run_1st_2nd_3rd_test,run_ui_test,verify_ui_live,visual_healer_test}`, `pages/dashboard.jsx.bak`, lighthouse report JSONs, backend root `copilottest*|debug_p1*|fix_*|patch*|test_*|verify_*|cascade_check|rag_run_check|aiServices|refactor*|chaos_*|inject_rules|extractChatLogic|broken_script|scratch_eval|news.txt`, `backend/sandbox_test_app/`, `backend/services/{refactorIntents,transformIntents}`, root `apply_patch|audit_codebase|fix_ollama*|fix_*|patch_*|test_*|notes.md|vs_BuildTools.exe`, ai-engine `{clean_main,fix,inspect_chroma,dummy_mcp_server}.py`. Kept (live): `scripts/apply-next-xff-patch.js` (postinstall), `public/sw.js` (registered in `_app.js`), `ecosystem.config.js`, `logger.js`, `projectStore.js`, `temp_test_workspace` (test fixture), `calculator_live_preview.html` (preview-server fixture).

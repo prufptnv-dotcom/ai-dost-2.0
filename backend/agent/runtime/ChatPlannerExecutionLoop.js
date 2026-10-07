@@ -7,7 +7,7 @@ const PlannerExecutionLoop = require('./PlannerExecutionLoop');
  * It does not duplicate execution, repair, verification, or tool handling.
  */
 class ChatPlannerExecutionLoop extends PlannerExecutionLoop {
-  async runWithPlan(projectId, userId, plan, maxRepairs = 3, isCanceled = () => false, externalTaskId = null) {
+  async runWithPlan(projectId, userId, plan, maxRepairs = 3, isCanceled = () => false, externalTaskId = null, options = {}) {
     if (!plan || typeof plan !== 'object' || typeof plan.goal !== 'string') {
       throw new Error('runWithPlan requires a validated agent plan');
     }
@@ -24,6 +24,11 @@ class ChatPlannerExecutionLoop extends PlannerExecutionLoop {
     }
 
     const context = await this.contextAssembler.assemble(projectId, userId, plan.goal);
+    context.projectId = projectId;
+    context.userId = userId;
+    context.workspaceManager = context.workspaceManager || this.workspaceManager || this.contextAssembler?.workspaceManager;
+    if (options && typeof options.onEvent === 'function') context.onEvent = options.onEvent;
+    if (options && options.permissionLevel) context.permissionLevel = options.permissionLevel;
 
     if (isCanceled()) {
       return { runId: null, taskId: externalTaskId || null, status: 'CANCELLED', reason: 'Canceled before execution' };

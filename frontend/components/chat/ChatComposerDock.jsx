@@ -70,10 +70,10 @@ export default function ChatComposerDock({
         )}
 
         <div
-          className={`relative rounded-2xl bg-canvas-surface/90 backdrop-blur-xl border shadow-xl transition-all duration-300 ${
+          className={`relative rounded-2xl bg-canvas-elevated/80 backdrop-blur-xl border shadow-lg transition-all duration-300 ${
             stopActive
-              ? 'border-accent/60 shadow-[0_0_34px_-8px_rgba(99,102,241,0.6)]'
-              : 'border-border hover:border-border-strong focus-within:border-accent/50 focus-within:shadow-[0_0_24px_-4px_rgba(99,102,241,0.25)]'
+              ? 'border-accent/50 shadow-[0_0_30px_-6px_rgba(99,102,241,0.4)]'
+              : 'border-border hover:border-border-strong focus-within:border-accent/40 focus-within:shadow-[0_0_24px_-6px_rgba(99,102,241,0.25)]'
           }`}
         >
           <textarea
@@ -84,9 +84,9 @@ export default function ChatComposerDock({
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             rows={Math.min(4, Math.max(1, input.split('\n').length))}
-            placeholder="Ask AI-Dost anything in any language, or paste an image (Ctrl+V)…"
+            placeholder="Reply ya kuch bhi poocho — image bhi paste kar sakte ho (Ctrl+V)..."
             style={{ color: 'var(--paper-100, var(--color-text-primary, #0f172a))' }}
-            className="w-full bg-transparent resize-none text-sm focus:outline-none placeholder:text-ink-muted text-paper-100 leading-relaxed px-4 pt-3 pb-1 font-sans min-h-[40px] max-h-[140px]"
+            className="w-full bg-transparent resize-none text-sm focus:outline-none placeholder:text-ink-muted text-paper-100 leading-relaxed px-5 pt-4 pb-1 font-sans min-h-[44px] max-h-[140px]"
           />
           <input
             ref={fileInputRef}
@@ -97,14 +97,14 @@ export default function ChatComposerDock({
             onChange={onFileSelect}
           />
 
-          <div className="flex items-center justify-between px-3 pb-2 pt-0.5 select-none">
+          <div className="flex items-center justify-between px-4 pb-3 pt-1 select-none">
             <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => fileInputRef.current && fileInputRef.current.click()}
                 title="Attach file"
                 aria-label="Attach file"
-                className="p-1.5 rounded-lg hover:bg-canvas-elevated text-paper-300 hover:text-paper-100 transition-fast cursor-pointer focus-ring"
+                className="p-2 rounded-lg hover:bg-canvas-surface text-paper-300 hover:text-paper-100 transition-fast cursor-pointer focus-ring"
               >
                 <AppIcon name="paperclip" className="w-4 h-4" />
               </button>
@@ -114,33 +114,61 @@ export default function ChatComposerDock({
                   onClick={onOpenVoice}
                   title="Voice input"
                   aria-label="Voice input"
-                  className="p-1.5 rounded-lg hover:bg-canvas-elevated text-paper-300 hover:text-accent transition-fast cursor-pointer focus-ring"
+                  className="p-2 rounded-lg hover:bg-canvas-surface text-paper-300 hover:text-accent transition-fast cursor-pointer focus-ring"
                 >
                   <AppIcon name="mic" className="w-4 h-4" />
                 </button>
               )}
             </div>
-            <div className="flex items-center gap-2">
-              <select
-                value={selectedModel}
-                onChange={onModelChange}
-                title="Select model"
-                aria-label="Select model"
-                className="px-2.5 py-1 rounded-lg text-[12px] font-medium bg-canvas-elevated/80 hover:bg-canvas-elevated border border-border hover:border-border-strong text-paper-100 cursor-pointer focus:outline-none focus:border-accent transition-fast"
-              >
-                {modelOptions.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
+            <div className="flex items-center gap-2.5">
+              <div className="relative group/model">
+                <select
+                  value={selectedModel}
+                  onChange={onModelChange}
+                  title="Select model"
+                  aria-label="Select model"
+                  className="appearance-none pl-7 pr-8 py-1.5 rounded-full text-[11px] font-semibold bg-canvas-surface hover:bg-canvas-elevated border border-border text-paper-200 cursor-pointer focus:outline-none focus:border-accent/40 transition-fast"
+                >
+                  {(() => {
+                    const ungrouped = modelOptions.filter((m) => !m.group);
+                    const groupedMap = new Map();
+                    modelOptions.forEach((m) => {
+                      if (m.group) {
+                        if (!groupedMap.has(m.group)) groupedMap.set(m.group, []);
+                        groupedMap.get(m.group).push(m);
+                      }
+                    });
+
+                    return (
+                      <>
+                        {ungrouped.map((m) => (
+                          <option key={m.id} value={m.id} className="bg-canvas-surface text-paper-100">
+                            {m.label === 'Auto' ? 'Auto · cascade' : m.label}
+                          </option>
+                        ))}
+                        {Array.from(groupedMap.entries()).map(([groupName, items]) => (
+                          <optgroup key={groupName} label={groupName} className="bg-canvas-surface font-semibold text-accent">
+                            {items.map((m) => (
+                              <option key={m.id} value={m.id} className="bg-canvas-surface text-paper-100 font-normal">
+                                {m.label}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </>
+                    );
+                  })()}
+                </select>
+                <AppIcon name="zap" className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-accent pointer-events-none" />
+                <AppIcon name="chevronDown" className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-ink-muted pointer-events-none opacity-70" />
+              </div>
               {stopActive ? (
                 <button
                   type="button"
                   onClick={onStop}
                   title="Stop generating (Stop)"
                   aria-label="Stop generating"
-                  className="group/stop flex items-center justify-center w-8 h-8 rounded-lg bg-red-500 hover:bg-red-600 text-white shadow-[0_0_14px_-2px_rgba(239,68,68,0.6)] active:scale-95 transition-all duration-150 cursor-pointer focus-ring animate-pulse hover:animate-none"
+                  className="group/stop flex items-center justify-center w-9 h-9 rounded-full bg-red-500 hover:bg-red-600 text-white shadow-[0_0_16px_-2px_rgba(239,68,68,0.55)] active:scale-95 transition-all duration-150 cursor-pointer focus-ring animate-pulse hover:animate-none"
                 >
                   <AppIcon name="square" className="w-3.5 h-3.5 fill-current" />
                 </button>
@@ -151,20 +179,24 @@ export default function ChatComposerDock({
                   disabled={!input.trim() || thinking}
                   title="Send (Enter)"
                   aria-label="Send message"
-                  className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-150 cursor-pointer focus-ring ${
+                  className={`flex items-center justify-center w-9 h-9 rounded-full transition-all duration-150 cursor-pointer focus-ring ${
                     input.trim() && !thinking
-                      ? 'bg-accent text-white hover:bg-accent-hover shadow-[0_0_14px_-2px_rgba(99,102,241,0.5)] active:scale-95'
-                      : 'bg-canvas-elevated text-ink-muted opacity-40 cursor-not-allowed'
+                      ? 'bg-accent text-white hover:bg-accent-hover shadow-[0_0_16px_-2px_rgba(99,102,241,0.55)] active:scale-95'
+                      : 'bg-canvas-surface text-ink-muted opacity-40 cursor-not-allowed'
                   }`}
                 >
-                  <AppIcon name="send" className="w-3.5 h-3.5" />
+                  <AppIcon name="arrowUp" className="w-4 h-4" />
                 </button>
               )}
             </div>
           </div>
         </div>
-        <div className="text-[11px] text-center text-ink-muted mt-1.5 select-none">
-          AI-Dost can make mistakes. Verify important information.
+        <div className="text-[11px] text-center text-ink-muted mt-2.5 select-none flex items-center justify-center gap-1.5">
+          <span>AI-Dost galti kar sakta hai — important code verify kar lein.</span>
+          <span className="opacity-40">·</span>
+          <span>Enter = send</span>
+          <span className="opacity-40">·</span>
+          <span>Shift+Enter = newline</span>
         </div>
       </div>
     </div>

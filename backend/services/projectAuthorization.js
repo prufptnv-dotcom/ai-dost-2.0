@@ -108,7 +108,7 @@ class ProjectAuthorizationService {
     // 2. Fetch project
     let project = this.projects.getById(targetId);
     if (!project) {
-      const isCopilotSession = /^copilot-session-[a-z0-9-]+$/i.test(targetId);
+      const isCopilotSession = /^(copilot-session-|chat_)[a-z0-9_-]+$/i.test(targetId);
       if (options.autoCreateIfMissing && (
         targetId === 'default' ||
         targetId === 'copilot-workspace' ||

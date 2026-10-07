@@ -712,9 +712,18 @@ ReactDOM.createRoot(document.getElementById('root')).render(
               const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
               // P0 FIX: --ignore-scripts stops package.json lifecycle scripts
               // (preinstall/install/postinstall) from running on the host.
-              const child = spawn(npmCmd, ['install', '--ignore-scripts'], {
+              //
+              // P0 (runtime): `shell:false` + a .cmd binary throws EINVAL on
+              // Node >=18.20.2/20.12.2/22 (CVE-2024-27980), so this install
+              // never ran on Windows at all — the `error` handler swallowed it
+              // and resolve() reported success. resolveInvocation routes through
+              // cmd.exe instead, which makes the install actually happen.
+              const { resolveInvocation } = require('../services/runtimeBridge');
+              const inv = resolveInvocation(npmCmd, ['install', '--ignore-scripts']);
+              const child = spawn(inv.command, inv.args, {
                 cwd: targetDir,
                 shell: false,
+                windowsHide: true,
                 timeout: 120000,
                 env: { ...process.env, NODE_ENV: 'development' }
               });

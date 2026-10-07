@@ -28,7 +28,7 @@
   font-style: italic;
 }
 .md-prose blockquote {
-  border-left: 3px solid rgba(139, 92, 246, 0.6);
+  border-left: 3px solid rgba(99, 102, 241, 0.6);
   margin: 0.5em 0;
   padding: 0.3em 0.8em;
   color: rgba(255, 255, 255, 0.7);
@@ -41,7 +41,7 @@
   margin: 0.6em 0;
 }
 .md-prose a {
-  color: #818cf8;
+  color: #e08b62;
   text-decoration: underline;
 }
 .md-prose table {

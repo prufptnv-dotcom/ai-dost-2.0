@@ -183,12 +183,13 @@ Key Response Guidelines:
                 logger.info(`🔄 Calling Groq API with model: ${primaryModel}`);
                 return await tryModel(primaryModel);
             } catch (primaryError) {
-                if (primaryError.message.includes('RATE_LIMIT') && primaryModel !== fallbackModel) {
+                const isRateLimit = /rate_limit|429|tokens|quota/i.test(primaryError.message);
+                if (isRateLimit && primaryModel !== fallbackModel) {
                     logger.info('⚠️ Groq rate limited on primary model, retrying with fallback model...');
                     try {
                         return await tryModel(fallbackModel);
                     } catch (fallbackError) {
-                        if (fallbackError.message.includes('RATE_LIMIT')) {
+                        if (/rate_limit|429|tokens|quota/i.test(fallbackError.message)) {
                             throw new Error('RATE_LIMIT_EXCEEDED: Both primary and fallback models rate limited');
                         }
                         throw fallbackError;
@@ -200,7 +201,7 @@ Key Response Guidelines:
         } catch (error) {
             logger.error('❌ Groq Service Error:', error.message);
             
-            if (error.message.includes('RATE_LIMIT')) {
+            if (/rate_limit|429|tokens|quota/i.test(error.message)) {
                 return 'GROQ_RATE_LIMITED';
             }
             

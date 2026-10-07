@@ -206,6 +206,10 @@ class ContextAssembler {
       };
     }
 
+    finalPackage.projectId = projectId;
+    finalPackage.userId = userId;
+    finalPackage.workspaceManager = this.workspaceManager;
+
     return finalPackage;
   }
 }

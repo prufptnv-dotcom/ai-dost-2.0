@@ -75,7 +75,7 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
   if (!appCode) {
     const appFile = (files || []).find(f => {
       const p = norm(f.path);
-      return p.endsWith('App.jsx') || p.endsWith('App.js') || p.endsWith('App.tsx');
+      return p === 'App.jsx' || p.endsWith('/App.jsx') || p === 'App.js' || p.endsWith('/App.js') || p === 'App.tsx' || p.endsWith('/App.tsx');
     });
     if (appFile) appCode = contents[appFile.path] || contents[norm(appFile.path)] || appFile.content || '';
   }
@@ -154,7 +154,8 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
     .replace(/export\s+default\s+const\s+(\w+)\s*=/g, 'const $1 =')
     .replace(/export\s+default\s+async\s+function\s*(\w*)/g, (m, name) => name ? `async function ${name}` : 'async function App')
     .replace(/export\s+default\s+(\w+);?/g, '')
-    .replace(/export\s+(?:async\s+)?function\s+(\w+)/g, 'async function $1')
+    .replace(/export\s+async\s+function\s+(\w+)/g, 'async function $1')
+    .replace(/export\s+function\s+(\w+)/g, 'function $1')
     .replace(/export\s+(?:const|let|var)\s+(\w+)/g, 'const $1')
     .replace(/export\s+\{[\s\S]*?\};?/g, '');
 
@@ -176,7 +177,11 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
     if (m[2]) apiImports.push(m[2].trim());
   }
 
-  // Load and clean src/services/api.js if available
+  // Load and clean src/services/api.js if available.
+  // This module is injected once below (${apiCode}) so its API surface + mock
+  // fallbacks resolve. It must be excluded from the sub-component sweep further
+  // down, or `const API` is declared twice and Babel throws a SyntaxError that
+  // blanks the entire preview.
   const apiFile = (files || []).find(f => f.path?.endsWith('api.js') || f.path?.endsWith('api.ts'));
   let apiCode = '';
   if (apiFile && contents[apiFile.path]) {
@@ -221,35 +226,134 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
     }
   }
 
-  // Inject sub-components from src/components/*.jsx or *.jsx so App can render them
+  // Inject sub-components from src/components/*.jsx or *.js/jsx so App can render them
   let subComponentsCode = '';
+  const declaredNames = new Set();
+  const appTopLevelMatches = (appCode || '').matchAll(/(?:function|class|const|let|var)\s+([A-Za-z0-9_]+)/g);
+  for (const m of appTopLevelMatches) {
+    if (m[1]) declaredNames.add(m[1]);
+  }
+
+  // Stripping an `import` leaves its local binding undeclared, so any JSX that
+  // referenced it (`createRoot(el).render(<App />)` in main.tsx is the classic
+  // case) throws "X is not defined" at transform time. Collect every stripped
+  // binding and re-declare it below, resolved off the window namespace the
+  // sub-component injection already publishes.
+  const strippedImports = new Map(); // localName -> { source, imported }
+
   (files || []).forEach(f => {
-    if (f.path && f.path.endsWith('.jsx') && !f.path.endsWith('App.jsx') && !f.path.endsWith('main.jsx')) {
+    const isCode = f.path && (f.path.endsWith('.jsx') || f.path.endsWith('.js') || f.path.endsWith('.tsx') || f.path.endsWith('.ts'));
+    const normP = norm(f.path);
+    // Entry files are mounted by the template below, so they must never be
+    // injected as sub-components (a second copy of App is both a duplicate
+    // declaration and a dangling reference). TS variants belong here too —
+    // omitting them is what let main.tsx leak in and throw.
+    const isEntry = normP === 'App.jsx' || normP.endsWith('/App.jsx') ||
+                    normP === 'App.js' || normP.endsWith('/App.js') ||
+                    normP === 'App.tsx' || normP.endsWith('/App.tsx') ||
+                    normP === 'App.ts' || normP.endsWith('/App.ts') ||
+                    normP === 'main.jsx' || normP.endsWith('/main.jsx') ||
+                    normP === 'main.js' || normP.endsWith('/main.js') ||
+                    normP === 'main.tsx' || normP.endsWith('/main.tsx') ||
+                    normP === 'main.ts' || normP.endsWith('/main.ts') ||
+                    normP === 'index.jsx' || normP.endsWith('/index.jsx') ||
+                    normP === 'index.js' || normP.endsWith('/index.js') ||
+                    normP === 'index.tsx' || normP.endsWith('/index.tsx') ||
+                    normP === 'index.ts' || normP.endsWith('/index.ts');
+    const isTest = f.path.includes('.test.') || f.path.includes('.spec.');
+    // Already injected above via ${apiCode} — injecting it again here would
+    // redeclare its bindings.
+    const isApiModule = Boolean(apiFile && norm(f.path) === norm(apiFile.path));
+    // Server-side / build-config modules run in Node, not the browser. Bundling
+    // them throws `require is not defined` at transform time and blanks the
+    // whole preview, so they never enter the app bundle.
+    const isServerSide =
+      /(^|\/)server(\/|\.|$)/i.test(normP) ||
+      /\.config\.(js|ts|mjs|cjs)$/i.test(normP) ||
+      /^(vite|webpack|rollup|esbuild|postcss|tailwind|drizzle|tsconfig|next)\./i.test(normP.split('/').pop() || '');
+    if (isCode && !isEntry && !isTest && !isApiModule && !isServerSide) {
       const subContent = contents[f.path] || f.content || '';
-      if (subContent) {
-        const cleanedSub = subContent
+      // Final guard: a CJS/Node module slipped past the path checks above.
+      if (subContent && !/\brequire\s*\(|\bmodule\.exports\b/.test(subContent)) {
+        // Record bindings before the import lines are removed.
+        for (const im of subContent.matchAll(/import\s+([^;'"]+?)\s+from\s+['"]([^'"]+)['"]/g)) {
+          const clause = im[1].trim();
+          const source = im[2];
+          const brace = clause.match(/\{([\s\S]*)\}/);
+          if (brace) {
+            for (const raw of brace[1].split(',')) {
+              const part = raw.trim();
+              if (!part) continue;
+              const as = part.split(/\s+as\s+/);
+              strippedImports.set(as[1] || as[0], { source, imported: as[0] });
+            }
+          }
+          const def = clause.replace(/\{[\s\S]*\}/, '').replace(/,/g, '').trim();
+          if (def && !def.startsWith('*')) {
+            strippedImports.set(def, { source, imported: 'default' });
+          }
+        }
+
+        let cleanedSub = subContent
           .replace(/import\s+[\s\S]*?from\s+['"].*?['"];?/g, '')
           .replace(/import\s+['"].*?['"];?/g, '')
           .replace(/export\s+default\s+function\s*(\w*)/g, (m, name) => name ? `function ${name}` : '')
           .replace(/export\s+default\s+const\s+(\w+)\s*=/g, 'const $1 =')
           .replace(/export\s+default\s+(\w+);?/g, '')
-          .replace(/export\s+(?:async\s+)?function\s+(\w+)/g, 'function $1')
+          .replace(/export\s+async\s+function\s+(\w+)/g, 'async function $1')
+          .replace(/export\s+function\s+(\w+)/g, 'function $1')
           .replace(/export\s+(?:const|let|var)\s+(\w+)/g, 'const $1')
-    .replace(/export\s+\{[\s\S]*?\};?/g, '');
+          .replace(/export\s+\{[\s\S]*?\};?/g, '');
+
+        cleanedSub = cleanedSub.replace(/(?:function|class)\s+([A-Za-z0-9_]+)/g, (match, name) => {
+          if (declaredNames.has(name)) {
+            return `window.${name} = function ${name}`;
+          }
+          declaredNames.add(name);
+          return match;
+        });
+
+        cleanedSub = cleanedSub.replace(/(?:const|let|var)\s+([A-Za-z0-9_]+)\s*=/g, (match, name) => {
+          if (declaredNames.has(name)) {
+            return `window.${name} =`;
+          }
+          declaredNames.add(name);
+          return match;
+        });
 
         subComponentsCode += '\n' + cleanedSub + '\n';
       }
     }
   });
 
+  // Re-declare every stripped import as a window-resolved local. React hooks and
+  // components resolve off the React global / the injected `window.X`
+  // declarations; anything unresolved falls back to undefined so a missing
+  // module degrades to an inert stub instead of a thrown ReferenceError.
+  const subImportAliases = Array.from(strippedImports.entries())
+    .filter(([local]) => !declaredNames.has(local))
+    .map(([local, meta]) => {
+      const fromReact = /(^|\/)react($|\/)/.test(meta.source) && !/react-router|react-dom/.test(meta.source);
+      const expr = fromReact
+        ? `(typeof React !== 'undefined' && React[${JSON.stringify(meta.imported)}])`
+        : `(typeof window !== 'undefined' && window[${JSON.stringify(meta.imported)}])`;
+      return `const ${local} = ${expr};`;
+    })
+    .join('\n');
+
   const declaredComponents = new Set();
-  const declMatches = ((appCode || '') + '\n' + subComponentsCode).matchAll(/(?:function|class|const|let|var)\s+([A-Z][A-Za-z0-9_]*)/g);
+  const declMatches = ((appCode || '') + '\n' + subComponentsCode).matchAll(/(?:function|class|const|let|var|window\.)\s*([A-Z][A-Za-z0-9_]*)/g);
   for (const m of declMatches) {
     if (m[1]) declaredComponents.add(m[1]);
+  }
+  for (const name of declaredNames) {
+    if (name && /^[A-Z]/.test(name)) declaredComponents.add(name);
   }
 
   const jsxTags = (appCode || '').match(/<([A-Z][A-Za-z0-9_]*)/g) || [];
   const tagsList = jsxTags.map(t => t.replace('<', '').trim());
+  const knownComponentSuffixes = /(?:App|Page|View|Card|Modal|Form|List|Item|Container|Provider|Layout|Nav|Header|Footer|Sidebar|Board|Grid|Row|Column|Button|Input|Dialog|Popup|Panel|Screen|Route|Wrapper|Section|Table)$/;
+  const filteredTagsList = tagsList.filter(t => !knownComponentSuffixes.test(t));
 
   const ALL_DETECTED_ICONS = Array.from(new Set([
     'Search', 'ShoppingCart', 'ShoppingBag', 'Kanban', 'BrainCircuit', 'Activity', 'BarChart2', 'BarChart3',
@@ -262,7 +366,7 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
     'Hospital', 'Stethoscope', 'Award', 'PhoneCall', 'UserCheck', 'Bed', 'CalendarCheck', 'Pill',
     'Ticket', 'Film', 'Rocket', 'Mars', 'Info', 'Utensils', 'Coffee', 'DollarSign', 'CreditCard', 'Tag', 'FileText',
     ...importedLucide,
-    ...tagsList
+    ...filteredTagsList
   ])).filter(name => !declaredComponents.has(name) && !['App', 'Main', 'Root', 'React', 'ReactDOM', 'GlobalErrorBoundary', 'Fragment'].includes(name));
 
   const iconDeclarations = ALL_DETECTED_ICONS.map(name =>
@@ -496,24 +600,31 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
     // ── Sub-Components Injected from Workspace ─────────────────────────────
     ${subComponentsCode}
 
+    ${subImportAliases}
+
     // ── Primary App Component ──────────────────────────────────────────────
     ${cleanedCode}
 
     ${rootAlias}
 
-    const container = document.getElementById('root');
-    const root = ReactDOM.createRoot(container);
+    const _appMountContainer = document.getElementById('root');
+    let _previewMountRoot = window.__aiDostRootInstance;
+    if (!_previewMountRoot && _appMountContainer) {
+      _previewMountRoot = window.__aiDostRootInstance = ReactDOM.createRoot(_appMountContainer);
+    }
     if (typeof App === 'undefined' || !App) {
       // Mount failure is outside GlobalErrorBoundary's reach (the ReferenceError
       // fires while evaluating <App />), so surface it as a readable card.
       try { report('RUNTIME_ERROR', { error: 'Root component not found: no App export in workspace entry file' }); } catch (_) {}
-      container.innerHTML = '<div style="max-width:420px;text-align:center;padding:24px;border:1px solid #334155;border-radius:16px;background:#0f172a;color:#94a3b8;font-family:Inter,sans-serif">' +
-        '<div style="font-size:20px;margin-bottom:8px">🧩</div>' +
-        '<div style="color:#e2e8f0;font-weight:600;margin-bottom:6px">Preview could not mount a root component</div>' +
-        '<div style="font-size:12px;line-height:1.6">No <code style="color:#818cf8">App</code> (or default export) was found in <code style="color:#818cf8">src/App.jsx</code>.<br>Check the entry file and retry.</div>' +
-        '</div>';
+      if (_appMountContainer) {
+        _appMountContainer.innerHTML = '<div style="max-width:420px;text-align:center;padding:24px;border:1px solid #334155;border-radius:16px;background:#0f172a;color:#94a3b8;font-family:Inter,sans-serif">' +
+          '<div style="font-size:20px;margin-bottom:8px">🧩</div>' +
+          '<div style="color:#e2e8f0;font-weight:600;margin-bottom:6px">Preview could not mount a root component</div>' +
+          '<div style="font-size:12px;line-height:1.6">No <code style="color:#818cf8">App</code> (or default export) was found in <code style="color:#818cf8">src/App.jsx</code>.<br>Check the entry file and retry.</div>' +
+          '</div>';
+      }
     } else {
-      root.render(
+      _previewMountRoot.render(
         <GlobalErrorBoundary>
           <App />
         </GlobalErrorBoundary>

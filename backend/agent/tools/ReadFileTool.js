@@ -20,7 +20,12 @@ class ReadFileTool extends Tool {
     
     // 2. Perform safe fs operation
     if (!fs.existsSync(resolvedPath)) {
-      throw new Error(`File not found: ${relativePath}`);
+      return { 
+        success: false, 
+        exists: false,
+        content: '', 
+        message: `File not found: ${relativePath}. The file does not exist yet.`
+      };
     }
 
     try {

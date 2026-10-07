@@ -61,11 +61,11 @@ export default function ChangelogPage() {
     >
       <section className="relative pt-20 pb-16 md:pt-28 md:pb-20 border-b border-border bg-canvas-subtle overflow-hidden">
         {/* Google Gemini Dual Ambient Celestial Orbs */}
-        <div className="absolute -top-24 left-1/4 w-[500px] h-[300px] bg-gradient-to-tr from-[#4285f4]/20 via-[#9b72cb]/18 to-transparent blur-[120px] pointer-events-none rounded-full" />
-        <div className="absolute top-10 right-1/4 w-[450px] h-[300px] bg-gradient-to-bl from-[#d96570]/15 via-[#1ba1e2]/15 to-transparent blur-[120px] pointer-events-none rounded-full" />
+        <div className="absolute -top-24 left-1/4 w-[500px] h-[300px] bg-gradient-to-tr from-[#6366f1]/20 via-[#a5b4fc]/18 to-transparent blur-[120px] pointer-events-none rounded-full" />
+        <div className="absolute top-10 right-1/4 w-[450px] h-[300px] bg-gradient-to-bl from-[#4f46e5]/15 via-[#818cf8]/15 to-transparent blur-[120px] pointer-events-none rounded-full" />
 
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-4 relative z-10">
-          <div className="gemini-shimmer-badge text-[11px] font-mono text-[#4893fc]">
+          <div className="gemini-shimmer-badge text-[11px] font-mono text-[#6366f1]">
             <Tag className="w-3.5 h-3.5 gemini-sparkle-icon" />
             <span>Release History</span>
           </div>
@@ -87,7 +87,7 @@ export default function ChangelogPage() {
             >
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-white/5">
                 <div className="flex items-center gap-3">
-                  <span className="text-xs font-mono font-bold px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[#4893fc] shadow-[0_0_12px_rgba(66,133,244,0.18)]">
+                  <span className="text-xs font-mono font-bold px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[#6366f1] shadow-[0_0_12px_rgba(99,102,241,0.18)]">
                     {rel.version}
                   </span>
                   <h2 className="text-base sm:text-lg font-bold font-display text-paper-100">
@@ -99,13 +99,13 @@ export default function ChangelogPage() {
 
               {/* Highlights */}
               <div className="space-y-2">
-                <h3 className="text-xs font-mono uppercase tracking-wider text-[#4893fc] font-bold flex items-center gap-1.5">
+                <h3 className="text-xs font-mono uppercase tracking-wider text-[#6366f1] font-bold flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5" /> Key Architectural Additions
                 </h3>
                 <ul className="space-y-1.5 text-xs text-paper-200 font-sans pl-1">
                   {rel.highlights.map((h, idx) => (
                     <li key={idx} className="flex items-start gap-2">
-                      <span className="text-[#4893fc] mt-0.5">•</span>
+                      <span className="text-[#6366f1] mt-0.5">•</span>
                       <span>{h}</span>
                     </li>
                   ))}
@@ -115,13 +115,13 @@ export default function ChangelogPage() {
               {/* Fixes */}
               {rel.fixes && rel.fixes.length > 0 && (
                 <div className="space-y-2 pt-2 border-t border-border-subtle">
-                  <h3 className="text-xs font-mono uppercase tracking-wider text-[#9b72cb] font-bold flex items-center gap-1.5">
+                  <h3 className="text-xs font-mono uppercase tracking-wider text-[#a5b4fc] font-bold flex items-center gap-1.5">
                     <Wrench className="w-3.5 h-3.5" /> Bug Fixes & Hardenings
                   </h3>
                   <ul className="space-y-1 text-xs text-ink-muted font-sans pl-1">
                     {rel.fixes.map((f, idx) => (
                       <li key={idx} className="flex items-start gap-2">
-                        <span className="text-[#9b72cb] mt-0.5">✓</span>
+                        <span className="text-[#a5b4fc] mt-0.5">✓</span>
                         <span>{f}</span>
                       </li>
                     ))}

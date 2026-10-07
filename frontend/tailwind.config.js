@@ -12,53 +12,53 @@ module.exports = {
       colors: {
         ink: {
           950: 'var(--ink-950, #090a0f)',
-          900: 'var(--ink-900, #0d0f18)',
+          900: 'var(--ink-900, #0f121d)',
           850: 'var(--ink-850, #131622)',
           800: 'var(--ink-800, #1a1e30)',
-          700: 'var(--ink-700, #252b44)',
+          700: 'var(--ink-700, #2a314d)',
           500: 'var(--ink-500, #64748b)',
-          primary: 'var(--color-text-primary, #ffffff)',
-          secondary: 'var(--color-text-secondary, #e2e8f0)',
+          primary: 'var(--color-text-primary, #f8fafc)',
+          secondary: 'var(--color-text-secondary, #d5d0c6)',
           muted: 'var(--color-text-muted, #94a3b8)',
         },
         paper: {
           0: '#ffffff',
-          50: '#f8fafc',
-          100: 'var(--paper-100, #ffffff)',
-          200: 'var(--paper-200, #e2e8f0)',
-          300: 'var(--paper-300, #cbd5e1)',
+          50: '#faf9f5',
+          100: 'var(--paper-100, #f8fafc)',
+          200: 'var(--paper-200, #cbd5e1)',
+          300: 'var(--paper-300, #c4beb2)',
           400: 'var(--paper-400, #94a3b8)',
         },
         canvas: {
           base: 'var(--color-canvas-base, #090a0f)',
           default: 'var(--color-canvas-base, #090a0f)',
-          subtle: 'var(--color-canvas-subtle, #0d0f18)',
+          subtle: 'var(--color-canvas-subtle, #0f121d)',
           surface: 'var(--color-canvas-surface, #131622)',
           elevated: 'var(--color-canvas-elevated, #1a1e30)',
           hover: 'var(--color-canvas-elevated, #1a1e30)',
-          overlay: 'var(--color-canvas-overlay, #232840)',
+          overlay: 'var(--color-canvas-overlay, #33302c)',
         },
         border: {
-          subtle: 'var(--color-border-subtle, rgba(255, 255, 255, 0.05))',
-          DEFAULT: 'var(--color-border-default, rgba(255, 255, 255, 0.08))',
-          default: 'var(--color-border-default, rgba(255, 255, 255, 0.08))',
-          strong: 'var(--color-border-strong, rgba(255, 255, 255, 0.16))',
+          subtle: 'var(--color-border-subtle, rgba(255, 255, 255, 0.06))',
+          DEFAULT: 'var(--color-border-default, rgba(255, 255, 255, 0.1))',
+          default: 'var(--color-border-default, rgba(255, 255, 255, 0.1))',
+          strong: 'var(--color-border-strong, rgba(255, 255, 255, 0.18))',
           focus: 'var(--color-border-focus, #6366f1)',
         },
         accent: {
           DEFAULT: 'var(--accent-primary, #6366f1)',
           hover: 'var(--accent-primary-strong, #4f46e5)',
           subtle: 'var(--accent-subtle, rgba(99, 102, 241, 0.14))',
-          border: 'var(--accent-border, rgba(99, 102, 241, 0.32))',
+          border: 'var(--accent-border, rgba(99, 102, 241, 0.38))',
         },
         primary: {
           DEFAULT: 'var(--accent-primary, #6366f1)',
           hover: 'var(--accent-primary-strong, #4f46e5)',
-          glow: 'var(--primary-lime-glow, rgba(99, 102, 241, 0.25))',
+          glow: 'var(--primary-lime-glow, rgba(99, 102, 241, 0.22))',
         },
         secondary: {
-          DEFAULT: 'var(--gemini-purple, #a855f7)',
-          hover: 'var(--gemini-violet, #7c3aed)',
+          DEFAULT: 'var(--gemini-purple, #d9777a)',
+          hover: 'var(--gemini-violet, #4f46e5)',
         },
         signal: {
           success: 'var(--signal-success, #10b981)',
@@ -74,17 +74,17 @@ module.exports = {
         },
         success: 'var(--signal-success, #10b981)',
         txt: {
-          primary: 'var(--color-text-primary, #ffffff)',
-          secondary: 'var(--color-text-secondary, #e2e8f0)',
+          primary: 'var(--color-text-primary, #f8fafc)',
+          secondary: 'var(--color-text-secondary, #d5d0c6)',
           muted: 'var(--color-text-muted, #94a3b8)',
-          disabled: 'var(--color-text-disabled, #64748b)',
+          disabled: 'var(--color-text-disabled, #475569)',
         },
         text: {
-          primary: 'var(--color-text-primary, #ffffff)',
-          secondary: 'var(--color-text-secondary, #e2e8f0)',
+          primary: 'var(--color-text-primary, #f8fafc)',
+          secondary: 'var(--color-text-secondary, #d5d0c6)',
           tertiary: 'var(--color-text-muted, #94a3b8)',
           muted: 'var(--color-text-muted, #94a3b8)',
-          disabled: 'var(--color-text-disabled, #64748b)',
+          disabled: 'var(--color-text-disabled, #475569)',
         }
       },
       borderRadius: {
@@ -97,6 +97,7 @@ module.exports = {
       fontFamily: {
         sans: ['Inter', '-apple-system', 'sans-serif'],
         display: ['Sora', 'Inter', 'sans-serif'],
+        serif: ['Newsreader', 'Georgia', 'serif'],
         mono: ['JetBrains Mono', 'monospace'],
       },
       boxShadow: {
@@ -117,3 +118,4 @@ module.exports = {
   },
   plugins: [],
 };
+

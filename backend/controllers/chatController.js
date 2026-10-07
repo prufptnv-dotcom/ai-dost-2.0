@@ -104,13 +104,15 @@ exports.handleChatSync = async (req, res) => {
         // Prepend locked language directive to guarantee response language consistency
         const todayStr = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
         const GLOBAL_SYSTEM_RULES = `
-[CRITICAL SYSTEM RULES & REAL-TIME CONTEXT]
+[CRITICAL SYSTEM RULES & AUTONOMOUS INTEGRITY PROTOCOL]
 1. Current Date: Today is ${todayStr}. NEVER hallucinate past dates.
-2. Crypto & Financial Data: Do NOT fabricate or guess prices, market caps, or numbers. If you don't have real-time data, state it clearly. Always provide actual URLs (e.g. CoinGecko/CoinMarketCap) when discussing crypto.
-3. Book & PDF Links: Do NOT hallucinate direct PDF links (e.g. .pdf files) unless you are 100% sure they exist. Instead, provide the official website or download page URL.
-4. Interactive UI Elements: Do NOT hallucinate or pretend to generate interactive UI buttons like "Launch Assessment" in plain text chat. Present quizzes or questions directly in plain text or markdown.
-5. Language Consistency: The user has chosen a specific language (e.g., Hinglish). You MUST reply entirely in that chosen language. Do not switch back to English except for technical terms.
-6. Citation Style: When citing sources, ALWAYS include the full clickable URL in this format: [1] https://... (do not just write [1] without the link).
+2. Anti-Deviation Rule (जो मांगा, वही मिलेगा): Deliver EXACTLY what the user asks. NEVER substitute request "A" with "B". Do not alter, mutate, or omit the user's core intent.
+3. Autonomous Domain Adaptability: Act as an advanced, self-governing AI companion. If the user asks for code, provide complete production-ready code; if creative writing (story, poem, script), provide rich evocative prose; if research or analysis, provide structured deep insight; if casual chat, reply naturally.
+4. Zero Preambles & Filler: Eliminate filler introductions like "Sure, I can help with that", "Certainly!", or "Here is what you asked for". Start directly with the answer or requested asset.
+5. Extreme Completeness (MANDATORY): Never truncate an answer mid-way, never use placeholder code ("// TODO", "// rest of code here"), and provide 100% complete runnable solutions.
+6. Financial & Factual Accuracy: Do NOT fabricate prices, market caps, numbers, or facts. Never invent direct links or packages.
+7. Hyper-Multilingual Mastery: Reply in the language detected from the user (English, Hindi, Hinglish, Marathi, Bengali, etc.). Keep technical tokens in standard English.
+8. Error-Correction Validation Check: Ensure this output directly and accurately answers what the user asked with zero deviation.
 `;
         processedMessage = `${GLOBAL_SYSTEM_RULES}\n\n${langInfo.instruction}\n\n${processedMessage}`;
 
@@ -298,9 +300,11 @@ exports.handleChatSync = async (req, res) => {
                 case 'cerebras':
                     response = await CerebrasService.chat(groqMsg, cleanHistory, mode, customKeys?.cerebras);
                     break;
-                case 'openrouter':
-                    response = await OpenRouterService.chat(groqMsg, cleanHistory, customKeys?.openrouter);
+                case 'openrouter': {
+                    response = await OpenRouterService.chat(groqMsg, cleanHistory, customKeys?.openrouter, mode);
+                    usedModel = 'openrouter (auto)';
                     break;
+                }
                 case 'mistral':
                     response = await MistralService.chat(groqMsg, cleanHistory, customKeys?.mistral);
                     break;
@@ -311,6 +315,12 @@ exports.handleChatSync = async (req, res) => {
                     response = await HuggingFaceService.chat(groqMsg);
                     break;
                 default: {
+                    if (model && (model.startsWith('openrouter:') || OpenRouterService.isSupportedModel(model))) {
+                        const targetOrModel = model.startsWith('openrouter:') ? model.slice(11) : model;
+                        response = await OpenRouterService.chat(groqMsg, cleanHistory, customKeys?.openrouter, mode, targetOrModel);
+                        usedModel = `openrouter (${targetOrModel})`;
+                        break;
+                    }
                     // Auto-select best model with intelligent intent detection
                     const autoResult = await autoSelectModel(processedMessage, section, fileContent, cleanHistory, mode, customKeys);
                     response = autoResult.response;

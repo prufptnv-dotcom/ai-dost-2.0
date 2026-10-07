@@ -52,11 +52,11 @@ export default function ProductPage() {
       {/* ─── Hero ─── */}
       <section className="relative pt-20 pb-16 md:pt-28 md:pb-20 border-b border-border bg-canvas-subtle overflow-hidden">
         {/* Google Gemini Dual Ambient Celestial Orbs */}
-        <div className="absolute -top-24 left-1/4 w-[500px] h-[300px] bg-gradient-to-tr from-[#4285f4]/20 via-[#9b72cb]/18 to-transparent blur-[120px] pointer-events-none rounded-full" />
-        <div className="absolute top-10 right-1/4 w-[450px] h-[300px] bg-gradient-to-bl from-[#d96570]/15 via-[#1ba1e2]/15 to-transparent blur-[120px] pointer-events-none rounded-full" />
+        <div className="absolute -top-24 left-1/4 w-[500px] h-[300px] bg-gradient-to-tr from-[#6366f1]/20 via-[#a5b4fc]/18 to-transparent blur-[120px] pointer-events-none rounded-full" />
+        <div className="absolute top-10 right-1/4 w-[450px] h-[300px] bg-gradient-to-bl from-[#4f46e5]/15 via-[#818cf8]/15 to-transparent blur-[120px] pointer-events-none rounded-full" />
 
         <RevealOnScroll direction="up" className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-5 relative z-10">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-canvas-surface/80 border border-white/10 text-[11px] font-mono text-[#4893fc] shadow-[0_0_12px_rgba(66,133,244,0.15)]">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-canvas-surface/80 border border-white/10 text-[11px] font-mono text-[#6366f1] shadow-[0_0_12px_rgba(99,102,241,0.15)]">
             <Sparkles className="w-3.5 h-3.5 gemini-sparkle-icon" />
             <span>Product Architecture</span>
           </div>
@@ -89,7 +89,7 @@ export default function ProductPage() {
       <section className="py-16 md:py-24 border-b border-border">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
           <RevealOnScroll direction="up" className="space-y-3">
-            <span className="text-xs font-mono uppercase tracking-[0.15em] text-[#4893fc] font-semibold block">
+            <span className="text-xs font-mono uppercase tracking-[0.15em] text-[#6366f1] font-semibold block">
               The Engine Stack
             </span>
             <h2 className="text-2xl sm:text-3xl font-bold font-display text-paper-100">
@@ -113,7 +113,7 @@ export default function ProductPage() {
                   <h3 className="text-sm font-semibold font-display text-paper-100">
                     {layer.title}
                   </h3>
-                  <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-[#4893fc] shrink-0 self-start sm:self-auto">
+                  <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-[#6366f1] shrink-0 self-start sm:self-auto">
                     {layer.tech}
                   </span>
                 </div>
@@ -130,7 +130,7 @@ export default function ProductPage() {
       <section className="py-16 md:py-24 bg-canvas-subtle border-b border-border">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
           <RevealOnScroll direction="up" className="text-center space-y-2">
-            <h2 className="text-xs font-mono uppercase tracking-[0.15em] text-[#4893fc] font-semibold">
+            <h2 className="text-xs font-mono uppercase tracking-[0.15em] text-[#6366f1] font-semibold">
               Product Principles
             </h2>
             <p className="text-2xl sm:text-3xl font-bold font-display text-paper-100">
@@ -140,21 +140,21 @@ export default function ProductPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <RevealOnScroll delay={0} direction="up" onMouseMove={handleCardMouseMove} className="gemini-glow-card p-6 border border-white/10 space-y-3">
-              <Zap className="w-5 h-5 text-[#4893fc]" />
+              <Zap className="w-5 h-5 text-[#6366f1]" />
               <h4 className="text-sm font-semibold text-paper-100 font-display">Zero Quota Anxiety</h4>
               <p className="text-xs text-ink-muted leading-relaxed font-sans">
                 Most AI tools halt the moment a free quota expires. AI-Dost cascades automatically across multiple tier-free providers, falling back to local Ollama if internet connectivity is completely lost.
               </p>
             </RevealOnScroll>
             <RevealOnScroll delay={100} direction="up" onMouseMove={handleCardMouseMove} className="gemini-glow-card p-6 border border-white/10 space-y-3">
-              <Database className="w-5 h-5 text-[#9b72cb]" />
+              <Database className="w-5 h-5 text-[#a5b4fc]" />
               <h4 className="text-sm font-semibold text-paper-100 font-display">Deterministic Persistence</h4>
               <p className="text-xs text-ink-muted leading-relaxed font-sans">
                 Your conversations, project workspaces, and generated documents are stored locally in SQLite. Restarting the process or rebooting your machine preserves all state exactly where you left off.
               </p>
             </RevealOnScroll>
             <RevealOnScroll delay={200} direction="up" onMouseMove={handleCardMouseMove} className="gemini-glow-card p-6 border border-white/10 space-y-3">
-              <GitBranch className="w-5 h-5 text-[#d96570]" />
+              <GitBranch className="w-5 h-5 text-[#4f46e5]" />
               <h4 className="text-sm font-semibold text-paper-100 font-display">Offline Git Versioning</h4>
               <p className="text-xs text-ink-muted leading-relaxed font-sans">
                 Every file modification creates an atomic local checkpoint commit. Roll back to any prior state instantly without requiring a remote GitHub repository or network connection.

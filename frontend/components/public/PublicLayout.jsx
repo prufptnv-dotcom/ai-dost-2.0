@@ -31,7 +31,7 @@ export function PublicLayout({
   };
 
   return (
-    <div className="relative min-h-screen flex flex-col bg-canvas-base text-paper-100 font-sans selection:bg-[#4893fc] selection:text-white overflow-x-hidden">
+    <div className="relative min-h-screen flex flex-col bg-canvas-base text-paper-100 font-sans selection:bg-[#6366f1] selection:text-white overflow-x-hidden">
       <Head>
         <title>{title}</title>
         <meta name="description" content={description} />
@@ -55,7 +55,7 @@ export function PublicLayout({
       {/* Skip to Content for a11y */}
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 z-50 px-4 py-2 bg-[#4893fc] text-white font-semibold text-xs rounded-full shadow-lg"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 z-50 px-4 py-2 bg-[#6366f1] text-white font-semibold text-xs rounded-full shadow-lg"
       >
         Skip to main content
       </a>

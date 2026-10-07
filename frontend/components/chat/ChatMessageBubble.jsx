@@ -112,8 +112,8 @@ function ChatMessageBubble({
       className={`group flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}
     >
       {!isUser && (
-        <div className="w-5 h-5 shrink-0 mt-0.5 opacity-70 select-none">
-          <AiDostMark size={18} />
+        <div className="w-8 h-8 shrink-0 mt-0.5 rounded-xl bg-gradient-to-br from-accent/20 to-accent/5 border border-accent/20 flex items-center justify-center select-none shadow-xs">
+          <AiDostMark size={16} />
         </div>
       )}
 
@@ -200,7 +200,7 @@ function ChatMessageBubble({
           {isStreaming && (!msg.content || msg.content.length === 0) ? (
             !msg.isThinkingTrace && (
               <div className="flex items-center gap-2 py-1 text-xs text-ink-muted select-none" data-testid="streaming-status-indicator">
-                <span className="inline-block w-2.5 h-4 bg-gradient-to-b from-accent to-purple-400 animate-pulse align-middle rounded-xs shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
+                <span className="inline-block w-2.5 h-4 bg-gradient-to-b from-accent to-accent/60 animate-pulse align-middle rounded-xs shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
                 <span className="font-mono text-[11px] text-accent animate-pulse">Generating response…</span>
               </div>
             )
@@ -219,15 +219,14 @@ function ChatMessageBubble({
                   detectedArtifact={detectedArtifact}
                 />
               )}
-              {/* 5. Streaming Status Indicator with Glowing Animated Cursor */}
               {isStreaming && (
                 <>
                   <span
-                    className="inline-block w-2.5 h-4 ml-1 bg-gradient-to-b from-accent to-purple-400 animate-pulse align-middle rounded-xs shadow-[0_0_8px_rgba(99,102,241,0.8)]"
+                    className="inline-block w-2.5 h-4 ml-1 bg-gradient-to-b from-accent to-accent/60 animate-pulse align-middle rounded-xs shadow-[0_0_8px_rgba(99,102,241,0.6)]"
                     data-testid="streaming-cursor"
                   />
                   <div
-                    className="mt-2.5 flex items-center gap-2 text-[11px] font-mono text-accent bg-accent/10 border border-accent/25 px-2.5 py-1 rounded-lg w-fit animate-pulse select-none"
+                    className="mt-2.5 flex items-center gap-2 text-[11px] font-mono text-accent bg-accent/[0.07] border border-accent/15 px-2.5 py-1 rounded-lg w-fit animate-pulse select-none"
                     data-testid="streaming-status-indicator"
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-accent animate-ping" />
@@ -242,12 +241,14 @@ function ChatMessageBubble({
 
 
           {detectedArtifact && (
-            <div className="mt-3 pt-2.5 border-t border-border-subtle flex items-center gap-2.5 w-fit">
-              <AppIcon name="layout" className="w-4 h-4 text-accent shrink-0" />
-              <span className="text-xs text-ink-muted flex-1">Interactive canvas ready</span>
+            <div className="mt-3 pt-3 border-t border-border-subtle flex items-center gap-3 w-fit rounded-xl bg-canvas-surface/60 border border-border-subtle px-3 py-2">
+              <div className="p-1.5 rounded-lg bg-accent/10 border border-accent/20">
+                <AppIcon name="layout" className="w-3.5 h-3.5 text-accent shrink-0" />
+              </div>
+              <span className="text-xs text-paper-200 flex-1 font-medium">Interactive canvas ready</span>
               <button
                 onClick={() => onOpenArtifact && onOpenArtifact(detectedArtifact)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent/15 hover:bg-accent border border-accent/30 hover:border-accent text-accent hover:text-white shadow-xs transition-all duration-150 cursor-pointer"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-accent text-white hover:bg-accent-hover shadow-xs transition-all duration-150 cursor-pointer"
               >
                 <AppIcon name="eye" className="w-3.5 h-3.5" />
                 Open canvas
@@ -258,7 +259,12 @@ function ChatMessageBubble({
           {msg.navView && (
             <div className="mt-3 pt-2.5 border-t border-border-subtle w-fit">
               <button
-                onClick={() => onNavigate && onNavigate(msg.navView)}
+                onClick={() => {
+                  if (msg.navLabel && msg.navLabel.includes('Preview')) {
+                    try { sessionStorage.setItem('ai_dost_copilot_mode_override', 'preview'); } catch (_) {}
+                  }
+                  onNavigate && onNavigate(msg.navView);
+                }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-canvas-elevated border border-border text-paper-200 hover:bg-canvas-overlay transition-fast cursor-pointer"
               >
                 {msg.navLabel || msg.navView}
@@ -291,10 +297,10 @@ function ChatMessageBubble({
           )}
 
           {msg.sources && msg.sources.length > 0 && (
-            <div className="flex flex-col gap-1.5 mt-3 pt-2.5 border-t border-border-subtle">
-              <div className="flex items-center gap-1.5 text-[11px] font-medium text-ink-muted">
+            <div className="flex flex-col gap-2 mt-3 pt-3 border-t border-border-subtle">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-paper-200">
                 <AppIcon name="globe" className="w-3.5 h-3.5 text-accent" />
-                <span>Web Sources ({msg.sources.length}):</span>
+                <span>Web Sources ({msg.sources.length})</span>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {msg.sources.map((s, i) => {
@@ -306,10 +312,10 @@ function ChatMessageBubble({
                       href={s.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-[11px] px-2.5 py-1 rounded-lg flex items-center gap-1.5 max-w-[240px] truncate bg-canvas-elevated border border-border text-ink-muted hover:text-paper-100 hover:border-accent/40 transition-fast shadow-xs cursor-pointer"
+                      className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 max-w-[240px] truncate bg-canvas-surface border border-border text-paper-200 hover:text-paper-100 hover:border-accent/40 hover:bg-canvas-elevated transition-fast shadow-xs cursor-pointer"
                       title={s.title || domain}
                     >
-                      <span className="font-mono text-accent text-[10px]">[{s.citationId || i + 1}]</span>
+                      <span className="font-mono text-accent text-[10px] font-semibold">[{s.citationId || i + 1}]</span>
                       <span className="truncate">{s.title || domain}</span>
                       <AppIcon name="external" className="w-2.5 h-2.5 shrink-0 opacity-60 ml-0.5" />
                     </a>

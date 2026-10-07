@@ -6,6 +6,10 @@ const net = require('net');
 const os = require('os');
 const sandboxManager = require('./SandboxManager');
 const workspaceManager = require('../services/workspaceManager');
+// P0: Windows cannot spawn a .cmd with `shell:false` since Node's
+// CVE-2024-27980 fix (throws EINVAL) — every host-side `npm install` /
+// `npm rebuild` below silently failed with "spawn EINVAL". Shared helper.
+const { resolveInvocation, npmBin } = require('../services/runtimeBridge');
 
 const FRAMEWORK_CONFIGS = {
   vite: {
@@ -279,9 +283,11 @@ class DevServerManager extends EventEmitter {
         return new Promise((resolve) => {
           const isWin = process.platform === 'win32';
           const npmCmd = isWin ? 'npm.cmd' : 'npm';
-          const child = spawn(npmCmd, ['rebuild'], {
+          const inv = resolveInvocation(npmCmd, ['rebuild']);
+          const child = spawn(inv.command, inv.args, {
             cwd: wsDir,
             shell: false,
+            windowsHide: true,
             env: { ...process.env, NODE_ENV: 'development' }
           });
           let stderr = '';
@@ -306,10 +312,12 @@ class DevServerManager extends EventEmitter {
     return new Promise((resolve) => {
       const isWin = process.platform === 'win32';
       const npmCmd = isWin ? 'npm.cmd' : 'npm';
+      const inv = resolveInvocation(npmCmd, ['install']);
 
-      const child = spawn(npmCmd, ['install'], {
+      const child = spawn(inv.command, inv.args, {
         cwd: wsDir,
         shell: false,
+        windowsHide: true,
         env: { ...process.env, NODE_ENV: 'development' }
       });
 
@@ -454,7 +462,16 @@ class DevServerManager extends EventEmitter {
       }
       let wsDir = rawWsDir;
       try {
-        wsDir = require('fs').realpathSync(rawWsDir);
+        // IMPORTANT: use the NATIVE realpath. On Windows, `os.tmpdir()` can be
+        // the 8.3 short form (`C:\Users\VIKASH~1\...`) while `process.cwd()`
+        // inside the spawned child comes back in LONG form (`...\vikash kumar\...`).
+        // Vite then computes its `fs.allow` list from the SHORT root but resolves
+        // module ids to LONG paths — `startsWith` fails, the file load is denied
+        // and Vite reports "Does the file exist?" for files that are right there.
+        // The result: no JSX transform at all, and the browser receives raw
+        // source (`Unexpected token '<'`). The pure-JS realpathSync does NOT
+        // expand 8.3 names; realpathSync.native does.
+        wsDir = require('fs').realpathSync.native(rawWsDir);
       } catch (_) {}
 
       const isWin = process.platform === 'win32';

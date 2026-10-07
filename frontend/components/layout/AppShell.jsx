@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { CommandRail } from './CommandRail';
-import { AiDostWordmark } from '../brand/AiDostWordmark';
 import { AiDostMark } from '../brand/AiDostMark';
 import AppIcon from '../ui/AppIcon';
 
@@ -64,10 +63,8 @@ export function AppShell({
     };
   }, []);
 
-  const projectName =
-    typeof activeProject === 'string'
-      ? activeProject
-      : activeProject?.project_name || activeProject?.name || 'Personal Workspace';
+  // viewLabel still drives the chat-view header + mobile nav; projectName went
+  // away with the non-chat header (each view renders its own title bar).
   const viewLabel =
     {
       chat: 'Chat',
@@ -238,64 +235,6 @@ export function AppShell({
           </div>
         )}
 
-        {/* Non-chat view header — desktop only */}
-        {currentView !== 'chat' && (
-        <header className="h-14 shrink-0 px-4 lg:px-6 bg-canvas-base/90 backdrop-blur-md border-b border-border hidden sm:flex items-center justify-between gap-4 z-40">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="lg:hidden shrink-0">
-              <AiDostWordmark size="sm" showVersion={false} />
-            </div>
-            <div className="hidden lg:flex items-center gap-2 min-w-0">
-              <span className="text-[10px] font-mono uppercase tracking-[0.14em] text-accent font-bold">
-                Workspace
-              </span>
-              <span className="text-ink-muted">/</span>
-              <span className="text-sm font-medium text-paper-100 truncate max-w-[220px]">
-                {projectName}
-              </span>
-              <AppIcon name="chevronDown" className="w-3.5 h-3.5 text-ink-muted" />
-            </div>
-            <div className="h-5 w-px bg-border hidden md:block" />
-            <div className="min-w-0">
-              <div className="text-sm font-semibold text-paper-100 truncate flex items-center gap-2">
-                <span>{viewLabel}</span>
-              </div>
-              <div className="text-[10px] text-ink-muted hidden md:block">
-                Personal computing workspace
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            {onOpenCommandPalette && (
-              <button
-                type="button"
-                onClick={onOpenCommandPalette}
-                className="hidden sm:flex items-center gap-2 h-9 px-3 rounded-lg bg-canvas-surface hover:bg-canvas-elevated border border-border hover:border-accent/40 text-xs text-paper-300 hover:text-paper-100 transition-fast cursor-pointer focus-ring shadow-sm"
-                title="Open Command Palette (Ctrl+K)"
-              >
-                <AppIcon name="search" className="w-3.5 h-3.5 text-accent" />
-                <span className="hidden md:inline">Search anything</span>
-                <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-canvas-elevated text-paper-300 border border-border/50">
-                  ⌘K
-                </kbd>
-              </button>
-            )}
-            <button
-              type="button"
-              className="w-9 h-9 rounded-lg flex items-center justify-center text-paper-300 hover:text-paper-100 hover:bg-canvas-surface transition-fast cursor-pointer focus-ring"
-              title="Notifications"
-              aria-label="Notifications"
-            >
-              <AppIcon name="bell" className="w-4 h-4" />
-            </button>
-            <div className="hidden md:flex items-center gap-2 pl-2 ml-1 border-l border-border">
-              <div className="w-8 h-8 rounded-full bg-accent/20 border border-accent/40 flex items-center justify-center text-xs font-bold text-paper-100 shadow-sm">
-                U
-              </div>
-            </div>
-          </div>
-        </header>
-        )}
         <div className="flex-1 flex overflow-hidden min-h-0">
           <main suppressHydrationWarning className="flex-1 flex flex-col h-full overflow-hidden min-w-0 bg-canvas-base">
             {children}

@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI-Dost — Copilot IDE (Redesign)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { width:1600px; height:1000px; background:#090a0f; font-family:'Inter',system-ui,sans-serif; color:#e2e8f0; display:flex; flex-direction:column; overflow:hidden; -webkit-font-smoothing:antialiased; }
+
+  /* title bar */
+  .titlebar { height:52px; background:#0d0f18; border-bottom:1px solid rgba(255,255,255,.06); display:flex; align-items:center; padding:0 16px; gap:14px; }
+  .brand { display:flex; align-items:center; gap:9px; }
+  .brand-mark { width:26px; height:26px; border-radius:7px; background:linear-gradient(135deg,#6366f1,#a855f7); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:13px; color:#fff; }
+  .brand-name { font-weight:600; font-size:14px; color:#fff; }
+  .crumbs { display:flex; align-items:center; gap:8px; font-size:13px; color:#94a3b8; background:#131622; border:1px solid rgba(255,255,255,.07); padding:7px 14px; border-radius:9px; }
+  .crumbs b { color:#fff; font-weight:600; }
+  .seg { display:flex; background:#131622; border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:3px; gap:3px; margin:0 auto; }
+  .seg span { font-size:13px; padding:7px 18px; border-radius:8px; color:#94a3b8; font-weight:500; display:flex; align-items:center; gap:7px; }
+  .seg span.on { background:#6366f1; color:#fff; box-shadow:0 4px 12px -4px rgba(99,102,241,.7); }
+  .title-actions { display:flex; align-items:center; gap:9px; margin-left:auto; }
+  .run-btn { background:#10b981; color:#052e1c; border:0; border-radius:9px; padding:9px 16px; font-size:13px; font-weight:700; font-family:inherit; display:flex; align-items:center; gap:8px; box-shadow:0 6px 16px -6px rgba(16,185,129,.7); }
+  .icon-btn { width:33px; height:33px; border-radius:9px; background:#131622; border:1px solid rgba(255,255,255,.07); display:flex; align-items:center; justify-content:center; color:#94a3b8; }
+  .icon-btn svg { width:15px; height:15px; }
+
+  .workspace { flex:1; display:flex; min-height:0; }
+
+  /* left: copilot panel */
+  .copilot { width:360px; background:#0d0f18; border-right:1px solid rgba(255,255,255,.06); display:flex; flex-direction:column; }
+  .cp-head { display:flex; align-items:center; gap:10px; padding:14px 16px 10px; }
+  .cp-head .t { font-size:13.5px; font-weight:700; color:#fff; letter-spacing:-.01em; }
+  .mode-chip { margin-left:auto; display:flex; gap:3px; background:#131622; border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:3px; }
+  .mode-chip span { font-size:11px; padding:4px 10px; border-radius:6px; color:#94a3b8; }
+  .mode-chip span.on { background:rgba(99,102,241,.2); color:#c7d2fe; font-weight:600; }
+
+  .plan { margin:6px 14px 12px; background:#131622; border:1px solid rgba(255,255,255,.07); border-radius:13px; padding:14px; }
+  .plan-head { display:flex; align-items:center; gap:9px; margin-bottom:12px; }
+  .plan-head .t { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#94a3b8; }
+  .plan-head .n { margin-left:auto; font-size:11.5px; color:#64748b; }
+  .prog { height:4px; background:#252b44; border-radius:4px; margin-bottom:13px; overflow:hidden; }
+  .prog i { display:block; height:100%; width:60%; background:linear-gradient(90deg,#6366f1,#38bdf8); border-radius:4px; }
+  .step { display:flex; align-items:center; gap:10px; padding:7px 2px; font-size:13px; color:#cbd5e1; }
+  .step .box { width:16px; height:16px; border-radius:5px; border:1.5px solid #475569; flex:none; display:flex; align-items:center; justify-content:center; font-size:10px; }
+  .step.done .box { background:#10b981; border-color:#10b981; color:#052e1c; }
+  .step.done { color:#64748b; }
+  .step.active { color:#fff; font-weight:500; }
+  .step.active .box { border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.18); }
+  .step .meta { margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#475569; }
+
+  .stream { flex:1; overflow:hidden; padding:2px 14px 10px; display:flex; flex-direction:column; gap:8px; }
+  .ev { background:#131622; border:1px solid rgba(255,255,255,.06); border-radius:11px; padding:10px 13px; }
+  .ev-head { display:flex; align-items:center; gap:8px; margin-bottom:5px; }
+  .ev-kind { font-size:9.5px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:#818cf8; background:rgba(99,102,241,.14); padding:2.5px 7px; border-radius:5px; }
+  .ev-kind.ok { color:#6ee7b7; background:rgba(16,185,129,.13); }
+  .ev-kind.edit { color:#fcd34d; background:rgba(245,158,11,.13); }
+  .ev-time { margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#475569; }
+  .ev-text { font-size:12.5px; line-height:1.6; color:#94a3b8; }
+  .ev-text b { color:#e2e8f0; font-weight:600; }
+  .ev-text .file { font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#a5b4fc; }
+  .ev-text .plus { color:#4ade80; }
+  .ev-text .minus { color:#f87171; }
+
+  .cp-input { margin:0 14px 14px; background:#131622; border:1px solid rgba(255,255,255,.1); border-radius:13px; padding:12px 13px 9px; }
+  .cp-input .ph { font-size:13.5px; color:#64748b; padding-bottom:10px; }
+  .cp-bar { display:flex; align-items:center; gap:7px; }
+  .cp-ico { color:#94a3b8; font-size:14px; }
+  .cp-send { margin-left:auto; width:30px; height:30px; border-radius:9px; background:#6366f1; color:#fff; display:flex; align-items:center; justify-content:center; font-size:14px; }
+  .kbd-hint { font-family:'JetBrains Mono',monospace; font-size:10px; color:#475569; margin-left:6px; }
+
+  /* center: editor */
+  .editor { flex:1; display:flex; flex-direction:column; min-width:0; background:#090a0f; }
+  .tabs { display:flex; background:#0d0f18; border-bottom:1px solid rgba(255,255,255,.06); }
+  .tab { display:flex; align-items:center; gap:8px; padding:11px 16px; font-family:'JetBrains Mono',monospace; font-size:12.5px; color:#64748b; border-right:1px solid rgba(255,255,255,.05); }
+  .tab.on { background:#090a0f; color:#e2e8f0; box-shadow:inset 0 2px 0 #6366f1; }
+  .tab .x { color:#475569; font-size:13px; }
+  .tab .fdot { width:7px; height:7px; border-radius:50%; background:#f59e0b; }
+  .code { flex:1; padding:16px 0; overflow:hidden; font-family:'JetBrains Mono',monospace; font-size:13px; line-height:1.85; }
+  .ln { display:flex; }
+  .ln .no { width:58px; text-align:right; padding-right:20px; color:#334155; flex:none; user-select:none; }
+  .ln .l { color:#e2e8f0; white-space:pre; }
+  .ln.hi { background:rgba(99,102,241,.08); box-shadow:inset 3px 0 0 #6366f1; }
+  .k { color:#c084fc; } .s { color:#86efac; } .f { color:#7dd3fc; } .c { color:#64748b; } .t { color:#fbbf24; } .v { color:#f0abfc; }
+
+  /* right: preview */
+  .preview { width:420px; background:#0d0f18; border-left:1px solid rgba(255,255,255,.06); display:flex; flex-direction:column; }
+  .pv-head { display:flex; align-items:center; gap:9px; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,.06); }
+  .pv-url { flex:1; background:#131622; border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:7px 12px; font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#94a3b8; display:flex; align-items:center; gap:8px; }
+  .pv-url .g { width:7px; height:7px; border-radius:50%; background:#10b981; box-shadow:0 0 7px #10b981; }
+  .pv-body { flex:1; margin:14px; background:#090a0f; border:1px solid rgba(255,255,255,.09); border-radius:13px; overflow:hidden; display:flex; flex-direction:column; }
+  .pv-app-head { padding:16px 18px; border-bottom:1px solid rgba(255,255,255,.06); display:flex; align-items:center; gap:10px; }
+  .pv-app-head .logo { width:24px; height:24px; border-radius:7px; background:linear-gradient(135deg,#6366f1,#38bdf8); }
+  .pv-app-head .n { font-size:14px; font-weight:700; color:#fff; }
+  .pv-app-head .pill { margin-left:auto; font-size:10.5px; color:#6ee7b7; background:rgba(16,185,129,.12); padding:4px 9px; border-radius:20px; font-weight:600; }
+  .pv-list { padding:14px 16px; display:flex; flex-direction:column; gap:9px; }
+  .pv-item { display:flex; align-items:center; gap:11px; background:#131622; border:1px solid rgba(255,255,255,.06); border-radius:10px; padding:11px 13px; font-size:13px; color:#e2e8f0; }
+  .pv-item .cb { width:16px; height:16px; border-radius:5px; border:1.5px solid #475569; flex:none; }
+  .pv-item .cb.on { background:#6366f1; border-color:#6366f1; }
+  .pv-item.done { color:#64748b; text-decoration:line-through; }
+  .pv-item .who { margin-left:auto; font-size:10.5px; color:#475569; }
+  .qa { margin:0 14px 14px; background:rgba(16,185,129,.07); border:1px solid rgba(16,185,129,.3); border-radius:11px; padding:11px 13px; font-size:12.5px; color:#6ee7b7; display:flex; align-items:center; gap:9px; }
+
+  /* status bar */
+  .statusbar { height:30px; background:#0d0f18; border-top:1px solid rgba(255,255,255,.06); display:flex; align-items:center; padding:0 14px; gap:18px; font-size:11.5px; color:#64748b; font-family:'JetBrains Mono',monospace; }
+  .statusbar .ok { color:#10b981; }
+  .statusbar .ind { color:#818cf8; }
+  .statusbar .right { margin-left:auto; display:flex; gap:18px; }
+</style>
+</head>
+<body>
+
+  <div class="titlebar">
+    <div class="brand"><div class="brand-mark">A</div><div class="brand-name">AI-Dost</div></div>
+    <div class="crumbs">Todo Pro <span style="color:#475569">/</span> <b>src</b></div>
+    <div class="seg">
+      <span class="on">‹› Code</span>
+      <span>◫ Split</span>
+      <span>◉ Preview</span>
+    </div>
+    <div class="title-actions">
+      <button class="run-btn">▶ Run project</button>
+      <div class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10h4l3-7 4 14 3-7h4"/></svg></div>
+      <div class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/></svg></div>
+      <div class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg></div>
+    </div>
+  </div>
+
+  <div class="workspace">
+
+    <div class="copilot">
+      <div class="cp-head">
+        <span class="t">Copilot</span>
+        <div class="mode-chip"><span>Ask</span><span>Plan</span><span class="on">Code</span></div>
+      </div>
+
+      <div class="plan">
+        <div class="plan-head"><span class="t">Working plan</span><span class="n">3/5 done</span></div>
+        <div class="prog"><i></i></div>
+        <div class="step done"><span class="box">✓</span> Scaffold project structure <span class="meta">12s</span></div>
+        <div class="step done"><span class="box">✓</span> Auth API + JWT <span class="meta">18s</span></div>
+        <div class="step done"><span class="box">✓</span> React login &amp; todo UI <span class="meta">24s</span></div>
+        <div class="step active"><span class="box"></span> Connect frontend ↔ API <span class="meta">running</span></div>
+        <div class="step"><span class="box"></span> Build &amp; visual QA <span class="meta">queued</span></div>
+      </div>
+
+      <div class="stream">
+        <div class="ev">
+          <div class="ev-head"><span class="ev-kind">Thinking</span><span class="ev-time">10:42</span></div>
+          <div class="ev-text">Pehle existing structure dekhta hoon, phir auth flow add karta hoon…</div>
+        </div>
+        <div class="ev">
+          <div class="ev-head"><span class="ev-kind edit">Edited</span><span class="ev-time">10:43</span></div>
+          <div class="ev-text"><span class="file">src/App.jsx</span> — login state wire ki <span class="plus">+34</span> <span class="minus">−12</span></div>
+        </div>
+        <div class="ev">
+          <div class="ev-head"><span class="ev-kind ok">Check passed</span><span class="ev-time">10:44</span></div>
+          <div class="ev-text"><b>npm run build</b> — 0 errors, bundle 214 kB</div>
+        </div>
+      </div>
+
+      <div class="cp-input">
+        <div class="ph">Copilot ko bolo — kya change karna hai?</div>
+        <div class="cp-bar">
+          <span class="cp-ico">🎤</span><span class="cp-ico">📎</span><span class="cp-ico">⌘</span>
+          <span class="kbd-hint">↵ send · ⇧↵ newline</span>
+          <span class="cp-send">↑</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="editor">
+      <div class="tabs">
+        <div class="tab on"><span class="fdot"></span>App.jsx <span class="x">×</span></div>
+        <div class="tab">auth.js <span class="x">×</span></div>
+        <div class="tab">package.json</div>
+      </div>
+      <div class="code">
+        <div class="ln"><span class="no">14</span><span class="l"><span class="k">import</span> { useState, useEffect } <span class="k">from</span> <span class="s">'react'</span>;</span></div>
+        <div class="ln"><span class="no">15</span><span class="l"><span class="k">import</span> { login } <span class="k">from</span> <span class="s">'./api/auth'</span>;</span></div>
+        <div class="ln"><span class="no">16</span><span class="l"></span></div>
+        <div class="ln"><span class="no">17</span><span class="l"><span class="k">export default function</span> <span class="f">App</span>() {</span></div>
+        <div class="ln hi"><span class="no">18</span><span class="l">  <span class="k">const</span> [user, setUser] = <span class="f">useState</span>(<span class="k">null</span>);</span></div>
+        <div class="ln hi"><span class="no">19</span><span class="l">  <span class="k">const</span> [error, setError] = <span class="f">useState</span>(<span class="s">''</span>);</span></div>
+        <div class="ln"><span class="no">20</span><span class="l"></span></div>
+        <div class="ln hi"><span class="no">21</span><span class="l">  <span class="k">async function</span> <span class="f">handleLogin</span>(email, password) {</span></div>
+        <div class="ln hi"><span class="no">22</span><span class="l">    <span class="k">try</span> {</span></div>
+        <div class="ln hi"><span class="no">23</span><span class="l">      <span class="k">const</span> { token } = <span class="k">await</span> <span class="f">login</span>(email, password);</span></div>
+        <div class="ln hi"><span class="no">24</span><span class="l">      localStorage.<span class="f">setItem</span>(<span class="s">'token'</span>, token);</span></div>
+        <div class="ln hi"><span class="no">25</span><span class="l">      <span class="f">setUser</span>(<span class="f">decode</span>(token));</span></div>
+        <div class="ln"><span class="no">26</span><span class="l">    } <span class="k">catch</span> (e) {</span></div>
+        <div class="ln"><span class="no">27</span><span class="l">      <span class="f">setError</span>(<span class="s">'Galat email ya password'</span>);</span></div>
+        <div class="ln"><span class="no">28</span><span class="l">    }</span></div>
+        <div class="ln"><span class="no">29</span><span class="l">  }</span></div>
+        <div class="ln"><span class="no">30</span><span class="l"></span></div>
+        <div class="ln"><span class="no">31</span><span class="l">  <span class="k">if</span> (!user) <span class="k">return</span> &lt;<span class="t">LoginForm</span> onSubmit={handleLogin} error={error} /&gt;;</span></div>
+        <div class="ln"><span class="no">32</span><span class="l">  <span class="k">return</span> &lt;<span class="t">TodoBoard</span> user={user} /&gt;;</span></div>
+        <div class="ln"><span class="no">33</span><span class="l">}</span></div>
+      </div>
+    </div>
+
+    <div class="preview">
+      <div class="pv-head">
+        <div class="pv-url"><span class="g"></span>localhost:5173</div>
+        <div class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/></svg></div>
+      </div>
+      <div class="pv-body">
+        <div class="pv-app-head">
+          <div class="logo"></div>
+          <span class="n">Todo Pro</span>
+          <span class="pill">● live</span>
+        </div>
+        <div class="pv-list">
+          <div class="pv-item"><span class="cb on"></span> Design mockups <span class="who">done</span></div>
+          <div class="pv-item"><span class="cb"></span> Write auth routes <span class="who">you</span></div>
+          <div class="pv-item"><span class="cb"></span> Deploy to Vercel <span class="who">tomorrow</span></div>
+          <div class="pv-item done"><span class="cb on"></span> Init repo <span class="who">done</span></div>
+        </div>
+        <div style="padding:0 16px 16px">
+          <div style="background:#6366f1;color:#fff;text-align:center;padding:11px;border-radius:10px;font-size:13.5px;font-weight:600">+ Add task</div>
+        </div>
+      </div>
+      <div class="qa">✓ Visual QA passed — layout, contrast aur console clean</div>
+    </div>
+
+  </div>
+
+  <div class="statusbar">
+    <span class="ind">⎇ main*</span>
+    <span class="ok">✓ 0 errors</span>
+    <span>src/App.jsx</span>
+    <div class="right">
+      <span>step 4/5 · 1m 12s</span>
+      <span class="ind">⚡ Auto (cascade)</span>
+      <span>UTF-8</span>
+      <span>AI-Dost v2.0</span>
+    </div>
+  </div>
+
+</body>
+</html>

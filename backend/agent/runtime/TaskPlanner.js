@@ -70,9 +70,47 @@ class TaskPlanner {
   }
 
   validateAndSanitizePlan(rawPlan) {
-    if (!rawPlan || typeof rawPlan !== 'object' || Array.isArray(rawPlan)) throw new Error('Invalid plan structure: Plan must be an object');
+    if (!rawPlan) throw new Error('Invalid plan structure: Plan must be an object');
+
+    // Handle plans returned as arrays of steps
+    if (Array.isArray(rawPlan)) {
+      rawPlan = { goal: 'Autonomous execution plan', steps: rawPlan };
+    }
+
+    if (typeof rawPlan !== 'object') throw new Error('Invalid plan structure: Plan must be an object');
+
+    // Surface explicit AI error payloads clearly
+    if (rawPlan.error) {
+      const msg = typeof rawPlan.error === 'string' ? rawPlan.error : (rawPlan.error.message || JSON.stringify(rawPlan.error));
+      throw new Error(`AI plan generation error: ${msg}`);
+    }
+
+    // Unwrap nested objects if wrapped by LLM (e.g. { plan: { goal, steps } })
+    if (!rawPlan.steps && !rawPlan.goal) {
+      if (rawPlan.plan && typeof rawPlan.plan === 'object' && !Array.isArray(rawPlan.plan)) rawPlan = rawPlan.plan;
+      else if (rawPlan.data && typeof rawPlan.data === 'object' && !Array.isArray(rawPlan.data)) rawPlan = rawPlan.data;
+      else if (rawPlan.result && typeof rawPlan.result === 'object' && !Array.isArray(rawPlan.result)) rawPlan = rawPlan.result;
+    }
+
+    // Fallback goal from objective, summary, task, or title if goal key is missing
+    if (typeof rawPlan.goal !== 'string' || !rawPlan.goal.trim()) {
+      const altGoal = rawPlan.objective || rawPlan.summary || rawPlan.task || rawPlan.title || rawPlan.intent;
+      if (typeof altGoal === 'string' && altGoal.trim()) {
+        rawPlan.goal = altGoal.trim();
+      }
+    }
+
     if (typeof rawPlan.goal !== 'string' || !rawPlan.goal.trim()) throw new Error('Invalid plan structure: Missing or invalid goal string');
     if (rawPlan.goal.length > this.limits.maxGoalChars) throw new Error('Invalid plan: goal exceeds maximum length');
+
+    // Fallback steps from tasks, actions, items if steps key is missing
+    if (!Array.isArray(rawPlan.steps)) {
+      const altSteps = rawPlan.tasks || rawPlan.actions || rawPlan.items;
+      if (Array.isArray(altSteps)) {
+        rawPlan.steps = altSteps;
+      }
+    }
+
     if (!Array.isArray(rawPlan.steps) || rawPlan.steps.length === 0) throw new Error('Invalid plan structure: Steps must be a non-empty array');
     if (rawPlan.steps.length > this.limits.maxSteps) throw new Error(`Invalid plan: step count exceeds maximum of ${this.limits.maxSteps}`);
 

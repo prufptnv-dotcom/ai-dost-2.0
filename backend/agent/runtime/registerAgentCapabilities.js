@@ -5,6 +5,11 @@ const LoadSkillTool = require('../tools/LoadSkillTool');
 const WebSearchTool = require('../tools/WebSearchTool');
 const FetchWebpageTool = require('../tools/FetchWebpageTool');
 const AssessmentTool = require('../tools/AssessmentTool');
+const WriteFileTool = require('../tools/WriteFileTool');
+const ReadFileTool = require('../tools/ReadFileTool');
+const ApplyDiffTool = require('../tools/ApplyDiffTool');
+const ListFilesTool = require('../tools/ListFilesTool');
+const TerminalTool = require('../tools/TerminalTool');
 const mcpClientManager = require('../../mcp/McpClientManager');
 const skillRegistry = require('../../services/skillRegistry');
 const logger = require('../../logger');
@@ -50,6 +55,32 @@ function registerSkillTool() {
     if (toolRegistry.has('load_skill')) return;
     toolRegistry.register(new LoadSkillTool());
     logger.info('🧠 load_skill tool registered');
+}
+
+/**
+ * Register core workspace tools (write_file, read_file, apply_diff, list_directory, run_terminal).
+ */
+function registerWorkspaceTools() {
+    if (!toolRegistry.has('write_file')) {
+        toolRegistry.register(new WriteFileTool());
+        logger.info('✍️ write_file tool registered in agent runtime');
+    }
+    if (!toolRegistry.has('read_file')) {
+        toolRegistry.register(new ReadFileTool());
+        logger.info('📖 read_file tool registered in agent runtime');
+    }
+    if (!toolRegistry.has('apply_diff')) {
+        toolRegistry.register(new ApplyDiffTool());
+        logger.info('✏️ apply_diff tool registered in agent runtime');
+    }
+    if (!toolRegistry.has('list_directory')) {
+        toolRegistry.register(new ListFilesTool());
+        logger.info('📂 list_directory tool registered in agent runtime');
+    }
+    if (!toolRegistry.has('run_terminal')) {
+        toolRegistry.register(new TerminalTool());
+        logger.info('💻 run_terminal tool registered in agent runtime');
+    }
 }
 
 /**
@@ -102,6 +133,7 @@ async function registerAll(options = {}) {
         return { mcpTools: toolRegistry.list().filter(t => t.name.startsWith('mcp_')).length, skills: skillRegistry.list().length };
     }
 
+    registerWorkspaceTools();
     registerSkillTool();
     registerWebTools();
     registerAssessmentTool();
@@ -109,12 +141,13 @@ async function registerAll(options = {}) {
     const skills = skillRegistry.list();
 
     _registered = true;
-    logger.info(`✅ Agent capabilities ready: ${mcpTools} MCP tools + ${skills.length} skills + load_skill + web_search + fetch_webpage`);
+    logger.info(`✅ Agent capabilities ready: ${mcpTools} MCP tools + ${skills.length} skills + workspace tools + load_skill + web_search`);
     return { mcpTools, skills: skills.length };
 }
 
-// Auto-register core web and skill tools on load
+// Auto-register core web, skill, and workspace tools on load
 try {
+    registerWorkspaceTools();
     registerWebTools();
     registerSkillTool();
     registerAssessmentTool();
@@ -122,6 +155,7 @@ try {
 
 module.exports = {
     registerAll,
+    registerWorkspaceTools,
     registerSkillTool,
     registerWebTools,
     registerAssessmentTool,

@@ -99,16 +99,16 @@ export default function HomePage() {
       {/* ─── Hero Section ─── */}
       <section className="relative pt-20 pb-16 md:pt-28 md:pb-24 overflow-hidden border-b border-border">
         {/* Google Gemini Dual Ambient Celestial Orbs */}
-        <div className="absolute -top-24 left-1/4 w-[600px] h-[380px] bg-gradient-to-tr from-[#4285f4]/25 via-[#9b72cb]/20 to-transparent blur-[130px] pointer-events-none rounded-full animate-pulse" />
-        <div className="absolute top-10 right-1/4 w-[550px] h-[380px] bg-gradient-to-bl from-[#d96570]/20 via-[#1ba1e2]/20 to-transparent blur-[140px] pointer-events-none rounded-full" />
+        <div className="absolute -top-24 left-1/4 w-[600px] h-[380px] bg-gradient-to-tr from-[#6366f1]/25 via-[#a5b4fc]/20 to-transparent blur-[130px] pointer-events-none rounded-full animate-pulse" />
+        <div className="absolute top-10 right-1/4 w-[550px] h-[380px] bg-gradient-to-bl from-[#4f46e5]/20 via-[#818cf8]/20 to-transparent blur-[140px] pointer-events-none rounded-full" />
 
         <RevealOnScroll direction="up" className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10 space-y-6">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-canvas-surface/80 border border-white/10 text-[11px] font-mono text-paper-200 shadow-[0_0_15px_rgba(66,133,244,0.15)] backdrop-blur-md">
-            <Sparkles className="w-3.5 h-3.5 text-[#4893fc] gemini-sparkle-icon" />
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-canvas-surface/80 border border-white/10 text-[11px] font-mono text-paper-200 shadow-[0_0_15px_rgba(99,102,241,0.15)] backdrop-blur-md">
+            <Sparkles className="w-3.5 h-3.5 text-[#6366f1] gemini-sparkle-icon" />
             <span>Autonomous AI Workspace • Version 2.0</span>
           </div>
 
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold font-display tracking-tight text-paper-100 leading-[1.1]">
+          <h1 className="text-4xl sm:text-5xl md:text-6xl font-serif font-semibold tracking-tight text-paper-100 leading-[1.12]">
             Tell AI-Dost what you need. <br />
             <span className="gemini-gradient-text">Let it figure out the work.</span>
           </h1>
@@ -135,13 +135,13 @@ export default function HomePage() {
 
           <div className="pt-8 flex items-center justify-center gap-6 text-[11px] font-mono text-ink-muted">
             <span className="flex items-center gap-1.5">
-              <CheckCircle2 className="w-3.5 h-3.5 text-[#4893fc]" /> Free Tier First
+              <CheckCircle2 className="w-3.5 h-3.5 text-[#6366f1]" /> Free Tier First
             </span>
             <span className="flex items-center gap-1.5">
-              <CheckCircle2 className="w-3.5 h-3.5 text-[#9b72cb]" /> Local-First SQLite
+              <CheckCircle2 className="w-3.5 h-3.5 text-[#a5b4fc]" /> Local-First SQLite
             </span>
             <span className="flex items-center gap-1.5">
-              <CheckCircle2 className="w-3.5 h-3.5 text-[#d96570]" /> 100% Private Workstation
+              <CheckCircle2 className="w-3.5 h-3.5 text-[#4f46e5]" /> 100% Private Workstation
             </span>
           </div>
         </RevealOnScroll>
@@ -151,7 +151,7 @@ export default function HomePage() {
       <section className="py-16 md:py-24 bg-canvas-subtle border-b border-border">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
           <RevealOnScroll direction="up" className="text-center space-y-2">
-            <h2 className="text-xs font-mono uppercase tracking-[0.15em] text-[#4893fc] font-semibold">
+            <h2 className="text-xs font-mono uppercase tracking-[0.15em] text-[#6366f1] font-semibold">
               Live Execution Model
             </h2>
             <p className="text-2xl sm:text-3xl font-bold font-display text-paper-100">
@@ -195,14 +195,14 @@ export default function HomePage() {
               >
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <div className="w-10 h-10 rounded-xl bg-canvas-base border border-white/10 flex items-center justify-center text-[#4893fc] group-hover:text-[#9b72cb] transition-fast shadow-[0_0_12px_rgba(66,133,244,0.15)]">
+                    <div className="w-10 h-10 rounded-xl bg-canvas-base border border-white/10 flex items-center justify-center text-[#6366f1] group-hover:text-[#a5b4fc] transition-fast shadow-[0_0_12px_rgba(99,102,241,0.15)]">
                       <cap.icon className="w-5 h-5" />
                     </div>
                     <span className="text-[10px] font-mono font-semibold px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-paper-200">
                       {cap.tag}
                     </span>
                   </div>
-                  <h3 className="text-sm font-semibold font-display text-paper-100 group-hover:text-[#4893fc] transition-fast">
+                  <h3 className="text-sm font-semibold font-display text-paper-100 group-hover:text-[#6366f1] transition-fast">
                     {cap.title}
                   </h3>
                   <p className="text-xs text-ink-muted leading-relaxed font-sans">
@@ -223,7 +223,7 @@ export default function HomePage() {
           <div className="text-center pt-4">
             <Link
               href="/capabilities"
-              className="inline-flex items-center gap-2 text-xs font-semibold text-[#4893fc] hover:underline"
+              className="inline-flex items-center gap-2 text-xs font-semibold text-[#6366f1] hover:underline"
             >
               <span>Explore all outcome capabilities</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -236,7 +236,7 @@ export default function HomePage() {
       <section className="py-16 md:py-24 bg-canvas-subtle border-b border-border">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
           <div className="text-center space-y-2">
-            <span className="text-xs font-mono uppercase tracking-[0.15em] text-[#4893fc] font-semibold block">
+            <span className="text-xs font-mono uppercase tracking-[0.15em] text-[#6366f1] font-semibold block">
               Execution Architecture
             </span>
             <h2 className="text-2xl sm:text-3xl font-bold font-display text-paper-100">
@@ -257,11 +257,11 @@ export default function HomePage() {
                   onClick={() => setActiveStage(idx)}
                   className={`p-3 rounded-xl border text-left transition-all duration-300 cursor-pointer ${
                     activeStage === idx
-                      ? 'bg-gradient-to-br from-[#4893fc]/20 to-[#9b72cb]/20 border-[#4893fc]/60 text-white shadow-[0_0_20px_rgba(66,133,244,0.25)] scale-[1.03]'
+                      ? 'bg-gradient-to-br from-[#6366f1]/20 to-[#a5b4fc]/20 border-[#6366f1]/60 text-white shadow-[0_0_20px_rgba(99,102,241,0.25)] scale-[1.03]'
                       : 'bg-canvas-base border-border hover:bg-canvas-surface/60'
                   }`}
                 >
-                  <div className={`text-[11px] font-mono font-semibold ${activeStage === idx ? 'text-[#4893fc]' : 'text-paper-100'}`}>
+                  <div className={`text-[11px] font-mono font-semibold ${activeStage === idx ? 'text-[#6366f1]' : 'text-paper-100'}`}>
                     {stage.title}
                   </div>
                   <div className="text-[10px] text-ink-muted mt-1 truncate">
@@ -279,7 +279,7 @@ export default function HomePage() {
               className="gemini-glow-card p-6 sm:p-8 rounded-2xl border border-white/10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 shadow-sm"
             >
               <div className="space-y-2 max-w-xl">
-                <span className="text-[10px] font-mono uppercase tracking-widest text-[#4893fc] font-bold">
+                <span className="text-[10px] font-mono uppercase tracking-widest text-[#6366f1] font-bold">
                   Detailed Lifecycle Phase
                 </span>
                 <h3 className="text-lg font-bold font-display text-paper-100">
@@ -305,7 +305,7 @@ export default function HomePage() {
       <section className="py-16 md:py-24 border-b border-border">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
           <div className="text-center space-y-2">
-            <h2 className="text-xs font-mono uppercase tracking-[0.15em] text-[#4893fc] font-semibold">
+            <h2 className="text-xs font-mono uppercase tracking-[0.15em] text-[#6366f1] font-semibold">
               Why AI-Dost
             </h2>
             <p className="text-2xl sm:text-3xl font-bold font-display text-paper-100">
@@ -320,7 +320,7 @@ export default function HomePage() {
             <div className="grid grid-cols-12 px-5 py-3 bg-canvas-subtle/80 border-b border-white/5 text-[11px] font-mono uppercase tracking-wider text-ink-muted">
               <div className="col-span-4 sm:col-span-3">Capability Dimension</div>
               <div className="col-span-4 sm:col-span-4 text-ink-muted">Standard AI Chatbots</div>
-              <div className="col-span-4 sm:col-span-5 text-[#4893fc] font-bold">AI-Dost Autonomous Workspace</div>
+              <div className="col-span-4 sm:col-span-5 text-[#6366f1] font-bold">AI-Dost Autonomous Workspace</div>
             </div>
             <div className="divide-y divide-border-subtle text-xs font-sans">
               <div className="grid grid-cols-12 px-5 py-3.5 items-center">
@@ -357,7 +357,7 @@ export default function HomePage() {
       <section className="py-16 md:py-24 bg-canvas-subtle border-b border-border">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
           <div className="text-center space-y-2">
-            <h2 className="text-xs font-mono uppercase tracking-[0.15em] text-[#4893fc] font-semibold">
+            <h2 className="text-xs font-mono uppercase tracking-[0.15em] text-[#6366f1] font-semibold">
               Safety & Governance
             </h2>
             <p className="text-2xl sm:text-3xl font-bold font-display text-paper-100">
@@ -370,21 +370,21 @@ export default function HomePage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
             <div className="gemini-glow-card p-6 rounded-2xl border border-white/10 space-y-2.5">
-              <ShieldCheck className="w-5 h-5 text-[#4893fc]" />
+              <ShieldCheck className="w-5 h-5 text-[#6366f1]" />
               <h4 className="text-sm font-semibold text-paper-100 font-display">Path Traversal Guards</h4>
               <p className="text-xs text-ink-muted leading-relaxed">
                 All file read and write operations are strictly normalized against authorized project directory paths. Null-byte injections and directory escapes are blocked at the engine layer.
               </p>
             </div>
             <div className="gemini-glow-card p-6 rounded-2xl border border-white/10 space-y-2.5">
-              <Lock className="w-5 h-5 text-[#9b72cb]" />
+              <Lock className="w-5 h-5 text-[#a5b4fc]" />
               <h4 className="text-sm font-semibold text-paper-100 font-display">Role Capability Policies</h4>
               <p className="text-xs text-ink-muted leading-relaxed">
                 Execution roles are mathematically bounded: Supervisors only orchestrate; Researchers only read; Coders write within projects; Verifiers only test. No agent can self-escalate authority.
               </p>
             </div>
             <div className="gemini-glow-card p-6 rounded-2xl border border-white/10 space-y-2.5">
-              <Eye className="w-5 h-5 text-[#d96570]" />
+              <Eye className="w-5 h-5 text-[#4f46e5]" />
               <h4 className="text-sm font-semibold text-paper-100 font-display">Human Approval Gates</h4>
               <p className="text-xs text-ink-muted leading-relaxed">
                 Destructive operations (clearing history, deleting projects, resetting settings) are physically isolated behind accessible confirmation modal dialogs requiring manual consent.
@@ -395,7 +395,7 @@ export default function HomePage() {
           <div className="text-center pt-2">
             <Link
               href="/security"
-              className="inline-flex items-center gap-2 text-xs font-semibold text-[#4893fc] hover:underline"
+              className="inline-flex items-center gap-2 text-xs font-semibold text-[#6366f1] hover:underline"
             >
               <span>Read the full technical security architecture</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -408,7 +408,7 @@ export default function HomePage() {
       <section className="py-20 md:py-28 relative overflow-hidden">
         {/* Gemini Ambient Glowing Spotlight */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="w-[600px] h-[350px] bg-gradient-to-r from-[#4285f4]/15 via-[#9b72cb]/15 to-[#d96570]/15 blur-[120px] rounded-full" />
+          <div className="w-[600px] h-[350px] bg-gradient-to-r from-[#6366f1]/15 via-[#a5b4fc]/15 to-[#4f46e5]/15 blur-[120px] rounded-full" />
         </div>
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-6 relative z-10">
           <h2 className="text-3xl sm:text-4xl font-bold font-display text-paper-100 tracking-tight">

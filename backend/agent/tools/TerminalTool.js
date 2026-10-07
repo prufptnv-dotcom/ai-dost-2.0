@@ -19,7 +19,7 @@ class TerminalTool extends Tool {
     // (rm -rf /, format c:, …) which trivial escapes bypassed.
     const policy = sandboxManager.validateCommandPolicy(command);
     if (!policy.allowed) {
-      throw new Error(policy.reason || 'Command blocked for safety.');
+      throw new Error(`Command blocked for safety: ${policy.reason || 'blocked by policy'}`);
     }
 
     const ws = context.workspaceManager.getWorkspacePath(context.projectId, context.userId);

@@ -33,6 +33,22 @@ const AgentOrchestrator = require('../agent/orchestrator');
 const PlannerService    = require('../services/plannerService');
 const SpecService       = require('../services/specService');
 const verifierService   = require('../services/verifierService');
+// P0 — Runtime Foundation: real install/build/run + honest, evidence-backed
+// verification. Replaces the old fire-and-forget `npm install` and the
+// stub-page "Vision QA" that reported success unconditionally.
+const runtimeBridge    = require('../services/runtimeBridge');
+// P1 — Deterministic verification + repair: turns a real build/runtime failure
+// into a bounded, re-verified repair loop. `callLLM` is injected by the caller
+// so this stays a pure orchestrator (no import cycle, one provider cascade).
+const projectRepair    = require('../services/projectRepair');
+// P2 — Repository-aware context: BM25 retrieval over code-aware tokens plus an
+// import graph. Replaces the substring-counting "semantic search" that could
+// neither rank by rarity nor tell the agent what a file change would break.
+const codeContext      = require('../services/codeContext');
+// P5 — Error→Fix learning memory: a successful repair becomes a durable lesson,
+// and a repeat of the same error starts from a known fix instead of
+// rediscovering it. The capability Replit / Bolt / Devin do not have.
+const fixMemory        = require('../services/fixMemory');
 const deterministicCodeGuard = require('../services/DeterministicCodeGuard');
 const { detectCategory, buildFullstackSystemPrompt, generateGoldenScaffold } = require('../agent/fullstackTrainer');
 const { saveProjectFile, deleteProjectFile, getProjectFiles, onWorkspaceChange } = require('../projectStore');
@@ -631,6 +647,12 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
     case 'generate_project_from_prompt': {
       try {
         const prompt = parameters.prompt || '';
+        // P1: repair is on by default; `repairEnabled: false` opts out (useful
+        // for fast golden-scaffold runs and for tests that must not call an LLM).
+        const repairEnabled = parameters.repairEnabled !== false;
+        const maxRepairAttempts = Number.isFinite(parameters.maxRepairAttempts)
+          ? Math.max(0, Math.min(5, Math.floor(parameters.maxRepairAttempts)))
+          : 3;
         const requestedDir = parameters.targetDir || projectPath;
         // P0 FIX (#1-4): resolve through safeJoin so BOTH relative and absolute
         // targetDir values are contained inside the workspace. Previously an
@@ -703,6 +725,69 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
             parsedData = {
               files: Array.from(fileMap.entries()).map(([filePath, content]) => ({ path: filePath, content }))
             };
+
+            // P0: guarantee the merged package.json is actually buildable.
+            //
+            // An LLM-authored package.json is routinely incoherent with the file
+            // tree it ships beside it: it declares `react-scripts` while the
+            // golden `vite.config.js` sits next to it, invents a `client`
+            // script for a directory that does not exist, and omits `build`
+            // entirely. A live run proved the cost — `vite build` failed with
+            // "'vite' is not recognized" because vite was never a dependency.
+            //
+            // Policy: the GOLDEN package.json is authoritative for `scripts`
+            // (it is verified against the golden file tree) and guarantees the
+            // framework toolchain is installed. The LLM keeps every extra
+            // dependency it asked for, plus its name/description/version.
+            const pkgEntry = parsedData.files.find(f => f.path === 'package.json');
+            const goldenPkgEntry = goldenFiles.find(f => f.path === 'package.json');
+            if (pkgEntry && goldenPkgEntry) {
+              try {
+                const llmPkg = JSON.parse(pkgEntry.content || '{}');
+                const goldenPkg = JSON.parse(goldenPkgEntry.content || '{}');
+
+                const mergedDeps = { ...(goldenPkg.dependencies || {}), ...(llmPkg.dependencies || {}) };
+                const mergedDevDeps = { ...(goldenPkg.devDependencies || {}), ...(llmPkg.devDependencies || {}) };
+
+                pkgEntry.content = JSON.stringify({
+                  ...goldenPkg,
+                  name: llmPkg.name || goldenPkg.name,
+                  version: llmPkg.version || goldenPkg.version,
+                  description: llmPkg.description || goldenPkg.description,
+                  main: llmPkg.main || goldenPkg.main,
+                  // Verified scripts always win.
+                  scripts: goldenPkg.scripts || {},
+                  dependencies: mergedDeps,
+                  devDependencies: mergedDevDeps,
+                }, null, 2);
+
+                logger.info(
+                  `[Agent] Reconciled package.json against golden scaffold — ` +
+                  `deps ${Object.keys(goldenPkg.dependencies || {}).length}+${Object.keys(llmPkg.dependencies || {}).length}, ` +
+                  `scripts fixed to ${Object.keys(goldenPkg.scripts || {}).join('/')}`
+                );
+              } catch (e) {
+                // Unparseable LLM package.json — fall back to the verified one.
+                pkgEntry.content = goldenPkgEntry.content;
+                logger.warn(`[Agent] LLM package.json was unparseable (${e.message}) — restored golden package.json`);
+              }
+            }
+          }
+
+          // P0: move inline <style> out of index.html into the stylesheet.
+          //
+          // Vite's `html-inline-proxy` plugin turns an inline <style> into a
+          // module id derived from the HTML path. When the workspace path
+          // contains a space (this machine: `C:\Users\vikash kumar\…`) that
+          // module cannot be resolved and EVERY build dies with
+          // "[vite:html-inline-proxy] Could not load …?html-proxy&inline-css".
+          // Proven: the identical project builds clean in a space-free path and
+          // fails in a space-containing one, purely because of this block.
+          //
+          // These styles belong in the stylesheet regardless, so this fixes
+          // correctness too. Applies to LLM-authored and golden index.html alike.
+          if (normalizeInlineHtmlStyles(parsedData.files)) {
+            logger.info('[Agent] Moved inline <style> from index.html into the stylesheet (vite html-inline-proxy breaks on space-containing paths)');
           }
           
           // 2. Task Manager (Todo) Agent: Structure Tasks
@@ -756,6 +841,13 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
                 // every non-listed entry (incl. dotfiles) before writing, so a
                 // regeneration prompt permanently destroyed them.
                 if (e.name.startsWith('.')) continue;
+                // P4: node_modules is the single most expensive thing in the
+                // workspace (~200s to rebuild from scratch on this machine).
+                // A regeneration changes the dependency set rarely; npm
+                // reconciles node_modules against the new package.json on the
+                // next install and only fetches the delta. Deleting it here is
+                // what forced a full reinstall on every second run.
+                if (e.name === 'node_modules') continue;
                 fs.rmSync(path.join(targetDir, e.name), { recursive: true, force: true });
                 removed.push(e.name);
               }
@@ -828,19 +920,28 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
             exec('git init', { cwd: targetDir, timeout: 3000 }, () => {});
           } catch (_) {}
 
-          // 5. DevOps Agent: Dependency Installation (Background)
+          // 5. DevOps Agent: Dependency Installation
+          //
+          // P0: this used to be `exec('npm install …')` + `proc.unref()` —
+          // fire-and-forget whose exit code nobody ever saw. Generated projects
+          // were therefore reported as installed while node_modules was usually
+          // absent. It is now awaited and the real exit code is captured.
           if (onProgress) {
-            onProgress({ type: 'agent_status', agent: 'DevOps', message: '⚙️ DevOps: Background dependency setup configured.' });
+            onProgress({ type: 'agent_status', agent: 'DevOps', message: '⚙️ DevOps: Installing declared dependencies…' });
           }
 
-          if (parsedData.files.some(f => f.path.endsWith('package.json'))) {
-             try {
-               // P0 FIX (#2): --ignore-scripts blocks package.json lifecycle
-               // scripts (preinstall/install/postinstall) from executing on the
-               // host — LLM-authored package.json is untrusted code.
-               const proc = exec('npm install --prefer-offline --no-audit --ignore-scripts', { cwd: targetDir });
-               if (proc && proc.unref) proc.unref();
-             } catch (_) {}
+          const emitRuntimeLog = (message) => {
+            if (onProgress) onProgress({ type: 'agent_status', agent: 'DevOps', message });
+          };
+
+          let installResult;
+          try {
+            installResult = await runtimeBridge.installDependencies(targetDir, { onLog: emitRuntimeLog });
+          } catch (installErr) {
+            // Never let an install failure kill the scaffold — the files are
+            // already on disk. Record it honestly and let verification speak.
+            logger.warn('[Agent] Dependency install threw:', installErr.message);
+            installResult = { ok: false, skipped: false, exitCode: -1, error: installErr.message, steps: [] };
           }
 
           // Mark all build tasks completed except last QA task
@@ -850,70 +951,85 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
           if (todoList.length > 0) todoList[todoList.length - 1].status = 'in_progress';
           if (onProgress) onProgress({ type: 'plan_tasks', tasks: [...todoList] });
 
-          // 6. Vision QA & Self-Healing Agent (Real In-Situ App Screenshot)
+          // 6. Vision QA — REAL verification against the REAL built output
+          //
+          // P0: this used to screenshot a hand-assembled stub page containing
+          // only App.jsx with hardcoded `IconStub` / fake `API` objects, then
+          // reported "UI rendered with 0 console errors" regardless of what
+          // happened. Every other generated file was discarded. Now the project
+          // is really built, the real output is served, a real browser loads it,
+          // and console/page errors are actually counted.
           if (onProgress) {
-            onProgress({ type: 'agent_status', agent: 'Vision QA', message: '👁️ Vision QA: Executing headless browser and verifying live UI components...' });
-            let shotBase64 = '';
+            onProgress({ type: 'agent_status', agent: 'Vision QA', message: '👁️ Vision QA: Building the project and loading the real output in a headless browser…' });
+          }
+
+          let verification = null;
+          try {
+            verification = await runtimeBridge.verifyBuild(targetDir, {
+              projectId: projectId || 'default',
+              onLog: (message) => {
+                if (onProgress) onProgress({ type: 'agent_status', agent: 'Vision QA', message });
+              },
+            });
+          } catch (verifyErr) {
+            logger.warn('[Agent] Runtime verification threw:', verifyErr.message);
+            verification = {
+              ok: false,
+              buildOk: false,
+              evidence: [],
+              runtime: { attempted: true, ok: false, unverified: true, reason: `verification crashed: ${verifyErr.message}`, consoleErrors: [], pageErrors: [], screenshot: null },
+            };
+          }
+
+          // ── P1: close the loop — feed the REAL failure back and re-verify ────
+          //
+          // P0 could only report a failure. Replit / Bolt / Devin repair it.
+          // Every attempt re-runs the real build + browser check; the model's
+          // own claim that it fixed something is never trusted.
+          let repairSummary = null;
+          if (repairEnabled !== false) {
             try {
-              const appFile = parsedData.files.find(f => f.path.endsWith('App.jsx'));
-              const cleanedCode = (appFile ? appFile.content : '')
-                .replace(/import\s+[\s\S]*?from\s+['"].*?['"];?/g, '')
-                .replace(/export\s+default\s+function\s*(\w*)/g, (m, name) => name ? 'function ' + name : 'function App');
-
-              const previewHtml = `<!DOCTYPE html>
-<html>
-<head>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-  <style>body { background: #07090e; color: white; margin: 0; font-family: 'Plus Jakarta Sans', sans-serif; }</style>
-</head>
-<body>
-  <div id="root"></div>
-  <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
-    const API = { getHistory: async () => [], saveCalculation: async () => ({ id: '1' }), clearHistory: async () => true };
-    const IconStub = (props) => <span style={{display: 'inline-block', width: props.size || 16, height: props.size || 16}}>✦</span>;
-    const History = IconStub, Trash2 = IconStub, Sparkles = IconStub, X = IconStub;
-    const Check = IconStub, Copy = IconStub, Volume2 = IconStub, VolumeX = IconStub;
-    const Delete = IconStub, ChevronRight = IconStub, RotateCcw = IconStub, Shield = IconStub;
-
-    ${cleanedCode}
-
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
-  </script>
-</body>
-</html>`;
-
-              const { chromium } = await import('playwright');
-              const browser = await chromium.launch({ headless: true });
-              const page = await browser.newPage({ viewport: { width: 440, height: 760 } });
-              await page.setContent(previewHtml, { waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
-              await page.waitForSelector('#root > div', { timeout: 3000 }).catch(() => {});
-              const shotBuffer = await page.screenshot({ fullPage: false, type: 'png', timeout: 3000 }).catch(() => null);
-              await browser.close().catch(() => {});
-              if (shotBuffer) shotBase64 = shotBuffer.toString('base64');
-            } catch (shotErr) {
-              logger.info('[Agent] Playwright auto-screenshot fallback:', shotErr.message);
-            }
-
-            if (shotBase64) {
-              onProgress({
-                type: 'screenshot',
-                data: shotBase64,
-                screenshot: shotBase64,
-                mimeType: 'image/png',
-                url: `/api/preview/${projectId || 'copilot-workspace'}`,
-                message: `📸 Live Application UI Verification Snapshot: ${category.toUpperCase()} Rendered`
+              repairSummary = await runRepairLoop({
+                dir: targetDir,
+                projectId: projectId || 'default',
+                prompt,
+                maxAttempts: maxRepairAttempts,
+                // The P0 verification above just built + browser-checked this exact
+                // state — pass it through so the loop does not pay for it twice.
+                initialVerification: verification,
+                callLLM: (system, user) => callScaffoldLLMText(system, user, parameters?.headers || {}),
+                onProgress,
               });
-              onProgress({
-                type: 'agent_status',
-                agent: 'Vision QA',
-                message: `👁️ Vision QA: ${category.toUpperCase()} UI rendered with 0 errors. Display, controls, and layout verified.`
-              });
+              if (repairSummary.verification) verification = repairSummary.verification;
+            } catch (repairErr) {
+              logger.warn('[Agent] Repair loop crashed:', repairErr.message);
+              if (onProgress) {
+                onProgress({ type: 'agent_status', agent: 'Vision QA', message: `⚠️ Repair loop crashed: ${repairErr.message}` });
+              }
             }
+          }
+
+          const rt = verification.runtime || {};
+          if (rt.screenshot) {
+            onProgress({
+              type: 'screenshot',
+              data: rt.screenshot,
+              screenshot: rt.screenshot,
+              mimeType: 'image/png',
+              url: `/api/preview/${projectId || 'copilot-workspace'}`,
+              message: '📸 Real application screenshot captured from the built output.'
+            });
+          }
+
+          // Truthful one-liner. There is deliberately no "0 errors" string that
+          // can be emitted without a command exit code behind it.
+          if (onProgress) {
+            const verdict = rt.unverified || rt.unavailable
+              ? `⚠️ Runtime UNVERIFIED — ${rt.reason || 'no evidence collected'}`
+              : rt.ok
+                ? '✅ Runtime verified — real output loaded and rendered, 0 uncaught errors.'
+                : `❌ Runtime FAILED — ${rt.pageErrors?.length || 0} uncaught error(s), ${rt.consoleErrors?.length || 0} console error(s).`;
+            onProgress({ type: 'agent_status', agent: 'Vision QA', message: verdict });
           }
 
           // All tasks completed
@@ -940,7 +1056,7 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
             '⚡ **Full Stack Integration**: REST API endpoints wired with Express backend and persistence.'
           ];
 
-          const finalReport = `### 🚀 Project Generated & Verified: **${titleCase || category.toUpperCase()}**
+          const finalReport = `### 🚀 Project Generated: **${titleCase || category.toUpperCase()}**
 
 **Prompt:** "${prompt}"
 
@@ -950,12 +1066,39 @@ ${featureList.map(f => `- ${f}`).join('\n')}
 #### 📂 Files Created (${writtenFiles.length}):
 ${writtenFiles.map(f => `- \`${f.path}\` (${f.size} bytes)`).join('\n')}
 
-#### 👁️ Visual & Runtime Verification:
-- **Headless Browser Screenshot QA**: Passed — UI rendered with 0 console errors.
-- **Preview Ready**: Click the **Live Preview** tab to interact with your live application!`;
+#### ⚙️ Dependencies:
+${installResult?.skipped
+    ? `- Skipped — ${installResult.reason}`
+    : `- \`npm install\` exit code **${installResult?.exitCode ?? 'n/a'}**${installResult?.ms ? ` (${Math.round(installResult.ms / 100) / 10}s)` : ''}`}
 
-          return { 
-            success: true, 
+#### 👁️ Visual & Runtime Verification:
+${runtimeBridge.describeVerification(verification)}
+
+${repairSummary ? `#### 🔧 Repair Attempts (${repairSummary.attempts}/${maxRepairAttempts}):
+${repairSummary.attempts === 0
+    ? '- No repair was needed.'
+    : repairSummary.repairs.map(r => r.applied?.length
+        ? `- Attempt ${r.attempt}: rewrote \`${r.applied.map(f => f.path).join('`, `')}\` → re-verified${r.unchanged?.length ? ` (${r.unchanged.length} file(s) returned unchanged and were skipped)` : ''}`
+        : `- Attempt ${r.attempt}: no usable repair (${r.reason || 'unknown'})`).join('\n')}
+
+${verification?.ok ? '✅ **Final state: the project builds and renders.**' : '❌ **Final state: still failing after every repair attempt.**'}
+` : ''}
+${verification?.ok
+    ? 'Click the **Live Preview** tab to interact with your running application.'
+    : '⚠️ **This project was written but did NOT pass verification.** The evidence above is real command output — review the failing step before using it.'}`;
+
+          // `success` means "files were generated", which is true and stays true.
+          // Whether the code actually WORKS is `verified` — kept separate so the
+          // ReAct loop (and the UI) can react to a real failure instead of an
+          // optimistic "done".
+          return {
+            success: true,
+            verified: Boolean(verification?.ok),
+            verification,
+            install: installResult,
+            repair: repairSummary
+              ? { attempts: repairSummary.attempts, repairs: repairSummary.repairs.map(r => ({ attempt: r.attempt, applied: (r.applied || []).map(f => f.path), reason: r.reason || null })) }
+              : null,
             message: finalReport,
             generatedFiles: writtenFiles,
             targetDir: targetDir
@@ -1241,22 +1384,76 @@ async function callOllamaLocal(agentPrompt, preferredModel = null) {
 }
 
 // ── LLM Call with Cascade ─────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// P3 — Provider error detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Does this response describe a PROVIDER/TRANSPORT failure rather than content?
+ *
+ * Every provider service here resolves with an error *string* instead of
+ * throwing, so a dead key looks exactly like a (very short) answer. Two places
+ * previously accepted it as content, which is how a run could "finish" with
+ * `Mistral Service Error: {"detail":"Invalid API Key"}` as its FINAL_ANSWER.
+ *
+ * Deliberately substring-based: the services agree on no error envelope, but
+ * they do agree on these words, and the cost of a false positive (one extra
+ * cascade hop) is far lower than a false negative (a silent, fake success).
+ */
+function isProviderErrorResponse(raw) {
+  if (!raw || typeof raw !== 'string') return true;
+  const t = raw.trim();
+  if (!t) return true;
+
+  if (
+    /\b(invalid|missing|expired|revoked|incorrect)\s+(api[_\s-]?)?key\b/i.test(t) ||
+    /\bunauthorized\b/i.test(t) ||
+    /\bforbidden\b/i.test(t) ||
+    /\bauthentication\b.*\b(fail|error|required)\b/i.test(t) ||
+    /\b(invalid|expired)\s+token\b/i.test(t) ||
+    /\b(insufficient|exceeded)\s+(quota|credit|balance)\b/i.test(t) ||
+    /\bquota\b.*\b(exceed|exhaust)\b/i.test(t) ||
+    /\brate[_\s-]?limit(ed)?\b/i.test(t) ||
+    /\b(429|401|403)\s*[:\-]?\s*(error|forbidden|unauthorized)?\b/i.test(t) ||
+    /\b(overloaded|service unavailable|bad gateway|gateway timeout|internal server error)\b/i.test(t) ||
+    /\bECONNRESET\b|\bETIMEDOUT\b|\bENOTFOUND\b|\bEAI_AGAIN\b|\bsocket hang up\b/i.test(t) ||
+    /\b(API key set nahi|service me error|rate_limit_exceeded|Credit limit|Quota exceeded)\b/i.test(t) ||
+    /\bmodel_deprecated\b|\bcontext_length_exceeded\b/i.test(t) ||
+    /\bservice error\b/i.test(t)
+  ) {
+    return true;
+  }
+
+  // A structured envelope with a `detail`/`error`/`code` field and no `action`.
+  // That shape is a provider response, never an agent tool call.
+  const maybeJson = t.match(/\{[\s\S*\}]*\}/);
+  if (maybeJson) {
+    try {
+      const obj = JSON.parse(maybeJson[0]);
+      if (obj && typeof obj === 'object' && !obj.action) {
+        if (obj.detail || obj.error || (obj.code != null && !obj.content)) return true;
+      }
+    } catch (_) { /* not JSON — fall through */ }
+  }
+
+  return false;
+}
+
+/** Human-readable label for a provider error, for honest reporting. */
+function describeProviderError(raw) {
+  const t = String(raw || '').trim().replace(/\s+/g, ' ');
+  return t.length > 220 ? `${t.slice(0, 220)}…` : (t || 'empty response from every provider');
+}
+
+// Sentinel action: every provider failed. Distinct from FINAL_ANSWER so the run
+// can report a real failure instead of a fake completion.
+const PROVIDER_ERROR_ACTION = '__PROVIDER_ERROR__';
+
 async function callLLM(messages, customKeys = null, onFallbackNotice = null, preferredModel = 'auto') {
   const contextBlock = messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
   const agentPrompt = `${AGENT_SYSTEM_PROMPT}\n\n---\n\n${contextBlock}\n\nASSISTANT (respond with valid JSON only):`;
 
-  const isErrorResp = (r) => !r ||
-    typeof r !== 'string' ||
-    r.includes('API key set nahi') ||
-    r.includes('API error') ||
-    r.includes('service me error') ||
-    r.includes('Rate limit') ||
-    r.includes('rate_limit_exceeded') ||
-    r.includes('Credit limit') ||
-    r.includes('Quota exceeded') ||
-    // Only treat bare "429" as error (short responses), not "429" inside real content
-    (r.trim().length <= 80 && /\b429\b/.test(r.trim())) ||
-    r.trim().length <= 5;
+  const isErrorResp = isProviderErrorResponse;
 
   // Cascade order (auto mode). preferredModel rotates a provider to front —
   // failure still falls through the rest, so a preference can never dead-end a run.
@@ -1272,7 +1469,14 @@ async function callLLM(messages, customKeys = null, onFallbackNotice = null, pre
   ];
 
   if (preferredModel && preferredModel !== 'auto') {
-    if (preferredModel === 'ollama') {
+    if (preferredModel && (preferredModel.startsWith('openrouter:') || (preferredModel !== 'openrouter' && OpenRouterService.isSupportedModel?.(preferredModel)))) {
+      const orTarget = preferredModel.startsWith('openrouter:') ? preferredModel.slice(11) : preferredModel;
+      const orProvider = { key: preferredModel, name: `OpenRouter (${orTarget})`, call: () => OpenRouterService.chat(agentPrompt, [], customKeys?.openrouter, 'agent', orTarget) };
+      providers.unshift(orProvider);
+      if (typeof onFallbackNotice === 'function') {
+        onFallbackNotice(`⚡ Preferred model: ${orProvider.name} first (cascade fallback active)`);
+      }
+    } else if (preferredModel === 'ollama') {
       // Local-first: try Ollama now, then normal cloud cascade if it's down.
       try {
         if (typeof onFallbackNotice === 'function') {
@@ -1369,12 +1573,28 @@ function extractFiles(resp) {
 // ── Scaffolding LLM (mini-cascade for generate_project_from_prompt) ──────────
 async function callScaffoldLLM(scaffoldPrompt, customKeys = null, reqHeaders = {}) {
   const isPrivacyMode = reqHeaders['x-privacy-mode'] === 'true';
-  const isErrorResp = (r) => !r || typeof r !== 'string' ||
-    r.includes('API key set nahi') || r.includes('API error') ||
-    r.includes('service me error') || r.includes('Rate limit') ||
-    r.includes('rate_limit_exceeded') || r.includes('Credit limit') ||
-    r.includes('Quota exceeded') ||
-    (r.trim().length <= 80 && /\b429\b/.test(r.trim())) || r.trim().length <= 5;
+  // P1: the old predicate accepted any response of ≤5 characters as success,
+  // which let `null`, `{}`, `"[DONE]"` etc. stop the cascade and be used as
+  // the "generated" scaffold. An empty/whitespace response is an error; a short
+  // one is only an error if it is obviously not a payload.
+  const looksLikePayload = (r) => {
+    const t = r.trim();
+    return t.length > 0 && (t.length > 40 || /[{}[\]<>]/.test(t) || /\n/.test(t));
+  };
+  const isErrorResp = (r) => {
+    if (!r || typeof r !== 'string') return true;
+    if (!looksLikePayload(r)) return true;
+    // Transport/provider failures. NOTE: these are checked against a response
+    // that already failed the payload test above, so a legitimate code payload
+    // containing the words "API error" / "Rate limit" is no longer discarded.
+    return r.includes('API key set nahi') ||
+      r.includes('service me error') ||
+      r.includes('rate_limit_exceeded') ||
+      r.includes('Credit limit') ||
+      r.includes('Quota exceeded') ||
+      r.includes('Rate limit') ||
+      r.includes('API error');
+  };
 
   const hasImage = typeof scaffoldPrompt === 'string' && scaffoldPrompt.includes('[IMAGE_BASE64:');
 
@@ -1435,16 +1655,518 @@ async function callScaffoldLLM(scaffoldPrompt, customKeys = null, reqHeaders = {
   throw new Error('All AI providers failed to generate code.');
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// P2 — Repository view
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Bounded, read-only workspace walk used to hydrate `projectFiles` when the
+ * caller did not supply them.
+ *
+ * Hard bounds on file count, per-file size and total size are deliberate: this
+ * runs on the request path before the first token is emitted, and an unbounded
+ * read of a workspace that contains `node_modules` would stall the SSE stream.
+ */
+function readWorkspaceFiles(dir, options = {}) {
+  const {
+    maxFiles = 120,
+    maxFileBytes = 120000,
+    maxTotalBytes = 900000,
+  } = options;
+
+  const SKIP = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.checkpoints', '.cache', 'out', '.turbo']);
+  const CODE_EXT = /\.(jsx?|tsx?|mjs|cjs|css|scss|html|json|md|txt|yml|yaml|py|ts)$/i;
+
+  let root;
+  try {
+    root = path.resolve(dir);
+    if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) return [];
+  } catch (_) {
+    return [];
+  }
+
+  const out = [];
+  let totalBytes = 0;
+
+  const walk = (rel, depth) => {
+    if (depth > 6 || out.length >= maxFiles || totalBytes >= maxTotalBytes) return;
+    let entries;
+    try {
+      entries = fs.readdirSync(path.join(root, rel), { withFileTypes: true });
+    } catch (_) {
+      return;
+    }
+    for (const e of entries) {
+      if (out.length >= maxFiles || totalBytes >= maxTotalBytes) return;
+      if (e.name.startsWith('.') && e.name !== '.env.example') continue;
+      const relPath = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        if (SKIP.has(e.name)) continue;
+        walk(relPath, depth + 1);
+        continue;
+      }
+      if (!CODE_EXT.test(e.name)) continue;
+      try {
+        const stat = fs.statSync(path.join(root, relPath));
+        if (!stat.isFile() || stat.size === 0 || stat.size > maxFileBytes) continue;
+        const content = fs.readFileSync(path.join(root, relPath), 'utf8');
+        totalBytes += content.length;
+        out.push({ path: relPath, content });
+      } catch (_) {}
+    }
+  };
+
+  walk('', 0);
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// P1 — Repair loop: real failure → LLM → real re-verification
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Flatten a verification result into the evidence a repair prompt needs.
+ * The model must see the ACTUAL compiler/runtime output, never a paraphrase —
+ * a paraphrase is how the agent ends up "fixing" the wrong file.
+ */
+function buildFailureEvidence(verification) {
+  const parts = [];
+  let summary = 'verification failed';
+
+  const build = verification?.build;
+  if (build && build.ok === false) {
+    summary = `\`npm run build\` exited with code ${build.exitCode}`;
+    parts.push(`BUILD COMMAND: npm run build\nEXIT CODE: ${build.exitCode}\n\n${build.stderr || build.stdout || '(no output)'}`);
+  }
+
+  const rt = verification?.runtime || {};
+  if (rt.attempted && rt.ok === false) {
+    if (rt.pageErrors?.length) {
+      parts.push(`UNCAUGHT RUNTIME ERRORS:\n${rt.pageErrors.slice(0, 8).join('\n')}`);
+      summary = 'the app loaded but threw uncaught errors';
+    }
+    if (rt.consoleErrors?.length) {
+      parts.push(`CONSOLE ERRORS:\n${rt.consoleErrors.slice(0, 8).join('\n')}`);
+      if (summary === 'verification failed') summary = 'the app logged console errors on load';
+    }
+    if (!parts.length) {
+      parts.push(`The app did not render anything (HTTP ${rt.status ?? 'n/a'}).`);
+      summary = 'the app rendered an empty page';
+    }
+  }
+
+  return { summary, text: parts.join('\n\n') || '(no detailed output captured)' };
+}
+
+/**
+ * Text-only wrapper over the scaffold cascade. `callScaffoldLLM` already
+ * validates that a provider returned a usable file payload, which is exactly
+ * the contract a repair response needs.
+ */
+function callScaffoldLLMText(system, user, reqHeaders = {}) {
+  return callScaffoldLLM(`${system}\n\n=== PROJECT STATE ===\n${user}`, null, reqHeaders);
+}
+
+/**
+ * Run: verify → (on real failure) ask the model to fix → re-verify for real.
+ *
+ * Bounded by `maxAttempts`. Stops early when the model returns nothing usable
+ * or returns files identical to what is already on disk — re-asking a model
+ * that already failed the same way only burns quota.
+ */
+async function runRepairLoop(opts) {
+  const { dir, projectId, prompt, callLLM, onProgress, maxAttempts = 3, initialVerification = null } = opts;
+  const log = (message) => {
+    if (onProgress) onProgress({ type: 'agent_status', agent: 'Self-Heal', message });
+  };
+
+  // Every attempt re-runs the REAL build + browser check.
+  const verify = async () => runtimeBridge.verifyBuild(dir, { projectId, onLog: log });
+
+  // P5: the error that kicked the loop off — remembered for learning and for
+  // injecting a known fix on the next occurrence.
+  let initialErrorText = null;
+
+  const repair = async (verification, attempt) => {
+    const evidence = buildFailureEvidence(verification);
+    if (!initialErrorText) initialErrorText = evidence.text;
+
+    // P5: has this exact error been fixed before? Inject the known fix so the
+    // model starts from a proven answer instead of rediscovering it — the thing
+    // Replit / Bolt / Devin do not do between runs.
+    let fixContext = '';
+    try {
+      const known = fixMemory.knownFixesFor({ error: evidence.text, projectId: projectId || 'default' });
+      if (known.length) {
+        fixContext = `\n\n${fixMemory.formatKnownFixes(known)}`;
+        log(`🧠 ${known.length} known fix(es) for this error found in memory`);
+      }
+    } catch (memErr) {
+      logger.info('[fixMemory] retrieval skipped:', memErr.message);
+    }
+
+    const request = await projectRepair.requestRepair({
+      dir,
+      evidence: evidence.text + fixContext,
+      summary: evidence.summary,
+      intent: prompt,
+      callLLM,
+      attempt,
+    });
+
+    if (!request.files.length) {
+      return { applied: [], reason: request.reason || 'model returned no files' };
+    }
+
+    const { applied, unchanged } = projectRepair.diffAgainstDisk(dir, request.files);
+    const written = [];
+
+    for (const f of applied) {
+      let safePath;
+      try {
+        safePath = safeJoin(dir, f.path); // path-security is not negotiable here
+      } catch (_) {
+        log(`⛔ Rejected repair path: ${f.path}`);
+        continue;
+      }
+      try {
+        fs.mkdirSync(path.dirname(safePath), { recursive: true });
+        fs.writeFileSync(safePath, f.content, 'utf-8');
+        saveProjectFile(projectId || 'default', f.path, f.content);
+        written.push(f.path);
+        if (onProgress) {
+          onProgress({ type: 'file_written', file: f.path, content: f.content, previous: null, isNew: false, progress: `repair ${attempt}` });
+        }
+      } catch (e) {
+        log(`⚠️ Could not write repaired file ${f.path}: ${e.message}`);
+      }
+    }
+
+    if (!written.length) {
+      return {
+        applied: [],
+        unchanged,
+        reason: unchanged.length ? 'model returned files identical to what is on disk' : 'no writable file was returned',
+      };
+    }
+
+    // P3: a repair that edits package.json changes the dependency set, so the
+    // next build would run against a stale node_modules. Without this the loop
+    // reports "vite is not recognized" forever — and the model's usual
+    // "workaround" is to rewrite the build script as `npm install && vite build`,
+    // which papers over the harness bug instead of fixing it.
+    if (projectRepair.manifestChanged(written)) {
+      log('📦 package.json changed — re-installing dependencies before the next build…');
+      try {
+        const reinstall = await runtimeBridge.installDependencies(dir, { onLog: log });
+        if (!reinstall.ok) {
+          return {
+            applied: written.map(p => ({ path: p })),
+            unchanged,
+            reason: `dependency re-install failed (exit ${reinstall.exitCode ?? 'unknown'}): ${reinstall.tail || 'see build output'}`,
+          };
+        }
+        log('✅ Dependencies re-installed.');
+      } catch (installErr) {
+        return {
+          applied: written.map(p => ({ path: p })),
+          unchanged,
+          reason: `dependency re-install threw: ${installErr.message}`,
+        };
+      }
+    }
+
+    return { applied: written.map(p => ({ path: p })), unchanged };
+  };
+
+  const outcome = await projectRepair.repairUntilVerified({ dir, verify, repair, maxAttempts, onLog: log, initialVerification });
+
+  // P5: a successful repair becomes a durable lesson. Only learn when the loop
+  // actually fixed something — learning from a failed loop would poison memory.
+  if (outcome.ok && initialErrorText && outcome.repairs.some(r => r.applied?.length)) {
+    try {
+      const appliedFiles = outcome.repairs.flatMap(r => (r.applied || []).map(f => f.path));
+      fixMemory.learnFix({
+        error: initialErrorText,
+        files: appliedFiles,
+        summary: `repaired by rewriting ${appliedFiles.slice(0, 3).join(', ')}`,
+        projectId: projectId || 'default',
+      });
+    } catch (learnErr) {
+      logger.info('[fixMemory] learning skipped:', learnErr.message);
+    }
+  }
+
+  return outcome;
+}
+
+/**
+ * P5 — Start the real dev server and leave it running.
+ *
+ * The preview route (`/api/preview/:projectId`) already proxies a READY server
+ * to the user, so the only missing piece was that nothing ever started one.
+ * Now a verified run ends with the actual Vite dev server alive: the "Live
+ * Preview" tab is genuinely live, and the next edit triggers HMR instead of a
+ * full rebuild.
+ *
+ * Never throws — a server that fails to boot is reported, not crashed on.
+ */
+async function ensureLivePreview(opts) {
+  const { dir, projectId, send, onProgress } = opts;
+
+  const log = (message) => {
+    if (onProgress) onProgress({ type: 'agent_status', agent: 'Preview', message });
+  };
+
+  try {
+    // Already running? Just report it — starting twice would waste a port and
+    // leak the first process.
+    const existing = devServerManager.getServerByProject(projectId);
+    if (existing && existing.state === 'READY') {
+      if (send) send({ type: 'dev_server', url: existing.url, state: 'READY', reused: true, hostPort: existing.hostPort });
+      return { ok: true, url: existing.url, hostPort: existing.hostPort, reused: true };
+    }
+
+    log('🚀 Starting the live dev server (kept running for Live Preview + HMR)…');
+    const started = await runtimeBridge.startRealDevServer(dir, {
+      projectId,
+      keepAlive: true,
+      onLog: log,
+    });
+
+    if (!started.ok) {
+      log(`⚠️ Live dev server did not start: ${started.reason || 'unknown reason'} (preview falls back to the built output)`);
+      if (send) send({ type: 'dev_server', url: null, state: 'FAILED', reason: started.reason });
+      return { ok: false, reason: started.reason || 'dev server failed to start' };
+    }
+
+    log(`✅ Live preview running at ${started.url}`);
+    if (send) {
+      send({
+        type: 'dev_server',
+        url: started.url,
+        state: 'READY',
+        reused: false,
+        hostPort: started.hostPort,
+        framework: started.framework,
+      });
+    }
+    return { ok: true, url: started.url, hostPort: started.hostPort, reused: false, framework: started.framework };
+  } catch (e) {
+    logger.warn('[Agent] ensureLivePreview threw:', e.message);
+    if (send) send({ type: 'dev_server', url: null, state: 'FAILED', reason: e.message });
+    return { ok: false, reason: e.message };
+  }
+}
+
+/**
+ * P3 — Evidence gate for a whole run.
+ *
+ * Before P3 only the greenfield scaffold path was ever verified: a modification
+ * request rewrote whole files and immediately reported `done`, so `npm run build`
+ * never ran and a broken edit was indistinguishable from a good one.
+ *
+ * This closes that. When a run actually changed files in a runnable project it
+ * must produce real build + browser evidence before the run is called finished.
+ * `skipped` is returned honestly for the cases where there is nothing to prove
+ * (no code changed, or the project cannot be built at all).
+ */
+async function verifyRunOutcome(opts) {
+  const {
+    dir,
+    projectId,
+    prompt,
+    changedFiles = [],
+    onProgress,
+    send,
+    repairEnabled = true,
+    maxRepairAttempts = 3,
+  } = opts;
+
+  const log = (message) => {
+    if (onProgress) onProgress({ type: 'agent_status', agent: 'Verify', message });
+  };
+
+  const hasCodeChanges = changedFiles.some(p => /\.(jsx?|tsx?|mjs|cjs|css|scss|html|json)$/i.test(p));
+
+  // P3: the scaffold path already built and browser-verified this exact state.
+  // Re-running it would burn ~10s and a second Chromium launch for a result we
+  // cannot have invalidated — but ONLY when nothing has been edited since.
+  if (opts.alreadyVerified && !changedFiles.length) {
+    return {
+      skipped: true,
+      verified: true,
+      reason: 'the scaffold was already built and browser-verified in this run, and nothing has changed since',
+      verification: null,
+      repair: null,
+      reused: true,
+    };
+  }
+
+  if (!hasCodeChanges) {
+    return {
+      skipped: true,
+      verified: false,
+      reason: 'no code files were changed, so there is nothing to build or run',
+      verification: null,
+      repair: null,
+    };
+  }
+
+  let verification = null;
+  try {
+    log('🔍 Verifying the result — building the project and loading the real output…');
+    verification = await runtimeBridge.verifyBuild(dir, { projectId, onLog: log });
+  } catch (e) {
+    logger.warn('[Agent] Run verification threw:', e.message);
+    return {
+      skipped: false,
+      verified: false,
+      reason: `verification crashed: ${e.message}`,
+      verification: null,
+      repair: null,
+    };
+  }
+
+  if (send) {
+    send({
+      type: 'verification',
+      verified: Boolean(verification.ok),
+      evidence: verification.evidence,
+      runtime: {
+        attempted: verification.runtime?.attempted ?? false,
+        ok: verification.runtime?.ok ?? false,
+        unverified: verification.runtime?.unverified ?? true,
+        via: verification.runtime?.via || null,
+        pageErrors: verification.runtime?.pageErrors || [],
+        consoleErrors: verification.runtime?.consoleErrors || [],
+      },
+      summary: runtimeBridge.describeVerification(verification),
+    });
+  }
+
+  let repair = null;
+  if (!verification.ok && repairEnabled) {
+    try {
+      repair = await runRepairLoop({
+        dir,
+        projectId,
+        prompt,
+        maxAttempts: maxRepairAttempts,
+        initialVerification: verification,
+        callLLM: (system, user) => callScaffoldLLMText(system, user, opts.headers || {}),
+        onProgress,
+      });
+      if (repair.verification) verification = repair.verification;
+    } catch (repairErr) {
+      logger.warn('[Agent] Run repair loop crashed:', repairErr.message);
+      if (onProgress) log(`⚠️ Repair loop crashed: ${repairErr.message}`);
+    }
+  }
+
+  const verified = Boolean(verification?.ok);
+
+  // P5: a verified modification deserves a live preview too — same app, same
+  // promise as the scaffold path.
+  let live = null;
+  if (verified) {
+    live = await ensureLivePreview({ dir, projectId, send, onProgress });
+  }
+
+  if (!verified && onProgress) {
+    log(
+      verification?.runtime?.unverified
+        ? '⚠️ Could not verify this change — reporting the reason honestly.'
+        : '❌ The change does not build or does not run. Reporting the real failure.'
+    );
+  }
+
+  return {
+    skipped: false,
+    verified,
+    verification,
+    repair: repair
+      ? { attempts: repair.attempts, repairs: repair.repairs.map(r => ({ attempt: r.attempt, applied: (r.applied || []).map(f => f.path), reason: r.reason || null })) }
+      : null,
+    summary: runtimeBridge.describeVerification(verification),
+    livePreviewUrl: live?.ok ? live.url : null,
+  };
+}
+
 // ── Safe Path Join ────────────────────────────────────────────────────────────
 function safeJoin(base, rel) {
   const { safeJoin: pathSafeJoin } = require('../services/pathSecurity');
   return pathSafeJoin(base, rel);
 }
 
+// ── P0: Inline <style> normalisation ───────────────────────────────────────────
+/**
+ * Move every inline `<style>` block out of a generated index.html and into the
+ * project's stylesheet.
+ *
+ * Why this exists: Vite's `html-inline-proxy` plugin converts an inline
+ * `<style>` into a virtual module whose id is derived from the HTML file's
+ * absolute path. On a path containing a space (e.g. `C:\Users\vikash kumar\…`)
+ * that id cannot be resolved and `vite build` fails with:
+ *   [vite:html-inline-proxy] Could not load …/index.html?html-proxy&inline-css&index=0.css
+ * The identical project builds successfully in a space-free directory, so the
+ * inline style block is the trigger. Moving it to the stylesheet both fixes the
+ * build and puts the CSS where it belongs.
+ *
+ * @param {Array<{path:string,content:string}>} files mutated in place
+ * @returns {boolean} true when at least one block was relocated
+ */
+function normalizeInlineHtmlStyles(files) {
+  if (!Array.isArray(files)) return false;
+
+  const html = files.find(f => f && f.path === 'index.html');
+  if (!html || typeof html.content !== 'string') return false;
+
+  const blocks = [];
+  const cleaned = html.content.replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, (_match, css) => {
+    const trimmed = String(css || '').trim();
+    if (trimmed) blocks.push(trimmed);
+    return '';
+  });
+
+  if (!blocks.length) return false;
+
+  html.content = cleaned;
+
+  const banner =
+    '/* Relocated from index.html by the scaffold normaliser.\n' +
+    '   Inline <style> blocks break Vite builds when the workspace path contains\n' +
+    '   spaces (vite:html-inline-proxy cannot resolve the derived module id). */';
+
+  const addition = `\n${banner}\n\n${blocks.join('\n')}\n`;
+
+  const css = files.find(f => f && (f.path === 'src/index.css' || f.path === 'index.css'));
+  if (css && typeof css.content === 'string') {
+    css.content = css.content + addition;
+  } else {
+    files.push({ path: 'src/index.css', content: addition.replace(/^\n/, '') });
+  }
+
+  return true;
+}
+
 // ── Parse LLM JSON output ─────────────────────────────────────────────────────
 function parseLLMAction(raw) {
   if (!raw || typeof raw !== 'string') {
     return { thought: 'No output received.', action: 'FINAL_ANSWER', answer: 'No response from model.' };
+  }
+
+  // P3: a provider error is not an answer. Without this check, `Mistral Service
+  // Error: {"detail":"Invalid API Key"}` parsed as JSON (no `action` key), fell
+  // through to the text fallback and became the run's FINAL_ANSWER — a run that
+  // looked complete having done nothing.
+  if (isProviderErrorResponse(raw)) {
+    return {
+      thought: 'The model provider returned an error instead of a response.',
+      action: PROVIDER_ERROR_ACTION,
+      answer: describeProviderError(raw),
+      providerError: true,
+    };
   }
 
   let parsed = null;
@@ -2377,6 +3099,16 @@ router.get('/watch/:projectId', (req, res) => {
 // ── ReAct Loop API Endpoint (SSE Streaming) ───────────────────────────────────
 router.post('/run', async (req, res) => {
   let { userPrompt, projectPath, projectFiles, projectId, customKeys, chatHistory, preferredModel } = req.body;
+  // P3: run-level switches. Repair is on by default; `repairEnabled:false` opts
+  // out and `maxRepairAttempts` is clamped so a client cannot ask for an
+  // unbounded repair loop.
+  const repairEnabled = req.body.repairEnabled !== false;
+  const maxRepairAttempts = Number.isFinite(Number(req.body.maxRepairAttempts))
+    ? Math.max(0, Math.min(5, Math.floor(Number(req.body.maxRepairAttempts))))
+    : 3;
+  const requestedMaxSteps = Number.isFinite(Number(req.body.maxSteps))
+    ? Math.max(1, Math.min(100, Math.floor(Number(req.body.maxSteps))))
+    : null;
   customKeys = settingsStore.mergeCustomKeys(customKeys);
 
   if (!userPrompt || typeof userPrompt !== 'string' || !userPrompt.trim()) {
@@ -2389,6 +3121,34 @@ router.post('/run', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('X-Accel-Buffering', 'no');
   if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+  // ── P2: hydrate the repository view ─────────────────────────────────────────
+  // `projectFiles` arrives from the client, so it is only as complete as the
+  // caller happened to send — which is why retrieval silently degraded to
+  // "no relevant code" for any caller that omitted it. Hydrate from SQLite
+  // first (the store the IDE already writes), then from disk, so the indexer
+  // always sees the real repository.
+  if (!Array.isArray(projectFiles) || projectFiles.length === 0) {
+    try {
+      const fromDb = getProjectFiles(projectId || 'default');
+      if (Array.isArray(fromDb) && fromDb.length) {
+        projectFiles = fromDb.map(f => ({ path: f.path, content: f.content || '' }));
+        logger.info(`[Agent] Hydrated ${projectFiles.length} file(s) from the workspace store for retrieval`);
+      }
+    } catch (hydrateErr) {
+      logger.info('[Agent] Workspace store hydration skipped:', hydrateErr?.message || hydrateErr);
+    }
+  }
+
+  if (!Array.isArray(projectFiles) || projectFiles.length === 0) {
+    const wsGuess = projectPath || path.join(os.tmpdir(), `agent-ws-${projectId || 'default'}`);
+    const fromDisk = readWorkspaceFiles(wsGuess);
+    if (fromDisk.length) {
+      projectFiles = fromDisk;
+      logger.info(`[Agent] Hydrated ${fromDisk.length} file(s) from disk for retrieval`);
+    }
+  }
+  if (!Array.isArray(projectFiles)) projectFiles = [];
 
   let isAborted = false;
   const abortHandler = () => {
@@ -2417,11 +3177,14 @@ router.post('/run', async (req, res) => {
     try {
       const notes = extractRunNotes({ prompt: userPrompt, status, message, heals: runHeals, filesTouched });
       if (notes.length) {
+        // NOTE: learnNotes is SYNCHRONOUS (returns {saved,deduped,failed}).
+        // Calling `.catch()` on it threw "not a function", which meant the
+        // auto-learn below was silently skipped on every single run.
         learnNotes(notes, {
           userId: req.headers['x-user-id'] || 'local-user',
           projectId: projectId || null,
           source: 'run',
-        }).catch(() => { /* memory must never break a run */ });
+        });
       }
     } catch (e) {
       logger.info(`[Agent] auto-learn skipped: ${e.message}`);
@@ -2493,16 +3256,39 @@ router.post('/run', async (req, res) => {
     }
   }
 
-  // Build file context (RAG: most relevant files via search first)
+  // Build file context (P2: real BM25 retrieval over code-aware tokens)
+  //
+  // This replaced a substring counter that scored a chunk by
+  // `text.match(/\bword\b/g).length * 3`. That could not tell a rare identifier
+  // from a common one, could not match `startTimer` when asked about "timer",
+  // and had no notion of which files import which. codeContext does all three
+  // and reports what it actually matched, so the block is never a guess.
   let fileContext = '';
+  let contextStats = null;
   try {
-    const relevantFiles = searchCodebase(userPrompt, projectFiles).results;
-    if (relevantFiles.length > 0) {
-      fileContext = '=== RELEVANT CODE (via semantic search) ===\n' +
-        relevantFiles.map(r => `FILE: ${r.file} (line ${r.startLine})\n\`\`\`\n${r.snippet}\n\`\`\``).join('\n\n');
+    const retrieval = codeContext.retrieveContext({
+      projectFiles: projectFiles || [],
+      query: userPrompt,
+      maxTokens: 6000,
+    });
+    contextStats = retrieval.stats;
+    if (!retrieval.empty) {
+      fileContext = retrieval.block;
+      logger.info(
+        `[Agent] BM25 retrieval: ${retrieval.hits.length} hit(s) across ${retrieval.stats.chunksIndexed} chunks ` +
+        `(${retrieval.stats.distinctTerms} terms, ~${retrieval.stats.tokensUsed} tokens, ${retrieval.stats.buildMs}ms)`
+      );
+      // Surface the evidence so the UI can show *why* those files were chosen.
+      send({
+        type: 'code_context',
+        hits: retrieval.hits,
+        stats: retrieval.stats,
+      });
+    } else {
+      logger.info(`[Agent] BM25 retrieval found nothing relevant for "${String(userPrompt).slice(0, 60)}" (${retrieval.stats.chunksIndexed} chunks indexed)`);
     }
   } catch (searchErr) {
-    logger.info('[Agent] Semantic search skipped:', searchErr?.message || searchErr);
+    logger.info('[Agent] Code retrieval skipped:', searchErr?.message || searchErr);
   }
 
   // Python AI Engine (LlamaIndex RAG) — semantic Q&A over workspace files.
@@ -2531,7 +3317,22 @@ router.post('/run', async (req, res) => {
 
   const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   initRunSnapshot(runId, projectId, workspacePath, projectFiles);
-  send({ type: 'run_started', runId });
+  // P3: every code file this run touches, so the evidence gate knows whether
+  // there is anything worth building.
+  const runChangedFiles = new Set();
+  // P3: set when the scaffold path produced fresh passing evidence, so the final
+  // gate can avoid re-running a build that cannot have changed.
+  let runScaffoldVerified = false;
+  // P3: tell the client its budget up front so the footer meter is honest rather
+  // than a guess.
+  send({
+    type: 'run_started',
+    runId,
+    budget: { maxSteps: requestedMaxSteps ?? 50, repairEnabled, maxRepairAttempts },
+    context: contextStats
+      ? { chunksIndexed: contextStats.chunksIndexed, hits: contextStats.hits, tokensUsed: contextStats.tokensUsed, buildMs: contextStats.buildMs }
+      : null
+  });
   send({ type: 'start', message: '🔍 Analyzing prompt & generating dynamic task plan...' });
 
   // Phase 1: Dynamic Task Breakdown Plan (Instant 0ms response)
@@ -2656,9 +3457,22 @@ router.post('/run', async (req, res) => {
     content: `WORKSPACE FILES:\n${fileContext || '(No files yet)'}${conversationContext}${dynamicToolsContext}${lessonsContext}\n\nUSER TASK: ${userPrompt}\n\nDYNAMIC TASK BREAKDOWN:\n${taskListText}`
   }];
 
-  const MAX_STEPS = 50;
+  // P3: the ceiling is now a real, client-visible budget instead of a magic 50.
+// A model that keeps looping needs a bound, and the UI needs to know what it is.
+  const MAX_STEPS = requestedMaxSteps ?? 50;
+  logger.info(`[Agent] ReAct budget for run ${runId}: ${MAX_STEPS} steps, repair=${repairEnabled ? `on (max ${maxRepairAttempts})` : 'off'}`);
   const steps = [];
+  // P1: self-heal bookkeeping. `selfHealState` pins the budget to ONE failing
+  // command instead of a global counter that any unrelated success used to
+  // reset — which is why the 3-attempt ceiling was never actually enforced.
   let selfHealAttempts = 0;
+  let selfHealState = null; // { command, signature }
+  // P1: real outcome tracking so a run that failed cannot report success.
+  const runStats = { steps: 0, failedSteps: 0, lastError: null };
+  // P3: consecutive provider-cascade failures. Two in a row aborts the run —
+  // three identical failures will not fix themselves, and silently degrading
+  // into an error string as the "answer" is worse than stopping.
+  const providerErrors = [];
   let activeTaskId = 1;
 
   for (let step = 0; step < MAX_STEPS; step++) {
@@ -2680,7 +3494,12 @@ router.post('/run', async (req, res) => {
       const hasExistingFiles = existingProjectFiles && existingProjectFiles.length > 0;
       const isExistingProjectModification = /\b(upgrade|update|add|chart|export|fix|modify|enhance|improve|refactor|optimize|debug|change|badlo|jodo|lagao|karo|integrate|feature|current|existing|iss? project|iss? app)\b/i.test(userPrompt);
       const isExplicitNewProject = !isExistingProjectModification && /\b(new project|naya project|scratch se|brand new|create a new (?:app|project|website)|build a new (?:app|project|website)|generate a new (?:app|project|website)|scaffold a new)\b/i.test(userPrompt);
-      const isGreenfieldScaffold = !hasExistingFiles && (isExplicitNewProject || !isExistingProjectModification);
+      // An EXPLICIT "create a new app …" is a greenfield request even when the
+      // workspace already holds files from an earlier run. Requiring an empty
+      // workspace meant a repeat scaffold fell through to the bare loop (neither
+      // the greenfield nor the modification branch), so it never produced
+      // verification evidence and never started the live preview.
+      const isGreenfieldScaffold = isExplicitNewProject || (!hasExistingFiles && !isExistingProjectModification);
 
       // Greenfield Full-Stack Project Generator
       if (step === 0 && isGreenfieldScaffold) {
@@ -2712,110 +3531,135 @@ router.post('/run', async (req, res) => {
           try { res.end(); } catch (_) {}
           return;
         }
-        plan.tasks.forEach(t => t.status = 'completed');
-        send({ type: 'plan', plan });
+        // P3: a verified scaffold is genuinely finished, so returning is correct.
+        // An UNVERIFIED one is not — fall through into the ReAct loop so the
+        // model can attempt targeted repairs with real tools, instead of the
+        // run ending on an unproven claim.
+        if (toolResult.verified) {
+          // P3: record that this run already has fresh, passing evidence. The
+          // run-level evidence gate at the end skips re-verifying when nothing
+          // has changed since, which saves a redundant build + browser launch.
+          runScaffoldVerified = true;
+
+          // P5: leave the real dev server running so the Live Preview tab is
+          // actually live and the next edit hot-reloads instead of rebuilding.
+          // NOTE: `targetDir` is local to executeTool's switch case — out here
+          // the workspace is `workspacePath` (it was passed in as targetDir).
+          // Referring to the wrong one threw a ReferenceError that the loop's
+          // catch turned into a step failure, silently killing the live preview.
+          // Guarded so a preview problem can never fail an already-verified run.
+          let live = { ok: false, reason: 'preview not started' };
+          try {
+            live = await ensureLivePreview({
+              dir: workspacePath,
+              projectId: projectId || 'default',
+              send,
+              onProgress: send,
+            });
+          } catch (previewErr) {
+            logger.warn('[Agent] Live preview step failed (run continues):', previewErr.message);
+          }
+
+          plan.tasks.forEach(t => t.status = 'completed');
+          send({ type: 'plan', plan });
+          send({
+            type: 'done',
+            message: (toolResult.message || '🎉 Full-stack application scaffolded, built and verified.') +
+              (live.ok ? `\n\n🌐 **Live Preview:** your app is running at \`${live.url}\`` : ''),
+            steps,
+            plan,
+            verified: true,
+            livePreviewUrl: live.ok ? live.url : null
+          });
+          try {
+            const { getWorkflowEngine } = require('../services/workflowEngine');
+            const engine = getWorkflowEngine();
+            if (engine) engine.emitEvent('agent_run_completed', { projectId: projectId || 'default', message: toolResult.message });
+          } catch (_) {}
+          try { res.end(); } catch (_) {}
+          return;
+        }
+
+        // Not verified. Hand the real failure to the model as an observation so
+        // it can act on it, and keep going.
+        logger.warn('[Agent] Scaffold generated but NOT verified — continuing into the ReAct loop for repair.');
         send({
-          type: 'done',
-          message: toolResult.message || '🎉 Full-stack application scaffolded successfully and ready for live preview.',
-          steps,
-          plan
+          type: 'verification',
+          verified: false,
+          summary: runtimeBridge.describeVerification(toolResult.verification),
+          evidence: toolResult.verification?.evidence || [],
+          runtime: {
+            attempted: toolResult.verification?.runtime?.attempted ?? false,
+            ok: false,
+            unverified: toolResult.verification?.runtime?.unverified ?? true,
+            pageErrors: toolResult.verification?.runtime?.pageErrors || [],
+            consoleErrors: toolResult.verification?.runtime?.consoleErrors || [],
+          },
         });
-        try {
-          const { getWorkflowEngine } = require('../services/workflowEngine');
-          const engine = getWorkflowEngine();
-          if (engine) engine.emitEvent('agent_run_completed', { projectId: projectId || 'default', message: toolResult.message });
-        } catch (_) {}
-        try { res.end(); } catch (_) {}
-        return;
+        messages.push({
+          role: 'assistant',
+          content: JSON.stringify({ thought: 'Project scaffolded, verification pending', action: 'generate_project_from_prompt', parameters: { prompt: userPrompt } })
+        });
+        messages.push({
+          role: 'user',
+          content: `The project was scaffolded but it does NOT pass verification. Real evidence:
+
+${runtimeBridge.describeVerification(toolResult.verification)}
+
+${buildFailureEvidence(toolResult.verification).text}
+
+ACTION REQUIRED:
+1. Read the failing file(s) with read_file.
+2. Fix the ROOT CAUSE with apply_diff (search/replace) — never rewrite a whole file.
+3. Re-run \`npm run build\` with run_terminal so its exit code proves the fix.
+4. Only then output FINAL_ANSWER.
+
+Do NOT claim the work is done until the build command exits 0.`
+        });
+        continue;
       }
 
-      // ── Iterative Code Modification Engine (for existing projects) ────────
+// ── Existing-Project Modification (P3: real ReAct, not a full rewrite) ───
+      //
+      // This used to be a single `callScaffoldLLM` pass that dumped every file
+      // into one prompt and asked for complete rewrites, then wrote them and
+      // reported `done` — no build, no browser, no repair, and a blast radius
+      // of every file in the project. It also bypassed the guarded tool path:
+      // `write_file` normally refuses to overwrite an existing file (you must
+      // use `apply_diff`), and this branch simply wrote to disk around it.
+      //
+      // Now a modification is an ordinary ReAct turn. The model already has
+      // BM25-retrieved context (P2), the tool list, and the plan, so it can
+      // read the exact file it needs and patch it. Every edit therefore goes
+      // through `deterministicCodeGuard` + path security, and the evidence gate
+      // below runs before the run is allowed to claim completion.
       if (step === 0 && hasExistingFiles && !isExplicitNewProject) {
         send({
           type: 'agent_status',
           agent: 'Coder',
-          message: `🛠️ Coder: Modifying existing project files for: "${userPrompt}"...`
-        });
-        send({
-          type: 'thinking',
-          step: 1,
-          message: `Reading workspace context and applying code updates...`
+          message: `🛠️ Coder: Modifying an existing project for: "${String(userPrompt).slice(0, 120)}"...`
         });
 
-        const targetFilesContext = existingProjectFiles.map(f => `FILE: ${f.path}\n\`\`\`\n${f.content || ''}\n\`\`\``).join('\n\n');
-        const editPrompt = `You are an expert autonomous software engineer.
-The user is modifying their existing React + Express project.
+        // Point the model at the retrieved code and tell it the ground rules
+        // that the removed one-shot rewrite used to violate.
+        messages.push({
+          role: 'user',
+          content: `You are modifying an EXISTING project. The relevant code is in the WORKSPACE FILES block above, with a CODE MAP telling you what imports what.
 
-USER REQUEST:
-"${userPrompt}"
+RULES FOR THIS TASK:
+1. Use 'read_file' on the exact file you must change before editing it. Do not guess its current contents.
+2. Use 'apply_diff' with an exact 'search' block copied verbatim from that file and your 'replace' block. Full-file replacement via 'write_file' is REJECTED for existing files, and rewriting an entire file you were not asked to touch will destroy unrelated work.
+3. Change only what the request needs. Preserve every other feature and import.
+4. ICON RULE (Font Awesome FREE only): any icon MUST be a real Font Awesome icon via @fortawesome/react-fontawesome with individual imports (e.g. "import { faPlus } from '@fortawesome/free-solid-svg-icons'" + "<FontAwesomeIcon icon={faPlus} />"). NEVER lucide-react, NEVER emoji-as-icons, NEVER hand-written <svg>. Add the @fortawesome/* dependencies to package.json if they are missing.
+5. When you are done, run 'run_terminal' with 'npm run build' so the exit code proves the change compiles. If it fails, fix it and re-run.
+6. Only output FINAL_ANSWER after the build passes. If you could not make it pass, say so plainly in the answer and include the real error output.
 
-CURRENT PROJECT FILES:
-${targetFilesContext}
+REQUEST: "${String(userPrompt).slice(0, 1500)}"`
+        });
 
-INSTRUCTIONS:
-1. Modify the relevant file(s) (e.g. src/App.jsx, server.js, src/index.css) to fully implement the user's requested change.
-2. Maintain all existing working features and dependencies.
-3. ICON RULE (Font Awesome ONLY): any icon you add or keep MUST be a real Font Awesome Free icon via @fortawesome/react-fontawesome with individual imports (e.g. "import { faPlus } from '@fortawesome/free-solid-svg-icons'" + "<FontAwesomeIcon icon={faPlus} />"; brand logos from '@fortawesome/free-brands-svg-icons'). NEVER use lucide-react, emoji-as-icons, or hand-written <svg> icon markup. If package.json lacks the @fortawesome/* dependencies, add them.
-3. Output the COMPLETE updated file(s) in this EXACT format (no ellipses, no placeholders):
-FILE: <filepath>
-\`\`\`<language>
-<complete updated code>
-\`\`\`
-`;
-
-        try {
-          logger.info(`[Agent] Healing LLM prompt sent...`);
-          const rawEditResp = await callScaffoldLLM(editPrompt, null, req.headers);
-          const editedFiles = extractFiles(rawEditResp);
-
-          if (editedFiles && editedFiles.length > 0) {
-            for (const ef of editedFiles) {
-              const guard = deterministicCodeGuard.guard(ef.path, ef.content || '');
-              if (!guard.accepted) {
-                logger.warn(`[Agent] Iterative edit rejected by guard for ${ef.path}: ${guard.reason}`);
-                continue;
-              }
-              const safePath = safeJoin(workspacePath, ef.path);
-              try {
-                fs.mkdirSync(path.dirname(safePath), { recursive: true });
-                fs.writeFileSync(safePath, ef.content || '', 'utf-8');
-              } catch (_) {}
-              saveProjectFile(projectId || 'default', ef.path, ef.content || '');
-
-              if (runSnapshots.has(runId)) {
-                runSnapshots.get(runId).afterFiles.set(ef.path, ef.content || '');
-              }
-              
-              send({
-                type: 'file_written',
-                file: ef.path,
-                path: ef.path,
-                content: ef.content || '',
-                progress: '1/1'
-              });
-            }
-
-            plan.tasks.forEach(t => t.status = 'completed');
-            send({ type: 'plan', plan });
-            send({
-              type: 'done',
-              message: `✅ Successfully applied updates to ${editedFiles.map(f => f.path).join(', ')} matching your request.`,
-              steps: [{
-                step: 1,
-                taskId: 1,
-                thought: 'Applied targeted code modifications',
-                action: 'modify_files',
-                parameters: { files: editedFiles.map(f => f.path) },
-                result: { success: true, updatedFiles: editedFiles.map(f => f.path) }
-              }],
-              plan
-            });
-            try { res.end(); } catch (_) {}
-            return;
-          }
-        } catch (editErr) {
-          logger.info('[Agent] Iterative edit LLM error:', editErr.message);
-        }
+        // Deliberately no `return` — the loop continues so the model works via
+        // tools and the evidence gate runs at the end.
+        continue;
       }
 
       // Simple local intent handler: perform deterministic actions for
@@ -2867,6 +3711,45 @@ FILE: <filepath>
       }, preferredModel);
       const parsed = parseLLMAction(rawResponse);
 
+      // ── P3: every provider failed — retry, then fail honestly ────────────────
+      // Previously this fell through to FINAL_ANSWER and the run reported a
+      // completed task whose "answer" was the provider's error text.
+      if (parsed.action === PROVIDER_ERROR_ACTION) {
+        providerErrors.push(parsed.answer);
+
+        if (providerErrors.length <= 2) {
+          logger.warn(`[Agent] Provider cascade failed (attempt ${providerErrors.length}/2): ${parsed.answer}`);
+          send({
+            type: 'thinking',
+            step: step + 1,
+            message: `⚠️ Model provider error (retry ${providerErrors.length}/2) — trying the cascade again: ${parsed.answer.slice(0, 120)}`
+          });
+          continue; // same step, fresh cascade attempt
+        }
+
+        const detail = providerErrors.join(' | ');
+        logger.error(`[Agent] All providers failed after 2 retries: ${detail}`);
+        runStats.failedSteps++;
+        runStats.lastError = `Provider cascade unavailable: ${detail}`;
+        send({
+          type: 'error',
+          message: `Every configured model provider is failing, so the run cannot continue.\n\n${detail}\n\nFix the API key / quota for at least one provider and retry.`
+        });
+        send({
+          type: 'done',
+          message: `❌ Run aborted — no model provider is available.\n\n${detail}`,
+          steps,
+          completed: false,
+          verified: false,
+          verificationSkipped: true
+        });
+        try { res.end(); } catch (_) {}
+        return;
+      }
+
+      // A successful response clears the retry budget.
+      providerErrors.length = 0;
+
       // Inject user prompt fallback for project generation when LLM omits params
       const execParams = { ...(parsed.parameters || {}) };
       if (parsed.action === 'generate_project_from_prompt') {
@@ -2884,14 +3767,55 @@ FILE: <filepath>
       };
 
       if (parsed.action === 'FINAL_ANSWER') {
-        // Mark all tasks as completed
-        plan.tasks.forEach(t => t.status = 'completed');
-        send({ type: 'plan', plan });
-
         stepLog.result = { success: true, message: parsed.answer || 'Task complete.' };
         steps.push(stepLog);
         send({ type: 'step', stepLog });
-        send({ type: 'done', message: parsed.answer || '✅ All tasks completed!', steps, plan });
+
+        // P3: the model saying "done" is a claim, not evidence. If this run
+        // changed code, prove it — build and load the real output — before the
+        // tasks are marked complete and the run is allowed to report success.
+        const outcome = await verifyRunOutcome({
+          dir: workspacePath,
+          projectId: projectId || 'default',
+          prompt: userPrompt,
+          changedFiles: [...runChangedFiles],
+          onProgress: send,
+          send,
+          headers: req.headers,
+          repairEnabled,
+          maxRepairAttempts,
+          alreadyVerified: runScaffoldVerified,
+        });
+
+        if (!outcome.skipped) {
+          if (outcome.verified) {
+            plan.tasks.forEach(t => t.status = 'completed');
+            send({ type: 'plan', plan });
+          } else {
+            // Honest state: something was changed and it does not pass. Leave
+            // tasks incomplete so the UI cannot render a green checkmark.
+            send({
+              type: 'error',
+              message: `Run finished without passing verification.\n\n${outcome.summary || outcome.reason}`
+            });
+          }
+        } else {
+          plan.tasks.forEach(t => t.status = 'completed');
+          send({ type: 'plan', plan });
+        }
+
+        send({
+          type: 'done',
+          message: outcome.verified
+            ? `${parsed.answer || '✅ All tasks completed!'}\n\n✅ **Verified:** the project was really built and the real output loaded successfully.`
+            : outcome.skipped
+              ? (parsed.answer || '✅ All tasks completed!')
+              : `${parsed.answer || '⚠️ Finished.'}\n\n⚠️ **Not verified.** ${outcome.summary || outcome.reason}`,
+          steps,
+          plan,
+          verified: outcome.verified,
+          verificationSkipped: outcome.skipped
+        });
         try {
           const { getWorkflowEngine } = require('../services/workflowEngine');
           const engine = getWorkflowEngine();
@@ -2928,6 +3852,8 @@ FILE: <filepath>
             if (runSnapshots.has(runId)) {
               runSnapshots.get(runId).afterFiles.set(changedPath, fileContent);
             }
+            // P3: record it so the evidence gate knows there is code to build.
+            if (changedPath) runChangedFiles.add(changedPath);
             // Also sync to SQLite workspace_files so post-run refresh doesn't lose files
             try {
               const ChatModel = require('../models/Chat');
@@ -2968,25 +3894,69 @@ FILE: <filepath>
       }
 
       // ── Phase 4: Self-Healing Terminal Logic ─────────────────────────────────
-      if (parsed.action === 'run_terminal' && !toolResult.success && selfHealAttempts < 3) {
-        const errorContext = toolResult.selfHealingHint || toolResult.stderr || toolResult.error || 'Unknown error';
-        selfHealAttempts++;
+      //
+      // P1 fixes, in order of severity:
+      //  1. The failed command is RE-RUN after the model patches something.
+      //     Previously the model was simply told "try again" and the loop moved
+      //     on, so a repair was never actually proven by an exit code.
+      //  2. The budget is pinned to the CURRENT failing command. Any unrelated
+      //     success used to zero the counter, so 3 attempts was never a bound.
+      //  3. When the budget is exhausted the model is told to stop repairing and
+      //     report the real error, instead of looping until MAX_STEPS.
+      const isTerminalFailure = parsed.action === 'run_terminal' && !toolResult.success;
+      const command = String(parsed.parameters?.command || 'unknown');
+      const errorContext = toolResult.selfHealingHint || toolResult.stderr || toolResult.error || 'Unknown error';
+      // Signature ignores volatile numbers/timestamps so a deterministic failure
+      // is recognised as the same failure across retries.
+      const errorSignature = `${command}::${String(errorContext).replace(/\d+/g, '#').slice(0, 160)}`;
+
+      if (isTerminalFailure) {
+        if (!selfHealState || selfHealState.signature !== errorSignature) {
+          // A genuinely new failure earns a fresh budget.
+          selfHealState = { command, signature: errorSignature };
+          selfHealAttempts = 0;
+        }
+
+        if (selfHealAttempts < 3) {
+          selfHealAttempts++;
+          send({
+            type: 'self_heal',
+            step: step + 1,
+            errorHint: String(errorContext).slice(0, 200),
+            message: `🔧 Self-healing (attempt ${selfHealAttempts}/3): \`${command.slice(0, 60)}\` failed — analysing the error and re-running after the fix…`
+          });
+          messages.push({ role: 'assistant', content: JSON.stringify({ thought: parsed.thought, action: parsed.action, parameters: parsed.parameters }) });
+          messages.push({
+            role: 'user',
+            content: `SELF-HEALING REQUIRED: Command "${command}" failed.\n\nERROR OUTPUT:\n${String(errorContext).slice(0, 2000)}\n\nDetailed Error Analysis:\n1. Exit code: ${toolResult.exit_code ?? toolResult.exitCode ?? 'N/A'}\n2. Standard Output: ${toolResult.stdout ? toolResult.stdout.substring(0, 500) : 'None'}\n3. Standard Error: ${toolResult.stderr ? toolResult.stderr.substring(0, 1000) : 'None'}\n\nACTION REQUIRED:\n1. Identify the ROOT CAUSE from the error above — do not guess.\n2. If it is a code error, fix it NOW with apply_diff or write_file.\n3. Then re-run the EXACT same command "${command}".\n\nIMPORTANT: Do NOT output FINAL_ANSWER yet. Apply the fix, then run the command again so its exit code can prove the fix worked.`
+          });
+          continue;
+        }
+
+        // Budget spent on this exact failure. Say so instead of looping.
         send({
           type: 'self_heal',
           step: step + 1,
+          exhausted: true,
           errorHint: String(errorContext).slice(0, 200),
-          message: `🔧 Self-healing (attempt ${selfHealAttempts}/3): Command failed — analyzing error and fixing...`
+          message: `🛑 Self-heal budget exhausted (3/3) for \`${command.slice(0, 60)}\`.`
         });
+        runStats.failedSteps++;
+        runStats.lastError = String(errorContext).slice(0, 500);
         messages.push({ role: 'assistant', content: JSON.stringify({ thought: parsed.thought, action: parsed.action, parameters: parsed.parameters }) });
         messages.push({
           role: 'user',
-          content: `SELF-HEALING REQUIRED: Command "${parsed.parameters?.command || 'unknown'}" failed.\n\nERROR OUTPUT:\n${errorContext}\n\nDetailed Error Analysis:\n1. Exit code: ${toolResult.exit_code || 'N/A'}\n2. Standard Output: ${toolResult.stdout ? toolResult.stdout.substring(0, 500) : 'None'}\n3. Standard Error: ${toolResult.stderr ? toolResult.stderr.substring(0, 1000) : 'None'}\n\nACTION REQUIRED:\n1. Analyze the exact error above to identify the root cause\n2. If it's a syntax error in code, fix the code using apply_diff or write_file\n3. If it's a runtime error, debug and fix the logic\n4. If it's a path issue, correct the file paths\n5. Then retry the command\n\nIMPORTANT: Do NOT output FINAL_ANSWER yet — fix the error first and retry the command.`
+          content: `SELF-HEAL BUDGET EXHAUSTED: "${command}" has failed 3 times with the same error and the fix did not work.\n\nLAST ERROR:\n${String(errorContext).slice(0, 1200)}\n\nStop retrying. Report the failure honestly in your FINAL_ANSWER, naming the specific error and what you tried. Do NOT claim success.`
         });
         continue;
       }
 
-      // Reset self-heal counter on success
-      if (toolResult.success) selfHealAttempts = 0;
+      // P1: success only clears the budget when it is the SAME command that
+      // was failing. An unrelated write_file must not reset it.
+      if (parsed.action === 'run_terminal' && toolResult.success) {
+        selfHealAttempts = 0;
+        selfHealState = null;
+      }
 
       // Normal observation
       messages.push({ role: 'assistant', content: JSON.stringify({ thought: parsed.thought, action: parsed.action, parameters: parsed.parameters }) });
@@ -3001,17 +3971,87 @@ FILE: <filepath>
 
     } catch (err) {
       send({ type: 'error', message: `Step ${step + 1} error: ${err.message}` });
+      runStats.failedSteps++;
+      runStats.lastError = err.message;
       break;
     }
   }
 
-  send({
-    type: 'done',
-    message: steps.length > 0
-      ? '🎉 Autonomous workflow execution completed successfully.'
-      : '✅ Task execution completed.',
-    steps
-  });
+  // ── P1 + P3: an exhausted loop is NOT a success, and it is not unverified ────
+  // `steps.length > 0` used to gate the success message, so a run where every
+  // step failed still reported "completed successfully".
+  runStats.steps = steps.length;
+  const loopExhausted = steps.length >= MAX_STEPS;
+  const anyFailure = runStats.failedSteps > 0;
+
+  // A run that ran out of budget may well have left the project in a real
+  // state, so it still owes the user evidence rather than a bare apology.
+  const exhaustedOutcome = (loopExhausted || anyFailure)
+    ? await verifyRunOutcome({
+        dir: workspacePath,
+        projectId: projectId || 'default',
+        prompt: userPrompt,
+        changedFiles: [...runChangedFiles],
+        onProgress: send,
+        send,
+        headers: req.headers,
+        repairEnabled,
+        maxRepairAttempts,
+      })
+    : null;
+
+  if (!loopExhausted && !anyFailure) {
+    const cleanOutcome = await verifyRunOutcome({
+      dir: workspacePath,
+      projectId: projectId || 'default',
+      prompt: userPrompt,
+      changedFiles: [...runChangedFiles],
+      onProgress: send,
+      send,
+      headers: req.headers,
+      repairEnabled,
+      maxRepairAttempts,
+      alreadyVerified: runScaffoldVerified,
+    });
+    send({
+      type: 'done',
+      message: cleanOutcome.verified
+        ? `🎉 Completed and verified — the project builds and the real output loads.\n\n${cleanOutcome.summary}`
+        : cleanOutcome.skipped
+          ? (steps.length > 0
+              ? '🎉 Autonomous workflow execution completed successfully.'
+              : '✅ Task execution completed.')
+          : `⚠️ Completed, but NOT verified.\n\n${cleanOutcome.summary}`,
+      steps,
+      stats: runStats,
+      verified: cleanOutcome.verified,
+      verificationSkipped: cleanOutcome.skipped
+    });
+  } else {
+    const reason = loopExhausted
+      ? `step budget exhausted (${MAX_STEPS})`
+      : `${runStats.failedSteps} step(s) failed`;
+    send({
+      type: 'error',
+      message: `⚠️ Run did not complete cleanly — ${reason}.${runStats.lastError ? `\n\nLast error:\n${runStats.lastError}` : ''}`,
+      steps,
+      stats: runStats
+    });
+    send({
+      type: 'done',
+      message: `⚠️ Finished with failures (${reason}). ${runStats.lastError ? `Last error: ${runStats.lastError.slice(0, 300)}` : ''}` +
+        (exhaustedOutcome && !exhaustedOutcome.skipped
+          ? `\n\n${exhaustedOutcome.summary}`
+          : exhaustedOutcome?.reason
+            ? `\n\n${exhaustedOutcome.reason}`
+            : ''),
+      steps,
+      completed: false,
+      verified: Boolean(exhaustedOutcome?.verified),
+      verificationSkipped: Boolean(exhaustedOutcome?.skipped),
+      stats: runStats
+    });
+  }
   try { res.end(); } catch (_) { /* client already disconnected */ }
 });
 
@@ -3251,7 +4291,7 @@ Output ONLY valid JSON. No markdown fences outside the JSON.`;
         }
       }
 
-      res.json({
+      return res.json({
         success: true,
         explanation: parsed.explanation || 'Fixed runtime exception',
         search: parsed.search,
@@ -3427,7 +4467,9 @@ Do not output any reasoning, apologies, or extra text. Only the JSON object.`;
     res.status(400).json({ success: false, error: 'Unrecognized heal mode: provide either error (Mode A) or findings + viewport (Mode B)' });
   } catch (err) {
     logger.error('[Agent] Self-healing failed:', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   }
 });
 

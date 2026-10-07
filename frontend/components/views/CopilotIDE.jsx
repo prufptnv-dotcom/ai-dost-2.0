@@ -57,6 +57,11 @@ const MODEL_OPTIONS = [
   { v: 'auto', l: 'Auto (cascade)' },
   { v: 'gemini', l: 'Gemini first' },
   { v: 'groq', l: 'Groq first' },
+  { v: 'openrouter', l: 'OpenRouter first' },
+  { v: 'openrouter:nemotron_3_super', l: 'Nemotron 3 Super' },
+  { v: 'openrouter:north_mini_code', l: 'Cohere North Code' },
+  { v: 'openrouter:laguna_s', l: 'Laguna-S Agent' },
+  { v: 'openrouter:lfm_reasoning', l: 'Liquid LFM 2.5' },
   { v: 'ollama', l: 'Ollama local' },
 ];
 const fmtTs = (ts) => (ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
@@ -269,7 +274,31 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   const [dirtyPaths, setDirtyPaths] = useState(() => new Set());
 
   // Workspace Mode: 'code' | 'split' | 'preview'
-  const [workspaceMode, setWorkspaceMode] = useState('split');
+  const [workspaceMode, setWorkspaceMode] = useState(() => {
+    try {
+      const override = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ai_dost_copilot_mode_override') : null;
+      if (override) {
+        sessionStorage.removeItem('ai_dost_copilot_mode_override');
+        return override;
+      }
+    } catch (_) {}
+    return 'split';
+  });
+  useEffect(() => {
+    try {
+      const override = sessionStorage.getItem('ai_dost_copilot_mode_override');
+      if (override) {
+        sessionStorage.removeItem('ai_dost_copilot_mode_override');
+        setWorkspaceMode(override);
+      }
+    } catch (_) {}
+    const handleSetMode = (e) => {
+      if (e.detail?.mode) setWorkspaceMode(e.detail.mode);
+    };
+    window.addEventListener('ai_dost_set_workspace_mode', handleSetMode);
+    return () => window.removeEventListener('ai_dost_set_workspace_mode', handleSetMode);
+  }, []);
+
   const [packagesModalOpen, setPackagesModalOpen] = useState(false);
   const [secretsModalOpen, setSecretsModalOpen] = useState(false);
   const [isReplitRunning, setIsReplitRunning] = useState(false);
@@ -985,8 +1014,33 @@ const animate = () => {
           }
         } catch (_) {}
 
-        const currentId = localStorage.getItem('copilot_current_session_id');
-        let target = parsed.find(s => s.id === currentId) || parsed[0];
+        let target = null;
+        if (defaultProjectId) {
+          target = parsed.find(s => s.id === defaultProjectId);
+          if (!target) {
+            target = {
+              id: defaultProjectId,
+              title: defaultProjectName || 'Copilot Workspace',
+              promptSummary: '',
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              messages: [],
+              files: [],
+              contents: {},
+              openTabs: [],
+              activePath: null,
+              workspaceMode: 'split',
+              previewDevice: 'desktop',
+              planTasks: [],
+              snapshots: []
+            };
+            parsed.unshift(target);
+            localStorage.setItem('copilot_sessions_v2', JSON.stringify(parsed));
+          }
+        } else {
+          const currentId = localStorage.getItem('copilot_current_session_id');
+          target = parsed.find(s => s.id === currentId) || parsed[0];
+        }
 
         if (!target) {
           target = {
@@ -1021,11 +1075,29 @@ const animate = () => {
           setContents(targetContents);
           setOpenTabs(target.openTabs || (target.files[0] ? [target.files[0].path] : []));
           setActivePath(target.activePath || (target.files[0] ? target.files[0].path : null));
+          activePathRef.current = target.activePath || (target.files[0] ? target.files[0].path : null);
           if (target.messages && target.messages.length > 0) setCopilotMessages(target.messages);
+          else setCopilotMessages([]);
           if (target.workspaceMode) setWorkspaceMode(target.workspaceMode);
           if (target.previewDevice) setPreviewDevice(target.previewDevice);
           if (target.planTasks) setPlanTasks(target.planTasks);
+          else setPlanTasks([]);
           if (target.snapshots) setSnapshots(target.snapshots);
+          else setSnapshots([]);
+        } else {
+          setFiles([]);
+          contentsRef.current = {};
+          setContents({});
+          setOpenTabs([]);
+          setActivePath(null);
+          activePathRef.current = null;
+          setCopilotMessages(target.messages && target.messages.length > 0 ? target.messages : []);
+          setPlanTasks(target.planTasks || []);
+          setSnapshots(target.snapshots || []);
+          setDirtyPaths(new Set());
+          setRuntimeError(null);
+          setSelectedInspectorElement(null);
+          setCopilotStatus({ label: '', tone: 'info' });
         }
         isHydratedRef.current = true;
       } catch (e) {
@@ -1131,7 +1203,12 @@ const animate = () => {
     const listWithNew = [newSession, ...sessionsRef.current];
     sessionsRef.current = listWithNew;
     setSessions(listWithNew);
-    try { localStorage.setItem('copilot_current_session_id', newId); } catch (_) {}
+    try {
+      localStorage.setItem('copilot_current_session_id', newId);
+      localStorage.setItem('ai_dost_session_id', newId);
+      window.dispatchEvent(new CustomEvent('ai_dost_new_chat', { detail: newId }));
+      window.dispatchEvent(new CustomEvent('ai_dost_switch_session', { detail: newId }));
+    } catch (_) {}
     try {
       const stored = localStorage.getItem('copilot_sessions_v2');
       const list = stored ? JSON.parse(stored) : [];
@@ -1151,7 +1228,11 @@ const animate = () => {
     if (!target) return;
 
     setActiveSessionId(sessionId);
-    try { localStorage.setItem('copilot_current_session_id', sessionId); } catch (_) {}
+    try {
+      localStorage.setItem('copilot_current_session_id', sessionId);
+      localStorage.setItem('ai_dost_session_id', sessionId);
+      window.dispatchEvent(new CustomEvent('ai_dost_switch_session', { detail: sessionId }));
+    } catch (_) {}
 
     setFiles(target.files || []);
     const targetContents = target.contents || {};
@@ -1187,8 +1268,21 @@ const animate = () => {
     const updated = sessionsRef.current.filter(s => s.id !== id);
     sessionsRef.current = updated;
     setSessions(updated);
-    try { localStorage.setItem('copilot_sessions_v2', JSON.stringify(updated)); } catch (_) {}
+    try {
+      localStorage.setItem('copilot_sessions_v2', JSON.stringify(updated));
+      const chatSessionsRaw = localStorage.getItem('ai_dost_chat_sessions');
+      if (chatSessionsRaw) {
+        try {
+          const chatSessions = JSON.parse(chatSessionsRaw);
+          const filteredChat = chatSessions.filter(c => c.id !== id);
+          localStorage.setItem('ai_dost_chat_sessions', JSON.stringify(filteredChat));
+        } catch (_) {}
+      }
+      localStorage.removeItem(`ai_dost_messages_${id}`);
+    } catch (_) {}
     api.delete(`/copilot/sessions/${id}`).catch(() => {});
+    api.delete(`/memory/project/${id}`).catch(() => {});
+    api.delete(`/chat/history?session_id=${id}`).catch(() => {});
     if (activeSessionId === id) {
       if (updated.length > 0) {
         handleSelectSession(updated[0].id);
@@ -1196,7 +1290,7 @@ const animate = () => {
         handleNewSession();
       }
     }
-    showToast('Session deleted', 'info');
+    showToast('Session and workspace deleted', 'info');
   }, [activeSessionId, handleSelectSession, handleNewSession, showToast]);
 
   const handleDuplicateSession = useCallback((id) => {
@@ -1217,6 +1311,44 @@ const animate = () => {
     api.post('/copilot/sessions', clone).catch(() => {});
     showToast(`Cloned session as "${clone.title}"`, 'success');
   }, [showToast]);
+
+  // 4b. Listen for global chat switch and new-chat events
+  useEffect(() => {
+    const handleGlobalNewChat = (e) => {
+      const newId = e?.detail;
+      if (newId && typeof newId === 'string') {
+        saveCurrentSession();
+        setActiveSessionId(newId);
+        setFiles([]);
+        contentsRef.current = {};
+        setContents({});
+        setOpenTabs([]);
+        setActivePath(null);
+        activePathRef.current = null;
+        setCopilotMessages([]);
+        setPlanTasks([]);
+        setSnapshots([]);
+        setDirtyPaths(new Set());
+        setRuntimeError(null);
+        setSelectedInspectorElement(null);
+        setCopilotStatus({ label: '', tone: 'info' });
+      }
+    };
+
+    const handleGlobalSwitchSession = (e) => {
+      const targetId = e?.detail;
+      if (targetId && typeof targetId === 'string' && targetId !== activeSessionId) {
+        handleSelectSession(targetId);
+      }
+    };
+
+    window.addEventListener('ai_dost_new_chat', handleGlobalNewChat);
+    window.addEventListener('ai_dost_switch_session', handleGlobalSwitchSession);
+    return () => {
+      window.removeEventListener('ai_dost_new_chat', handleGlobalNewChat);
+      window.removeEventListener('ai_dost_switch_session', handleGlobalSwitchSession);
+    };
+  }, [activeSessionId, handleSelectSession, saveCurrentSession, setCopilotMessages]);
 
   // Load workspace files with path normalization & deduplication
   const loadWorkspaceFiles = useCallback(async (forceSelect = false) => {
@@ -1790,7 +1922,9 @@ const animate = () => {
       const decoder = new TextDecoder();
       let buffer = '';
 
-      while (true) {
+      let streamFinished = false;
+
+      while (!streamFinished) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -1800,7 +1934,12 @@ const animate = () => {
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           const jsonStr = line.slice(6).trim();
-          if (!jsonStr || jsonStr === '[DONE]') continue;
+          if (!jsonStr) continue;
+          if (jsonStr === '[DONE]') {
+            streamFinished = true;
+            setRunning(false);
+            break;
+          }
 
           try {
             const data = JSON.parse(jsonStr);
@@ -1897,6 +2036,12 @@ const animate = () => {
                 runDiagnostics(activePathRef.current, contents[activePathRef.current] || '');
               }
               setWorkspaceMode('preview');
+              if (iframeRef?.current && devServerStatus?.state === 'READY') {
+                iframeRef.current.src = `/api/preview/${projectId}?t=${Date.now()}`;
+              }
+              setRunning(false);
+              streamFinished = true;
+              break;
             }
             // ── Director Error: Show error and reset running state ──
             else if (data.type === 'director_error') {
@@ -1904,12 +2049,18 @@ const animate = () => {
               setCopilotStatus({ label: `❌ ${errMsg.substring(0, 40)}`, tone: 'error' });
               setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'error', content: `❌ Director Error: ${errMsg}` }]);
               setPlanTasks(prev => prev.map(t => t.status === 'in_progress' ? { ...t, status: 'error' } : t));
+              setRunning(false);
+              streamFinished = true;
+              break;
             }
             // ── Director Canceled: Show cancellation and reset ──
             else if (data.type === 'director_canceled') {
               setCopilotStatus({ label: '⏹ Director run canceled', tone: 'neutral' });
               setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: '⏹ Director run canceled. Completed changes remain in the workspace.' }]);
               setPlanTasks(prev => prev.map(t => t.status === 'in_progress' ? { ...t, status: 'pending' } : t));
+              setRunning(false);
+              streamFinished = true;
+              break;
             }
             else if (data.type === 'plan' || data.type === 'plan_tasks') {
               const tasks = Array.isArray(data.tasks) ? data.tasks : (Array.isArray(data.plan?.tasks) ? data.plan.tasks : []);
@@ -2075,6 +2226,12 @@ const animate = () => {
                 runDiagnostics(activePathRef.current, contents[activePathRef.current] || '');
               }
               setWorkspaceMode('preview');
+              if (iframeRef?.current && devServerStatus?.state === 'READY') {
+                iframeRef.current.src = `/api/preview/${projectId}?t=${Date.now()}`;
+              }
+              setRunning(false);
+              streamFinished = true;
+              break;
             }
             // ── ReAct-loop events (defensive: non-director run shapes must stay visible) ──
             else if (data.type === 'start') {
@@ -2087,6 +2244,9 @@ const animate = () => {
               setCopilotStatus({ label: `⚠️ ${errMsg.substring(0, 40)}`, tone: 'error' });
               setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'error', content: `⚠️ ${errMsg}` }]);
               setPlanTasks(prev => prev.map(t => t.status === 'in_progress' ? { ...t, status: 'error' } : t));
+              setRunning(false);
+              streamFinished = true;
+              break;
             }
             else if (data.type === 'terminal_output') {
               const out = String(data.output || data.text || '').trim();
@@ -2129,6 +2289,10 @@ const animate = () => {
             }
           } catch (_) {}
         }
+      }
+
+      if (streamFinished) {
+        try { await reader.cancel(); } catch (_) {}
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
@@ -2234,6 +2398,51 @@ const animate = () => {
       return askSideChat(question);
     }
     if ((!rawPrompt && pastedImages.length === 0) || running) return;
+
+    // Client-side view switch commands (preview / code / split)
+    if (pastedImages.length === 0) {
+      const isPreviewCommand = /\b(preview|live preview)\b.*\b(kholo|dikhao|dikha|open|show|run|chalao|start|de do|do)\b|\b(open|show|kholo|dikhao|dikha|run|chalao|start)\b.*\b(preview|live preview)\b|^preview$/i.test(rawPrompt);
+      if (isPreviewCommand) {
+        setCopilotInput('');
+        setWorkspaceMode('preview');
+        if (iframeRef?.current && devServerStatus?.state === 'READY') {
+          iframeRef.current.src = `/api/preview/${projectId}?t=${Date.now()}`;
+        }
+        setCopilotMessages(prev => [
+          ...prev,
+          { role: 'user', content: rawPrompt },
+          { role: 'assistant', kind: 'thought', content: '🖥️ Live Preview mode open kar diya hai.' }
+        ]);
+        showToast('🖥️ Live Preview opened', 'success');
+        return;
+      }
+
+      const isCodeCommand = /\b(code|editor|files?)\b.*\b(kholo|dikhao|dikha|open|show)\b|\b(open|show|kholo|dikhao|dikha)\b.*\b(code|editor)\b|^code$/i.test(rawPrompt);
+      if (isCodeCommand) {
+        setCopilotInput('');
+        setWorkspaceMode('code');
+        setCopilotMessages(prev => [
+          ...prev,
+          { role: 'user', content: rawPrompt },
+          { role: 'assistant', kind: 'thought', content: '📝 Code editor mode open kar diya hai.' }
+        ]);
+        showToast('📝 Code editor opened', 'success');
+        return;
+      }
+
+      const isSplitCommand = /\b(split|split screen|dono)\b.*\b(kholo|dikhao|dikha|open|show|mode)\b|^split$/i.test(rawPrompt);
+      if (isSplitCommand) {
+        setCopilotInput('');
+        setWorkspaceMode('split');
+        setCopilotMessages(prev => [
+          ...prev,
+          { role: 'user', content: rawPrompt },
+          { role: 'assistant', kind: 'thought', content: '⚡ Split screen view open kar diya hai.' }
+        ]);
+        showToast('⚡ Split view opened', 'success');
+        return;
+      }
+    }
 
     // Image generation is NOT a build task. Short-circuit BEFORE /agent/plan —
     // the planner used to turn "ek cat ka images banao" into a multi-file plan
@@ -2869,29 +3078,27 @@ const animate = () => {
       <div className="flex-1 flex overflow-hidden min-h-0">
 
         {/* ── LEFT PANE: AI COPILOT CHAT & AUTONOMOUS ENGINE ─────────────────── */}
-        <aside className="w-[390px] shrink-0 flex flex-col bg-canvas-base border-r border-border z-10">
+        <aside className="w-[390px] shrink-0 flex flex-col bg-canvas-base border-r border-border z-10 overflow-hidden">
 
-          {/* Copilot Header */}
-          <div className="flex items-center justify-between px-4 py-3 bg-canvas-base border-b border-border">
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block shadow-[0_0_8px_rgba(52,211,153,.65)]" />
-              </div>
-              <div>
-                <span className="text-xs font-semibold text-paper-100 tracking-wide block">Copilot</span>
-                <span className="text-[9px] uppercase tracking-[0.14em] text-ink-muted">Agent workspace</span>
-              </div>
-              <div className="relative">
+          {/* Copilot Header — identity/actions on row 1, mode + permission on row 2.
+              The single-row layout needed ~430px inside a 390px pane, so the
+              controls painted over the file explorer; two rows + overflow-x
+              keeps every control inside this pane. */}
+          <div className="shrink-0 bg-canvas-base border-b border-border">
+            <div className="flex items-center gap-2 px-3 py-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 shadow-[0_0_8px_rgba(52,211,153,.65)]" />
+              <span className="text-xs font-semibold text-paper-100 shrink-0">Copilot</span>
+              <div className="relative min-w-0 shrink">
                 <button
                   type="button"
                   onClick={() => setModelMenuOpen(o => !o)}
-                  className="text-[10px] font-mono text-ink-muted bg-canvas-elevated px-2 py-0.5 rounded border border-border hover:border-accent/40 hover:text-paper-200 transition-colors cursor-pointer flex items-center gap-1"
+                  className="text-[10px] font-mono text-ink-muted bg-canvas-elevated pl-2 pr-1.5 py-0.5 rounded border border-border hover:border-accent/40 hover:text-paper-200 transition-colors cursor-pointer flex items-center gap-1 max-w-[120px]"
                   title="Preferred model — failure still falls back through the cascade"
                   data-testid="model-picker-btn"
                 >
-                  <AppIcon name="zap" size={9} className="text-accent" />
-                  {MODEL_OPTIONS.find(o => o.v === preferredModel)?.l || 'auto'}
-                  <AppIcon name="chevronDown" size={9} />
+                  <AppIcon name="zap" size={9} className="text-accent shrink-0" />
+                  <span className="truncate">{MODEL_OPTIONS.find(o => o.v === preferredModel)?.l || 'auto'}</span>
+                  <AppIcon name="chevronDown" size={9} className="opacity-60 shrink-0" />
                 </button>
                 {modelMenuOpen && (
                   <>
@@ -2922,11 +3129,73 @@ const animate = () => {
                   </>
                 )}
               </div>
+
+              <div className="ml-auto flex items-center gap-0.5 shrink-0">
+                <button
+                  data-testid="watch-toggle"
+                  aria-pressed={watching}
+                  onClick={() => {
+                    setWatching((prev) => {
+                      const next = !prev;
+                      try { window.localStorage.setItem('ai_dost_copilot_watch', next ? '1' : '0'); } catch (_) { /* ignore */ }
+                      showToast(next ? 'Watch mode ON — live workspace updates' : 'Watch mode OFF', 'info');
+                      return next;
+                    });
+                  }}
+                  title={watching
+                    ? 'Watch mode: streaming workspace file changes (click to stop)'
+                    : 'Watch mode: live-refresh workspace file changes (click to start)'}
+                  className={`p-1.5 rounded-md transition-colors cursor-pointer ${
+                    watching
+                      ? 'bg-emerald-400/15 text-emerald-400'
+                      : 'hover:bg-canvas-elevated text-ink-muted hover:text-paper-100'
+                  }`}
+                >
+                  <AppIcon name="eye" size={13} />
+                </button>
+
+                <button
+                  data-testid="memory-btn"
+                  aria-expanded={memoryOpen}
+                  onClick={() => {
+                    const next = !memoryOpen;
+                    setMemoryOpen(next);
+                    if (next) loadMemoryNotes();
+                  }}
+                  title={`Self-learning notes (${memoryCount} saved — survive project deletion)`}
+                  className={`relative p-1.5 rounded-md transition-colors cursor-pointer ${
+                    memoryOpen
+                      ? 'bg-accent/15 text-accent'
+                      : 'hover:bg-canvas-elevated text-ink-muted hover:text-paper-100'
+                  }`}
+                >
+                  <AppIcon name="brain" size={13} />
+                  {memoryCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[13px] h-[13px] px-[2px] rounded-full bg-accent/90 text-[8px] font-bold text-white flex items-center justify-center">
+                      {memoryCount > 99 ? '99+' : memoryCount}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => {
+                    setCopilotMessages([]);
+                    setPendingPlan(null);
+                    setPlanTasks([]);
+                    showToast('Chat history cleared', 'info');
+                  }}
+                  className="p-1.5 rounded-md hover:bg-canvas-elevated text-ink-muted hover:text-paper-100 transition-colors cursor-pointer"
+                  title="Clear conversation"
+                >
+                  <AppIcon name="trash" size={13} />
+                </button>
+              </div>
             </div>
 
-            <div className="flex items-center gap-1.5">
+            {/* Mode + permission — scrollable, so it can never bleed into the file tree */}
+            <div className="flex items-center gap-1.5 px-3 pb-2 overflow-x-auto no-scrollbar">
               <div
-                className="flex items-center rounded-lg border border-border overflow-hidden"
+                className="flex items-center rounded-md border border-border overflow-hidden shrink-0"
                 role="radiogroup"
                 aria-label="Agent mode"
                 data-testid="agent-mode-switch"
@@ -2946,7 +3215,7 @@ const animate = () => {
                       showToast(`Mode: ${opt.l}`, 'info');
                     }}
                     title={opt.t}
-                    className={`px-2.5 py-1 text-[10px] font-bold transition-all cursor-pointer ${
+                    className={`px-2 py-1 text-[10px] font-semibold transition-colors cursor-pointer ${
                       agentMode === opt.v
                         ? 'bg-accent/20 text-accent'
                         : 'bg-canvas-elevated text-ink-muted hover:text-paper-200'
@@ -2958,7 +3227,7 @@ const animate = () => {
               </div>
 
               <div
-                className="flex items-center rounded-lg border border-border overflow-hidden"
+                className="flex items-center rounded-md border border-border overflow-hidden shrink-0"
                 role="radiogroup"
                 aria-label="Agent permission level"
                 data-testid="permission-switch"
@@ -2978,7 +3247,7 @@ const animate = () => {
                       showToast(`Permissions: ${opt.l}`, 'info');
                     }}
                     title={opt.t}
-                    className={`px-2 py-1 text-[10px] font-bold transition-all cursor-pointer ${
+                    className={`px-2 py-1 text-[10px] font-semibold transition-colors cursor-pointer ${
                       permissionLevel === opt.v
                         ? 'bg-amber-400/15 text-amber-400'
                         : 'bg-canvas-elevated text-ink-muted hover:text-paper-200'
@@ -2988,65 +3257,6 @@ const animate = () => {
                   </button>
                 ))}
               </div>
-
-              <button
-                data-testid="watch-toggle"
-                aria-pressed={watching}
-                onClick={() => {
-                  setWatching((prev) => {
-                    const next = !prev;
-                    try { window.localStorage.setItem('ai_dost_copilot_watch', next ? '1' : '0'); } catch (_) { /* ignore */ }
-                    showToast(next ? 'Watch mode ON — live workspace updates' : 'Watch mode OFF', 'info');
-                    return next;
-                  });
-                }}
-                title={watching
-                  ? 'Watch mode: streaming workspace file changes (click to stop)'
-                  : 'Watch mode: live-refresh workspace file changes (click to start)'}
-                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                  watching
-                    ? 'bg-emerald-400/15 text-emerald-400 shadow-glow-sm'
-                    : 'hover:bg-canvas-elevated text-ink-muted hover:text-paper-100'
-                }`}
-              >
-                <AppIcon name="eye" size={14} />
-              </button>
-
-              <button
-                data-testid="memory-btn"
-                aria-expanded={memoryOpen}
-                onClick={() => {
-                  const next = !memoryOpen;
-                  setMemoryOpen(next);
-                  if (next) loadMemoryNotes();
-                }}
-                title={`Self-learning notes (${memoryCount} saved — survive project deletion)`}
-                className={`relative p-1.5 rounded-lg transition-colors cursor-pointer ${
-                  memoryOpen
-                    ? 'bg-accent/15 text-accent'
-                    : 'hover:bg-canvas-elevated text-ink-muted hover:text-paper-100'
-                }`}
-              >
-                <AppIcon name="brain" size={14} />
-                {memoryCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-[3px] rounded-full bg-accent/90 text-canvas text-[8px] font-bold leading-[14px] text-center pointer-events-none">
-                    {memoryCount > 99 ? '99+' : memoryCount}
-                  </span>
-                )}
-              </button>
-
-              <button
-                onClick={() => {
-                  setCopilotMessages([]);
-                  setPendingPlan(null);
-                  setPlanTasks([]);
-                  showToast('Chat history cleared', 'info');
-                }}
-                className="p-1.5 rounded-lg hover:bg-canvas-elevated text-ink-muted hover:text-paper-100 transition-colors cursor-pointer"
-                title="Clear Conversation"
-              >
-                <AppIcon name="trash" size={14} />
-              </button>
             </div>
           </div>
 
@@ -3735,6 +3945,7 @@ const animate = () => {
                     </button>
                   ) : (
                     <button
+                      data-testid="copilot-send-btn"
                       onClick={() => handleSend()}
                       disabled={!copilotInput.trim() && pastedImages.length === 0}
                       className="w-7 h-7 rounded-full bg-accent hover:bg-accent/90 disabled:opacity-30 disabled:hover:bg-accent text-white flex items-center justify-center transition-all shadow-glow-sm cursor-pointer"

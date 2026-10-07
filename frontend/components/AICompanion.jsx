@@ -294,7 +294,20 @@ const AICompanion = ({ onWriteCode, currentCode, currentFile }) => {
             <option value="gemini">Gemini Flash</option>
             <option value="deepseek">DeepSeek V3</option>
             <option value="nvidia">NVIDIA NIM</option>
-            <option value="openrouter">OpenRouter</option>
+            <optgroup label="OpenRouter Free Models">
+              <option value="openrouter">OpenRouter (Auto Free)</option>
+              <option value="openrouter:nemotron_3_super">Nemotron 3 Super (120B)</option>
+              <option value="openrouter:nemotron_3_ultra">Nemotron 3 Ultra (550B)</option>
+              <option value="openrouter:nemotron_3_lightning">Nemotron 3.5 Lightning</option>
+              <option value="openrouter:north_mini_code">Cohere North Mini Code</option>
+              <option value="openrouter:laguna_s">Poolside Laguna-S 2.1</option>
+              <option value="openrouter:lfm_reasoning">Liquid LFM 2.5 (Reasoning)</option>
+              <option value="openrouter:gemma_26b">Google Gemma 4 (26B)</option>
+              <option value="openrouter:dots_3_note">Dots 3 Note Preview</option>
+              <option value="openrouter:ling_sante">Ling 3.0 Santé (Medical)</option>
+              <option value="openrouter:apodex_mini">Apodex 1.1 Mini (Research)</option>
+              <option value="openrouter:content_safety">Nemotron Content Safety</option>
+            </optgroup>
             {localModels.length > 0 && (
               <optgroup label="Local (Ollama)">
                 {localModels.map(m => (

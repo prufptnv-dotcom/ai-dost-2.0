@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI } from '@google/genai';
-import { Mic, MicOff, Video, VideoOff, X } from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 
 /**
  * LiveMultimodalExperience.jsx
@@ -251,7 +251,7 @@ const LiveMultimodalExperience = ({ onClose }) => {
         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
             
             <button onClick={onClose} style={{ position: 'absolute', top: 20, right: 20, background: 'transparent', border: 'none', color: 'white', cursor: 'pointer' }}>
-                <X size={32} />
+                <AppIcon name="close" size={32} />
             </button>
 
             <h2 style={{ marginBottom: '20px' }}>AI-Dost Live Voice & Vision</h2>
@@ -278,10 +278,10 @@ const LiveMultimodalExperience = ({ onClose }) => {
                 {isConnected && (
                     <>
                         <button onClick={toggleMic} style={{ padding: '10px', background: micEnabled ? '#3b82f6' : '#ef4444', border: 'none', borderRadius: '50%', color: 'white', cursor: 'pointer' }}>
-                            {micEnabled ? <Mic size={24} /> : <MicOff size={24} />}
+                            {micEnabled ? <AppIcon name="mic" size={24} /> : <AppIcon name="micOff" size={24} />}
                         </button>
                         <button onClick={toggleVideo} style={{ padding: '10px', background: videoEnabled ? '#3b82f6' : '#4b5563', border: 'none', borderRadius: '50%', color: 'white', cursor: 'pointer' }}>
-                            {videoEnabled ? <Video size={24} /> : <VideoOff size={24} />}
+                            {videoEnabled ? <AppIcon name="video" size={24} /> : <AppIcon name="videoOff" size={24} />}
                         </button>
                         <button onClick={disconnectLive} style={{ padding: '10px 20px', background: '#ef4444', border: 'none', borderRadius: '8px', color: 'white', fontSize: '16px', cursor: 'pointer' }}>
                             End Call

@@ -28,4 +28,43 @@ describe('taskPlanner', () => {
     expect(plan.steps).toHaveLength(1);
     expect(plan.steps[0].action).toBe('respond');
   });
+
+  it('intercepts preview open and show commands as command instead of tool task', () => {
+    const phrases = [
+      'preview open karo',
+      'preview dikhao',
+      'show preview',
+      'open preview',
+      'preview kholo',
+      'live preview dikhao',
+      'preview',
+    ];
+    for (const phrase of phrases) {
+      const intent = inferIntent(phrase);
+      expect(intent.type).toBe('command');
+      expect(intent.action).toBe('open-preview');
+      expect(intent.target).toBe('preview');
+      const plan = createTaskPlan(phrase);
+      expect(plan.intent.type).toBe('command');
+      expect(plan.intent.requiresTool).toBeFalsy();
+    }
+  });
+
+  it('classifies creative writing and storytelling as chat without tool execution', () => {
+    const creativePhrases = [
+      'ek achhi kahani banao',
+      'write a poem about stars',
+      'ek funny joke sunao',
+      'write an essay on climate change',
+      'ek leave letter banao',
+    ];
+    for (const phrase of creativePhrases) {
+      const intent = inferIntent(phrase);
+      expect(intent.type).toBe('chat');
+      expect(intent.requiresTool).toBeFalsy();
+      const plan = createTaskPlan(phrase);
+      expect(plan.intent.type).toBe('chat');
+      expect(plan.steps).toHaveLength(1);
+    }
+  });
 });

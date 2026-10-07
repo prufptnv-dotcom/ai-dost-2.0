@@ -310,23 +310,31 @@ class WorkspaceManager {
     const resolvedPath = check.resolvedPath;
     const wsRoot = this.getWorkspacePath(projectId, userId);
     
-    // Prevent symlink escape by validating the closest existing parent directory
-    let currentPath = resolvedPath;
-    while (currentPath !== path.dirname(currentPath)) {
-      if (fs.existsSync(currentPath)) {
-        const real = fs.realpathSync(currentPath);
-        const isWindows = process.platform === 'win32';
-        const rootNorm = isWindows ? wsRoot.toLowerCase() : wsRoot;
-        const realNorm = isWindows ? real.toLowerCase() : real;
-        
-        if (realNorm !== rootNorm && !realNorm.startsWith(rootNorm + path.sep.toLowerCase())) {
-          const err = new Error(`Workspace path security violation (ERR_PATH_TRAVERSAL) for project '${projectId}': Symlink escape detected`);
-          err.code = 'ERR_PATH_TRAVERSAL';
-          throw err;
+    // Prevent symlink escape by validating existing parent directories inside wsRoot
+    if (fs.existsSync(wsRoot)) {
+      const isWindows = process.platform === 'win32';
+      let realRoot = wsRoot;
+      try { realRoot = fs.realpathSync(wsRoot); } catch (_) {}
+      const rootNorm = isWindows ? realRoot.toLowerCase() : realRoot;
+
+      let currentPath = resolvedPath;
+      while (currentPath.length >= wsRoot.length) {
+        if (fs.existsSync(currentPath)) {
+          let real = currentPath;
+          try { real = fs.realpathSync(currentPath); } catch (_) {}
+          const realNorm = isWindows ? real.toLowerCase() : real;
+          
+          if (realNorm !== rootNorm && !realNorm.startsWith(rootNorm + path.sep.toLowerCase())) {
+            const err = new Error(`Workspace path security violation (ERR_PATH_TRAVERSAL) for project '${projectId}': Symlink escape detected`);
+            err.code = 'ERR_PATH_TRAVERSAL';
+            throw err;
+          }
+          break; 
         }
-        break; 
+        const parent = path.dirname(currentPath);
+        if (parent === currentPath) break;
+        currentPath = parent;
       }
-      currentPath = path.dirname(currentPath);
     }
     
     return resolvedPath;
@@ -376,6 +384,41 @@ class WorkspaceManager {
       fileCount,
       totalSizeBytes
     };
+  }
+
+  /**
+   * Permanently delete physical workspace directory and universal DB records
+   */
+  deleteWorkspace(projectId, userId = null) {
+    const targetId = (projectId && typeof projectId === 'string') ? projectId.trim() : 'default';
+    if (!targetId) return false;
+
+    if (userId && !isSharedProject(targetId)) {
+      try {
+        this._resolveProject(targetId, userId);
+      } catch (_) {
+        return false;
+      }
+    }
+
+    try {
+      const ws = this.workspaces.getByProjectId(targetId);
+      const diskPath = ws && ws.disk_path ? path.resolve(ws.disk_path) : this.getDefaultDiskPath(targetId);
+      const base = this.getBaseWorkspaceDir();
+
+      // Containment guard: ensure diskPath is strictly a subfolder of base and not base itself
+      if (diskPath !== base && diskPath.startsWith(base + path.sep)) {
+        if (fs.existsSync(diskPath)) {
+          fs.rmSync(diskPath, { recursive: true, force: true });
+        }
+      }
+
+      this.workspaces.deleteByProjectId(targetId);
+      return true;
+    } catch (err) {
+      logger.warn(`[WorkspaceManager] deleteWorkspace error for ${targetId}:`, err?.message || err);
+      return false;
+    }
   }
 }
 

@@ -36,6 +36,7 @@ export async function streamChatResponse({
   });
 
   try {
+    const currentSessionId = typeof window !== 'undefined' ? (localStorage.getItem('ai_dost_session_id') || 'default') : 'default';
     const response = await fetch('/api/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -46,6 +47,8 @@ export async function streamChatResponse({
         history,
         mode: 'chat',
         persona,
+        sessionId: currentSessionId,
+        projectId: currentSessionId,
       }),
       signal,
     });
@@ -249,9 +252,11 @@ export async function streamChatResponse({
     //     use THAT text. Firing the REST cascade here used to produce a
     //     duplicate "provider busy" bubble minutes later.
     //  2. Genuine stream failure (503 / capacity) — REST cascade fallback.
+    let isAgentRun = false;
     if (!finalReply || !finalReply.trim()) {
       const marker = typeof window !== 'undefined' ? window[BLOCK_FALLBACK_KEY] : null;
       if (marker && marker.kind === 'agent') {
+        isAgentRun = true;
         // Live plan checklist in the chat bubble while the run executes
         // (marker.agentPlan covers events fired before this listener attached).
         const applyPlan = (tasks) => {
@@ -348,11 +353,15 @@ export async function streamChatResponse({
               isThinkingTrace: false,
               thoughtCompleted: true,
               meta: buildMeta(false),
+              ...(isAgentRun ? { navView: 'copilot', navLabel: '🖥️ Open Live Preview' } : {}),
             }
           : m
       )
     );
     setLastReply(finalReply);
+    if (isAgentRun) {
+      try { sessionStorage.setItem('ai_dost_copilot_mode_override', 'preview'); } catch (_) {}
+    }
 
     const artifact = extractArtifact(finalReply);
     if (artifact) setActiveArtifact(artifact);

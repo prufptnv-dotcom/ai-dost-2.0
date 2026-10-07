@@ -131,9 +131,10 @@ function agentTaskEvent(taskId, phase, status, type = TASK_EVENT_TYPES.PHASE) {
 }
 
 function toAgentRunBody(task, plan, requestBody) {
+  const currentSessionId = task.sessionId || (typeof window !== 'undefined' ? localStorage.getItem('ai_dost_session_id') : null) || 'default';
   return {
     userPrompt: task.message,
-    projectId: requestBody?.projectId || requestBody?.project_id || 'default',
+    projectId: requestBody?.projectId || requestBody?.project_id || currentSessionId,
     projectPath: requestBody?.projectPath,
     projectFiles: requestBody?.projectFiles,
     customKeys: requestBody?.customKeys,
@@ -143,7 +144,7 @@ function toAgentRunBody(task, plan, requestBody) {
     // CapabilityGatekeeper approval + scaffold cascade) is what we want.
     clientTaskPlan: plan,
     taskId: task.taskId,
-    sessionId: task.sessionId,
+    sessionId: currentSessionId,
   };
 }
 
@@ -246,7 +247,7 @@ export default function TaskRuntimeBridge() {
         canceled: false,
         startedAt: Date.now(),
         message: requestBody?.message || '',
-        sessionId: requestBody?.sessionId || null,
+        sessionId: requestBody?.sessionId || requestBody?.session_id || (typeof window !== 'undefined' ? localStorage.getItem('ai_dost_session_id') : null) || 'default',
         attachmentCount: Math.min(15, composerDocs.length),
       };
       tasks.set(taskId, task);
@@ -293,6 +294,10 @@ export default function TaskRuntimeBridge() {
       try {
         // Autonomous tool-bearing chat commands use the existing agent runtime.
         // Regular conversation keeps the established /api/chat/stream pipeline.
+        if (plan.intent.action === 'open-preview') {
+          const [, init] = args;
+          return originalFetch(augmentStreamRequest(args)[0], { ...(augmentStreamRequest(args)[1] || init || {}), signal: controller.signal });
+        }
         if (plan.intent.type === 'task' && plan.intent.requiresTool) {
           const [, init] = args;
           task.agentBody = toAgentRunBody(task, plan, effectiveBody);

@@ -167,6 +167,7 @@ class ExecutionController {
         'apply_diff': 'coding.production_code',
         'write_file': 'coding.production_code',
         'read_file': 'coding.code_explanation',
+        'list_directory': 'coding.code_explanation',
         'list_files': 'coding.code_explanation',
         'load_skill': 'autonomy.skill_loading',
         'web_search': 'autonomy.web_acquisition',
@@ -176,11 +177,14 @@ class ExecutionController {
 
       const capId = tool.capabilityId || toolToCapMap[toolName] || null;
       if (capId) {
-        const evaluation = this.gatekeeper.evaluate([capId], {
+        const evalCtx = {
           user: (context && context.user) || (context && context.userId ? { id: context.userId, role: context.role || 'developer' } : null),
           project_id: context && context.projectId,
           permissions: (context && context.permissions) !== undefined ? context.permissions : null
-        });
+        };
+        const evaluation = typeof this.gatekeeper.evaluateWithLevel === 'function'
+          ? this.gatekeeper.evaluateWithLevel([capId], evalCtx, context && context.permissionLevel ? context.permissionLevel : 'auto')
+          : this.gatekeeper.evaluate([capId], evalCtx);
 
         if (evaluation.decision === 'BLOCK') {
           const reason = (evaluation.capabilities || []).map(c => c.reason).join(', ') || 'Blocked by security policy';
@@ -287,6 +291,18 @@ class ExecutionController {
       removeParentAbortListener?.();
       const duration = Date.now() - startTime;
       await this.completeToolCall(toolCall.id, 'SUCCEEDED', output, null, { duration });
+
+      if (output && output.success && (toolName === 'write_file' || toolName === 'apply_diff')) {
+        if (context && typeof context.onEvent === 'function') {
+          context.onEvent({
+            type: 'file_written',
+            path: input?.path,
+            content: input?.content || output?.newContent || output?.content || '',
+            isNew: toolName === 'write_file'
+          });
+        }
+      }
+
       return output;
     } catch (err) {
       settled = true;

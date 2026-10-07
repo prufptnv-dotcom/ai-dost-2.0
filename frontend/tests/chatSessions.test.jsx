@@ -75,7 +75,11 @@ describe('Chat session lifecycle — undefined setter regression', () => {
     expect(result.current.messages.some((m) => m.content === 'pichli baat')).toBe(true);
   });
 
-  it('deleteSession on the active session resets to default without throwing', () => {
+  // Sessions now carry real generated ids (`chat_*`), so deleting the last
+  // active session must land on a fresh valid id — never stay on the deleted
+  // one, and never throw. (The old 'default' reset no longer applies: the
+  // createSession case above asserts new sessions are *not* 'default'.)
+  it('deleteSession on the active session switches away without throwing', () => {
     const { result } = renderHook(() => useChatView({ model: 'auto' }));
     act(() => result.current.createSession());
     const activeId = result.current.sessionId;
@@ -90,6 +94,7 @@ describe('Chat session lifecycle — undefined setter regression', () => {
     });
     confirmSpy.mockRestore();
     expect(thrown).toBeNull();
-    expect(result.current.sessionId).toBe('default');
+    expect(result.current.sessionId).toBeTruthy();
+    expect(result.current.sessionId).not.toBe(activeId);
   });
 });

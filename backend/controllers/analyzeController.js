@@ -78,7 +78,7 @@ Ensure all tables, metrics, rubrics, and code blocks are completely filled out w
             });
         }
 
-        const geminiModels = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite'];
+        const geminiModels = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash', 'gemini-1.5-flash'];
         for (const gModel of geminiModels) {
             try {
                 const controller = new AbortController();

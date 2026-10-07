@@ -36,6 +36,7 @@ const DOC_KEYWORDS = [
 ];
 
 const NAV_INTENTS = [
+  { re: /\b(preview|live preview)\b.*\b(kholo|dikhao|dikha|open|show|run|chalao|start|de do|do)\b|\b(open|show|kholo|dikhao|dikha|run|chalao|start)\b.*\b(preview|live preview)\b|^preview$/i, view: 'copilot', label: 'Live Preview', mode: 'preview' },
   { re: /\b(projects?|meri projects?|my projects?)\b.*\b(kholo|dikhao|dikha|open|show|list)\b/i, view: 'projects', label: 'Projects' },
   { re: /\b(history|purani baatein|chat history|old chats?)\b.*\b(kholo|dikhao|dikha|open|show|load|dekh)\b/i, view: 'history', label: 'Chat History' },
   { re: /\b(copilot|ide|code editor|editor)\b.*\b(kholo|dikhao|dikha|open|show)\b/i, view: 'copilot', label: 'Copilot IDE' },
@@ -503,6 +504,9 @@ persona,
 
     const nav = !isExplicitChat ? NAV_INTENTS.find((n) => n.re.test(content)) : null;
     if (nav) {
+      if (nav.mode === 'preview') {
+        try { sessionStorage.setItem('ai_dost_copilot_mode_override', 'preview'); } catch (_) {}
+      }
       const navReply = {
         id: Date.now() + 1,
         role: 'assistant',
@@ -621,23 +625,50 @@ persona,
 
   const createSession = () => {
     saveCurrentToStorage();
-    const id = Date.now().toString(36);
+    const id = 'chat_' + Date.now().toString(36);
     const list = [{ id, title: 'New conversation', updatedAt: Date.now() }, ...sessions];
     persistSessions(list.slice(0, 20));
-    // P2 #112: setItem guarded like the sibling at switchSession — a
-    // QuotaError here broke createSession mid-flight.
-    try { localStorage.setItem('ai_dost_session_id', id); } catch (_) {}
+    try {
+      localStorage.setItem('ai_dost_session_id', id);
+      localStorage.setItem('copilot_current_session_id', id);
+
+      const storedSessions = localStorage.getItem('copilot_sessions_v2');
+      let parsed = storedSessions ? JSON.parse(storedSessions) : [];
+      if (!Array.isArray(parsed)) parsed = [];
+      const freshSession = {
+        id,
+        title: 'New conversation',
+        promptSummary: '',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        messages: [],
+        files: [],
+        contents: {},
+        openTabs: [],
+        activePath: null,
+        workspaceMode: 'split',
+        previewDevice: 'desktop',
+        planTasks: [],
+        snapshots: []
+      };
+      localStorage.setItem('copilot_sessions_v2', JSON.stringify([freshSession, ...parsed.filter(s => s.id !== id)]));
+    } catch (_) {}
     setSessionId(id);
     setMessages([WELCOME]);
     setShowFollowUps(false);
     setBackendHistory(null);
     setActiveArtifact(null);
+    window.dispatchEvent(new CustomEvent('ai_dost_new_chat', { detail: id }));
+    window.dispatchEvent(new CustomEvent('ai_dost_switch_session', { detail: id }));
   };
 
   const switchSession = useCallback((id) => {
     if (!id) return;
     saveCurrentToStorage();
-    try { localStorage.setItem('ai_dost_session_id', id); } catch (_) {}
+    try {
+      localStorage.setItem('ai_dost_session_id', id);
+      localStorage.setItem('copilot_current_session_id', id);
+    } catch (_) {}
     setSessionId(id);
     setShowFollowUps(false);
     setActiveArtifact(null);
@@ -661,9 +692,23 @@ persona,
       const targetId = e?.detail;
       if (targetId && typeof targetId === 'string') switchSession(targetId);
     };
+    const handleNewChatEvent = (e) => {
+      const targetId = e?.detail;
+      if (targetId && typeof targetId === 'string' && targetId !== sessionId) {
+        setSessionId(targetId);
+        setMessages([WELCOME]);
+        setShowFollowUps(false);
+        setBackendHistory(null);
+        setActiveArtifact(null);
+      }
+    };
     window.addEventListener('ai_dost_switch_session', handleCustomSwitch);
-    return () => window.removeEventListener('ai_dost_switch_session', handleCustomSwitch);
-  }, [switchSession]);
+    window.addEventListener('ai_dost_new_chat', handleNewChatEvent);
+    return () => {
+      window.removeEventListener('ai_dost_switch_session', handleCustomSwitch);
+      window.removeEventListener('ai_dost_new_chat', handleNewChatEvent);
+    };
+  }, [switchSession, sessionId, setMessages, setSessionId, setBackendHistory]);
 
   // P3 #119: announce readiness AFTER the switch listener above is attached
   // (effects run in declaration order) so parents can replace fixed-timeout
@@ -679,15 +724,34 @@ persona,
 
   const deleteSession = (id) => {
     if (!window.confirm('Ye session delete karna hai?')) return;
-    try { localStorage.removeItem(getMsgKey(id)); } catch (_) {}
+    try {
+      localStorage.removeItem(getMsgKey(id));
+      const copilotSessionsRaw = localStorage.getItem('copilot_sessions_v2');
+      if (copilotSessionsRaw) {
+        try {
+          const parsedCopilot = JSON.parse(copilotSessionsRaw);
+          if (Array.isArray(parsedCopilot)) {
+            const filteredCopilot = parsedCopilot.filter(item => item.id !== id && item.id !== `workspace_${id}`);
+            localStorage.setItem('copilot_sessions_v2', JSON.stringify(filteredCopilot));
+          }
+        } catch (_) {}
+      }
+      fetch(`/api/chat/history?session_id=${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+      fetch(`/api/memory/project/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+      fetch(`/api/copilot/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+    } catch (_) {}
     const list = sessions.filter((s) => s.id !== id);
     persistSessions(list);
+    window.dispatchEvent(new CustomEvent('ai_dost_sessions_updated'));
     if (id === sessionId) {
-      localStorage.setItem('ai_dost_session_id', 'default');
-      setSessionId('default');
+      const nextId = list.length > 0 ? list[0].id : ('chat_' + Date.now().toString(36));
+      localStorage.setItem('ai_dost_session_id', nextId);
+      localStorage.setItem('copilot_current_session_id', nextId);
+      setSessionId(nextId);
       setMessages([WELCOME]);
       setShowFollowUps(false);
       setActiveArtifact(null);
+      window.dispatchEvent(new CustomEvent('ai_dost_switch_session', { detail: nextId }));
     }
   };
 

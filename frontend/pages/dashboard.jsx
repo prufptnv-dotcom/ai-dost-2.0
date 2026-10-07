@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -173,6 +173,9 @@ export default function Dashboard() {
         document.documentElement.classList.add(`${nextTheme}-theme`);
       }
       document.documentElement.setAttribute('data-theme', nextTheme);
+      // Smooth 300ms theme crossfade (transient forced color transitions)
+      document.body.classList.add('theme-transitioning');
+      window.setTimeout(() => document.body.classList.remove('theme-transitioning'), 340);
       return nextTheme;
     });
   }, []);
@@ -234,6 +237,49 @@ export default function Dashboard() {
   // duplicate toast for every global event. Direct showToast() calls above
   // still render the dashboard's own stack.
 
+  const [activeSessionId, setActiveSessionId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        return localStorage.getItem('ai_dost_session_id') || 'default';
+      } catch (_) {}
+    }
+    return 'default';
+  });
+
+  useEffect(() => {
+    const handleSwitchSession = (e) => {
+      const targetId = e?.detail;
+      if (targetId && typeof targetId === 'string') {
+        setActiveSessionId(targetId);
+      }
+    };
+    const handleNewChatEvent = (e) => {
+      const targetId = e?.detail;
+      if (targetId && typeof targetId === 'string') {
+        setActiveSessionId(targetId);
+      }
+    };
+    window.addEventListener('ai_dost_switch_session', handleSwitchSession);
+    window.addEventListener('ai_dost_new_chat', handleNewChatEvent);
+    return () => {
+      window.removeEventListener('ai_dost_switch_session', handleSwitchSession);
+      window.removeEventListener('ai_dost_new_chat', handleNewChatEvent);
+    };
+  }, []);
+
+  const activeChatTitle = useMemo(() => {
+    if (typeof window === 'undefined') return 'Copilot Workspace';
+    try {
+      const stored = localStorage.getItem('ai_dost_chat_sessions');
+      if (stored) {
+        const list = JSON.parse(stored);
+        const current = list.find((s) => s.id === activeSessionId);
+        if (current && (current.title || current.name)) return current.title || current.name;
+      }
+    } catch (_) {}
+    return 'Copilot Workspace';
+  }, [activeSessionId]);
+
   const [initialChatPrompt, setInitialChatPrompt] = useState('');
 
   const go = useCallback((v, opts) => {
@@ -245,6 +291,38 @@ export default function Dashboard() {
   }, []);
 
   const handleNewChat = useCallback(() => {
+    const newSessionId = 'chat_' + Date.now().toString(36);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('ai_dost_session_id', newSessionId);
+        localStorage.setItem('copilot_current_session_id', newSessionId);
+
+        // Pre-initialize clean copilot session
+        const storedSessions = localStorage.getItem('copilot_sessions_v2');
+        let parsed = storedSessions ? JSON.parse(storedSessions) : [];
+        if (!Array.isArray(parsed)) parsed = [];
+        const freshSession = {
+          id: newSessionId,
+          title: 'New conversation',
+          promptSummary: '',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          messages: [],
+          files: [],
+          contents: {},
+          openTabs: [],
+          activePath: null,
+          workspaceMode: 'split',
+          previewDevice: 'desktop',
+          planTasks: [],
+          snapshots: []
+        };
+        localStorage.setItem('copilot_sessions_v2', JSON.stringify([freshSession, ...parsed.filter(s => s.id !== newSessionId)]));
+        window.dispatchEvent(new CustomEvent('ai_dost_new_chat', { detail: newSessionId }));
+        window.dispatchEvent(new CustomEvent('ai_dost_switch_session', { detail: newSessionId }));
+      } catch (_) {}
+    }
+    setActiveSessionId(newSessionId);
     setChatKey((k) => k + 1);
     setInitialChatPrompt('');
     go('chat');
@@ -400,8 +478,9 @@ export default function Dashboard() {
           {view === 'copilot' && (
             <IDEErrorBoundary>
               <CopilotIDE
-                projectId="copilot-workspace"
-                projectName="Copilot Workspace"
+                key={activeSessionId}
+                projectId={activeSessionId}
+                projectName={activeChatTitle}
                 onToast={showToast}
               />
             </IDEErrorBoundary>

@@ -89,10 +89,10 @@ export default function DocsIndexPage() {
                 className="gemini-glow-card p-5 border border-white/10 space-y-2 block group transition-all"
               >
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-semibold font-display text-paper-100 group-hover:text-[#4893fc] transition-fast">
+                  <h4 className="text-xs font-semibold font-display text-paper-100 group-hover:text-[#6366f1] transition-fast">
                     {track.title}
                   </h4>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/5 text-[#9b72cb] border border-white/10">{track.badge}</span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/5 text-[#a5b4fc] border border-white/10">{track.badge}</span>
                 </div>
                 <p className="text-[11px] text-ink-muted leading-relaxed font-sans">
                   {track.desc}

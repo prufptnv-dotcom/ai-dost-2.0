@@ -1,11 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Eye, Code2, Download, ExternalLink, RefreshCw, X,
-  Smartphone, Tablet, Monitor, Sparkles, Copy, Check,
-  Maximize2, Minimize2, Play, Send, Loader2,
-  FileText, BarChart3, Image as ImageIcon, FileCode, Zap
-} from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 import Image from 'next/image';
 import { compileLiveHtml } from '../../lib/compileLiveHtml';
 import { useCanvasCollaboration } from '../../hooks/useCanvasCollaboration';
@@ -19,19 +14,18 @@ export default function ChatArtifactsCanvas({
   onClose,
   onOpenInCopilot,
 }) {
-  const [tab, setTab] = useState('preview'); // 'preview' | 'code'
-  const [device, setDevice] = useState('desktop'); // 'desktop' | 'tablet' | 'mobile'
+  const [tab, setTab] = useState('preview');
+  const [device, setDevice] = useState('desktop');
   const [copied, setCopied] = useState(false);
   const [iframeKey, setIframeKey] = useState(0);
   const [isMaximized, setIsMaximized] = useState(false);
-  const [canvasWidth, setCanvasWidth] = useState(50); 
+  const [canvasWidth, setCanvasWidth] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [showAiPrompt, setShowAiPrompt] = useState(false);
   const [aiInstruction, setAiInstruction] = useState('');
 
-  // --- Autonomous Self-Healing State ---
-  const [healState, setHealState] = useState('idle'); 
+  const [healState, setHealState] = useState('idle');
   const [healInfo, setHealInfo] = useState({
     error: '',
     explanation: '',
@@ -53,7 +47,6 @@ export default function ChatArtifactsCanvas({
 
   const roomId = artifactId || 'collaborative-canvas-default';
 
-  // --- Real-Time Multiplayer Collaboration Hook ---
   const {
     connected,
     participants,
@@ -80,11 +73,10 @@ export default function ChatArtifactsCanvas({
     setHealState('idle');
   }, [code, artifact?.id]);
 
-  // --- ARTIFACT RENDERER: The Claude-Style Multi-Viewer ---
   const renderArtifactContent = () => {
     if (tab === 'code') {
       return (
-        <div className="w-full h-full p-4 font-mono text-xs text-slate-300 bg-slate-950 overflow-auto">
+        <div className="w-full h-full p-5 font-mono text-xs leading-relaxed text-paper-200 bg-canvas-elevated overflow-auto">
           <pre className="whitespace-pre-wrap">{code || liveCode}</pre>
         </div>
       );
@@ -93,9 +85,9 @@ export default function ChatArtifactsCanvas({
     switch (type) {
       case 'pdf':
         return (
-          <iframe 
-            src={`${downloadUrl}#toolbar=0`} 
-            className="w-full h-full border-none" 
+          <iframe
+            src={`${downloadUrl}#toolbar=0`}
+            className="w-full h-full border-none"
             title="PDF Preview"
           />
         );
@@ -107,7 +99,7 @@ export default function ChatArtifactsCanvas({
         );
       case 'image':
         return (
-          <div className="w-full h-full flex items-center justify-center bg-slate-900 p-4 overflow-auto">
+          <div className="w-full h-full flex items-center justify-center bg-canvas-elevated p-4 overflow-auto">
             <Image src={code} alt="Generated Visual" width={400} height={300} className="max-w-full h-auto rounded-lg shadow-2xl" />
           </div>
         );
@@ -115,11 +107,11 @@ export default function ChatArtifactsCanvas({
         return (
           <div className="w-full h-full p-8 bg-white text-slate-900 overflow-y-auto prose prose-slate max-w-none">
             <div className="max-w-3xl mx-auto">
-                <div dangerouslySetInnerHTML={{ __html: code }} />
+              <div dangerouslySetInnerHTML={{ __html: code }} />
             </div>
           </div>
         );
-      default: // Default to the Live HTML Sandbox
+      default:
         return (
           <div className="w-full h-full relative bg-white overflow-hidden">
             <iframe
@@ -141,73 +133,93 @@ export default function ChatArtifactsCanvas({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const typeIcon = () => {
+    if (type === 'pdf') return <AppIcon name="file" size={16} />;
+    if (type === 'chart') return <AppIcon name="chart" size={16} />;
+    if (type === 'image') return <AppIcon name="image" size={16} />;
+    if (type === 'document') return <AppIcon name="file" size={16} />;
+    if (type === 'code') return <AppIcon name="fileCode" size={16} />;
+    return <AppIcon name="zap" size={16} />;
+  };
+
+  const typeColor = () => {
+    if (type === 'pdf') return 'text-red-400 bg-red-500/10 border-red-500/20';
+    if (type === 'chart') return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
+    if (type === 'image') return 'text-violet-400 bg-violet-500/10 border-violet-500/20';
+    if (type === 'document') return 'text-orange-400 bg-orange-500/10 border-orange-500/20';
+    if (type === 'code') return 'text-sky-400 bg-sky-500/10 border-sky-500/20';
+    return 'text-amber-400 bg-amber-500/10 border-amber-500/20';
+  };
+
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0, x: 100 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 100 }}
-      className="fixed right-0 top-0 h-screen bg-slate-900 border-l border-slate-800 shadow-2xl z-40 flex flex-col transition-all duration-300"
+      className="fixed right-0 top-0 h-screen bg-canvas-base border-l border-border-subtle shadow-2xl z-40 flex flex-col transition-all duration-300"
       style={{ width: `${canvasWidth}%` }}
     >
-      {/* Artifact Header */}
-      <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
-        <div className="flex items-center gap-3 overflow-hidden">
-          <div className="p-2 bg-blue-500/20 rounded-lg">
-            {type === 'pdf' && <FileText className="w-4 h-4 text-blue-400" />}
-            {type === 'chart' && <BarChart3 className="w-4 h-4 text-green-400" />}
-            {type === 'image' && <ImageIcon className="w-4 h-4 text-purple-400" />}
-            {type === 'document' && <FileText className="w-4 h-4 text-orange-400" />}
-            {type === 'code' && <Code2 className="w-4 h-4 text-blue-400" />}
-            {type !== 'pdf' && type !== 'chart' && type !== 'image' && type !== 'document' && <Zap className="w-4 h-4 text-yellow-400" />}
+      <div className="px-4 py-3 border-b border-border-subtle flex items-center justify-between bg-canvas-surface/80 backdrop-blur-sm">
+        <div className="flex items-center gap-3 overflow-hidden min-w-0">
+          <div className={`p-2 rounded-xl border shrink-0 shadow-xs ${typeColor()}`}>
+            {typeIcon()}
           </div>
-          <h3 className="text-sm font-bold text-slate-200 truncate">{title}</h3>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-paper-100 truncate">{title}</h3>
+            <p className="text-[10px] font-mono text-ink-muted uppercase tracking-wider">{language || type} · interactive</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 shrink-0">
           {downloadUrl && (
-            <button onClick={() => window.open(downloadUrl, '_blank')} className="p-2 hover:bg-slate-800 rounded-md text-slate-400 transition-colors">
-              <Download className="w-4 h-4" />
+            <button onClick={() => window.open(downloadUrl, '_blank')} className="p-2 hover:bg-canvas-elevated rounded-lg text-ink-muted hover:text-paper-100 transition-colors cursor-pointer" title="Download">
+              <AppIcon name="download" size={16} />
             </button>
           )}
-          <button onClick={onClose} className="p-2 hover:bg-slate-800 rounded-md text-slate-400 transition-colors">
-            <X className="w-4 h-4" />
+          <button onClick={onClose} className="p-2 hover:bg-canvas-elevated rounded-lg text-ink-muted hover:text-paper-100 transition-colors cursor-pointer" title="Close">
+            <AppIcon name="close" size={16} />
           </button>
         </div>
       </div>
 
-      {/* Tab Switcher */}
-      <div className="flex p-2 gap-1 bg-slate-950 border-b border-slate-800">
-        <button 
+      <div className="flex p-2 gap-1 bg-canvas-base border-b border-border-subtle">
+        <button
           onClick={() => setTab('preview')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'preview' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+            tab === 'preview'
+              ? 'bg-accent text-white shadow-[0_0_12px_-2px_rgba(99,102,241,0.4)]'
+              : 'text-ink-muted hover:text-paper-200 hover:bg-canvas-surface'
+          }`}
         >
-          <Eye className="w-3 h-3" /> Preview
+          <AppIcon name="eye" size={14} /> Preview
         </button>
-        <button 
+        <button
           onClick={() => setTab('code')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${tab === 'code' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+            tab === 'code'
+              ? 'bg-accent text-white shadow-[0_0_12px_-2px_rgba(99,102,241,0.4)]'
+              : 'text-ink-muted hover:text-paper-200 hover:bg-canvas-surface'
+          }`}
         >
-          <Code2 className="w-3 h-3" /> Code
+          <AppIcon name="code" size={14} /> Code
         </button>
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 relative overflow-hidden bg-slate-950">
+      <div className="flex-1 relative overflow-hidden bg-canvas-elevated">
         {renderArtifactContent()}
       </div>
 
-      {/* Action Footer */}
-      <div className="p-4 border-t border-slate-800 bg-slate-950 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <button onClick={handleCopy} className="flex items-center gap-2 text-xs text-slate-400 hover:text-white transition-colors">
-            {copied ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+      <div className="px-4 py-3 border-t border-border-subtle bg-canvas-surface/80 backdrop-blur-sm flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <button onClick={handleCopy} className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-paper-200 bg-canvas-elevated border border-border hover:border-border-strong hover:text-paper-100 transition-all cursor-pointer">
+            {copied ? <AppIcon name="check" size={14} className="text-emerald-400" /> : <AppIcon name="copy" size={14} />}
             {copied ? 'Copied!' : 'Copy Code'}
           </button>
-          <button onClick={onOpenInCopilot} className="flex items-center gap-2 text-xs text-blue-400 hover:text-blue-300 transition-colors">
-            <ExternalLink className="w-3 h-3" /> Open in IDE
+          <button onClick={onOpenInCopilot} className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-accent hover:bg-accent-hover shadow-[0_0_12px_-2px_rgba(99,102,241,0.4)] transition-all cursor-pointer">
+            <AppIcon name="external" size={14} /> Open in IDE
           </button>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-slate-600 uppercase font-bold tracking-widest">Artifact v1.0</span>
+          <span className="text-[10px] font-mono text-ink-muted uppercase tracking-widest">Artifact v1.0</span>
         </div>
       </div>
     </motion.div>

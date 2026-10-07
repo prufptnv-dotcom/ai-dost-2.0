@@ -187,7 +187,11 @@ class RobustApiClient {
                                                  errorText.includes('output tokens per minute') ||
                                                  errorText.includes('(OTPM)') ||
                                                  errorText.includes('tokens per minute (TPM)') ||
-                                                 errorText.includes('rate_limit_exceeded');
+                                                 errorText.includes('rate_limit_exceeded') ||
+                                                 errorText.includes('insufficient_quota') ||
+                                                 errorText.includes('credit_balance_exhausted') ||
+                                                 errorText.includes('no credits remaining') ||
+                                                 errorText.includes('billing');
                         
                         const retryAfter = response.headers.get('Retry-After');
                         const retryAfterMs = retryAfter ? parseInt(retryAfter) * 1000 : NaN;

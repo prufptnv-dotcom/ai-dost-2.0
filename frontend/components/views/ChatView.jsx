@@ -30,6 +30,7 @@ const DOC_KEYWORDS = [
 ];
 
 const NAV_INTENTS = [
+  { re: /\b(preview|live preview)\b.*\b(kholo|dikhao|dikha|open|show|run|chalao|start|de do|do)\b|\b(open|show|kholo|dikhao|dikha|run|chalao|start)\b.*\b(preview|live preview)\b|^preview$/i, view: 'copilot', label: 'Live Preview', mode: 'preview' },
   { re: /\b(projects?|meri projects?|my projects?)\b.*\b(kholo|dikhao|dikha|open|show|list)\b/i, view: 'projects', label: 'Projects' },
   { re: /\b(history|purani baatein|chat history|old chats?)\b.*\b(kholo|dikhao|dikha|open|show|load|dekh)\b/i, view: 'history', label: 'Chat History' },
   { re: /\b(copilot|ide|code editor|editor)\b.*\b(kholo|dikhao|dikha|open|show)\b/i, view: 'copilot', label: 'Copilot IDE' },
@@ -56,6 +57,38 @@ const MODEL_OPTIONS = [
   { id: 'deepseek', label: 'DeepSeek' },
   { id: 'mistral', label: 'Mistral' },
   { id: 'ollama', label: 'Ollama (Local)' },
+
+  // OpenRouter Free Models
+  { id: 'openrouter', label: '🪐 OpenRouter (Auto Best Free)', group: 'OpenRouter Free Models' },
+
+  // 1. General Reasoning & Heavy Tasks
+  { id: 'openrouter:nemotron_3_super', label: 'Nemotron 3 Super (120B)', group: 'OpenRouter · Reasoning' },
+  { id: 'openrouter:nemotron_3_ultra', label: 'Nemotron 3 Ultra (550B)', group: 'OpenRouter · Reasoning' },
+  { id: 'openrouter:nemotron_3_lightning', label: 'Nemotron 3.5 Lightning', group: 'OpenRouter · Reasoning' },
+  { id: 'openrouter:inkling', label: 'Inkling (Agentic)', group: 'OpenRouter · Reasoning' },
+  { id: 'openrouter:inkling_small', label: 'Inkling Small', group: 'OpenRouter · Reasoning' },
+  { id: 'openrouter:dots_3_note', label: 'Dots 3 Note Preview', group: 'OpenRouter · Reasoning' },
+  { id: 'openrouter:lfm_reasoning', label: 'Liquid LFM 2.5 (Reasoning)', group: 'OpenRouter · Reasoning' },
+
+  // 2. Coding & Developer Agents
+  { id: 'openrouter:north_mini_code', label: 'Cohere North Mini Code', group: 'OpenRouter · Coding' },
+  { id: 'openrouter:laguna_s', label: 'Poolside Laguna-S 2.1', group: 'OpenRouter · Coding' },
+  { id: 'openrouter:laguna_xs', label: 'Poolside Laguna-XS 2.1', group: 'OpenRouter · Coding' },
+
+  // 3. Multimodal & Vision
+  { id: 'openrouter:gemma_26b', label: 'Google Gemma 4 (26B)', group: 'OpenRouter · Multimodal' },
+  { id: 'openrouter:gemma_31b', label: 'Google Gemma 4 (31B)', group: 'OpenRouter · Multimodal' },
+  { id: 'openrouter:qwen_38', label: 'Qwen 3.8 (27B)', group: 'OpenRouter · Multimodal' },
+  { id: 'openrouter:nemotron_nano_omni', label: 'Nemotron Nano Omni (30B)', group: 'OpenRouter · Multimodal' },
+  { id: 'openrouter:nemotron_rerank_vl', label: 'Nemotron Rerank VL', group: 'OpenRouter · Multimodal' },
+  { id: 'openrouter:nemotron_embed_vl', label: 'Nemotron Embed VL', group: 'OpenRouter · Multimodal' },
+
+  // 4. Specialized & Niche Tasks
+  { id: 'openrouter:ling_sante', label: 'Ling 3.0 Santé (Medical)', group: 'OpenRouter · Specialized' },
+  { id: 'openrouter:apodex_mini', label: 'Apodex 1.1 Mini (Research)', group: 'OpenRouter · Specialized' },
+  { id: 'openrouter:mercury_decide', label: 'Mercury Decide', group: 'OpenRouter · Specialized' },
+  { id: 'openrouter:content_safety', label: 'Nemotron Content Safety', group: 'OpenRouter · Specialized' },
+  { id: 'openrouter:nemotron_embed', label: 'Nemotron Embed 1B', group: 'OpenRouter · Specialized' },
 ];
 
 const WELCOME = {
@@ -147,10 +180,57 @@ export default function ChatView({
 
   const isWriting = displayMessages.some((m) => m.isStreaming && m.content);
 
+  // ─── Draggable artifact split (Claude/Cursor-style resizable divider) ───
+  const SPLIT_KEY = 'ai_dost_chat_split_pct';
+  const splitContainerRef = useRef(null);
+  const draggingRef = useRef(false);
+  const [splitPct, setSplitPct] = useState(52);
+
+  useEffect(() => {
+    try {
+      const v = parseInt(window.localStorage.getItem(SPLIT_KEY), 10);
+      if (Number.isFinite(v) && v >= 30 && v <= 75) setSplitPct(v);
+    } catch (_) { /* ignore */ }
+  }, []);
+
+  const commitSplit = (pct) => {
+    const clamped = Math.min(75, Math.max(30, Math.round(pct)));
+    setSplitPct(clamped);
+    try { window.localStorage.setItem(SPLIT_KEY, String(clamped)); } catch (_) { /* ignore */ }
+  };
+
+  const handleSplitPointerDown = (e) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+
+  const handleSplitPointerMove = (e) => {
+    if (!draggingRef.current) return;
+    const rect = splitContainerRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return;
+    const pct = ((rect.right - e.clientX) / rect.width) * 100;
+    setSplitPct(Math.min(75, Math.max(30, pct)));
+  };
+
+  const handleSplitPointerUp = (e) => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    const rect = splitContainerRef.current?.getBoundingClientRect();
+    if (rect && rect.width > 0) commitSplit(((rect.right - e.clientX) / rect.width) * 100);
+  };
+
+  const handleSplitKeyDown = (e) => {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); commitSplit(splitPct + 4); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); commitSplit(splitPct - 4); }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); commitSplit(52); }
+  };
+
   return (
-    <div className="h-full flex flex-row overflow-hidden bg-canvas-base relative">
+    <div ref={splitContainerRef} className="h-full flex flex-row overflow-hidden bg-canvas-base relative">
       {/* LEFT PANE: Chat Interface */}
-      <div className={`relative flex flex-col h-full overflow-hidden transition-all duration-500 ease-in-out ${activeArtifact ? 'flex-1 max-w-2xl' : 'flex-1 max-w-4xl mx-auto'}`}>
+      <div className={`relative flex flex-col h-full overflow-hidden transition-all duration-500 ease-in-out ${activeArtifact ? 'flex-1 min-w-0' : 'flex-1 max-w-4xl mx-auto'}`}>
         <SmartChatHeader
           sessionName={currentSessionName}
           sessions={sessions}
@@ -207,15 +287,40 @@ export default function ChatView({
         />
       </div>
 
+      {/* Draggable split divider */}
+      {activeArtifact && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize chat and artifact panes"
+          aria-valuenow={Math.round(splitPct)}
+          aria-valuemin={30}
+          aria-valuemax={75}
+          tabIndex={0}
+          onPointerDown={handleSplitPointerDown}
+          onPointerMove={handleSplitPointerMove}
+          onPointerUp={handleSplitPointerUp}
+          onPointerCancel={() => { draggingRef.current = false; }}
+          onDoubleClick={() => commitSplit(52)}
+          onKeyDown={handleSplitKeyDown}
+          className="group relative w-[6px] shrink-0 cursor-col-resize bg-canvas-base focus:outline-none touch-none"
+          title="Drag to resize · Double-click to reset"
+          data-testid="split-divider"
+        >
+          <span className="absolute inset-y-0 left-0 right-0 m-auto w-px bg-border-default transition-colors duration-150 group-hover:bg-accent group-focus-visible:bg-accent" />
+          <span className="absolute inset-y-0 -left-1 -right-1" />
+        </div>
+      )}
+
       {/* RIGHT PANE: Artifacts Workspace */}
       <AnimatePresence>
         {activeArtifact && (
           <motion.div 
             initial={{ width: 0, opacity: 0 }}
-            animate={{ width: '50%', opacity: 1 }}
+            animate={{ width: `${splitPct}%`, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
-            transition={{ type: 'spring', damping: 20, stiffness: 100 }}
-            className="h-full border-l border-slate-800 bg-slate-950 overflow-hidden"
+            transition={{ type: 'spring', damping: 22, stiffness: 120 }}
+            className="h-full bg-canvas-subtle overflow-hidden"
           >
             <ChatArtifactsCanvas 
               artifact={activeArtifact} 

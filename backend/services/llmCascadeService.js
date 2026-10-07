@@ -220,11 +220,28 @@ async function runStreamCascade({
             }
         }
 
-        // 4. Try OpenRouter Streaming (DeepSeek-R1 / Qwen Reasoning)
-        if (!streamedSuccessfully && (model === 'openrouter' || model === 'auto' || !model)) {
+        // 4. Try OpenRouter Streaming (with verified 2026 Free Models & Thinking/Reasoning support)
+        const isOrRequested = model === 'openrouter' || (model && (model.startsWith('openrouter:') || OpenRouterService.isSupportedModel?.(model)));
+        if (!streamedSuccessfully && (isOrRequested || model === 'auto' || !model)) {
             const openrouterKey = customKeys?.openrouter || process.env.OPENROUTER_API_KEY;
             if (openrouterKey) {
-                const orModels = ['openai/gpt-oss-20b:free', 'deepseek/deepseek-r1:free', 'cohere/north-mini-code:free', 'google/gemma-4-31b-it:free'];
+                let requestedOrModel = null;
+                if (model && model.startsWith('openrouter:')) requestedOrModel = OpenRouterService.resolveModel?.(model.slice(11));
+                else if (model && OpenRouterService.isSupportedModel?.(model)) requestedOrModel = OpenRouterService.resolveModel?.(model);
+
+                const baseOrModels = [
+                    'openrouter/free',
+                    'nvidia/nemotron-3-super-120b-a12b:free',
+                    'cohere/north-mini-code:free',
+                    'liquid/lfm-2.5-2.6b:free',
+                    'nvidia/nemotron-3.5-lightning:free',
+                    'poolside/laguna-s-2.1:free',
+                    'inclusionai/ling-3.0-flash-sante:free',
+                    'apodex/apodex-1.1-mini:free',
+                    'google/gemma-4-31b-it:free',
+                    'google/gemma-4-26b-a4b-it:free'
+                ];
+                const orModels = requestedOrModel ? [requestedOrModel, ...baseOrModels.filter(m => m !== requestedOrModel)] : baseOrModels;
                 for (const orModel of orModels) {
                     try {
                         const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {

@@ -37,12 +37,12 @@ export function DocsLayout({ title, description, category, children }) {
     <PublicLayout title={`${title} — AI-Dost Documentation`} description={description}>
       <div className="relative border-b border-border bg-canvas-subtle py-8 overflow-hidden">
         {/* Subtle Gemini ambient glow */}
-        <div className="absolute top-0 right-1/4 w-[400px] h-[200px] bg-gradient-to-l from-[#4285f4]/15 via-[#9b72cb]/10 to-transparent blur-[100px] pointer-events-none rounded-full" />
+        <div className="absolute top-0 right-1/4 w-[400px] h-[200px] bg-gradient-to-l from-[#6366f1]/15 via-[#a5b4fc]/10 to-transparent blur-[100px] pointer-events-none rounded-full" />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
           <div className="flex items-center gap-2 text-xs font-mono text-ink-muted mb-2">
             <Link href="/docs" className="hover:text-paper-100">Docs</Link>
             <ChevronRight className="w-3 h-3 text-border" />
-            <span className="text-[#4893fc]">{category || 'Guide'}</span>
+            <span className="text-[#6366f1]">{category || 'Guide'}</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold font-display text-paper-100">
             {title}
@@ -74,7 +74,7 @@ export function DocsLayout({ title, description, category, children }) {
                             href={item.href}
                             className={`block px-3 py-1.5 rounded-r-lg transition-fast ${
                               isActive
-                                ? 'bg-white/5 text-white font-semibold border-l-2 border-[#4893fc] shadow-[0_0_12px_rgba(66,133,244,0.15)]'
+                                ? 'bg-white/5 text-white font-semibold border-l-2 border-[#6366f1] shadow-[0_0_12px_rgba(99,102,241,0.15)]'
                                 : 'text-paper-200 hover:text-paper-100 hover:bg-white/5'
                             }`}
                           >

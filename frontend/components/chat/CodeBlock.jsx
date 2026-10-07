@@ -1,9 +1,5 @@
 import React, { useState } from 'react';
-import {
-  Copy, Check, Play, ExternalLink, RefreshCw, X,
-  Smartphone, Monitor, Sparkles, Eye, Square,
-  ChevronDown, ChevronUp
-} from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 import api from '../../services/api';
 import { compileLiveHtml, isVisualCode } from '../../lib/compileLiveHtml';
 
@@ -114,12 +110,18 @@ export default function CodeBlock({
               className={`chat-code-action ${
                 showPreview ? 'text-accent font-semibold bg-accent/15 border border-accent/30' : ''
               }`}
-              aria-label={isVisual ? (showPreview ? 'Close animation preview' : 'Run live animation') : 'Run code'}
-              title={isVisual ? (showPreview ? 'Close preview' : 'Run animation live') : 'Run code'}
+              aria-label={isVisual ? (showPreview ? 'Close preview' : 'Open live preview') : 'Run code'}
+              title={isVisual ? (showPreview ? 'Close preview' : 'Open preview live') : 'Run code'}
             >
-              {showPreview ? <Square size={12} className="text-accent" /> : <Play size={12} className="text-emerald-400 fill-emerald-400/20" />}
+              {showPreview ? (
+                <AppIcon name="square" size={12} className="text-accent" />
+              ) : isVisual ? (
+                <AppIcon name="eye" size={12} className="text-sky-400" />
+              ) : (
+                <AppIcon name="play" size={12} className="text-emerald-400 fill-emerald-400/20" />
+              )}
               <span>
-                {running ? 'Running…' : isVisual ? (showPreview ? 'Close Preview' : 'Run Animation') : 'Run'}
+                {running ? 'Running…' : isVisual ? (showPreview ? 'Close Preview' : 'Open Preview') : 'Run'}
               </span>
             </button>
           )}
@@ -133,7 +135,7 @@ export default function CodeBlock({
               aria-label="Open split canvas preview"
               title="Open in Split Canvas"
             >
-              <ExternalLink size={12} />
+              <AppIcon name="external" size={12} />
               <span>Canvas</span>
             </button>
           )}
@@ -147,7 +149,7 @@ export default function CodeBlock({
               aria-label="Open code in IDE"
               title="Open in IDE"
             >
-              <Sparkles size={12} />
+              <AppIcon name="sparkles" size={12} />
               <span>IDE</span>
             </button>
           )}
@@ -162,12 +164,12 @@ export default function CodeBlock({
           >
             {copied ? (
               <>
-                <Check size={13} className="text-accent" />
+                <AppIcon name="check" size={13} className="text-accent" />
                 <span>Copied</span>
               </>
             ) : (
               <>
-                <Copy size={13} />
+                <AppIcon name="copy" size={13} />
                 <span>Copy</span>
               </>
             )}
@@ -195,12 +197,12 @@ export default function CodeBlock({
           >
             {expanded ? (
               <>
-                <ChevronUp size={13} />
+                <AppIcon name="chevronUp" size={13} />
                 <span>Show less</span>
               </>
             ) : (
               <>
-                <ChevronDown size={13} />
+                <AppIcon name="chevronDown" size={13} />
                 <span>Expand full code ({lineCount} lines)</span>
               </>
             )}
@@ -216,7 +218,7 @@ export default function CodeBlock({
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-signal-success animate-pulse" />
               <span className="font-mono text-[11px] font-semibold text-paper-100 flex items-center gap-1">
-                <Eye size={12} className="text-accent" /> Live Animation Preview
+                <AppIcon name="eye" size={12} className="text-accent" /> Live Animation Preview
               </span>
             </div>
 
@@ -231,7 +233,7 @@ export default function CodeBlock({
                   }`}
                   title="Desktop viewport"
                 >
-                  <Monitor size={11} />
+                  <AppIcon name="desktop" size={11} />
                 </button>
                 <button
                   type="button"
@@ -241,7 +243,7 @@ export default function CodeBlock({
                   }`}
                   title="Mobile viewport"
                 >
-                  <Smartphone size={11} />
+                  <AppIcon name="mobile" size={11} />
                 </button>
               </div>
 
@@ -252,7 +254,7 @@ export default function CodeBlock({
                 className="p-1 rounded hover:bg-canvas-subtle text-ink-muted hover:text-paper-100 transition-colors cursor-pointer"
                 title="Restart Animation"
               >
-                <RefreshCw size={11} />
+                <AppIcon name="refresh" size={11} />
               </button>
 
               {/* Popout to split canvas */}
@@ -263,7 +265,7 @@ export default function CodeBlock({
                   className="p-1 rounded hover:bg-canvas-subtle text-ink-muted hover:text-paper-100 transition-colors cursor-pointer"
                   title="Open Split Canvas"
                 >
-                  <ExternalLink size={11} />
+                  <AppIcon name="external" size={11} />
                 </button>
               )}
 
@@ -274,7 +276,7 @@ export default function CodeBlock({
                 className="p-1 rounded hover:bg-canvas-subtle text-ink-muted hover:text-paper-100 transition-colors cursor-pointer"
                 title="Close Preview"
               >
-                <X size={11} />
+                <AppIcon name="close" size={11} />
               </button>
             </div>
           </div>
@@ -314,7 +316,7 @@ export default function CodeBlock({
                 onClick={() => setShowPreview(true)}
                 className="text-[10px] text-accent hover:underline cursor-pointer flex items-center gap-1 font-semibold"
               >
-                <Play size={10} /> Open as Live Browser Animation
+                <AppIcon name="play" size={10} /> Open as Live Browser Animation
               </button>
             )}
           </div>

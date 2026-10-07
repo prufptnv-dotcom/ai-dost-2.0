@@ -69,11 +69,11 @@ export default function SecurityPage() {
       {/* ─── Header ─── */}
       <section className="relative pt-20 pb-16 md:pt-28 md:pb-20 border-b border-border bg-canvas-subtle overflow-hidden">
         {/* Google Gemini Dual Ambient Celestial Orbs */}
-        <div className="absolute -top-24 left-1/4 w-[500px] h-[300px] bg-gradient-to-tr from-[#4285f4]/20 via-[#9b72cb]/18 to-transparent blur-[120px] pointer-events-none rounded-full" />
-        <div className="absolute top-10 right-1/4 w-[450px] h-[300px] bg-gradient-to-bl from-[#d96570]/15 via-[#1ba1e2]/15 to-transparent blur-[120px] pointer-events-none rounded-full" />
+        <div className="absolute -top-24 left-1/4 w-[500px] h-[300px] bg-gradient-to-tr from-[#6366f1]/20 via-[#a5b4fc]/18 to-transparent blur-[120px] pointer-events-none rounded-full" />
+        <div className="absolute top-10 right-1/4 w-[450px] h-[300px] bg-gradient-to-bl from-[#4f46e5]/15 via-[#818cf8]/15 to-transparent blur-[120px] pointer-events-none rounded-full" />
 
         <RevealOnScroll direction="up" className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-4 relative z-10">
-          <div className="gemini-shimmer-badge text-[11px] font-mono text-[#4893fc]">
+          <div className="gemini-shimmer-badge text-[11px] font-mono text-[#6366f1]">
             <ShieldCheck className="w-3.5 h-3.5 gemini-sparkle-icon" />
             <span>Security Architecture</span>
           </div>
@@ -90,7 +90,7 @@ export default function SecurityPage() {
       <section className="py-16 md:py-24 border-b border-border">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
           <RevealOnScroll direction="up" className="space-y-2 text-center sm:text-left">
-            <h2 className="text-xs font-mono uppercase tracking-[0.15em] text-[#4893fc] font-semibold">
+            <h2 className="text-xs font-mono uppercase tracking-[0.15em] text-[#6366f1] font-semibold">
               Verified Controls
             </h2>
             <p className="text-2xl sm:text-3xl font-bold font-display text-paper-100">
@@ -112,10 +112,10 @@ export default function SecurityPage() {
               >
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex items-center gap-2.5">
-                    <ShieldCheck className="w-4 h-4 text-[#4893fc] shrink-0" />
+                    <ShieldCheck className="w-4 h-4 text-[#6366f1] shrink-0" />
                     <h3 className="text-sm font-semibold font-display text-paper-100">{ctrl.title}</h3>
                   </div>
-                  <span className="text-[10px] font-mono px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[#9b72cb] shrink-0 self-start sm:self-auto">
+                  <span className="text-[10px] font-mono px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[#a5b4fc] shrink-0 self-start sm:self-auto">
                     {ctrl.category}
                   </span>
                 </div>
@@ -123,7 +123,7 @@ export default function SecurityPage() {
                   {ctrl.desc}
                 </p>
                 <div className="text-[10px] font-mono text-ink-muted pt-1 border-t border-border-subtle flex items-center gap-1.5">
-                  <span className="text-[#4893fc] font-semibold">Code Evidence:</span>
+                  <span className="text-[#6366f1] font-semibold">Code Evidence:</span>
                   <span>{ctrl.verified}</span>
                 </div>
               </RevealOnScroll>
@@ -136,7 +136,7 @@ export default function SecurityPage() {
       <section className="py-16 md:py-24 bg-canvas-subtle border-b border-border">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
           <div className="space-y-2 text-center sm:text-left">
-            <h2 className="text-xs font-mono uppercase tracking-[0.15em] text-[#4893fc] font-semibold">
+            <h2 className="text-xs font-mono uppercase tracking-[0.15em] text-[#6366f1] font-semibold">
               Transparent Disclosures
             </h2>
             <p className="text-2xl sm:text-3xl font-bold font-display text-paper-100">

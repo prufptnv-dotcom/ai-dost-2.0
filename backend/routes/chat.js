@@ -212,6 +212,22 @@ router.get('/local-models', async (req, res) => {
     }
 });
 
+// OpenRouter models catalog endpoint
+router.get('/openrouter-models', (req, res) => {
+    try {
+        const configured = Boolean(process.env.OPENROUTER_API_KEY);
+        const models = OpenRouterService.getModelCatalog();
+        res.json({
+            success: true,
+            configured,
+            models,
+            rawModels: OpenRouterService.FREE_MODELS
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 // Service health check endpoint
 router.get('/health/services', async (req, res) => {
     const services = {
@@ -326,15 +342,15 @@ router.post('/', async (req, res) => {
         // Prepend locked language directive to guarantee response language consistency
         const todayStr = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
         const GLOBAL_SYSTEM_RULES = `
-[CRITICAL SYSTEM RULES & REAL-TIME CONTEXT]
+[CRITICAL SYSTEM RULES & AUTONOMOUS INTEGRITY PROTOCOL]
 1. Current Date: Today is ${todayStr}. NEVER hallucinate past dates.
-2. Financial & Factual Accuracy: Do NOT fabricate or guess prices, market caps, numbers, or facts. If you don't have real-time data, state it clearly. Always provide actual URLs when discussing facts or crypto.
-3. Link Accuracy: Do NOT hallucinate direct links (e.g., .pdf files or GitHub repos) unless you are 100% sure they exist. Instead, provide the official website or download page URL.
-4. Interactive UI Elements: Do NOT hallucinate interactive UI buttons like "Launch Assessment" in plain text chat. Present quizzes or questions directly in plain text or markdown.
-5. Hyper-Multilingual: You MUST reply entirely in the language determined by the system or requested by the user. Switch seamlessly (English, Hindi, Hinglish, Marathi, Bengali, etc.). Do not switch back to English except for technical terms.
-6. Citation Style: When citing sources, ALWAYS include the full clickable URL in this format: [1] https://... (do not just write [1] without the link).
-7. Extreme Completeness (MANDATORY): Never truncate an answer mid-way, never use placeholder code ("// rest of code here"), and never give a shallow one-liner when the question needs depth. Code must be complete and runnable.
-8. Zero Hallucinations: If you don't know something, admit it. Never invent APIs, packages, or tools.
+2. Anti-Deviation Rule (जो मांगा, वही मिलेगा): Deliver EXACTLY what the user asks. NEVER substitute request "A" with "B". Do not alter, mutate, or omit the user's core intent.
+3. Autonomous Domain Adaptability: Act as an advanced, self-governing AI companion. If the user asks for code, provide complete production-ready code; if creative writing (story, poem, script), provide rich evocative prose; if research or analysis, provide structured deep insight; if casual chat, reply naturally.
+4. Zero Preambles & Filler: Eliminate filler introductions like "Sure, I can help with that", "Certainly!", or "Here is what you asked for". Start directly with the answer or requested asset.
+5. Extreme Completeness (MANDATORY): Never truncate an answer mid-way, never use placeholder code ("// TODO", "// rest of code here"), and provide 100% complete runnable solutions.
+6. Financial & Factual Accuracy: Do NOT fabricate prices, market caps, numbers, or facts. Never invent direct links or packages.
+7. Hyper-Multilingual Mastery: Reply in the language detected from the user (English, Hindi, Hinglish, Marathi, Bengali, etc.). Keep technical tokens in standard English.
+8. Error-Correction Validation Check: Ensure this output directly and accurately answers what the user asked with zero deviation.
 `;
         processedMessage = `${GLOBAL_SYSTEM_RULES}\n\n${langInfo.instruction}\n\n${processedMessage}`;
 
@@ -808,9 +824,11 @@ Structure the answer clearly, use appropriate diagrams, code, tables, or step-by
                 case 'cerebras':
                     response = await CerebrasService.chat(groqMsg, cleanHistory, mode, customKeys?.cerebras);
                     break;
-                case 'openrouter':
-                    response = await OpenRouterService.chat(groqMsg, cleanHistory, customKeys?.openrouter);
+                case 'openrouter': {
+                    response = await OpenRouterService.chat(groqMsg, cleanHistory, customKeys?.openrouter, mode);
+                    usedModel = 'openrouter (auto)';
                     break;
+                }
                 case 'mistral':
                     response = await MistralService.chat(groqMsg, cleanHistory, customKeys?.mistral);
                     break;
@@ -821,6 +839,12 @@ Structure the answer clearly, use appropriate diagrams, code, tables, or step-by
                     response = await HuggingFaceService.chat(groqMsg);
                     break;
                 default: {
+                    if (model && (model.startsWith('openrouter:') || OpenRouterService.isSupportedModel(model))) {
+                        const targetOrModel = model.startsWith('openrouter:') ? model.slice(11) : model;
+                        response = await OpenRouterService.chat(groqMsg, cleanHistory, customKeys?.openrouter, mode, targetOrModel);
+                        usedModel = `openrouter (${targetOrModel})`;
+                        break;
+                    }
                     // Auto-select best model with intelligent intent detection
                     const autoResult = await autoSelectModel(processedMessage, section, fileContent, cleanHistory, mode, customKeys);
                     response = autoResult.response;
@@ -860,27 +884,34 @@ Structure the answer clearly, use appropriate diagrams, code, tables, or step-by
 
         // Final fallback if all models failed
         if (!isValidResponse(response)) {
-
-
-            logger.warn(`⚠️ Primary selected model failed (${usedModel}), attempting global cascading failover...`);
-            try {
-                const fallbackResult = await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
-                response = fallbackResult.response;
-                usedModel = fallbackResult.winner;
-            } catch (failoverError) {
-                logger.error('Cascading failover threw an error:', failoverError);
-                logger.error('All AI models failed, checking autonomous generator fallback');
-            if (/(?:three\.?js|webgl|dna|helix|genetic|molecule|cellular|highway|road|car|vehicle|city|skyline|crystal|quantum|polyhedron|solar system|earth|gravity|orbit|planet|space simulation|sorting|neural|periodic|science|simulation|game|runner|tron|hyperdrive|logo|brand|reveal|text|typography|kinetic|font|2030|cyberpunk|ultra hd|3d scene|3d model|3d visual|3d)/i.test(message)) {
-                response = generateFuturistic2030Animation(message, langInfo.detectedResponseLanguage);
-                usedModel = '2030-futuristic-engine';
-            } else if (/(?:anime\.?js|2d animation|motion design|krishna|peacock|aura)/i.test(message)) {
-                response = `### ✨ 3D Interactive Animation (Anime.js)\n\nAapka **3D Motion Animation** ready hai! Isme Anime.js 3D perspective transforms, rotating multi-layered rings, aur floating orb depth effect integrate kiya gaya hai:\n\n\`\`\`html\n<!DOCTYPE html>\n<html>\n<head>\n  <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>\n  <style>\n    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle, #0d1b2a 0%, #000814 100%); overflow: hidden; perspective: 1000px; font-family: sans-serif; }\n    .scene { position: relative; width: 300px; height: 300px; transform-style: preserve-3d; display: flex; align-items: center; justify-content: center; }\n    .ring { position: absolute; border-radius: 50%; border: 2px solid rgba(254, 215, 102, 0.7); box-shadow: 0 0 25px rgba(255, 215, 0, 0.6); transform-style: preserve-3d; }\n    .ring-1 { width: 260px; height: 260px; border-color: #38bdf8; box-shadow: 0 0 30px #0284c7; }\n    .ring-2 { width: 200px; height: 200px; border-color: #facc15; box-shadow: 0 0 35px #eab308; }\n    .ring-3 { width: 140px; height: 140px; border-color: #a855f7; box-shadow: 0 0 40px #9333ea; }\n    .center-orb { width: 70px; height: 70px; border-radius: 50%; background: radial-gradient(circle, #fef08a 20%, #eab308 60%, #ca8a04 100%); box-shadow: 0 0 50px #fbbf24; transform: translateZ(50px); }\n    .peacock-feather { position: absolute; top: -40px; font-size: 34px; filter: drop-shadow(0 0 10px #22c55e); transform: translateZ(70px); }\n    .title { position: absolute; bottom: 20px; color: #fde047; font-size: 15px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; text-shadow: 0 0 12px rgba(250,204,21,0.8); }\n  </style>\n</head>\n<body>\n  <div class="scene">\n    <div class="ring ring-1"></div>\n    <div class="ring ring-2"></div>\n    <div class="ring ring-3"></div>\n    <div class="center-orb"></div>\n    <div class="peacock-feather">🪶</div>\n  </div>\n  <div class="title">Divine 3D Motion Aura</div>\n  <script>\n    anime({\n      targets: '.ring-1',\n      rotateX: [0, 360],\n      rotateY: [0, 180],\n      duration: 6000,\n      loop: true,\n      easing: 'linear'\n    });\n    anime({\n      targets: '.ring-2',\n      rotateY: [0, 360],\n      rotateZ: [0, 180],\n      duration: 4500,\n      loop: true,\n      easing: 'linear'\n    });\n    anime({\n      targets: '.ring-3',\n      rotateX: [360, 0],\n      rotateZ: [0, 360],\n      duration: 3500,\n      loop: true,\n      easing: 'linear'\n    });\n    anime({\n      targets: '.center-orb, .peacock-feather',\n      translateZ: [30, 80],\n      scale: [0.95, 1.1],\n      direction: 'alternate',\n      duration: 1800,\n      loop: true,\n      easing: 'easeInOutQuad'\n    });\n  </script>\n</body>\n</html>\n\`\`\`\n\n*Aap upar **Run/Preview** button par click karke live animation dekh sakte hain!*`;
-                usedModel = 'anime-3d-engine';
+            const isOrModelSelected = model === 'openrouter' || (model && (model.startsWith('openrouter:') || OpenRouterService.isSupportedModel(model)));
+            if (isOrModelSelected) {
+                logger.warn(`⚠️ OpenRouter model failed (${usedModel}), reporting error directly without silent Groq substitution.`);
+                response = (typeof response === 'string' && response.trim() && !response.includes('OPENROUTER_'))
+                    ? response
+                    : `Ai-Dost: Aapne OpenRouter model (**${model}**) select kiya hai, lekin OpenRouter service temporarily busy ya rate-limited hai. Kripya thodi der baad dobara koshish karein ya doosra model chunein.`;
+                usedModel = `${model} (Unavailable)`;
             } else {
-                response = "Ai-Dost: Sabhi AI models temporarily unavailable. Please check your API keys in settings, try again in a moment, or use local Ollama (http://127.0.0.1:11434) for offline mode.";
-                usedModel = 'fallback';
-            }
-            } // Close catch block
+                logger.warn(`⚠️ Primary selected model failed (${usedModel}), attempting global cascading failover...`);
+                try {
+                    const fallbackResult = await executeCascadingFailover(message, groqMsg, cleanHistory, fileContent, mode, customKeys);
+                    response = fallbackResult.response;
+                    usedModel = fallbackResult.winner;
+                } catch (failoverError) {
+                    logger.error('Cascading failover threw an error:', failoverError);
+                    logger.error('All AI models failed, checking autonomous generator fallback');
+                    if (/(?:three\.?js|webgl|dna|helix|genetic|molecule|cellular|highway|road|car|vehicle|city|skyline|crystal|quantum|polyhedron|solar system|earth|gravity|orbit|planet|space simulation|sorting|neural|periodic|science|simulation|game|runner|tron|hyperdrive|logo|brand|reveal|text|typography|kinetic|font|2030|cyberpunk|ultra hd|3d scene|3d model|3d visual|3d)/i.test(message)) {
+                        response = generateFuturistic2030Animation(message, langInfo.detectedResponseLanguage);
+                        usedModel = '2030-futuristic-engine';
+                    } else if (/(?:anime\.?js|2d animation|motion design|krishna|peacock|aura)/i.test(message)) {
+                        response = `### ✨ 3D Interactive Animation (Anime.js)\n\nAapka **3D Motion Animation** ready hai! Isme Anime.js 3D perspective transforms, rotating multi-layered rings, aur floating orb depth effect integrate kiya gaya hai:\n\n\`\`\`html\n<!DOCTYPE html>\n<html>\n<head>\n  <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>\n  <style>\n    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle, #0d1b2a 0%, #000814 100%); overflow: hidden; perspective: 1000px; font-family: sans-serif; }\n    .scene { position: relative; width: 300px; height: 300px; transform-style: preserve-3d; display: flex; align-items: center; justify-content: center; }\n    .ring { position: absolute; border-radius: 50%; border: 2px solid rgba(254, 215, 102, 0.7); box-shadow: 0 0 25px rgba(255, 215, 0, 0.6); transform-style: preserve-3d; }\n    .ring-1 { width: 260px; height: 260px; border-color: #38bdf8; box-shadow: 0 0 30px #0284c7; }\n    .ring-2 { width: 200px; height: 200px; border-color: #facc15; box-shadow: 0 0 35px #eab308; }\n    .ring-3 { width: 140px; height: 140px; border-color: #a855f7; box-shadow: 0 0 40px #9333ea; }\n    .center-orb { width: 70px; height: 70px; border-radius: 50%; background: radial-gradient(circle, #fef08a 20%, #eab308 60%, #ca8a04 100%); box-shadow: 0 0 50px #fbbf24; transform: translateZ(50px); }\n    .peacock-feather { position: absolute; top: -40px; font-size: 34px; filter: drop-shadow(0 0 10px #22c55e); transform: translateZ(70px); }\n    .title { position: absolute; bottom: 20px; color: #fde047; font-size: 15px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; text-shadow: 0 0 12px rgba(250,204,21,0.8); }\n  </style>\n</head>\n<body>\n  <div class="scene">\n    <div class="ring ring-1"></div>\n    <div class="ring ring-2"></div>\n    <div class="ring ring-3"></div>\n    <div class="center-orb"></div>\n    <div class="peacock-feather">🪶</div>\n  </div>\n  <div class="title">Divine 3D Motion Aura</div>\n  <script>\n    anime({\n      targets: '.ring-1',\n      rotateX: [0, 360],\n      rotateY: [0, 180],\n      duration: 6000,\n      loop: true,\n      easing: 'linear'\n    });\n    anime({\n      targets: '.ring-2',\n      rotateY: [0, 360],\n      rotateZ: [0, 180],\n      duration: 4500,\n      loop: true,\n      easing: 'linear'\n    });\n    anime({\n      targets: '.ring-3',\n      rotateX: [360, 0],\n      rotateZ: [0, 360],\n      duration: 3500,\n      loop: true,\n      easing: 'linear'\n    });\n    anime({\n      targets: '.center-orb, .peacock-feather',\n      translateZ: [30, 80],\n      scale: [0.95, 1.1],\n      direction: 'alternate',\n      duration: 1800,\n      loop: true,\n      easing: 'easeInOutQuad'\n    });\n  </script>\n</body>\n</html>\n\`\`\`\n\n*Aap upar **Run/Preview** button par click karke live animation dekh sakte hain!*`;
+                        usedModel = 'anime-3d-engine';
+                    } else {
+                        response = "Ai-Dost: Sabhi AI models temporarily unavailable. Please check your API keys in settings, try again in a moment, or use local Ollama (http://127.0.0.1:11434) for offline mode.";
+                        usedModel = 'fallback';
+                    }
+                } // Close catch block
+            } // Close isOrModelSelected else block
         } // Close if block
 
         let responseThought = '';
@@ -1384,6 +1415,8 @@ Include:
         let streamedSuccessfully = false;
         let usedModel = 'auto';
 
+        const isOrRequested = model === 'openrouter' || (model && (model.startsWith('openrouter:') || OpenRouterService.isSupportedModel(model)));
+
         // 0. If Custom Fine-Tuned VKP-Omni-2B requested
         const isVkpRequested = model === 'vkp-omni' || model === 'vkp-omni-2b' || model === 'vkp' || model === 'nandiai/vkp-omni-2b' || (typeof model === 'string' && model.toLowerCase().includes('vkp'));
         if (isVkpRequested) {
@@ -1419,8 +1452,123 @@ Include:
             }
         }
 
-        // 1. If Local Ollama requested
-        if (!streamedSuccessfully && (model === 'ollama' || (model && model.startsWith('local:')))) {
+        // 1. If OpenRouter requested explicitly (PRIMARY PRIORITY: run first, never defer to Groq)
+        if (!streamedSuccessfully && isOrRequested) {
+            const openrouterKey = customKeys?.openrouter || process.env.OPENROUTER_API_KEY;
+            if (openrouterKey) {
+                try {
+                    let requestedOrModel = null;
+                    if (model && model.startsWith('openrouter:')) requestedOrModel = OpenRouterService.resolveModel(model.slice(11));
+                    else if (model && OpenRouterService.isSupportedModel(model)) requestedOrModel = OpenRouterService.resolveModel(model);
+
+                    const verifiedOrModels = [
+                        'nvidia/nemotron-3-super-120b-a12b:free',
+                        'openrouter/free',
+                        'nvidia/nemotron-3-ultra-550b-a55b:free',
+                        'nvidia/nemotron-3.5-lightning:free',
+                        'dots-studio/dots-3-note-preview:free',
+                        'liquid/lfm-2.5-2.6b:free',
+                        'cohere/north-mini-code:free',
+                        'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+                        'inclusionai/ling-3.0-flash-sante:free',
+                        'apodex/apodex-1.1-mini:free',
+                        'nvidia/nemotron-3.5-content-safety:free'
+                    ];
+                    const orModels = requestedOrModel ? [requestedOrModel, ...verifiedOrModels.filter(m => m !== requestedOrModel)] : verifiedOrModels;
+
+                    for (const orModel of orModels) {
+                        try {
+                            logger.info(`🪐 [OpenRouter Stream] Trying model: ${orModel}`);
+                            const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${openrouterKey}`,
+                                    'HTTP-Referer': 'http://localhost:3000',
+                                    'X-Title': 'AI-Dost'
+                                },
+                                body: JSON.stringify({
+                                    model: orModel,
+                                    messages: [
+                                        { role: 'system', content: DEEP_REASONING_SYSTEM_PROMPT },
+                                        ...cleanHistory,
+                                        { role: 'user', content: groqMsg }
+                                    ],
+                                    stream: true,
+                                    temperature: 0.2,
+                                    max_tokens: 4096
+                                }),
+                                signal: AbortSignal.timeout(20000)
+                            });
+
+                            if (orRes.ok && orRes.body) {
+                                const reader = orRes.body.getReader();
+                                const decoder = new TextDecoder();
+                                let buffer = '';
+                                let capturedThoughts = [];
+                                let capturedContent = [];
+                                const filter = new ReasoningStreamFilter(
+                                    (t) => { capturedThoughts.push(t); sendEvent({ type: 'thought_chunk', thought: t }); },
+                                    (c) => { capturedContent.push(c); sendEvent({ chunk: c }); streamedSuccessfully = true; }
+                                );
+
+                                while (true) {
+                                    const { done, value } = await reader.read();
+                                    if (done) break;
+                                    buffer += decoder.decode(value, { stream: true });
+                                    const lines = buffer.split('\n');
+                                    buffer = lines.pop() || '';
+                                    for (const line of lines) {
+                                        const trimmed = line.trim();
+                                        if (trimmed.startsWith('data: ')) {
+                                            const dataStr = trimmed.slice(6);
+                                            if (dataStr === '[DONE]') continue;
+                                            try {
+                                                const parsed = JSON.parse(dataStr);
+                                                const reasoning = parsed.choices?.[0]?.delta?.reasoning_content || parsed.choices?.[0]?.delta?.reasoning;
+                                                if (reasoning) {
+                                                    filter.pushReasoningDelta(reasoning);
+                                                }
+                                                const delta = parsed.choices?.[0]?.delta?.content;
+                                                if (delta) {
+                                                    filter.pushContentDelta(delta);
+                                                }
+                                            } catch (_) {}
+                                        }
+                                    }
+                                }
+                                filter.flush();
+                                if (filter.hasEmittedThought) sendEvent({ type: 'thought_done' });
+
+                                // Reasoning-to-content recovery for reasoning models without separate content chunks
+                                if (capturedContent.length === 0 && capturedThoughts.length > 0) {
+                                    const fullThoughtText = capturedThoughts.join('').trim();
+                                    if (fullThoughtText) {
+                                        sendEvent({ chunk: fullThoughtText });
+                                        streamedSuccessfully = true;
+                                    }
+                                }
+
+                                if (streamedSuccessfully) {
+                                    usedModel = (model && model.startsWith('openrouter:')) ? model : `openrouter (${orModel})`;
+                                    logger.info(`✅ [OpenRouter Stream] Succeeded using ${usedModel}`);
+                                    break;
+                                }
+                            } else {
+                                logger.warn(`⚠️ [OpenRouter Stream] Model ${orModel} HTTP ${orRes.status}`);
+                            }
+                        } catch (modelErr) {
+                            logger.warn(`⚠️ [OpenRouter Stream] Model ${orModel} failed: ${modelErr.message}`);
+                        }
+                    }
+                } catch (e) {
+                    logger.warn('OpenRouter streaming loop error:', e.message);
+                }
+            }
+        }
+
+        // 2. If Local Ollama requested
+        if (!streamedSuccessfully && !isOrRequested && (model === 'ollama' || (model && model.startsWith('local:')))) {
             const localModelName = model.startsWith('local:') ? model.substring(6) : (process.env.OLLAMA_MODEL || 'qwen2.5-coder:7b');
             try {
                 const ollamaRes = await fetch('http://127.0.0.1:11434/api/chat', {
@@ -1470,8 +1618,8 @@ Include:
             }
         }
 
-        // 2. Try Groq Streaming (Primary Fast with Reasoning Support)
-        if (!streamedSuccessfully && (model === 'groq' || model === 'auto' || !model)) {
+        // 3. Try Groq Streaming (Primary Fast with Reasoning Support - ONLY when OpenRouter not explicitly selected)
+        if (!streamedSuccessfully && !isOrRequested && (model === 'groq' || model === 'auto' || !model)) {
             const apiKey = customKeys?.groq || process.env.GROQ_API_KEY;
             if (apiKey && apiKey !== 'gsk_your_key_here') {
                 const groqCandidates = ['openai/gpt-oss-120b', 'deepseek-r1-distill-llama-70b', 'qwen-2.5-32b', 'llama-3.3-70b-versatile'];
@@ -1545,8 +1693,8 @@ Include:
             }
         }
 
-        // 3. Try Gemini Streaming (with Native Thought & Reasoning Filter)
-        if (!streamedSuccessfully && (model === 'gemini' || model === 'auto' || !model)) {
+        // 4. Try Gemini Streaming (with Native Thought & Reasoning Filter - ONLY when OpenRouter not explicitly selected)
+        if (!streamedSuccessfully && !isOrRequested && (model === 'gemini' || model === 'auto' || !model)) {
             const geminiKey = customKeys?.gemini || process.env.GEMINI_API_KEY;
             if (geminiKey && geminiKey !== 'your_gemini_key') {
                 try {
@@ -1615,86 +1763,128 @@ Include:
             }
         }
 
-        // 4. Try OpenRouter Streaming (DeepSeek-R1 / Qwen Reasoning)
-        if (!streamedSuccessfully && (model === 'openrouter' || model === 'auto' || !model)) {
+        // 5. Try OpenRouter Streaming for auto mode if Groq and Gemini did not stream
+        if (!streamedSuccessfully && (model === 'auto' || !model)) {
             const openrouterKey = customKeys?.openrouter || process.env.OPENROUTER_API_KEY;
             if (openrouterKey) {
                 try {
-                    const orModels = ['openai/gpt-oss-20b:free', 'deepseek/deepseek-r1:free', 'cohere/north-mini-code:free', 'google/gemma-4-31b-it:free'];
-                    for (const orModel of orModels) {
-                        const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${openrouterKey}`,
-                                'HTTP-Referer': 'http://localhost:3000',
-                                'X-Title': 'AI-Dost'
-                            },
-                            body: JSON.stringify({
-                                model: orModel,
-                                messages: [
-                                    { role: 'system', content: DEEP_REASONING_SYSTEM_PROMPT },
-                                    ...cleanHistory,
-                                    { role: 'user', content: groqMsg }
-                                ],
-                                stream: true,
-                                temperature: 0.2,
-                                max_tokens: 4096
-                            }),
-                            signal: AbortSignal.timeout(20000)
-                        });
+                    const fallbackOrModels = [
+                        'nvidia/nemotron-3-super-120b-a12b:free',
+                        'openrouter/free',
+                        'nvidia/nemotron-3-ultra-550b-a55b:free',
+                        'liquid/lfm-2.5-2.6b:free'
+                    ];
+                    for (const orModel of fallbackOrModels) {
+                        try {
+                            const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${openrouterKey}`,
+                                    'HTTP-Referer': 'http://localhost:3000',
+                                    'X-Title': 'AI-Dost'
+                                },
+                                body: JSON.stringify({
+                                    model: orModel,
+                                    messages: [
+                                        { role: 'system', content: DEEP_REASONING_SYSTEM_PROMPT },
+                                        ...cleanHistory,
+                                        { role: 'user', content: groqMsg }
+                                    ],
+                                    stream: true,
+                                    temperature: 0.2,
+                                    max_tokens: 4096
+                                }),
+                                signal: AbortSignal.timeout(20000)
+                            });
 
-                        if (orRes.ok && orRes.body) {
-                            const reader = orRes.body.getReader();
-                            const decoder = new TextDecoder();
-                            let buffer = '';
-                            const filter = new ReasoningStreamFilter(
-                                (t) => sendEvent({ type: 'thought_chunk', thought: t }),
-                                (c) => { sendEvent({ chunk: c }); streamedSuccessfully = true; }
-                            );
+                            if (orRes.ok && orRes.body) {
+                                const reader = orRes.body.getReader();
+                                const decoder = new TextDecoder();
+                                let buffer = '';
+                                const filter = new ReasoningStreamFilter(
+                                    (t) => sendEvent({ type: 'thought_chunk', thought: t }),
+                                    (c) => { sendEvent({ chunk: c }); streamedSuccessfully = true; }
+                                );
 
-                            while (true) {
-                                const { done, value } = await reader.read();
-                                if (done) break;
-                                buffer += decoder.decode(value, { stream: true });
-                                const lines = buffer.split('\n');
-                                buffer = lines.pop() || '';
-                                for (const line of lines) {
-                                    const trimmed = line.trim();
-                                    if (trimmed.startsWith('data: ')) {
-                                        const dataStr = trimmed.slice(6);
-                                        if (dataStr === '[DONE]') continue;
-                                        try {
-                                            const parsed = JSON.parse(dataStr);
-                                            const reasoning = parsed.choices?.[0]?.delta?.reasoning_content || parsed.choices?.[0]?.delta?.reasoning;
-                                            if (reasoning) {
-                                                filter.pushReasoningDelta(reasoning);
-                                            }
-                                            const delta = parsed.choices?.[0]?.delta?.content;
-                                            if (delta) {
-                                                filter.pushContentDelta(delta);
-                                            }
-                                        } catch (_) {}
+                                while (true) {
+                                    const { done, value } = await reader.read();
+                                    if (done) break;
+                                    buffer += decoder.decode(value, { stream: true });
+                                    const lines = buffer.split('\n');
+                                    buffer = lines.pop() || '';
+                                    for (const line of lines) {
+                                        const trimmed = line.trim();
+                                        if (trimmed.startsWith('data: ')) {
+                                            const dataStr = trimmed.slice(6);
+                                            if (dataStr === '[DONE]') continue;
+                                            try {
+                                                const parsed = JSON.parse(dataStr);
+                                                const reasoning = parsed.choices?.[0]?.delta?.reasoning_content || parsed.choices?.[0]?.delta?.reasoning;
+                                                if (reasoning) {
+                                                    filter.pushReasoningDelta(reasoning);
+                                                }
+                                                const delta = parsed.choices?.[0]?.delta?.content;
+                                                if (delta) {
+                                                    filter.pushContentDelta(delta);
+                                                }
+                                            } catch (_) {}
+                                        }
                                     }
                                 }
+                                filter.flush();
+                                if (filter.hasEmittedThought) sendEvent({ type: 'thought_done' });
+                                if (streamedSuccessfully) {
+                                    usedModel = `openrouter (${orModel})`;
+                                    break;
+                                }
                             }
-                            filter.flush();
-                            if (filter.hasEmittedThought) sendEvent({ type: 'thought_done' });
-                            if (streamedSuccessfully) {
-                                usedModel = `openrouter (${orModel})`;
-                                break;
-                            }
-                        }
+                        } catch (_) {}
                     }
                 } catch (e) {
-                    logger.warn('OpenRouter streaming failed:', e.message);
+                    logger.warn('OpenRouter auto stream fallback failed:', e.message);
                 }
             }
         }
 
-        // 5. Fallback to normal cascading chat if streaming had no output
+        // 6. Fallback handling if streaming had no output
         if (!streamedSuccessfully) {
-            if (model === 'vkp-omni' || model === 'vkp' || model === 'nandiai/vkp-omni-2b') {
+            if (isOrRequested) {
+                // If OpenRouter was explicitly selected, attempt synchronous OpenRouter chat before any failover
+                logger.info(`Streaming failed for requested OpenRouter model (${model}), attempting synchronous OpenRouter chat...`);
+                try {
+                    let requestedOrModel = null;
+                    if (model && model.startsWith('openrouter:')) requestedOrModel = OpenRouterService.resolveModel(model.slice(11));
+                    else if (model && OpenRouterService.isSupportedModel(model)) requestedOrModel = OpenRouterService.resolveModel(model);
+
+                    const orSyncReply = await OpenRouterService.chat(groqMsg, cleanHistory, customKeys?.openrouter, mode, requestedOrModel);
+                    if (isValidResponse(orSyncReply)) {
+                        let cleanReply = orSyncReply;
+                        if (/<think>/i.test(cleanReply)) {
+                            const tMatch = cleanReply.match(/<think>([sS]*?)<\/think>/i);
+                            if (tMatch) {
+                                sendEvent({ type: 'thought_chunk', thought: tMatch[1].trim() });
+                                sendEvent({ type: 'thought_done' });
+                                cleanReply = cleanReply.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+                            }
+                        }
+                        sendEvent({ chunk: cleanReply });
+                        usedModel = (model && model.startsWith('openrouter:')) ? model : `openrouter (${requestedOrModel || 'auto'})`;
+                        streamedSuccessfully = true;
+                    }
+                } catch (syncErr) {
+                    logger.warn('Synchronous OpenRouter stream fallback failed:', syncErr.message);
+                }
+
+                // If even synchronous OpenRouter failed, report OpenRouter status honestly without switching to Groq
+                if (!streamedSuccessfully) {
+                    sendEvent({
+                        chunk: `Ai-Dost: Aapne OpenRouter model (**${model}**) select kiya hai, lekin OpenRouter service temporarily busy ya rate-limited hai.\n\nKripya kuch seconds baad dubara message bhejein ya model selector se doosra model chunein.`
+                    });
+                    usedModel = `${model} (Unavailable)`;
+                    streamedSuccessfully = true;
+                }
+            } else if (model === 'vkp-omni' || model === 'vkp' || model === 'nandiai/vkp-omni-2b') {
                 sendEvent({
                     chunk: '⚠️ **VKP-Omni-2B Engine Abhi Start Nahi Hai**\n\nAapne apna custom fine-tuned model **VKP-Omni-2B (NandiAi/VKP-Omni-2B)** select kiya hai, lekin Python sidecar engine (Port 8001 ya 8002) abhi run nahi ho raha hai.\n\n**Ise chalane ke liye:**\n1. Ek naya terminal open karke yeh run karein:\n   ```powershell\n   cd "C:\\Users\\vikash kumar\\Pictures\\ai dost 3.0\\ai-engine"\n   start_vkp_omni.bat\n   ```\n   *(Ya `python vkp_omni_engine.py`)*\n2. Engine start hone ke baad aapka **VKP-Omni-2B** model load hokar sidhe chat handle karega!'
                 });
@@ -1704,37 +1894,37 @@ Include:
                 sendEvent({ chunk: 'Ai-Dost: Local Ollama model (' + ollamaModelName + ') connect nahi ho pa raha.\nKripya check karein:\n1. Kya "ollama serve" terminal me chal raha hai?\n2. Kya apne model download kiya hai? ("ollama pull ' + ollamaModelName + '")' });
                 usedModel = 'ollama-error';
             } else {
-            logger.info('Streaming fallbacks exhausted, falling back to synchronous cascade...');
-            const fallbackResult = await autoSelectModel(processedMessage, section, fileContent, cleanHistory, mode, customKeys);
-            if (isValidResponse(fallbackResult.response)) {
-                let cleanReply = fallbackResult.response;
-                if (/<think>/i.test(cleanReply)) {
-                    const tMatch = cleanReply.match(/<think>([\s\S]*?)<\/think>/i);
-                    if (tMatch) {
-                        sendEvent({ type: 'thought_chunk', thought: tMatch[1].trim() });
-                        sendEvent({ type: 'thought_done' });
-                        cleanReply = cleanReply.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+                logger.info('Streaming fallbacks exhausted, falling back to synchronous cascade...');
+                const fallbackResult = await autoSelectModel(processedMessage, section, fileContent, cleanHistory, mode, customKeys);
+                if (isValidResponse(fallbackResult.response)) {
+                    let cleanReply = fallbackResult.response;
+                    if (/<think>/i.test(cleanReply)) {
+                        const tMatch = cleanReply.match(/<think>([\s\S]*?)<\/think>/i);
+                        if (tMatch) {
+                            sendEvent({ type: 'thought_chunk', thought: tMatch[1].trim() });
+                            sendEvent({ type: 'thought_done' });
+                            cleanReply = cleanReply.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+                        }
                     }
-                }
-                sendEvent({ chunk: cleanReply });
-                usedModel = fallbackResult.model;
-            } else {
-                if (/(?:three\.?js|webgl|solar system|gravity|orbit|planet|space simulation|game|runner|tron|hyperdrive|logo|brand|reveal|text|typography|kinetic|font|2030|cyberpunk|ultra hd)/i.test(message)) {
-                    const simText = generateFuturistic2030Animation(message, langInfo.detectedResponseLanguage);
-                    sendEvent({ chunk: simText });
-                    usedModel = '2030-futuristic-engine';
-                } else if (/(?:anime\.?js|3d animation|3d motion|3d|motion design|krishna)/i.test(message)) {
-                    const animText = `### ✨ 3D Interactive Animation (Anime.js)\n\nAapka **3D Motion Animation** ready hai! Isme Anime.js 3D perspective transforms, rotating multi-layered rings, aur floating orb depth effect integrate kiya gaya hai:\n\n\`\`\`html\n<!DOCTYPE html>\n<html>\n<head>\n  <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>\n  <style>\n    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle, #0d1b2a 0%, #000814 100%); overflow: hidden; perspective: 1000px; font-family: sans-serif; }\n    .scene { position: relative; width: 300px; height: 300px; transform-style: preserve-3d; display: flex; align-items: center; justify-content: center; }\n    .ring { position: absolute; border-radius: 50%; border: 2px solid rgba(254, 215, 102, 0.7); box-shadow: 0 0 25px rgba(255, 215, 0, 0.6); transform-style: preserve-3d; }\n    .ring-1 { width: 260px; height: 260px; border-color: #38bdf8; box-shadow: 0 0 30px #0284c7; }\n    .ring-2 { width: 200px; height: 200px; border-color: #facc15; box-shadow: 0 0 35px #eab308; }\n    .ring-3 { width: 140px; height: 140px; border-color: #a855f7; box-shadow: 0 0 40px #9333ea; }\n    .center-orb { width: 70px; height: 70px; border-radius: 50%; background: radial-gradient(circle, #fef08a 20%, #eab308 60%, #ca8a04 100%); box-shadow: 0 0 50px #fbbf24; transform: translateZ(50px); }\n    .peacock-feather { position: absolute; top: -40px; font-size: 34px; filter: drop-shadow(0 0 10px #22c55e); transform: translateZ(70px); }\n    .title { position: absolute; bottom: 20px; color: #fde047; font-size: 15px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; text-shadow: 0 0 12px rgba(250,204,21,0.8); }\n  </style>\n</head>\n<body>\n  <div class="scene">\n    <div class="ring ring-1"></div>\n    <div class="ring ring-2"></div>\n    <div class="ring ring-3"></div>\n    <div class="center-orb"></div>\n    <div class="peacock-feather">🪶</div>\n  </div>\n  <div class="title">Divine 3D Motion Aura</div>\n  <script>\n    anime({\n      targets: '.ring-1',\n      rotateX: [0, 360],\n      rotateY: [0, 180],\n      duration: 6000,\n      loop: true,\n      easing: 'linear'\n    });\n    anime({\n      targets: '.ring-2',\n      rotateY: [0, 360],\n      rotateZ: [0, 180],\n      duration: 4500,\n      loop: true,\n      easing: 'linear'\n    });\n    anime({\n      targets: '.ring-3',\n      rotateX: [360, 0],\n      rotateZ: [0, 360],\n      duration: 3500,\n      loop: true,\n      easing: 'linear'\n    });\n    anime({\n      targets: '.center-orb, .peacock-feather',\n      translateZ: [30, 80],\n      scale: [0.95, 1.1],\n      direction: 'alternate',\n      duration: 1800,\n      loop: true,\n      easing: 'easeInOutQuad'\n    });\n  </script>\n</body>\n</html>\n\`\`\`\n\n*Aap upar **Run/Preview** button par click karke live animation dekh sakte hain!*`;
-                    sendEvent({ chunk: animText });
-                    usedModel = 'anime-3d-engine';
+                    sendEvent({ chunk: cleanReply });
+                    usedModel = fallbackResult.model;
                 } else {
-                    sendEvent({ chunk: 'Ai-Dost: Sabhi AI models temporarily busy hain. Please kuch der baad try karein ya Local Ollama use karein.' });
-                    usedModel = 'fallback';
+                    if (/(?:three\.?js|webgl|solar system|gravity|orbit|planet|space simulation|game|runner|tron|hyperdrive|logo|brand|reveal|text|typography|kinetic|font|2030|cyberpunk|ultra hd)/i.test(message)) {
+                        const simText = generateFuturistic2030Animation(message, langInfo.detectedResponseLanguage);
+                        sendEvent({ chunk: simText });
+                        usedModel = '2030-futuristic-engine';
+                    } else if (/(?:anime\.?js|3d animation|3d motion|3d|motion design|krishna)/i.test(message)) {
+                        const animText = `### ✨ 3D Interactive Animation (Anime.js)\n\nAapka **3D Motion Animation** ready hai! Isme Anime.js 3D perspective transforms, rotating multi-layered rings, aur floating orb depth effect integrate kiya gaya hai:\n\n\`\`\`html\n<!DOCTYPE html>\n<html>\n<head>\n  <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>\n  <style>\n    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle, #0d1b2a 0%, #000814 100%); overflow: hidden; perspective: 1000px; font-family: sans-serif; }\n    .scene { position: relative; width: 300px; height: 300px; transform-style: preserve-3d; display: flex; align-items: center; justify-content: center; }\n    .ring { position: absolute; border-radius: 50%; border: 2px solid rgba(254, 215, 102, 0.7); box-shadow: 0 0 25px rgba(255, 215, 0, 0.6); transform-style: preserve-3d; }\n    .ring-1 { width: 260px; height: 260px; border-color: #38bdf8; box-shadow: 0 0 30px #0284c7; }\n    .ring-2 { width: 200px; height: 200px; border-color: #facc15; box-shadow: 0 0 35px #eab308; }\n    .ring-3 { width: 140px; height: 140px; border-color: #a855f7; box-shadow: 0 0 40px #9333ea; }\n    .center-orb { width: 70px; height: 70px; border-radius: 50%; background: radial-gradient(circle, #fef08a 20%, #eab308 60%, #ca8a04 100%); box-shadow: 0 0 50px #fbbf24; transform: translateZ(50px); }\n    .peacock-feather { position: absolute; top: -40px; font-size: 34px; filter: drop-shadow(0 0 10px #22c55e); transform: translateZ(70px); }\n    .title { position: absolute; bottom: 20px; color: #fde047; font-size: 15px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; text-shadow: 0 0 12px rgba(250,204,21,0.8); }\n  </style>\n</head>\n<body>\n  <div class="scene">\n    <div class="ring ring-1"></div>\n    <div class="ring ring-2"></div>\n    <div class="ring ring-3"></div>\n    <div class="center-orb"></div>\n    <div class="peacock-feather">🪶</div>\n  </div>\n  <div class="title">Divine 3D Motion Aura</div>\n  <script>\n    anime({\n      targets: '.ring-1',\n      rotateX: [0, 360],\n      rotateY: [0, 180],\n      duration: 6000,\n      loop: true,\n      easing: 'linear'\n    });\n    anime({\n      targets: '.ring-2',\n      rotateY: [0, 360],\n      rotateZ: [0, 180],\n      duration: 4500,\n      loop: true,\n      easing: 'linear'\n    });\n    anime({\n      targets: '.ring-3',\n      rotateX: [360, 0],\n      rotateZ: [0, 360],\n      duration: 3500,\n      loop: true,\n      easing: 'linear'\n    });\n    anime({\n      targets: '.center-orb, .peacock-feather',\n      translateZ: [30, 80],\n      scale: [0.95, 1.1],\n      direction: 'alternate',\n      duration: 1800,\n      loop: true,\n      easing: 'easeInOutQuad'\n    });\n  </script>\n</body>\n</html>\n\`\`\`\n\n*Aap upar **Run/Preview** button par click karke live animation dekh sakte hain!*`;
+                        sendEvent({ chunk: animText });
+                        usedModel = 'anime-3d-engine';
+                    } else {
+                        sendEvent({ chunk: 'Ai-Dost: Sabhi AI models temporarily busy hain. Please kuch der baad try karein ya Local Ollama use karein.' });
+                        usedModel = 'fallback';
+                    }
                 }
             }
         }
-        }
-
+        
         sendEvent({ done: true, model: usedModel, sources: attachedSources });
         sendEvent('[DONE]');
         res.end();

@@ -13,45 +13,43 @@ export function IdeFooter({
   modelLabel = 'Auto (cascade)',
 }) {
   return (
-    <footer className="h-7 shrink-0 flex items-center justify-between px-4 bg-canvas-surface border-t border-border text-[10px] text-ink-muted font-mono select-none">
-      <div className="flex items-center gap-4">
-        <span className="flex items-center gap-1.5 text-paper-200">
-          <AppIcon name="branch" size={12} className="text-accent" /> main
+    <footer className="h-6 shrink-0 flex items-center justify-between px-3 bg-canvas-surface border-t border-border text-[10px] text-ink-muted font-mono select-none">
+      <div className="flex items-center gap-3 min-w-0">
+        <span className="flex items-center gap-1 text-ink-muted" title="Git branch">
+          <AppIcon name="branch" size={11} /> main
         </span>
-        <span className="flex items-center gap-1">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,.7)]" />
-          {activePath ? activePath : 'No active file'}
+        <span className="truncate max-w-[220px]" title={activePath || 'No active file'}>
+          {activePath || 'No active file'}
         </span>
         <button
           type="button"
           onClick={handleAutoFixProblems}
           disabled={running || problems === 0}
-          className={`flex items-center gap-1.5 px-2 py-0.5 rounded transition-all ${
-            problems > 0 
-              ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 font-bold border border-amber-500/30 cursor-pointer shadow-xs' 
-              : 'text-emerald-400 font-medium cursor-default'
+          className={`flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors ${
+            problems > 0
+              ? 'text-amber-400 hover:bg-amber-500/15 cursor-pointer'
+              : 'text-emerald-400 cursor-default'
           }`}
-          title={problems > 0 ? 'Click to auto-fix and verify all problems with Copilot AI' : 'Zero problems detected'}
+          title={problems > 0 ? `Fix ${problems} problems with AI` : 'Zero problems'}
         >
           {problems > 0 ? (
             <>
-              <AppIcon name="alertCircle" size={11} className="text-amber-400" />
-              <span>⚠ {problems} problems</span>
-              <span className="ml-1 px-1.5 py-0.2 rounded bg-amber-500/25 text-[9px] uppercase tracking-wider text-amber-300 border border-amber-500/30">Auto-Fix ⚡</span>
+              <AppIcon name="alertCircle" size={10} />
+              <span>{problems}</span>
             </>
           ) : (
             <>
-              <AppIcon name="check" size={11} className="text-emerald-400" />
-              <span>✓ 0 errors</span>
+              <AppIcon name="check" size={10} />
+              <span>0</span>
             </>
           )}
         </button>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 shrink-0">
         {stepLabel && (
-          <span className="text-paper-200" data-testid="footer-step">
-            step {stepLabel}
+          <span className="text-paper-200 tabular-nums" data-testid="footer-step">
+            {stepLabel}
           </span>
         )}
         {running && elapsedSec >= 1 && (
@@ -59,14 +57,16 @@ export function IdeFooter({
             {formatElapsed(elapsedSec)}
           </span>
         )}
-        <span className="text-ink-muted tabular-nums" data-testid="footer-tokens" title="Approximate tokens (chars ÷ 4) — free tier">
-          ≈{approxTokens >= 1000 ? `${(approxTokens / 1000).toFixed(1)}k` : approxTokens} tok · ₹0
+        <span className="text-ink-muted tabular-nums" data-testid="footer-tokens" title="Approximate tokens (chars ÷ 4)">
+          ≈{approxTokens >= 1000 ? `${(approxTokens / 1000).toFixed(1)}k` : approxTokens}
         </span>
-        <span className="text-ink-muted flex items-center gap-1" title="Preferred model — cascade fallback active">
-          <AppIcon name="zap" size={10} className="text-emerald-500" /> {modelLabel}
+        <span className="text-ink-muted" title="Preferred model">
+          {modelLabel}
         </span>
-        <span>UTF-8</span>
-        <span className="text-paper-200">AI-Dost v3.0</span>
+        <span className="text-ink-muted/70">UTF-8</span>
+        <span className="flex items-center gap-1 text-emerald-500/80" title="Ready">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+        </span>
       </div>
     </footer>
   );

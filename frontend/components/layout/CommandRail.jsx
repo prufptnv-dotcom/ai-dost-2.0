@@ -69,6 +69,7 @@ export function CommandRail({
     if (editingId === s.id) return;
     try {
       localStorage.setItem('ai_dost_session_id', s.id);
+      localStorage.setItem('copilot_current_session_id', s.id);
       setActiveSessionId(s.id);
       window.dispatchEvent(new CustomEvent('ai_dost_switch_session', { detail: s.id }));
     } catch (_) {}
@@ -103,8 +104,26 @@ export function CommandRail({
     try {
       localStorage.setItem('ai_dost_chat_sessions', JSON.stringify(updated));
       localStorage.removeItem(getMsgKey(s.id));
+
+      // Remove corresponding workspace files and sessions from copilot storage
+      const copilotSessionsRaw = localStorage.getItem('copilot_sessions_v2');
+      if (copilotSessionsRaw) {
+        try {
+          const parsedCopilot = JSON.parse(copilotSessionsRaw);
+          if (Array.isArray(parsedCopilot)) {
+            const filteredCopilot = parsedCopilot.filter(item => item.id !== s.id && item.id !== `workspace_${s.id}`);
+            localStorage.setItem('copilot_sessions_v2', JSON.stringify(filteredCopilot));
+          }
+        } catch (_) {}
+      }
+
+      // Backend API cleanup for chat history, project files, and copilot sessions
+      fetch(`/api/chat/history?session_id=${encodeURIComponent(s.id)}`, { method: 'DELETE' }).catch(() => {});
+      fetch(`/api/memory/project/${encodeURIComponent(s.id)}`, { method: 'DELETE' }).catch(() => {});
+      fetch(`/api/copilot/sessions/${encodeURIComponent(s.id)}`, { method: 'DELETE' }).catch(() => {});
+
       window.dispatchEvent(new CustomEvent('ai_dost_sessions_updated'));
-      window.dispatchEvent(new CustomEvent('ai_dost_toast', { detail: { type: 'success', message: 'Chat deleted' } }));
+      window.dispatchEvent(new CustomEvent('ai_dost_toast', { detail: { type: 'success', message: 'Chat and workspace deleted' } }));
 
       if (activeSessionId === s.id) {
         if (updated.length > 0) {
@@ -147,8 +166,8 @@ export function CommandRail({
               onClick={() => onSelectView?.('chat')}
               aria-label="AI-Dost home"
             >
-              <AiDostMark size={22} />
-              <span>AI-Dost</span>
+              <AiDostMark size={24} />
+              <span className="text-[14px] font-semibold text-paper-100 tracking-wide">AI-Dost</span>
             </button>
 
             {onToggleCollapse && (
@@ -166,23 +185,23 @@ export function CommandRail({
 
           <button
             type="button"
-            className="chat-new-button"
+            className="w-full flex items-center justify-center gap-2 mt-4 mb-3 py-2.5 rounded-xl bg-accent text-white font-semibold text-[13px] hover:bg-accent-hover transition-all shadow-[0_0_16px_-4px_rgba(99,102,241,0.4)] hover:shadow-[0_0_20px_-4px_rgba(99,102,241,0.5)] active:scale-[0.98]"
             onClick={onNewChat}
             aria-label="New chat"
           >
-            <AppIcon name="plus" size={16} />
+            <AppIcon name="plus" size={14} />
             <span>New chat</span>
           </button>
 
           <button
             type="button"
-            className="chat-search-button"
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-canvas-base border border-border-subtle text-ink-muted text-xs hover:text-paper-200 hover:border-border transition-colors cursor-pointer"
             onClick={onOpenCommandPalette}
             aria-label="Search chats"
           >
-            <AppIcon name="search" size={15} />
-            <span>Search & actions</span>
-            <kbd>Ctrl K</kbd>
+            <AppIcon name="search" size={13} />
+            <span className="flex-1 text-left">Search & actions</span>
+            <kbd className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-canvas-surface border border-border opacity-70">Ctrl K</kbd>
           </button>
         </div>
 
@@ -260,7 +279,7 @@ export function CommandRail({
 
                 if (editingId === s.id) {
                   return (
-                    <div key={s.id} className="flex items-center gap-1 px-2 py-1.5 rounded-md bg-canvas-surface border border-accent-primary">
+                    <div key={s.id} className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-canvas-surface border border-accent/30">
                       <input
                         type="text"
                         value={editTitle}
@@ -270,7 +289,7 @@ export function CommandRail({
                           if (e.key === 'Escape') setEditingId(null);
                         }}
                         autoFocus
-                        className="flex-1 bg-transparent text-xs text-txt-primary focus:outline-none min-w-0"
+                        className="flex-1 bg-transparent text-xs text-paper-100 focus:outline-none min-w-0"
                       />
                       <button
                         type="button"
@@ -376,10 +395,12 @@ export function CommandRail({
             className="chat-sidebar-icon-button ml-auto"
             title={`Theme: ${theme.charAt(0).toUpperCase() + theme.slice(1)}`}
           >
-            {theme === 'dark' && <AppIcon name="moon" size={16} />}
-            {theme === 'light' && <AppIcon name="sun" size={16} />}
-            {theme === 'hacker' && <AppIcon name="terminal" size={16} />}
-            {theme === 'ocean' && <AppIcon name="droplets" size={16} />}
+            <span key={theme} className="inline-flex anim-pop transition-transform duration-200 hover:scale-110 hover:-rotate-6">
+              {theme === 'dark' && <AppIcon name="moon" size={16} />}
+              {theme === 'light' && <AppIcon name="sun" size={16} />}
+              {theme === 'hacker' && <AppIcon name="terminal" size={16} />}
+              {theme === 'ocean' && <AppIcon name="droplets" size={16} />}
+            </span>
           </button>
         </div>
       </aside>

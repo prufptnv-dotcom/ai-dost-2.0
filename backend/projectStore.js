@@ -97,4 +97,18 @@ function getProjectFiles(projectId) {
   }
 }
 
-module.exports = { saveProjectFile, deleteProjectFile, getProjectFiles, onWorkspaceChange, notifyWorkspaceChange: emitChange };
+// Clear all files of a project from SQLite
+function clearProjectFiles(projectId) {
+  if (!projectId) return false;
+  try {
+    const d = getDb();
+    d.prepare('DELETE FROM workspace_files WHERE project_id = ?').run(projectId);
+    emitChange(projectId, '*', 'clear');
+    return true;
+  } catch (e) {
+    logger.error('[ProjectStore] clear failed:', e.message || e);
+    return false;
+  }
+}
+
+module.exports = { saveProjectFile, deleteProjectFile, clearProjectFiles, getProjectFiles, onWorkspaceChange, notifyWorkspaceChange: emitChange };

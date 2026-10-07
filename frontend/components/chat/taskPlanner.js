@@ -36,18 +36,34 @@ export function inferIntent(message) {
   if (/(?:delete|remove|clear|erase|hatao|mitao)\b.*\b(?:chat|conversation)/.test(text)) {
     return { type: 'command', action: 'delete-chat', target: 'chat', confidence: 0.99 };
   }
+  if (/\b(?:preview|live preview)\b.*\b(?:open|show|kholo|dikhao|dikha|chalao|run|start|de do|do)\b|\b(?:open|show|kholo|dikhao|dikha|chalao|run|start)\b.*\b(?:preview|live preview)\b|^preview$/i.test(text)) {
+    return { type: 'command', action: 'open-preview', target: 'preview', confidence: 0.99 };
+  }
+
+  const CREATIVE_CONTENT = /\b(story|kahani|katha|poem|kavita|shayari|joke|chutkula|essay|nibandh|speech|bhashan|letter|patra|email|greeting|dialogue|quote|vichar|recipe|timetable|bio)\b/i;
+  if (CREATIVE_CONTENT.test(text)) {
+    return {
+      type: 'chat',
+      action: 'write',
+      target: 'chat',
+      confidence: 0.95,
+      originalMessage: String(message || ''),
+    };
+  }
 
   const action = findMatch(text, ACTION_PATTERNS);
   const target = findMatch(text, TARGETS);
 
   if (action) {
+    const isToolTarget = Boolean(target && ['code', 'pdf', 'data'].includes(target.target));
+    const requiresTool = isToolTarget && action.action !== 'understand';
     const confidence = target ? 0.82 : 0.7;
     return {
-      type: 'task',
+      type: requiresTool || target ? 'task' : 'chat',
       action: action.action,
       target: target?.target || null,
       confidence,
-      requiresTool: action.action !== 'understand',
+      requiresTool,
       originalMessage: String(message || ''),
     };
   }

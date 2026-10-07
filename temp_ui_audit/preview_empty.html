@@ -1,0 +1,1353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script>
+    // ── In-Browser Preview Telemetry ─────────────────────────────────────
+    const report = (type, payload) => window.parent.postMessage({ channel: 'ai-dost-preview', type, ...payload }, '*');
+    window.addEventListener('error', (event) => report('RUNTIME_ERROR', { error: event.message || 'Runtime error' }));
+    window.addEventListener('unhandledrejection', (event) => report('RUNTIME_ERROR', { error: String(event.reason?.message || event.reason || 'Unhandled promise') }));
+    // Console capture → parent console drawer (cap ~80 by parent, 600 chars each)
+    const _fmtArg = (a) => { try { return typeof a === 'string' ? a : JSON.stringify(a); } catch (_) { return String(a); } };
+    ['log', 'info', 'warn', 'error', 'debug'].forEach((level) => {
+      const orig = console[level] ? console[level].bind(console) : null;
+      console[level] = (...args) => {
+        try { report('CONSOLE', { level, text: args.map(_fmtArg).join(' ').slice(0, 600) }); } catch (_) {}
+        if (orig) orig(...args);
+      };
+    });
+    window.addEventListener('error', (event) => {
+      const t = event.target;
+      if (t && t !== window && (t.src || t.href)) report('CONSOLE', { level: 'error', text: 'Failed to load ' + (t.src || t.href) });
+    }, true);
+    const inspect = () => {
+      const body = document.body;
+      if (!body) return;
+      const rect = body.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0 || !body.children.length) report('VISUAL_ERROR', { message: 'Blank preview detected' });
+      else report('PREVIEW_READY', { width: rect.width, height: rect.height });
+    };
+    new MutationObserver(() => requestAnimationFrame(inspect)).observe(document.documentElement, { childList: true, subtree: true });
+    window.addEventListener('load', () => requestAnimationFrame(inspect), { once: true });
+  </script>
+  <script>
+    // ── Safe In-Memory Storage Polyfill ─────────────────────────────────────
+    const _memoryStorage = {};
+    window.safeStorage = {
+      getItem: (k) => _memoryStorage[k] !== undefined ? _memoryStorage[k] : null,
+      setItem: (k, v) => { _memoryStorage[k] = String(v); },
+      removeItem: (k) => { delete _memoryStorage[k]; },
+      clear: () => { Object.keys(_memoryStorage).forEach(k => delete _memoryStorage[k]); }
+    };
+    try {
+      if (!window.localStorage) window.localStorage = window.safeStorage;
+    } catch(_) {}
+
+    // ── Smart In-Memory REST & Fetch Router for Preview ─────────────────────
+    const _origFetch = window.fetch;
+    const _db = {
+      notes: [
+        { id: '1', title: 'System Architecture', content: '# Core Design\n\n- Reactive state management\n- Zero-latency preview sync\n- Dark Linear design tokens', tags: ['architecture', 'saas'], createdAt: new Date().toISOString() },
+        { id: '2', title: 'Roadmap & Specs', content: '## Sprint 1 Goals\n\n- SQLite REST API: Completed\n- Split Editor: Active', tags: ['roadmap', 'product'], createdAt: new Date().toISOString() }
+      ],
+      tags: ['architecture', 'saas', 'roadmap', 'product', 'design'],
+      items: [
+        { id: '1', title: 'Primary Item', name: 'Sample Item 1', status: 'Active', count: 10, price: 99, tags: ['general'] }
+      ]
+    };
+
+    window.fetch = async function(url, options = {}) {
+      const rawUrl = String(url || '').split('?')[0];
+      const withoutProto = rawUrl.indexOf('://') !== -1 ? rawUrl.split('://')[1].split('/').slice(1).join('/') : rawUrl;
+      const cleanPath = withoutProto.startsWith('api/') ? withoutProto.slice(4) : (withoutProto.startsWith('/') ? withoutProto.slice(1) : withoutProto);
+      const method = (options.method || 'GET').toUpperCase();
+      const resource = cleanPath.split('/')[0] || 'items';
+
+      if (!_db[resource]) {
+        _db[resource] = [
+          { id: '1', title: 'Sample ' + resource, name: 'Item 1', status: 'Active', count: 5, tags: ['default'], createdAt: new Date().toISOString() }
+        ];
+      }
+
+      if (method === 'GET') {
+        const id = cleanPath.split('/')[1];
+        const data = Array.isArray(_db[resource]) && id
+          ? _db[resource].find(x => x.id === id) || _db[resource][0]
+          : _db[resource];
+        return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      if (method === 'POST') {
+        let body = {};
+        try { body = JSON.parse(options.body || '{}'); } catch(_) {}
+        const newItem = { id: String(Date.now()), ...body, createdAt: new Date().toISOString() };
+        if (Array.isArray(_db[resource])) _db[resource].unshift(newItem);
+        return new Response(JSON.stringify(newItem), { status: 201, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      if (method === 'PUT' || method === 'PATCH') {
+        let body = {};
+        try { body = JSON.parse(options.body || '{}'); } catch(_) {}
+        const id = cleanPath.split('/')[1];
+        let updatedItem = { id: id || '1', ...body };
+        if (Array.isArray(_db[resource])) {
+          const idx = _db[resource].findIndex(x => x.id === id);
+          if (idx !== -1) {
+            _db[resource][idx] = { ..._db[resource][idx], ...body };
+            updatedItem = _db[resource][idx];
+          }
+        }
+        return new Response(JSON.stringify(updatedItem), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      if (method === 'DELETE') {
+        const id = cleanPath.split('/')[1];
+        if (Array.isArray(_db[resource]) && id) {
+          _db[resource] = _db[resource].filter(x => x.id !== id);
+        }
+        return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      if (!rawUrl.startsWith('http') || rawUrl.includes('localhost') || rawUrl.includes('127.0.0.1')) {
+        const dynamicPayload = [
+          { id: '1', title: 'Item Active', name: 'Item Alpha', status: 'Active', count: 12, tags: ['general'], createdAt: new Date().toISOString() }
+        ];
+        return new Response(JSON.stringify(dynamicPayload), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      try {
+        return await _origFetch(url, options);
+      } catch(e) {
+        return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+    };
+
+    // ── Live Iframe Error Telemetry ─────────────────────────────────────────
+    window.onerror = function(msg, url, lineNo, columnNo, error) {
+      const errText = (msg || '').toString() + (lineNo ? ' (Line: ' + lineNo + ':' + columnNo + ')' : '');
+      window.parent.postMessage({
+        channel: 'ai-dost-preview',
+        type: 'AUTO_FIX_ERROR',
+        error: errText,
+        source: 'iframe_window_onerror'
+      }, '*');
+      return false;
+    };
+
+    window.addEventListener('unhandledrejection', function(event) {
+      const reason = event.reason ? (event.reason.message || event.reason) : 'Unhandled promise';
+      window.parent.postMessage({
+        channel: 'ai-dost-preview',
+        type: 'AUTO_FIX_ERROR',
+        error: 'Promise Rejection: ' + String(reason),
+        source: 'iframe_unhandled_rejection'
+      }, '*');
+    });
+  </script>
+</head>
+<body class="bg-[#090a0f] text-slate-100 min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo, useCallback, useContext, useReducer, createContext, Fragment } = React;
+
+    // ── API Functions & Stubs ───────────────────────────────────────────────
+    
+    
+
+    // ── Dynamic Icon Component Declarations ─────────────────────────────────
+    if (typeof window.Search === 'undefined') {
+      window.Search = function SearchIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Search'
+        }, '✦');
+      };
+    }
+    var Search = window.Search;
+if (typeof window.ShoppingCart === 'undefined') {
+      window.ShoppingCart = function ShoppingCartIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'ShoppingCart'
+        }, '✦');
+      };
+    }
+    var ShoppingCart = window.ShoppingCart;
+if (typeof window.ShoppingBag === 'undefined') {
+      window.ShoppingBag = function ShoppingBagIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'ShoppingBag'
+        }, '✦');
+      };
+    }
+    var ShoppingBag = window.ShoppingBag;
+if (typeof window.Kanban === 'undefined') {
+      window.Kanban = function KanbanIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Kanban'
+        }, '✦');
+      };
+    }
+    var Kanban = window.Kanban;
+if (typeof window.BrainCircuit === 'undefined') {
+      window.BrainCircuit = function BrainCircuitIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'BrainCircuit'
+        }, '✦');
+      };
+    }
+    var BrainCircuit = window.BrainCircuit;
+if (typeof window.Activity === 'undefined') {
+      window.Activity = function ActivityIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Activity'
+        }, '✦');
+      };
+    }
+    var Activity = window.Activity;
+if (typeof window.BarChart2 === 'undefined') {
+      window.BarChart2 = function BarChart2Icon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'BarChart2'
+        }, '✦');
+      };
+    }
+    var BarChart2 = window.BarChart2;
+if (typeof window.BarChart3 === 'undefined') {
+      window.BarChart3 = function BarChart3Icon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'BarChart3'
+        }, '✦');
+      };
+    }
+    var BarChart3 = window.BarChart3;
+if (typeof window.Sparkles === 'undefined') {
+      window.Sparkles = function SparklesIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Sparkles'
+        }, '✦');
+      };
+    }
+    var Sparkles = window.Sparkles;
+if (typeof window.Play === 'undefined') {
+      window.Play = function PlayIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Play'
+        }, '✦');
+      };
+    }
+    var Play = window.Play;
+if (typeof window.Layers === 'undefined') {
+      window.Layers = function LayersIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Layers'
+        }, '✦');
+      };
+    }
+    var Layers = window.Layers;
+if (typeof window.TrendingUp === 'undefined') {
+      window.TrendingUp = function TrendingUpIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'TrendingUp'
+        }, '✦');
+      };
+    }
+    var TrendingUp = window.TrendingUp;
+if (typeof window.CheckCircle === 'undefined') {
+      window.CheckCircle = function CheckCircleIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'CheckCircle'
+        }, '✦');
+      };
+    }
+    var CheckCircle = window.CheckCircle;
+if (typeof window.CheckCircle2 === 'undefined') {
+      window.CheckCircle2 = function CheckCircle2Icon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'CheckCircle2'
+        }, '✦');
+      };
+    }
+    var CheckCircle2 = window.CheckCircle2;
+if (typeof window.Shield === 'undefined') {
+      window.Shield = function ShieldIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Shield'
+        }, '✦');
+      };
+    }
+    var Shield = window.Shield;
+if (typeof window.ShieldCheck === 'undefined') {
+      window.ShieldCheck = function ShieldCheckIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'ShieldCheck'
+        }, '✦');
+      };
+    }
+    var ShieldCheck = window.ShieldCheck;
+if (typeof window.GitBranch === 'undefined') {
+      window.GitBranch = function GitBranchIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'GitBranch'
+        }, '✦');
+      };
+    }
+    var GitBranch = window.GitBranch;
+if (typeof window.Plus === 'undefined') {
+      window.Plus = function PlusIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Plus'
+        }, '✦');
+      };
+    }
+    var Plus = window.Plus;
+if (typeof window.Minus === 'undefined') {
+      window.Minus = function MinusIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Minus'
+        }, '✦');
+      };
+    }
+    var Minus = window.Minus;
+if (typeof window.Zap === 'undefined') {
+      window.Zap = function ZapIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Zap'
+        }, '✦');
+      };
+    }
+    var Zap = window.Zap;
+if (typeof window.Box === 'undefined') {
+      window.Box = function BoxIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Box'
+        }, '✦');
+      };
+    }
+    var Box = window.Box;
+if (typeof window.ArrowRight === 'undefined') {
+      window.ArrowRight = function ArrowRightIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'ArrowRight'
+        }, '✦');
+      };
+    }
+    var ArrowRight = window.ArrowRight;
+if (typeof window.Download === 'undefined') {
+      window.Download = function DownloadIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Download'
+        }, '✦');
+      };
+    }
+    var Download = window.Download;
+if (typeof window.X === 'undefined') {
+      window.X = function XIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'X'
+        }, '✦');
+      };
+    }
+    var X = window.X;
+if (typeof window.Menu === 'undefined') {
+      window.Menu = function MenuIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Menu'
+        }, '✦');
+      };
+    }
+    var Menu = window.Menu;
+if (typeof window.Trash === 'undefined') {
+      window.Trash = function TrashIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Trash'
+        }, '✦');
+      };
+    }
+    var Trash = window.Trash;
+if (typeof window.Trash2 === 'undefined') {
+      window.Trash2 = function Trash2Icon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Trash2'
+        }, '✦');
+      };
+    }
+    var Trash2 = window.Trash2;
+if (typeof window.Edit === 'undefined') {
+      window.Edit = function EditIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Edit'
+        }, '✦');
+      };
+    }
+    var Edit = window.Edit;
+if (typeof window.Pencil === 'undefined') {
+      window.Pencil = function PencilIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Pencil'
+        }, '✦');
+      };
+    }
+    var Pencil = window.Pencil;
+if (typeof window.FolderTree === 'undefined') {
+      window.FolderTree = function FolderTreeIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'FolderTree'
+        }, '✦');
+      };
+    }
+    var FolderTree = window.FolderTree;
+if (typeof window.FilePlus2 === 'undefined') {
+      window.FilePlus2 = function FilePlus2Icon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'FilePlus2'
+        }, '✦');
+      };
+    }
+    var FilePlus2 = window.FilePlus2;
+if (typeof window.FolderPlus === 'undefined') {
+      window.FolderPlus = function FolderPlusIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'FolderPlus'
+        }, '✦');
+      };
+    }
+    var FolderPlus = window.FolderPlus;
+if (typeof window.ChevronDown === 'undefined') {
+      window.ChevronDown = function ChevronDownIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'ChevronDown'
+        }, '✦');
+      };
+    }
+    var ChevronDown = window.ChevronDown;
+if (typeof window.ChevronUp === 'undefined') {
+      window.ChevronUp = function ChevronUpIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'ChevronUp'
+        }, '✦');
+      };
+    }
+    var ChevronUp = window.ChevronUp;
+if (typeof window.ChevronRight === 'undefined') {
+      window.ChevronRight = function ChevronRightIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'ChevronRight'
+        }, '✦');
+      };
+    }
+    var ChevronRight = window.ChevronRight;
+if (typeof window.ChevronLeft === 'undefined') {
+      window.ChevronLeft = function ChevronLeftIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'ChevronLeft'
+        }, '✦');
+      };
+    }
+    var ChevronLeft = window.ChevronLeft;
+if (typeof window.Globe === 'undefined') {
+      window.Globe = function GlobeIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Globe'
+        }, '✦');
+      };
+    }
+    var Globe = window.Globe;
+if (typeof window.Database === 'undefined') {
+      window.Database = function DatabaseIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Database'
+        }, '✦');
+      };
+    }
+    var Database = window.Database;
+if (typeof window.Server === 'undefined') {
+      window.Server = function ServerIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Server'
+        }, '✦');
+      };
+    }
+    var Server = window.Server;
+if (typeof window.Code === 'undefined') {
+      window.Code = function CodeIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Code'
+        }, '✦');
+      };
+    }
+    var Code = window.Code;
+if (typeof window.Code2 === 'undefined') {
+      window.Code2 = function Code2Icon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Code2'
+        }, '✦');
+      };
+    }
+    var Code2 = window.Code2;
+if (typeof window.Eye === 'undefined') {
+      window.Eye = function EyeIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Eye'
+        }, '✦');
+      };
+    }
+    var Eye = window.Eye;
+if (typeof window.EyeOff === 'undefined') {
+      window.EyeOff = function EyeOffIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'EyeOff'
+        }, '✦');
+      };
+    }
+    var EyeOff = window.EyeOff;
+if (typeof window.Lock === 'undefined') {
+      window.Lock = function LockIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Lock'
+        }, '✦');
+      };
+    }
+    var Lock = window.Lock;
+if (typeof window.User === 'undefined') {
+      window.User = function UserIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'User'
+        }, '✦');
+      };
+    }
+    var User = window.User;
+if (typeof window.Users === 'undefined') {
+      window.Users = function UsersIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Users'
+        }, '✦');
+      };
+    }
+    var Users = window.Users;
+if (typeof window.Clock === 'undefined') {
+      window.Clock = function ClockIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Clock'
+        }, '✦');
+      };
+    }
+    var Clock = window.Clock;
+if (typeof window.Mail === 'undefined') {
+      window.Mail = function MailIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Mail'
+        }, '✦');
+      };
+    }
+    var Mail = window.Mail;
+if (typeof window.Phone === 'undefined') {
+      window.Phone = function PhoneIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Phone'
+        }, '✦');
+      };
+    }
+    var Phone = window.Phone;
+if (typeof window.MapPin === 'undefined') {
+      window.MapPin = function MapPinIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'MapPin'
+        }, '✦');
+      };
+    }
+    var MapPin = window.MapPin;
+if (typeof window.Star === 'undefined') {
+      window.Star = function StarIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Star'
+        }, '✦');
+      };
+    }
+    var Star = window.Star;
+if (typeof window.Heart === 'undefined') {
+      window.Heart = function HeartIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Heart'
+        }, '✦');
+      };
+    }
+    var Heart = window.Heart;
+if (typeof window.Filter === 'undefined') {
+      window.Filter = function FilterIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Filter'
+        }, '✦');
+      };
+    }
+    var Filter = window.Filter;
+if (typeof window.RefreshCw === 'undefined') {
+      window.RefreshCw = function RefreshCwIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'RefreshCw'
+        }, '✦');
+      };
+    }
+    var RefreshCw = window.RefreshCw;
+if (typeof window.ExternalLink === 'undefined') {
+      window.ExternalLink = function ExternalLinkIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'ExternalLink'
+        }, '✦');
+      };
+    }
+    var ExternalLink = window.ExternalLink;
+if (typeof window.Settings === 'undefined') {
+      window.Settings = function SettingsIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Settings'
+        }, '✦');
+      };
+    }
+    var Settings = window.Settings;
+if (typeof window.AlertCircle === 'undefined') {
+      window.AlertCircle = function AlertCircleIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'AlertCircle'
+        }, '✦');
+      };
+    }
+    var AlertCircle = window.AlertCircle;
+if (typeof window.Check === 'undefined') {
+      window.Check = function CheckIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Check'
+        }, '✦');
+      };
+    }
+    var Check = window.Check;
+if (typeof window.Copy === 'undefined') {
+      window.Copy = function CopyIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Copy'
+        }, '✦');
+      };
+    }
+    var Copy = window.Copy;
+if (typeof window.Sliders === 'undefined') {
+      window.Sliders = function SlidersIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Sliders'
+        }, '✦');
+      };
+    }
+    var Sliders = window.Sliders;
+if (typeof window.Calendar === 'undefined') {
+      window.Calendar = function CalendarIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Calendar'
+        }, '✦');
+      };
+    }
+    var Calendar = window.Calendar;
+if (typeof window.Camera === 'undefined') {
+      window.Camera = function CameraIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Camera'
+        }, '✦');
+      };
+    }
+    var Camera = window.Camera;
+if (typeof window.Image === 'undefined') {
+      window.Image = function ImageIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Image'
+        }, '✦');
+      };
+    }
+    var Image = window.Image;
+if (typeof window.Video === 'undefined') {
+      window.Video = function VideoIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Video'
+        }, '✦');
+      };
+    }
+    var Video = window.Video;
+if (typeof window.Hospital === 'undefined') {
+      window.Hospital = function HospitalIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Hospital'
+        }, '✦');
+      };
+    }
+    var Hospital = window.Hospital;
+if (typeof window.Stethoscope === 'undefined') {
+      window.Stethoscope = function StethoscopeIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Stethoscope'
+        }, '✦');
+      };
+    }
+    var Stethoscope = window.Stethoscope;
+if (typeof window.Award === 'undefined') {
+      window.Award = function AwardIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Award'
+        }, '✦');
+      };
+    }
+    var Award = window.Award;
+if (typeof window.PhoneCall === 'undefined') {
+      window.PhoneCall = function PhoneCallIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'PhoneCall'
+        }, '✦');
+      };
+    }
+    var PhoneCall = window.PhoneCall;
+if (typeof window.UserCheck === 'undefined') {
+      window.UserCheck = function UserCheckIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'UserCheck'
+        }, '✦');
+      };
+    }
+    var UserCheck = window.UserCheck;
+if (typeof window.Bed === 'undefined') {
+      window.Bed = function BedIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Bed'
+        }, '✦');
+      };
+    }
+    var Bed = window.Bed;
+if (typeof window.CalendarCheck === 'undefined') {
+      window.CalendarCheck = function CalendarCheckIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'CalendarCheck'
+        }, '✦');
+      };
+    }
+    var CalendarCheck = window.CalendarCheck;
+if (typeof window.Pill === 'undefined') {
+      window.Pill = function PillIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Pill'
+        }, '✦');
+      };
+    }
+    var Pill = window.Pill;
+if (typeof window.Ticket === 'undefined') {
+      window.Ticket = function TicketIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Ticket'
+        }, '✦');
+      };
+    }
+    var Ticket = window.Ticket;
+if (typeof window.Film === 'undefined') {
+      window.Film = function FilmIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Film'
+        }, '✦');
+      };
+    }
+    var Film = window.Film;
+if (typeof window.Rocket === 'undefined') {
+      window.Rocket = function RocketIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Rocket'
+        }, '✦');
+      };
+    }
+    var Rocket = window.Rocket;
+if (typeof window.Mars === 'undefined') {
+      window.Mars = function MarsIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Mars'
+        }, '✦');
+      };
+    }
+    var Mars = window.Mars;
+if (typeof window.Info === 'undefined') {
+      window.Info = function InfoIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Info'
+        }, '✦');
+      };
+    }
+    var Info = window.Info;
+if (typeof window.Utensils === 'undefined') {
+      window.Utensils = function UtensilsIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Utensils'
+        }, '✦');
+      };
+    }
+    var Utensils = window.Utensils;
+if (typeof window.Coffee === 'undefined') {
+      window.Coffee = function CoffeeIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Coffee'
+        }, '✦');
+      };
+    }
+    var Coffee = window.Coffee;
+if (typeof window.DollarSign === 'undefined') {
+      window.DollarSign = function DollarSignIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'DollarSign'
+        }, '✦');
+      };
+    }
+    var DollarSign = window.DollarSign;
+if (typeof window.CreditCard === 'undefined') {
+      window.CreditCard = function CreditCardIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'CreditCard'
+        }, '✦');
+      };
+    }
+    var CreditCard = window.CreditCard;
+if (typeof window.Tag === 'undefined') {
+      window.Tag = function TagIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'Tag'
+        }, '✦');
+      };
+    }
+    var Tag = window.Tag;
+if (typeof window.FileText === 'undefined') {
+      window.FileText = function FileTextIcon(props) {
+        const size = props?.size || 18;
+        const className = props?.className || '';
+        return React.createElement('span', {
+          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
+          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          title: 'FileText'
+        }, '✦');
+      };
+    }
+    var FileText = window.FileText;
+
+    class GlobalErrorBoundary extends React.Component {
+      constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null };
+      }
+      static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+      }
+      componentDidCatch(error, info) {
+        console.error("Preview caught error:", error, info);
+        window.parent.postMessage({
+          type: 'AUTO_FIX_ERROR',
+          error: 'React ErrorBoundary: ' + (error?.message || 'Component Crash'),
+          source: 'react_error_boundary'
+        }, '*');
+      }
+      render() {
+        if (this.state.hasError) {
+          return (
+            <div className="min-h-screen bg-[#0d111a] text-red-400 p-8 flex flex-col items-center justify-center space-y-4">
+              <div className="p-6 max-w-lg w-full bg-red-950/40 border border-red-500/30 rounded-2xl shadow-2xl space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">⚠️</span>
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Preview Runtime Error</h3>
+                </div>
+                <pre className="text-xs bg-black/60 p-3 rounded-xl overflow-x-auto text-red-300 font-mono">
+                  {this.state.error?.message || 'Unknown error'}
+                </pre>
+                <button
+                  onClick={() => {
+                    window.parent.postMessage({
+                      type: 'AUTO_FIX_ERROR',
+                      error: this.state.error?.message || 'Runtime crash'
+                    }, '*');
+                  }}
+                  className="w-full py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  ⚡ Auto-Fix this Error with Copilot AI
+                </button>
+              </div>
+            </div>
+          );
+        }
+        return this.props.children;
+      }
+    }
+
+    // ── Sub-Components Injected from Workspace ─────────────────────────────
+    
+
+    // ── Primary App Component ──────────────────────────────────────────────
+    
+
+    
+
+    const _appMountContainer = document.getElementById('root');
+    let _previewMountRoot = window.__aiDostRootInstance;
+    if (!_previewMountRoot && _appMountContainer) {
+      _previewMountRoot = window.__aiDostRootInstance = ReactDOM.createRoot(_appMountContainer);
+    }
+    if (typeof App === 'undefined' || !App) {
+      // Mount failure is outside GlobalErrorBoundary's reach (the ReferenceError
+      // fires while evaluating <App />), so surface it as a readable card.
+      try { report('RUNTIME_ERROR', { error: 'Root component not found: no App export in workspace entry file' }); } catch (_) {}
+      if (_appMountContainer) {
+        _appMountContainer.innerHTML = '<div style="max-width:420px;text-align:center;padding:24px;border:1px solid #334155;border-radius:16px;background:#0f172a;color:#94a3b8;font-family:Inter,sans-serif">' +
+          '<div style="font-size:20px;margin-bottom:8px">🧩</div>' +
+          '<div style="color:#e2e8f0;font-weight:600;margin-bottom:6px">Preview could not mount a root component</div>' +
+          '<div style="font-size:12px;line-height:1.6">No <code style="color:#818cf8">App</code> (or default export) was found in <code style="color:#818cf8">src/App.jsx</code>.<br>Check the entry file and retry.</div>' +
+          '</div>';
+      }
+    } else {
+      _previewMountRoot.render(
+        <GlobalErrorBoundary>
+          <App />
+        </GlobalErrorBoundary>
+      );
+    }
+
+    // ── Visual Element Inspector Instrumentation ────────────────────────────
+    let _inspectorActive = true;
+    let _hoveredEl = null;
+    let _badge = null;
+
+    function _getBadge() {
+      if (_badge) return _badge;
+      _badge = document.createElement('div');
+      _badge.id = '_aidost_inspector_badge';
+      _badge.style.cssText = 'position:fixed;z-index:999999;display:none;padding:4px 9px;border-radius:6px;background:rgba(15,23,42,0.95);color:#818cf8;border:1px solid #6366f1;font-family:monospace;font-size:11px;font-weight:600;pointer-events:none;box-shadow:0 8px 16px rgba(0,0,0,0.5);white-space:nowrap;backdrop-filter:blur(8px);';
+      document.body.appendChild(_badge);
+      return _badge;
+    }
+
+    window.addEventListener('message', function(e) {
+      if (e.data && e.data.type === 'SET_INSPECTOR_ACTIVE') {
+        _inspectorActive = Boolean(e.data.active);
+        if (!_inspectorActive && _hoveredEl) {
+          _hoveredEl.style.outline = '';
+          _hoveredEl.style.boxShadow = '';
+          if (_badge) _badge.style.display = 'none';
+        }
+      }
+    });
+
+    document.addEventListener('mouseover', function(e) {
+      if (!_inspectorActive) return;
+      const el = e.target;
+      if (el === document.body || el === document.documentElement || el.id === '_aidost_inspector_badge') return;
+      if (_hoveredEl && _hoveredEl !== el) {
+        _hoveredEl.style.outline = '';
+        _hoveredEl.style.boxShadow = '';
+      }
+      _hoveredEl = el;
+      el.style.outline = '2px dashed #6366f1';
+      el.style.outlineOffset = '2px';
+      el.style.boxShadow = '0 0 12px rgba(99,102,241,0.35)';
+
+      const badge = _getBadge();
+      const rect = el.getBoundingClientRect();
+      const tag = el.tagName.toLowerCase();
+      const cls = el.className ? '.' + String(el.className).trim().split(/\s+/).slice(0, 2).join('.') : '';
+      const text = el.innerText ? ' "' + el.innerText.trim().slice(0, 20) + '"' : '';
+      badge.textContent = '<' + tag + cls + '>' + text;
+      badge.style.display = 'block';
+      badge.style.top = Math.max(6, rect.top - 28) + 'px';
+      badge.style.left = Math.max(6, rect.left) + 'px';
+    }, true);
+
+    document.addEventListener('mouseout', function(e) {
+      if (!_inspectorActive) return;
+      if (_hoveredEl) {
+        _hoveredEl.style.outline = '';
+        _hoveredEl.style.boxShadow = '';
+      }
+      if (_badge) _badge.style.display = 'none';
+    }, true);
+
+    function _buildSelector(el) {
+      if (!el || el === document.body) return 'body';
+      if (el.id) return '#' + el.id;
+      var path = [];
+      var cur = el;
+      while (cur && cur !== document.body && cur !== document.documentElement) {
+        var tag = cur.tagName.toLowerCase();
+        if (cur.id) { path.unshift(tag + '#' + cur.id); break; }
+        var cls = cur.className ? '.' + String(cur.className).trim().split(/\s+/).slice(0, 2).join('.') : '';
+        var idx = 1;
+        var sib = cur.previousElementSibling;
+        while (sib) { if (sib.tagName === cur.tagName) idx++; sib = sib.previousElementSibling; }
+        path.unshift(tag + cls + ':nth-of-type(' + idx + ')');
+        cur = cur.parentElement;
+      }
+      return path.join(' > ');
+    }
+
+    document.addEventListener('click', function(e) {
+      if (!_inspectorActive) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const el = e.target;
+      const tag = el.tagName.toLowerCase();
+      const className = el.className || '';
+      const text = (el.innerText || '').trim().slice(0, 60);
+      const id = el.id || '';
+      const selector = _buildSelector(el);
+      const outerHTML = el.outerHTML ? el.outerHTML.slice(0, 500) : '';
+      const computedStyle = window.getComputedStyle(el);
+      const styles = {
+        color: computedStyle.color,
+        background: computedStyle.background,
+        fontSize: computedStyle.fontSize,
+        padding: computedStyle.padding,
+        margin: computedStyle.margin,
+        borderRadius: computedStyle.borderRadius
+      };
+
+      window.parent.postMessage({
+        type: 'INSPECT_ELEMENT',
+        element: { tag, className, text, id, selector, outerHTML, styles }
+      }, '*');
+
+      el.style.outline = '3px solid #10b981';
+      setTimeout(() => {
+        if (el) {
+          el.style.outline = '';
+          el.style.boxShadow = '';
+        }
+      }, 800);
+    }, true);
+  </script>
+</body>
+</html>

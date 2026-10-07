@@ -1,18 +1,18 @@
 import React, { useState } from 'react';
-import { Terminal, FileCode2, FilePlus, Search, ShieldCheck, ChevronDown, ChevronRight, Check, X, Loader2, Globe, Cpu, FileText } from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 import { Badge } from '../ui/Badge';
 
 const TOOL_ICONS = {
-  read_file: FileCode2,
-  write_file: FilePlus,
-  run_command: Terminal,
-  search_code: Search,
-  verify: ShieldCheck,
-  web_search: Globe,
-  python: Cpu,
-  python_runner: Cpu,
-  create_document: FileText,
-  default: Terminal,
+  read_file: 'fileCode',
+  write_file: 'filePlus',
+  run_command: 'terminal',
+  search_code: 'search',
+  verify: 'shield',
+  web_search: 'globe',
+  python: 'cpu',
+  python_runner: 'cpu',
+  create_document: 'file',
+  default: 'terminal',
 };
 
 export function ToolExecutionCard({
@@ -25,7 +25,7 @@ export function ToolExecutionCard({
 }) {
   const [expanded, setExpanded] = useState(false);
 
-  const Icon = TOOL_ICONS[tool] || TOOL_ICONS.default;
+  const iconName = TOOL_ICONS[tool] || TOOL_ICONS.default;
 
   const STATUS_VARIANTS = {
     running: 'info',
@@ -54,14 +54,14 @@ export function ToolExecutionCard({
         aria-expanded={expanded}
       >
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-6 h-6 rounded-xs bg-canvas-elevated border border-border flex items-center justify-center text-txt-secondary flex-shrink-0">
-            <Icon className="w-3.5 h-3.5" />
+          <div className="w-6 h-6 rounded-xs bg-canvas-elevated border border-border flex items-center justify-center text-paper-200 flex-shrink-0">
+            <AppIcon name={iconName} size={14} />
           </div>
-          <span className="font-mono text-xs font-medium text-txt-primary truncate">
+          <span className="font-mono text-xs font-medium text-paper-100 truncate">
             {tool}
           </span>
           {target && (
-            <span className="font-mono text-xs text-txt-muted truncate max-w-[200px] sm:max-w-xs">
+            <span className="font-mono text-xs text-ink-muted truncate max-w-[200px] sm:max-w-xs">
               {target}
             </span>
           )}
@@ -69,17 +69,17 @@ export function ToolExecutionCard({
 
         <div className="flex items-center gap-2 flex-shrink-0">
           {duration && (
-            <span className="text-[11px] font-mono text-txt-muted">
+            <span className="text-[11px] font-mono text-ink-muted">
               {duration}
             </span>
           )}
           <Badge variant={STATUS_VARIANTS[status] || 'default'} size="sm">
-            {status === 'running' && <Loader2 className="w-2.5 h-2.5 animate-spin mr-1" />}
+            {status === 'running' && <AppIcon name="loader" size={10} className="animate-spin mr-1" />}
             {status}
           </Badge>
           {output && (
-            <div className="text-txt-muted">
-              {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+            <div className="text-ink-muted">
+              {expanded ? <AppIcon name="chevronDown" size={14} /> : <AppIcon name="chevronRight" size={14} />}
             </div>
           )}
         </div>
@@ -87,7 +87,7 @@ export function ToolExecutionCard({
 
       {/* Expanded Output Block */}
       {expanded && output && (
-        <div className="p-3 border-t border-border bg-canvas-base overflow-x-auto max-h-60 text-code-sm text-txt-secondary font-mono leading-relaxed">
+        <div className="p-3 border-t border-border bg-canvas-base overflow-x-auto max-h-60 text-code-sm text-paper-200 font-mono leading-relaxed">
           <pre className="whitespace-pre-wrap">{output}</pre>
         </div>
       )}

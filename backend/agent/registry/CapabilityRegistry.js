@@ -1037,6 +1037,32 @@ const RAW_CAPABILITIES = [
     requires_code_diff_gate: false
   },
   {
+    capability_id: 'autonomy.skill_loading',
+    category: CATEGORIES.CATEGORY_4,
+    name: 'Agent Dynamic Skill & Assessment Loading',
+    description: 'Dynamic discovery, loading, and context injection of specialized agent skills and assessment guidelines',
+    status: STATUS.IMPLEMENTED,
+    required_skills: ['skill-management'],
+    required_tools: [],
+    required_permissions: [],
+    risk_level: RISK.LOW,
+    approval_policy: APPROVAL.AUTO,
+    cost_policy: COST.ZERO_API,
+    token_policy: { max_input_tokens: 4000, max_output_tokens: 2000, require_compression: false },
+    verification_policy: 'NONE',
+    rollback_policy: 'NONE',
+    fallback_strategy: 'skip_skill',
+    dependencies: [],
+    supported_inputs: ['text/plain', 'application/json'],
+    supported_outputs: ['text/plain', 'application/json'],
+    implementation: {
+      service: 'backend/agent/runtime/ToolRegistry.js',
+      module: 'backend/agent/runtime/ToolRegistry.js',
+      entrypoint: 'load_skill'
+    },
+    requires_code_diff_gate: false
+  },
+  {
     capability_id: 'autonomy.conflict_resolution',
     category: CATEGORIES.CATEGORY_4,
     name: 'Causal Conflict Resolution & Arbitration',

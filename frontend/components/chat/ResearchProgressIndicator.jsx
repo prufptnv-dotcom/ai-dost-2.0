@@ -15,13 +15,12 @@ export default function ResearchProgressIndicator({
 
   return (
     <div
-      className="my-2.5 rounded-xl border border-cyan-500/25 bg-cyan-950/15 overflow-hidden backdrop-blur-md shadow-sm transition-all select-none"
+      className="my-2.5 rounded-xl border border-cyan-500/15 bg-cyan-500/[0.03] overflow-hidden backdrop-blur-md shadow-xs transition-all select-none"
       data-testid="research-progress-indicator"
     >
-      {/* 3. Research Progress Header */}
-      <div className="flex items-center justify-between px-3.5 py-2.5 bg-cyan-900/10 border-b border-cyan-500/15">
+      <div className="flex items-center justify-between px-3.5 py-2.5 bg-cyan-500/[0.05] border-b border-cyan-500/10">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="relative flex items-center justify-center w-6 h-6 rounded-md bg-cyan-500/20 border border-cyan-400/30 text-cyan-300 shrink-0">
+          <div className="relative flex items-center justify-center w-6 h-6 rounded-lg bg-cyan-500/15 border border-cyan-500/20 text-cyan-300 shrink-0">
             {isSearching ? (
               <AppIcon name="loader" size={12} className="text-cyan-300" />
             ) : (
@@ -35,12 +34,12 @@ export default function ResearchProgressIndicator({
             <span className="text-xs font-semibold text-cyan-100 tracking-wide flex items-center gap-1.5 truncate">
               {isSearching ? 'Deep Web Research' : 'Verified Web Research'}
               {query && (
-                <span className="text-[11px] font-mono text-cyan-300/80 font-normal truncate max-w-[200px] sm:max-w-xs">
-                  “{query}”
+                <span className="text-[11px] font-mono text-cyan-300/70 font-normal truncate max-w-[200px] sm:max-w-xs">
+                  &ldquo;{query}&rdquo;
                 </span>
               )}
             </span>
-            <span className="text-[10px] text-cyan-300/70 font-mono">
+            <span className="text-[10px] text-cyan-300/60 font-mono">
               {status || (isSearching ? 'Scanning web sources & verifying citations…' : `${displayCount} verified sources consulted`)}
             </span>
           </div>
@@ -50,8 +49,8 @@ export default function ResearchProgressIndicator({
           <span
             className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-medium border ${
               isSearching
-                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400/40 animate-pulse'
-                : 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30'
+                ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/25 animate-pulse'
+                : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
             }`}
           >
             {isSearching ? 'Researching' : 'Complete'}
@@ -60,7 +59,7 @@ export default function ResearchProgressIndicator({
             <button
               type="button"
               onClick={() => setExpanded(!expanded)}
-              className="text-cyan-300/70 hover:text-cyan-100 p-1 rounded-md transition-colors cursor-pointer"
+              className="text-cyan-300/60 hover:text-cyan-100 p-1 rounded-md transition-colors cursor-pointer"
               title="Toggle source list"
               aria-label="Toggle sources"
             >
@@ -70,8 +69,7 @@ export default function ResearchProgressIndicator({
         </div>
       </div>
 
-      {/* 3-Step Research Pipeline Indicator */}
-      <div className="px-3.5 py-2 grid grid-cols-3 gap-2 text-[10px] font-mono border-b border-cyan-500/10 bg-black/20">
+      <div className="px-3.5 py-2 grid grid-cols-3 gap-2 text-[10px] font-mono border-b border-cyan-500/10 bg-canvas-elevated/50">
         <div className="flex items-center gap-1.5 text-cyan-200">
           <AppIcon name="check" size={10} className="text-emerald-400 shrink-0" />
           <span className="truncate">1. Query Dispatched</span>
@@ -82,7 +80,7 @@ export default function ResearchProgressIndicator({
           ) : isSearching ? (
             <AppIcon name="loader" size={10} className="text-cyan-400 shrink-0" />
           ) : (
-            <span className="w-2.5 h-2.5 rounded-full border border-cyan-500/40 shrink-0" />
+            <span className="w-2.5 h-2.5 rounded-full border border-cyan-500/30 shrink-0" />
           )}
           <span className="truncate">2. Sources Found ({displayCount})</span>
         </div>
@@ -92,24 +90,22 @@ export default function ResearchProgressIndicator({
           ) : isSearching ? (
             <AppIcon name="loader" size={10} className="text-cyan-400 shrink-0" />
           ) : (
-            <span className="w-2.5 h-2.5 rounded-full border border-cyan-500/40 shrink-0" />
+            <span className="w-2.5 h-2.5 rounded-full border border-cyan-500/30 shrink-0" />
           )}
           <span className="truncate">3. Synthesizing</span>
         </div>
       </div>
 
-      {/* Animated Progress Bar */}
-      <div className="h-1 w-full bg-cyan-950/60 overflow-hidden">
+      <div className="h-1 w-full bg-cyan-500/10 overflow-hidden">
         <div
-          className={`h-full bg-gradient-to-r from-cyan-500 via-indigo-400 to-purple-400 transition-all duration-500 ${
+          className={`h-full bg-gradient-to-r from-cyan-500 via-cyan-400 to-cyan-300 transition-all duration-500 ${
             isSearching ? 'w-2/3 animate-pulse' : 'w-full'
           }`}
         />
       </div>
 
-      {/* Expandable Sources Drawer */}
       {expanded && sources.length > 0 && (
-        <div className="p-3 bg-black/40 flex flex-wrap gap-1.5">
+        <div className="p-3 bg-canvas-elevated/50 flex flex-wrap gap-1.5">
           {sources.map((s, i) => {
             let domain = '';
             try {
@@ -121,7 +117,7 @@ export default function ResearchProgressIndicator({
                 href={s.url}
                 target="_blank"
                 rel="noreferrer"
-                className="text-[11px] px-2.5 py-1 rounded-lg flex items-center gap-1.5 max-w-[240px] truncate bg-cyan-950/30 border border-cyan-500/20 text-cyan-200 hover:text-white hover:border-cyan-400/50 transition-all shadow-xs cursor-pointer"
+                className="text-[11px] px-2.5 py-1 rounded-lg flex items-center gap-1.5 max-w-[240px] truncate bg-cyan-500/[0.06] border border-cyan-500/15 text-cyan-200 hover:text-cyan-100 hover:border-cyan-500/30 transition-all shadow-xs cursor-pointer"
                 title={s.title || domain}
               >
                 <span className="font-mono text-cyan-400 text-[10px]">[{s.citationId || i + 1}]</span>

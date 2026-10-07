@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowDown } from 'lucide-react';
+import AppIcon from '../ui/AppIcon';
 import ChatQuickStarts from './ChatQuickStarts';
 import ChatMessageBubble from './ChatMessageBubble';
 import ThinkingDot from './ThinkingDot';
@@ -41,13 +41,13 @@ export default function ChatMessageList({
             <ChatQuickStarts onSelectPrompt={onSelectPrompt} />
           )}
 
-          <div className="space-y-6">
+          <div className="space-y-7">
             {isEmpty && backendHistory && backendHistory.length > 0 && (
               <div className="flex justify-center mb-6">
                 <button
                   type="button"
                   onClick={loadBackendHistory}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-canvas-surface border border-border text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated transition-fast cursor-pointer"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-medium bg-canvas-surface border border-border text-ink-muted hover:text-paper-100 hover:bg-canvas-elevated hover:border-border-strong transition-fast cursor-pointer shadow-xs"
                 >
                   🕐 Load previous conversation ({backendHistory.length} messages)
                 </button>
@@ -121,7 +121,7 @@ export default function ChatMessageList({
               className="jump-to-bottom-btn"
               aria-label="Jump to latest message"
             >
-              <ArrowDown size={13} className="text-accent" />
+              <AppIcon name="arrowDown" size={13} className="text-accent" />
               <span>Jump to latest</span>
             </button>
           </motion.div>

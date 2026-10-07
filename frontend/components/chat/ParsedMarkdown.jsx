@@ -4,6 +4,7 @@ import DOMPurify from 'dompurify';
 import CodeBlock from './CodeBlock';
 import CanvasArtifact from './CanvasArtifact';
 import { stripInternalTags } from '../../utils/chatContent';
+import { isVisualCode } from '../../lib/compileLiveHtml';
 
 const MD_CACHE = new Map();
 const MAX_CACHE = 400;
@@ -66,13 +67,56 @@ function ParsedMarkdown({
             code = '';
           }
           
-          // Render Canvas UI for long scripts/code, fallback to standard CodeBlock
-          if (code.split('\n').length > 15 && (langLine.includes('js') || langLine.includes('javascript') || langLine.includes('python') || langLine.includes('py') || langLine.includes('html') || langLine.includes('htm') || langLine.includes('css'))) {
-              return (
-                  <div key={i} style={{ height: '500px', margin: '15px 0' }}>
-                      <CanvasArtifact initialCode={code} language={langLine} />
-                  </div>
-              );
+          const rawLang = (langLine || '').toLowerCase().trim();
+
+          // 1. Python script detection (always runnable in terminal, never client-side iframe HTML preview)
+          const isPython = /^(python|py|python3)$/i.test(rawLang) || (
+            (!rawLang || rawLang === 'text') &&
+            /^\s*(import\s+\w+|from\s+\w+\s+import|def\s+\w+\(|print\s*\(|class\s+\w+:|if\s+__name__\s*==)/m.test(code)
+          );
+
+          // 2. Visual Preview Code (HTML, CSS, SVG, React, JSX, Web apps, UI animations, Three.js, Canvas games)
+          const isVisual = !isPython && (
+            /^(html|htm|svg|css|jsx|tsx|react|vue)$/i.test(rawLang) ||
+            isVisualCode(code, rawLang)
+          );
+
+          // 3. Runnable Terminal Code (Python, Node/JS scripts, Bash, Shell, PowerShell)
+          // Renders CanvasArtifact with code editor and live Terminal Output console
+          const isRunnableScript = !isVisual && (
+            isPython ||
+            /^(javascript|js|node|sh|bash|shell|zsh|powershell|ps1|terminal|console)$/i.test(rawLang)
+          );
+
+          if (isRunnableScript && code.trim().length > 0) {
+            const artifactLang = isPython ? 'python' : (rawLang || 'javascript');
+            const lineCount = (code.match(/\n/g) || []).length + 1;
+            const cardHeight = Math.min(540, Math.max(300, 140 + lineCount * 20));
+
+            return (
+              <div key={i} style={{ height: `${cardHeight}px`, margin: '14px 0', width: '100%' }}>
+                <CanvasArtifact
+                  initialCode={code}
+                  language={artifactLang}
+                  onOpenIDE={() => {
+                    if (onNavigate) {
+                      try {
+                        localStorage.setItem(
+                          'ai_dost_copilot_import',
+                          JSON.stringify({
+                            title: `${artifactLang}-script`,
+                            code,
+                            language: artifactLang,
+                            timestamp: Date.now(),
+                          })
+                        );
+                      } catch (_) {}
+                      onNavigate('copilot');
+                    }
+                  }}
+                />
+              </div>
+            );
           }
 
           return (
