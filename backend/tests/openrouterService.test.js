@@ -13,10 +13,38 @@ test('OpenRouterService - Model Catalog and Dictionary', () => {
 
     const catalog = OpenRouterService.getModelCatalog();
     assert.ok(Array.isArray(catalog));
-    assert.ok(catalog.length >= 20, `Catalog has ${catalog.length} models`);
+    // 2026-10-08 live sweep: OpenRouter has 20 free models, but only 16 are
+    // chat-able via /chat/completions (2 = Lyria music, rest wrong API/no longer
+    // free). The catalog must equal that honest universe, not an inflated list.
+    assert.ok(catalog.length >= 16, `Catalog has ${catalog.length} models`);
     const superModel = catalog.find(m => m.key === 'nemotron_3_super');
     assert.ok(superModel);
     assert.equal(superModel.category, 'General Reasoning & Heavy Tasks');
+});
+
+test('OpenRouterService - catalog hygiene after 2026-10-08 live sweep', () => {
+    const F = OpenRouterService.FREE_MODELS;
+
+    // Dead keys removed (verified live: rejected by the API or no longer free):
+    const removed = ['qwen_38', 'inkling', 'inkling_small', 'nemotron_rerank_vl', 'nemotron_embed_vl', 'nemotron_embed', 'mercury_decide'];
+    for (const key of removed) {
+        assert.ok(!(key in F), `${key} should have been removed (not chat-usable / no longer free)`);
+        assert.ok(!OpenRouterService.getModelCatalog().some(m => m.key === key), `catalog still lists ${key}`);
+    }
+
+    // The one live-free model that was missing got added:
+    assert.equal(F.ling_3_1_flash, 'inclusionai/ling-3.1-flash');
+    assert.ok(OpenRouterService.resolveModel('openrouter:ling_3_1_flash') === 'inclusionai/ling-3.1-flash');
+
+    // Every catalog entry must be a provider/model-shaped chat slug:
+    for (const [key, slug] of Object.entries(F)) {
+        assert.match(slug, /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:-]*$/i, `${key} -> ${slug} must look like provider/model`);
+    }
+
+    // Fallback cascade = general models only; the content-safety CLASSIFIER
+    // would reply "User Safety: safe" as a chat answer — never again.
+    assert.ok(!OpenRouterService.DEFAULT_FALLBACK_CASCADE.includes('nvidia/nemotron-3.5-content-safety:free'));
+    assert.ok(OpenRouterService.DEFAULT_FALLBACK_CASCADE.length >= 8);
 });
 
 test('OpenRouterService - Model Resolution & Normalization', () => {

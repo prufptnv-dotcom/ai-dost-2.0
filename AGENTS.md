@@ -456,6 +456,20 @@ Two humans + the agent in the same editor, live.
 - Tests: `backend/tests/opencodeCascade.test.js` → **14** (parseModel/formatHistory/assertSafeArgs/enable-flag · chat() full contract vs **mock HTTP server** — state-file reuse se binary/spawn ZERO dependency, session dir = scratch assert · HTTP-500 + empty-reply + timeout · executeCascadingFailover export + STRING contract + OpenCode-wins keyless + honest degradation · agent.js static audits: position-3 + scaffold timeout + single require) → backend unit **343/343 (74 suites)**; integration 73/1 (same pre-existing memory-route failure); frontend 58 suites / 472 tests; eslint 0/0.
 - Gotchas: `test:unit` = **explicit file list** (naya test file wahan add karo warna gate chalta hi nahi) · `where opencode` → `opencode.cmd` (spawn EINVAL trap — APPDATA `.exe` candidate pehle) · `routes/agent.js` edit ke baad backend **restart** zaroori.
 
+## 30. P10.2 — OpenRouter "sabhi model" live sweep (2026-10-08)
+
+**User ka asli ask ye tha** (P10.1 me "opencode" wording confusion thi): OpenRouter ke **saare models check karo → add karo → backend restart**. Reproducible probe: `temp_ui_audit/check_openrouter_models.js` (key tier + har free model live-ping, 2 rounds).
+
+- **Key ground truth**: `GET /api/v1/key` → `is_free_tier=true, limit=none` → **sirf free models chalte hain**. OpenRouter pe 468 models me **20 free** (usme 2 Lyria = music API, chat nahi) → **16 chat-able universe**.
+- **Catalog = exactly wahi 16** (`services/openrouterService.js` FREE_MODELS):
+  - **ADD (1)**: `ling_3_1_flash` → `inclusionai/ling-3.1-flash` (live-free list me naya tha; provider kabhi-kabhi "Provider returned error" deta hai — failover cover karta hai).
+  - **REMOVE (7 dead, live-verified)**: `qwen_38` ("unavailable for free — use paid slug"), `inkling`/`inkling_small` ("only available on agentic harnesses" — chat/completions reject), `nemotron_embed`/`nemotron_embed_vl`/`nemotron_rerank_vl`/`mercury_decide` (wrong API type — embed/rerank/decisions chat endpoint accept hi nahi karta).
+  - ChatView picker se bhi wahi 7 entries hata di (warna picker raw key bhejta → resolve → 404); SettingsView/CopilotIDE me the hi nahi. Naya option: ChatView Reasoning group + SettingsView.
+- **DEFAULT_FALLBACK_CASCADE = 10 live-verified general models**: super (295ms) → openrouter/free (380ms) → ultra (403ms) → lightning → dots → lfm → north-mini-code → nano-omni → sante → apodex. `content-safety` yahan se **hataya** — wo classifier model hai jo chat fallback me `"User Safety: safe"` jaisa junk reply deta hai (catalog me specialized option ki tarah raha).
+- **Live ping verdict**: 10/23 first-round pass; `nano-omni` = transient rate-limit (retry me OK ✓); `laguna`×2 + `gemma`×2 + `ling-3.1` = 2/2 rounds "Provider returned error" (legit free + correct API — provider outage; catalog me rakhe, cascade me nahi); `qwen3.8`/inkling/embed/rerank/mercury = permanent rejects (upar REMOVE wale).
+- Test: `openrouterService.test.js` — catalog threshold `>=20` → `>=16` (honest, comment sahit) + **naya hygiene test** (7 dead keys gone + `ling_3_1_flash` resolve + slug-shape regex + cascade me classifier nahi) → backend unit **344/344 (74 suites)**; integration 73/1 (pre-existing); frontend jest 58/472; eslint 0/0.
+- Gotcha: `threeJsSimulator.js` me "tw**inkling**" grep se false-positive aata hai — us file ko chhoo mat.
+
 ## ⌃ Keyboard Shortcuts
 
 | Shortcut | Action |
@@ -578,7 +592,7 @@ npx playwright test         # 13 tests — real geometry, computed styles, Mutat
 
 # Backend: unit + integration (node:test, 0 LLM calls, ephemeral port)
 cd "C:\Users\vikash kumar\Pictures\ai dost 3.0\backend"
-npm run test:unit           # 343 tests (unit + project/auth/settings/cache + agent run history/watch bus + copilot memory + runtime/repair/retrieval/dep-cache/fix-memory/HMR-routing + P6–P9: shareTunnel/backgroundRuns/p9Tools/collabDoc + P10.1: opencodeCascade)
+npm run test:unit           # 344 tests (unit + project/auth/settings/cache + agent run history/watch bus + copilot memory + runtime/repair/retrieval/dep-cache/fix-memory/HMR-routing + P6–P9: shareTunnel/backgroundRuns/p9Tools/collabDoc + P10.1: opencodeCascade + P10.2: openrouter sweep)
 npm run test:integration    # 73 pass + 1 pre-existing fail (memory DELETE baseline; real Express app on port 0)
 npm run test:all            # everything: unit(104) + integration(53) + security(14) + mcp(5) + api(12) + chat(13)
 node --test tests/unit.test.js tests/integration.test.js

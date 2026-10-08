@@ -3,6 +3,11 @@ const { RobustApiClient } = require('./apiClient');
 const { withQualityStandard } = require('./outputQualityStandard');
 
 // OpenRouter par available Free Models ki Category-wise List (2026 Active & Verified)
+// 2026-10-08 live sweep (temp_ui_audit/check_openrouter_models.js): OpenRouter pe
+// 468 models me 20 free the; 16 chat-able hain. Removed dead entries:
+//   qwen_38 (ab paid-only), inkling/inkling_small (agentic-harness only),
+//   nemotron_embed/_vl, nemotron_rerank_vl, mercury_decide (wrong API type —
+//   chat/completions inhe reject karta hai). Added: ling_3_1_flash (live-free).
 const FREE_MODELS = {
     // 1. Automatic Best Free Model
     "auto": "openrouter/free",
@@ -11,8 +16,7 @@ const FREE_MODELS = {
     "nemotron_3_ultra": "nvidia/nemotron-3-ultra-550b-a55b:free",
     "nemotron_3_super": "nvidia/nemotron-3-super-120b-a12b:free",
     "nemotron_3_lightning": "nvidia/nemotron-3.5-lightning:free",
-    "inkling": "thinkingmachines/inkling:free",
-    "inkling_small": "thinkingmachines/inkling-small:free",
+    "ling_3_1_flash": "inclusionai/ling-3.1-flash",   // NEW 2026-10-08 (free; provider flaky at times — failover covers)
     "dots_3_note": "dots-studio/dots-3-note-preview:free",
     "lfm_reasoning": "liquid/lfm-2.5-2.6b:free",
 
@@ -24,17 +28,12 @@ const FREE_MODELS = {
     // 4. Multimodal (Image, Video & Vision RAG)
     "gemma_26b": "google/gemma-4-26b-a4b-it:free",
     "gemma_31b": "google/gemma-4-31b-it:free",
-    "qwen_38": "qwen/qwen3.8-27b:free",
     "nemotron_nano_omni": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-    "nemotron_rerank_vl": "nvidia/llama-nemotron-rerank-vl-1b-v2:free",
-    "nemotron_embed_vl": "nvidia/llama-nemotron-embed-vl-1b-v2:free",
 
     // 5. Specialized / Niche Tasks
     "ling_sante": "inclusionai/ling-3.0-flash-sante:free",      // Medical & Health
     "apodex_mini": "apodex/apodex-1.1-mini:free",                // Long Research & Forecasting
-    "mercury_decide": "inception/mercury-decide:free",           // Fast Structured Decisions
-    "content_safety": "nvidia/nemotron-3.5-content-safety:free", // Guardrails & Content Moderation
-    "nemotron_embed": "nvidia/nemotron-3-embed-1b:free"          // Search & Vector Embeddings
+    "content_safety": "nvidia/nemotron-3.5-content-safety:free"  // Guardrails & Content Moderation
 };
 
 // Friendly categories and descriptions
@@ -43,8 +42,7 @@ const MODEL_METADATA = {
     "nemotron_3_ultra": { name: "Nemotron 3 Ultra (550B)", category: "General Reasoning & Heavy Tasks", description: "Heavyweight 550B MoE reasoning architecture" },
     "nemotron_3_super": { name: "Nemotron 3 Super (120B)", category: "General Reasoning & Heavy Tasks", description: "High-parameter reasoning for system architecture and logic" },
     "nemotron_3_lightning": { name: "Nemotron 3.5 Lightning", category: "General Reasoning & Heavy Tasks", description: "Ultra-fast thought process & lightning chain-of-thought" },
-    "inkling": { name: "Inkling (Agentic)", category: "General Reasoning & Heavy Tasks", description: "Thinking Machines agentic harness model" },
-    "inkling_small": { name: "Inkling Small", category: "General Reasoning & Heavy Tasks", description: "Lightweight agentic harness model" },
+    "ling_3_1_flash": { name: "Ling 3.1 Flash", category: "General Reasoning & Heavy Tasks", description: "inclusionAI fast general-purpose flash model (free)" },
     "dots_3_note": { name: "Dots 3 Note Preview", category: "General Reasoning & Heavy Tasks", description: "Deep technical documentation & structured notes" },
     "lfm_reasoning": { name: "Liquid LFM 2.5", category: "General Reasoning & Heavy Tasks", description: "Liquid AI hybrid liquid state-space reasoning architecture" },
     "laguna_s": { name: "Poolside Laguna-S 2.1", category: "Coding & Developer Agents", description: "Specialized autonomous software engineering agent model" },
@@ -52,15 +50,10 @@ const MODEL_METADATA = {
     "north_mini_code": { name: "Cohere North Mini Code", category: "Coding & Developer Agents", description: "Cohere coding, syntax, and logic model" },
     "gemma_26b": { name: "Google Gemma 4 (26B)", category: "Multimodal & Vision", description: "Instruction-tuned vision and reasoning model" },
     "gemma_31b": { name: "Google Gemma 4 (31B)", category: "Multimodal & Vision", description: "Google Gemma 31B high-capability model" },
-    "qwen_38": { name: "Qwen 3.8 (27B)", category: "Multimodal & Vision", description: "Alibaba multimodal vision-language model" },
     "nemotron_nano_omni": { name: "Nemotron Nano Omni (30B)", category: "Multimodal & Vision", description: "Omni-modal reasoning & vision agent" },
-    "nemotron_rerank_vl": { name: "Nemotron Rerank VL", category: "Multimodal & Vision", description: "Reranking model for RAG and search pipelines" },
-    "nemotron_embed_vl": { name: "Nemotron Embed VL", category: "Multimodal & Vision", description: "Multimodal visual and text embedding model" },
     "ling_sante": { name: "Ling 3.0 Santé", category: "Specialized & Niche Tasks", description: "Medical, healthcare, and clinical inquiry specialist" },
     "apodex_mini": { name: "Apodex 1.1 Mini", category: "Specialized & Niche Tasks", description: "Long-horizon research, synthesis, and forecasting" },
-    "mercury_decide": { name: "Mercury Decide", category: "Specialized & Niche Tasks", description: "Fast structured decision trees and policy evaluations" },
-    "content_safety": { name: "Nemotron Content Safety", category: "Specialized & Niche Tasks", description: "Guardrails, safety moderation, and defensive verification" },
-    "nemotron_embed": { name: "Nemotron Embed 1B", category: "Specialized & Niche Tasks", description: "Dense semantic vector embeddings for search" }
+    "content_safety": { name: "Nemotron Content Safety", category: "Specialized & Niche Tasks", description: "Guardrails, safety moderation, and defensive verification" }
 };
 
 // Aliases and slug normalizers to fix common typos
@@ -76,7 +69,11 @@ const MODEL_ALIASES = {
     "nemotron-3-nano-omni:free": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 };
 
-// Resilient fallback order when primary model is rate limited or unavailable (verified 2026 live)
+// Resilient fallback order when primary model is rate limited or unavailable.
+// 2026-10-08 live sweep: ye 10 sab general-purpose models sabhi ping-pass hain.
+// content-safety ko yahan se hataya — wo ek classifier model hai jo chat fallback
+// me "User Safety: safe" jaisa junk reply deta hai (catalog me specialized
+// option ki tarah available hai).
 const DEFAULT_FALLBACK_CASCADE = [
     'nvidia/nemotron-3-super-120b-a12b:free',
     'openrouter/free',
@@ -87,8 +84,7 @@ const DEFAULT_FALLBACK_CASCADE = [
     'cohere/north-mini-code:free',
     'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
     'inclusionai/ling-3.0-flash-sante:free',
-    'apodex/apodex-1.1-mini:free',
-    'nvidia/nemotron-3.5-content-safety:free'
+    'apodex/apodex-1.1-mini:free'
 ];
 
 class OpenRouterService {

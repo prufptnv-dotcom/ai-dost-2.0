@@ -66,8 +66,7 @@ const MODEL_OPTIONS = [
   { id: 'openrouter:nemotron_3_super', label: 'Nemotron 3 Super (120B)', group: 'OpenRouter · Reasoning' },
   { id: 'openrouter:nemotron_3_ultra', label: 'Nemotron 3 Ultra (550B)', group: 'OpenRouter · Reasoning' },
   { id: 'openrouter:nemotron_3_lightning', label: 'Nemotron 3.5 Lightning', group: 'OpenRouter · Reasoning' },
-  { id: 'openrouter:inkling', label: 'Inkling (Agentic)', group: 'OpenRouter · Reasoning' },
-  { id: 'openrouter:inkling_small', label: 'Inkling Small', group: 'OpenRouter · Reasoning' },
+  { id: 'openrouter:ling_3_1_flash', label: 'Ling 3.1 Flash', group: 'OpenRouter · Reasoning' },
   { id: 'openrouter:dots_3_note', label: 'Dots 3 Note Preview', group: 'OpenRouter · Reasoning' },
   { id: 'openrouter:lfm_reasoning', label: 'Liquid LFM 2.5 (Reasoning)', group: 'OpenRouter · Reasoning' },
 
@@ -79,17 +78,12 @@ const MODEL_OPTIONS = [
   // 3. Multimodal & Vision
   { id: 'openrouter:gemma_26b', label: 'Google Gemma 4 (26B)', group: 'OpenRouter · Multimodal' },
   { id: 'openrouter:gemma_31b', label: 'Google Gemma 4 (31B)', group: 'OpenRouter · Multimodal' },
-  { id: 'openrouter:qwen_38', label: 'Qwen 3.8 (27B)', group: 'OpenRouter · Multimodal' },
   { id: 'openrouter:nemotron_nano_omni', label: 'Nemotron Nano Omni (30B)', group: 'OpenRouter · Multimodal' },
-  { id: 'openrouter:nemotron_rerank_vl', label: 'Nemotron Rerank VL', group: 'OpenRouter · Multimodal' },
-  { id: 'openrouter:nemotron_embed_vl', label: 'Nemotron Embed VL', group: 'OpenRouter · Multimodal' },
 
   // 4. Specialized & Niche Tasks
   { id: 'openrouter:ling_sante', label: 'Ling 3.0 Santé (Medical)', group: 'OpenRouter · Specialized' },
   { id: 'openrouter:apodex_mini', label: 'Apodex 1.1 Mini (Research)', group: 'OpenRouter · Specialized' },
-  { id: 'openrouter:mercury_decide', label: 'Mercury Decide', group: 'OpenRouter · Specialized' },
   { id: 'openrouter:content_safety', label: 'Nemotron Content Safety', group: 'OpenRouter · Specialized' },
-  { id: 'openrouter:nemotron_embed', label: 'Nemotron Embed 1B', group: 'OpenRouter · Specialized' },
 ];
 
 const WELCOME = {

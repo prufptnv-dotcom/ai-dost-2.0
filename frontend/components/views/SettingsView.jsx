@@ -26,6 +26,7 @@ const MODEL_OPTIONS = [
   { value: 'openrouter:lfm_reasoning', label: 'OpenRouter · Liquid LFM 2.5 (Reasoning)' },
   { value: 'openrouter:gemma_26b', label: 'OpenRouter · Google Gemma 4 26B' },
   { value: 'openrouter:dots_3_note', label: 'OpenRouter · Dots 3 Note Preview' },
+  { value: 'openrouter:ling_3_1_flash', label: 'OpenRouter · Ling 3.1 Flash' },
   { value: 'openrouter:ling_sante', label: 'OpenRouter · Ling 3.0 Santé (Medical)' },
   { value: 'openrouter:apodex_mini', label: 'OpenRouter · Apodex 1.1 Mini (Research)' },
   { value: 'openrouter:content_safety', label: 'OpenRouter · Nemotron Content Safety' },
