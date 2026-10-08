@@ -65,10 +65,10 @@ describe('collabClient source contract', () => {
     expect(LIB()).toMatch(/new MonacoBinding\([^)]*new Set\(\[editor\]\)/);
   });
 
-  test('unbindCurrent disposes the old binding (no two Y.Texts on one model)', () => {
+  test('unbindProject disposes the old binding (no two Y.Texts on one model)', () => {
     const src = LIB();
-    expect(src).toContain('unbindCurrent');
-    expect(src).toMatch(/const prev = editorBindings\.get\(editor\)[\s\S]{0,240}prev\.dispose\(\)/);
+    expect(src).toContain('unbindProject');
+    expect(src).toMatch(/const prev = projectBindings\.get\(key\)[\s\S]{0,240}prev\.dispose\(\)/);
   });
 
   test('getCollab is browser-guarded (SSR must not construct a socket)', () => {
@@ -87,16 +87,16 @@ describe('CopilotIDE P8 wiring', () => {
     const src = IDE();
     const effectIdx = src.indexOf('bindCurrentModel(projectId, editor, activePath)');
     expect(effectIdx).toBeGreaterThan(-1);
-    expect(src.slice(effectIdx, effectIdx + 400)).toContain('unbindCurrent(editor)');
-    // deps: rebind exactly when project or active file changes
-    expect(src.slice(effectIdx, effectIdx + 500)).toContain('[projectId, activePath]');
+    expect(src.slice(effectIdx, effectIdx + 400)).toContain('unbindProject(projectId)');
+    // deps: rebind exactly when project, active file, or editor tick changes
+    expect(src.slice(effectIdx, effectIdx + 500)).toContain('[projectId, activePath, editorTick]');
   });
 
-  test('mount path also binds (covers editor remounts with stable activePath)', () => {
+  test('mount path triggers editorTick to bind fresh instance', () => {
     const src = IDE();
     const mountIdx = src.indexOf('const handleEditorMount = (editor, monaco) => {');
     expect(mountIdx).toBeGreaterThan(-1);
-    expect(src.slice(mountIdx, mountIdx + 900)).toContain('bindCurrentModel(projectId, editor, initialCollabPath)');
+    expect(src.slice(mountIdx, mountIdx + 900)).toContain('setEditorTick');
   });
 
   test('presence strip renders with testid and dedupes cursor-only churn', () => {

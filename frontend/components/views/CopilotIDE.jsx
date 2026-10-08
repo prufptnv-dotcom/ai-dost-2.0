@@ -7,7 +7,7 @@ import { isImageCreateRequest } from '../../lib/imageIntent';
 import { runCopilotImageRequest } from '../../lib/copilotImageRequest';
 import { cancelAgentRun } from '../../lib/copilotStop';
 import { saveBgRun, clearBgRun, loadBgRun, attachRunEvents, eventToActions } from '../../lib/backgroundRun';
-import { bindCurrentModel, unbindCurrent, subscribeParticipants } from '../../lib/collabClient';
+import { bindCurrentModel, unbindProject, subscribeParticipants } from '../../lib/collabClient';
 import { filePathOf, detectMention, parseMentionPaths } from '../../lib/copilotMentions';
 import { LANG_BY_EXT, TreeView, fileTreeFromFiles } from './CopilotTree';
 import { PromptModal, QuickOpen, CommandPalette, SearchOverlay, MODAL_ICONS } from './IDEOverlays';
@@ -517,6 +517,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   const endRef = useRef(null);
   const diagTimerRef = useRef(null);
   const [visualDebuggerOpen, setVisualDebuggerOpen] = useState(false);
+  const [editorTick, setEditorTick] = useState(0);
 
   // P8: presence subscription — dedupe by identity signature (awareness
   // 'change' fires on every remote cursor move; never re-render for those).
@@ -539,8 +540,8 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     const editor = editorRef.current;
     if (!editor || !projectId || !activePath) return undefined;
     bindCurrentModel(projectId, editor, activePath);
-    return () => { unbindCurrent(editor); };
-  }, [projectId, activePath]);
+    return () => { unbindProject(projectId); };
+  }, [projectId, activePath, editorTick]);
 
   // Devin-style Stop: abort the local stream AND cancel server-side so the
   // director loop (signal.aborted) actually halts instead of running headless.
@@ -1021,6 +1022,12 @@ const animate = () => {
   // ── Session Hydration, Auto-Save & History Management ───────────────────
   const autoSaveTimeoutRef = useRef(null);
   const isHydratedRef = useRef(false);
+  // Guard vs. async session-hydrate race: hydrateSessions() awaits
+  // /copilot/sessions and can resolve AFTER loadWorkspaceFiles() has already
+  // populated the workspace from the API — its empty-files branch must never
+  // wipe API-loaded files/tabs (performance entries proved the ordering:
+  // sessions +319ms vs memory +271ms → restore landed last → FILES(0)).
+  const workspaceLoadedRef = useRef(false);
 
   // 1. Initial hydration from localStorage & backend SQLite
   useEffect(() => {
@@ -1103,13 +1110,29 @@ const animate = () => {
         localStorage.setItem('copilot_current_session_id', target.id);
 
         if (target.files && target.files.length > 0) {
-          setFiles(target.files);
-          const targetContents = target.contents || {};
-          contentsRef.current = targetContents;
-          setContents(targetContents);
-          setOpenTabs(target.openTabs || (target.files[0] ? [target.files[0].path] : []));
-          setActivePath(target.activePath || (target.files[0] ? target.files[0].path : null));
-          activePathRef.current = target.activePath || (target.files[0] ? target.files[0].path : null);
+          if (!workspaceLoadedRef.current) {
+            // Workspace API hasn't answered yet: session snapshot = fast fallback.
+            setFiles(target.files);
+            const targetContents = target.contents || {};
+            contentsRef.current = targetContents;
+            setContents(targetContents);
+            setOpenTabs(target.openTabs || (target.files[0] ? [target.files[0].path] : []));
+            setActivePath(target.activePath || (target.files[0] ? target.files[0].path : null));
+            activePathRef.current = target.activePath || (target.files[0] ? target.files[0].path : null);
+          } else {
+            // API files are already live: a stored snapshot must never clobber
+            // them (it can be stale — or poisoned by an old doc-bind bug that
+            // wrote CSS into src/App.jsx). Restore only the tab layout,
+            // filtered to paths that actually exist in the loaded workspace.
+            const known = contentsRef.current;
+            const tabs = (target.openTabs || []).filter((p) => known[p] !== undefined);
+            if (tabs.length) setOpenTabs(tabs);
+            const path = target.activePath && known[target.activePath] !== undefined ? target.activePath : null;
+            if (path) {
+              setActivePath(path);
+              activePathRef.current = path;
+            }
+          }
           if (target.messages && target.messages.length > 0) setCopilotMessages(target.messages);
           else setCopilotMessages([]);
           if (target.workspaceMode) setWorkspaceMode(target.workspaceMode);
@@ -1119,12 +1142,14 @@ const animate = () => {
           if (target.snapshots) setSnapshots(target.snapshots);
           else setSnapshots([]);
         } else {
-          setFiles([]);
-          contentsRef.current = {};
-          setContents({});
-          setOpenTabs([]);
-          setActivePath(null);
-          activePathRef.current = null;
+          if (!workspaceLoadedRef.current) {
+            setFiles([]);
+            contentsRef.current = {};
+            setContents({});
+            setOpenTabs([]);
+            setActivePath(null);
+            activePathRef.current = null;
+          }
           setCopilotMessages(target.messages && target.messages.length > 0 ? target.messages : []);
           setPlanTasks(target.planTasks || []);
           setSnapshots(target.snapshots || []);
@@ -1268,14 +1293,27 @@ const animate = () => {
       window.dispatchEvent(new CustomEvent('ai_dost_switch_session', { detail: sessionId }));
     } catch (_) {}
 
-    setFiles(target.files || []);
-    const targetContents = target.contents || {};
-    contentsRef.current = targetContents;
-    setContents(targetContents);
-    setOpenTabs(target.openTabs || []);
-    const defFile = target.activePath || (target.files && target.files[0] ? target.files[0].path : null);
-    setActivePath(defFile);
-    activePathRef.current = defFile;
+    if (workspaceLoadedRef.current) {
+      // Live workspace files win over the stored session snapshot (same
+      // workspace for every session of this project; the snapshot can be
+      // stale or poisoned). Restore only the tab layout, filtered to paths
+      // that exist in the loaded workspace.
+      const known = contentsRef.current;
+      const tabs = (target.openTabs || []).filter((p) => known[p] !== undefined);
+      setOpenTabs(tabs);
+      const picked = target.activePath && known[target.activePath] !== undefined ? target.activePath : (tabs[0] || null);
+      setActivePath(picked);
+      activePathRef.current = picked;
+    } else {
+      setFiles(target.files || []);
+      const targetContents = target.contents || {};
+      contentsRef.current = targetContents;
+      setContents(targetContents);
+      setOpenTabs(target.openTabs || []);
+      const defFile = target.activePath || (target.files && target.files[0] ? target.files[0].path : null);
+      setActivePath(defFile);
+      activePathRef.current = defFile;
+    }
     setCopilotMessages(target.messages || []);
     setPlanTasks(target.planTasks || []);
     setSnapshots(target.snapshots || []);
@@ -1405,6 +1443,7 @@ const animate = () => {
       const fileList = Array.from(fileMap.values());
 
       setFiles(fileList);
+      workspaceLoadedRef.current = fileList.length > 0;
       const map = {};
       fileList.forEach(f => { map[f.path] = f.content; });
       contentsRef.current = map;
@@ -1696,14 +1735,7 @@ const animate = () => {
   const handleEditorMount = (editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
-
-    // P8: multiplayer — bind this fresh editor instance to the shared doc for
-    // the file active at mount time. (The [projectId, activePath] effect
-    // handles later switches; this covers editor remounts.)
-    try {
-      const initialCollabPath = activePathRef.current;
-      if (initialCollabPath) bindCurrentModel(projectId, editor, initialCollabPath);
-    } catch (_) { /* collab is optional — editor still works solo */ }
+    setEditorTick(t => t + 1);
 
     try {
       configureMonacoThemes(monaco);

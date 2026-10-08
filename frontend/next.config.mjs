@@ -26,6 +26,15 @@ const nextConfig = {
   // Turbopack root: absolute path to monorepo root (one level above frontend/)
   turbopack: {
     root: resolve(__dirname, '..'),
+    // y-monaco (0.1.6) deep-imports `monaco-editor/esm/vs/editor/editor.api.js`,
+    // but monaco-editor 0.56 added an exports map where `./*` rewrites to
+    // `./esm/vs/*.js` — the old specifier would double the prefix
+    // (`esm/vs/esm/vs/...`) and fail with "Module not found". Alias to the
+    // specifier the exports map DOES accept: `./*.js` → `./esm/vs/*.js`
+    // resolves `editor/editor.api.js` to the exact same file.
+    resolveAlias: {
+      'monaco-editor/esm/vs/editor/editor.api.js': 'monaco-editor/editor/editor.api.js',
+    },
   },
   images: {
     remotePatterns: [

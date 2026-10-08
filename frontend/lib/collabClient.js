@@ -22,7 +22,7 @@ import { WebsocketProvider } from 'y-websocket';
 import { MonacoBinding } from 'y-monaco';
 
 const sessions = new Map(); // projectId -> { doc, provider }
-const editorBindings = new WeakMap(); // editor -> MonacoBinding (current file)
+const projectBindings = new Map(); // projectId -> MonacoBinding (current active editor for project)
 
 const PEER_COLORS = ['#6366f1', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4'];
 
@@ -64,10 +64,10 @@ export function getCollab(projectId) {
  */
 export function bindCurrentModel(projectId, editor, filePath) {
   try {
-    if (!editor || !filePath) return null;
+    if (!projectId || !editor || !filePath) return null;
     const model = typeof editor.getModel === 'function' ? editor.getModel() : null;
     if (!model) return null;
-    unbindCurrent(editor);
+    unbindProject(projectId);
     const session = getCollab(projectId);
     if (!session) return null;
     const ytext = session.doc.getText(`file:${filePath}`);
@@ -79,7 +79,7 @@ export function bindCurrentModel(projectId, editor, filePath) {
       model.setValue(ytext.toString());
     }
     const binding = new MonacoBinding(ytext, model, new Set([editor]), session.provider.awareness);
-    editorBindings.set(editor, binding);
+    projectBindings.set(String(projectId), binding);
     return binding;
   } catch (e) {
     console.warn('[collab] bind failed:', e.message);
@@ -87,13 +87,14 @@ export function bindCurrentModel(projectId, editor, filePath) {
   }
 }
 
-/** Dispose the editor's active binding (file switch / unmount). */
-export function unbindCurrent(editor) {
-  if (!editor) return null;
-  const prev = editorBindings.get(editor) || null;
+/** Dispose the active binding for a project (file switch / unmount). */
+export function unbindProject(projectId) {
+  if (!projectId) return null;
+  const key = String(projectId);
+  const prev = projectBindings.get(key) || null;
   if (prev) {
     try { prev.dispose(); } catch (_) { /* already gone */ }
-    editorBindings.delete(editor);
+    projectBindings.delete(key);
   }
   return prev;
 }
