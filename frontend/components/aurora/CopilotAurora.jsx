@@ -1,92 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import AppIcon from '../ui/AppIcon';
 import AgentStream from './AgentStream';
 import AuroraRail from './AuroraRail';
 import AuroraStage from './AuroraStage';
+import useAuroraRun from './useAuroraRun';
 import s from './Aurora.module.css';
 
 /**
- * P11 A1 — "Aurora": from-scratch copilot cockpit.
+ * P11 A2 — "Aurora" cockpit on the REAL run stream.
  *
  * Layout: rail (plan) │ run spine + composer │ stage (preview/files).
  * The run header is the one instrument; the spine is the one signature.
- * A1 ships the full shell on mock run data — real SSE wiring lands in A2
- * (same props contract as CopilotIDE: projectId / projectName / onToast).
+ * A1 shipped this shell on mock data — A2 wires it to POST /api/agent/run
+ * (SSE) via useAuroraRun: live plan, live file diffs, real stop, approval gate.
+ * Props contract matches CopilotIDE: projectId / projectName / onToast.
  */
-
-const MOCK_PLAN = [
-  { id: 'p1', label: 'Scaffold Vite + React app', status: 'done' },
-  { id: 'p2', label: 'Install dependencies', status: 'done' },
-  { id: 'p3', label: 'Green production build', status: 'done' },
-  { id: 'p4', label: 'Style the UI — Obsidian indigo', status: 'active' },
-  { id: 'p5', label: 'Wire the tasks API', status: 'todo' },
-  { id: 'p6', label: 'Verify preview + screenshot', status: 'todo' },
-];
-
-const MOCK_FILES = [
-  { path: 'src/App.jsx', add: 48, del: 2, isNew: false },
-  { path: 'src/index.css', add: 12, del: 0, isNew: true },
-  { path: 'package.json', add: 6, del: 1, isNew: false },
-];
-
-const MOCK_EVENTS = [
-  {
-    id: 'm1',
-    kind: 'thought',
-    label: 'think',
-    detail: 'Plan: scaffold → install → build → style → wire API → verify',
-    meta: '2s',
-    tone: 'muted',
-  },
-  {
-    id: 'm2',
-    kind: 'write',
-    label: 'write',
-    detail: 'package.json + vite.config.js + src/main.jsx',
-    meta: '+124',
-    tone: 'accent',
-  },
-  {
-    id: 'm3',
-    kind: 'read',
-    label: 'read',
-    detail: 'src/App.jsx',
-    meta: '1.2s',
-    tone: 'info',
-  },
-  {
-    id: 'm4',
-    kind: 'build',
-    label: 'build',
-    detail: 'npm run build — exit 1 · Unexpected token }',
-    meta: '3.1s',
-    tone: 'err',
-  },
-  {
-    id: 'm5',
-    kind: 'fix',
-    label: 'fix',
-    detail: 'src/App.jsx +4 -1',
-    meta: '',
-    tone: 'accent',
-  },
-  {
-    id: 'm6',
-    kind: 'build',
-    label: 'build',
-    detail: 'npm run build — exit 0',
-    meta: '2.8s',
-    tone: 'ok',
-  },
-  {
-    id: 'm7',
-    kind: 'reply',
-    label: 'aurora',
-    detail: 'Build is green. Preview spins up next — check the Stage panel.',
-    meta: 'now',
-    tone: 'ok',
-  },
-];
 
 const PERMISSIONS = ['ask', 'auto', 'turbo'];
 
@@ -96,52 +24,26 @@ function fmt(totalSeconds) {
   return `${m}:${sec}`;
 }
 
-function stamp() {
-  const d = new Date();
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
-
-export default function CopilotAurora({ projectId = 'default', projectName = 'Untitled project', onToast }) {
-  const [events, setEvents] = useState(MOCK_EVENTS);
-  const [running, setRunning] = useState(true);
-  const [elapsed, setElapsed] = useState(47);
+export default function CopilotAurora({
+  projectId = 'default',
+  projectName = 'Untitled project',
+  onToast,
+}) {
+  const run = useAuroraRun({ projectId, onToast });
   const [input, setInput] = useState('');
   const [permission, setPermission] = useState('auto');
   const inputRef = useRef(null);
 
-  useEffect(() => {
-    if (!running) return undefined;
-    const timer = setInterval(() => setElapsed((e) => e + 1), 1000);
-    return () => clearInterval(timer);
-  }, [running]);
+  const planDone = run.plan.filter((p) => p.status === 'done').length;
+  const hasPlan = run.plan.length > 0;
+  const pct = hasPlan ? Math.round((planDone / run.plan.length) * 100) : 0;
+  const planLabel = hasPlan ? `plan ${planDone}/${run.plan.length}` : run.running ? 'running' : 'ready';
 
-  const planDone = MOCK_PLAN.filter((p) => p.status === 'done').length;
-  const pct = Math.round((planDone / MOCK_PLAN.length) * 100);
-
-  function append(event) {
-    setEvents((prev) => [...prev, event]);
-  }
-
-  function send() {
+  function handleSend() {
     const text = input.trim();
-    if (!text) return;
-    append({ id: `u${Date.now()}`, kind: 'user', label: 'you', detail: text, meta: stamp(), tone: 'user' });
+    if (!text || run.running) return;
     setInput('');
-    if (inputRef.current) inputRef.current.focus();
-  }
-
-  function stopRun() {
-    if (!running) return;
-    setRunning(false);
-    append({
-      id: `s${Date.now()}`,
-      kind: 'status',
-      label: 'stop',
-      detail: 'run stopped',
-      meta: fmt(elapsed),
-      tone: 'muted',
-    });
-    if (typeof onToast === 'function') onToast('Run stopped');
+    run.send(text, { permissionLevel: permission });
   }
 
   function goClassic() {
@@ -161,13 +63,16 @@ export default function CopilotAurora({ projectId = 'default', projectName = 'Un
 
   return (
     <div className={s.shell} data-testid="aurora-shell" data-project={projectId}>
-      <AuroraRail projectName={projectName} plan={MOCK_PLAN} onClassic={goClassic} />
+      <AuroraRail projectName={projectName} plan={run.plan} onClassic={goClassic} />
 
       <div className={s.main}>
         <header className={s.head} data-testid="aurora-head">
-          <span className={`${s.liveDot} ${running ? s.liveDotRun : s.liveDotIdle}`} aria-hidden="true" />
+          <span
+            className={`${s.liveDot} ${run.running ? s.liveDotRun : s.liveDotIdle}`}
+            aria-hidden="true"
+          />
           <span className={s.headLabel} data-testid="aurora-plan-count">
-            plan {planDone}/{MOCK_PLAN.length}
+            {planLabel}
           </span>
           <div
             className={s.track}
@@ -179,27 +84,54 @@ export default function CopilotAurora({ projectId = 'default', projectName = 'Un
           >
             <div className={s.trackFill} style={{ width: `${pct}%` }} />
           </div>
-          <span className={s.headStep} data-testid="aurora-step">
-            step 4/9
-          </span>
-          <span className={s.headTimer} data-testid="aurora-timer">
-            {fmt(elapsed)}
-          </span>
+          {(run.running || run.stepCount > 0) && (
+            <span className={s.headStep} data-testid="aurora-steps">
+              steps {run.stepCount}
+            </span>
+          )}
+          {(run.running || run.elapsed > 0) && (
+            <span className={s.headTimer} data-testid="aurora-timer">
+              {fmt(run.elapsed)}
+            </span>
+          )}
           <button
             type="button"
             className={s.stopBtn}
             data-testid="aurora-stop"
-            disabled={!running}
-            onClick={stopRun}
+            disabled={!run.running}
+            onClick={run.stop}
           >
             <AppIcon name="square" size={9} />
             Stop
           </button>
         </header>
 
-        <AgentStream events={events} running={running} />
+        <AgentStream events={run.rows} running={run.running} />
 
         <div className={s.composer} data-testid="aurora-composer">
+          {run.approval && (
+            <div className={s.approvalBar} data-testid="approval-banner" role="alert">
+              <AppIcon name="shield" size={13} />
+              <span className={s.approvalMsg}>Approval needed to continue this run</span>
+              <button
+                type="button"
+                className={s.approveBtn}
+                data-testid="approve-btn"
+                onClick={run.approve}
+              >
+                Approve
+              </button>
+              <button
+                type="button"
+                className={s.rejectBtn}
+                data-testid="reject-btn"
+                onClick={run.dismissApproval}
+              >
+                Reject
+              </button>
+            </div>
+          )}
+
           <div className={s.composerBox}>
             <textarea
               ref={inputRef}
@@ -207,12 +139,12 @@ export default function CopilotAurora({ projectId = 'default', projectName = 'Un
               data-testid="aurora-composer-input"
               rows={1}
               value={input}
-              placeholder="Message the copilot…"
+              placeholder={run.running ? 'Run in progress — Stop to interrupt…' : 'Message the copilot…'}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  send();
+                  handleSend();
                 }
               }}
             />
@@ -221,8 +153,8 @@ export default function CopilotAurora({ projectId = 'default', projectName = 'Un
               className={s.sendBtn}
               data-testid="aurora-send"
               aria-label="Send message"
-              disabled={!input.trim()}
-              onClick={send}
+              disabled={!input.trim() || run.running}
+              onClick={handleSend}
             >
               <AppIcon name="send" size={13} />
             </button>
@@ -252,7 +184,7 @@ export default function CopilotAurora({ projectId = 'default', projectName = 'Un
         </div>
       </div>
 
-      <AuroraStage files={MOCK_FILES} />
+      <AuroraStage files={run.files} />
     </div>
   );
 }

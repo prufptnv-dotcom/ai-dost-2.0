@@ -30,13 +30,13 @@ export default function AuroraRail({ projectName = 'Untitled project', plan = []
               <span
                 className={`${s.planBox} ${p.status === 'done' ? s.planDone : ''} ${
                   p.status === 'active' ? s.planActive : ''
-                }`}
+                } ${p.status === 'error' ? s.planError : ''}`}
                 aria-hidden="true"
               />
               <span
                 className={`${s.planLabel} ${p.status === 'done' ? s.planLabelDone : ''} ${
                   p.status === 'active' ? s.planLabelActive : ''
-                }`}
+                } ${p.status === 'error' ? s.planLabelError : ''}`}
               >
                 {p.label}
               </span>

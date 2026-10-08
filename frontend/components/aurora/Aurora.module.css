@@ -121,6 +121,15 @@
   color: var(--color-text-primary);
 }
 
+.planError {
+  border-color: var(--signal-error);
+  background: var(--signal-error-subtle);
+}
+
+.planLabelError {
+  color: var(--signal-error);
+}
+
 .railFoot {
   display: flex;
   gap: 8px;
@@ -612,6 +621,62 @@
 .diffDel {
   color: var(--signal-error);
   font-size: 10.5px;
+}
+
+/* ─── Approval gate (A2: ask-permission runs pause here) ─── */
+
+.approvalBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--signal-warning);
+  background: var(--signal-warning-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+}
+
+.approvalMsg {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approveBtn {
+  padding: 5px 12px;
+  border: 1px solid var(--signal-success);
+  border-radius: var(--radius-sm);
+  background: var(--signal-success-subtle);
+  color: var(--signal-success);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease);
+}
+
+.approveBtn:hover {
+  background: var(--signal-success);
+  color: var(--bg-void);
+}
+
+.rejectBtn {
+  padding: 5px 12px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.rejectBtn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
 }
 
 /* ─── Motion ─── */
