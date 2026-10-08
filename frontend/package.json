@@ -44,7 +44,10 @@
     "socket.io-client": "^4.8.3",
     "tabler-icons-react": "^1.56.0",
     "vscode-ws-jsonrpc": "^3.5.0",
-    "y-webrtc": "^10.3.0"
+    "y-monaco": "^0.1.6",
+    "y-webrtc": "^10.3.0",
+    "y-websocket": "^3.1.0",
+    "yjs": "^13.6.33"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

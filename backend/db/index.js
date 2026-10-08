@@ -13,6 +13,8 @@ const migration007 = require('./migrations/007_performance_indexes');
 const migration008 = require('./migrations/008_context_compression_cache');
 const migration009 = require('./migrations/009_assessments_schema');
 const migration010 = require('./migrations/010_copilot_memory');
+const migration011 = require('./migrations/011_task_events');
+const migration012 = require('./migrations/012_collab_docs');
 const logger = require('../logger');
 
 let dbInstance = null;
@@ -70,7 +72,9 @@ function initDatabase(customPath = null) {
     migration007,
     migration008,
     migration009,
-    migration010
+    migration010,
+    migration011,
+    migration012
   ]);
 
   // Run legacy data migrator (idempotent)

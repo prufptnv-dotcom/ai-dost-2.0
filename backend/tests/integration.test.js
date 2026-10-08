@@ -807,3 +807,204 @@ test('GET /api/copilot/memory/retrieve returns ranked notes for a prompt', async
   assert.ok(r.body.notes.length >= 1);
   assert.match(r.body.formatted, /nextjs app router lesson/);
 });
+
+// -- P6 � Instant in-browser (WebContainer wrapper + FileSystemTree) ----------
+test('P6: /instant/:projectId serves an isolated wrapper (COOP/COEP, no API key)', async () => {
+  const page = await fetch(base + '/instant/p6-test-proj');
+  const html = await page.text();
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get('content-type') || '', /text\/html/);
+  assert.equal(page.headers.get('cross-origin-opener-policy'), 'same-origin');
+  assert.equal(page.headers.get('cross-origin-embedder-policy'), 'require-corp');
+  assert.match(html, /WebContainer/);
+  assert.match(html, /crossOriginIsolated/);
+  // files URL is composed at runtime from the injected project id
+  assert.match(html, /const PROJECT = "p6-test-proj"/);
+  assert.match(html, /'\/api\/instant\/' \+ encodeURIComponent\(PROJECT\) \+ '\/files'/);
+  // engine preflight: boot must NOT start before the reachability probe
+  assert.match(html, /\/api\/instant\/engine-status/);
+  assert.match(html, /WebContainer engine UNREACHABLE/);
+
+  // invalid project ids never reach the wrapper
+  const bad = await fetch(base + '/instant/bad..id');
+  assert.equal(bad.status, 400);
+  await bad.text();
+});
+
+test('P6: /api/instant/:projectId/files builds a FileSystemTree from the workspace', async () => {
+  const projectStore = require('../projectStore');
+  projectStore.saveProjectFile('instant-ut', 'package.json', JSON.stringify({ name: 'instant-ut', scripts: { dev: 'vite' } }));
+  projectStore.saveProjectFile('instant-ut', 'src/App.jsx', 'export default function App() { return null; }');
+  try {
+    const r = await req('GET', '/api/instant/instant-ut/files');
+    assert.equal(r.status, 200);
+    assert.ok(r.body.files, 'files tree present');
+    assert.ok(r.body.files['package.json'], 'package.json mounted');
+    assert.match(r.body.files['package.json'].file.contents, /instant-ut/);
+    assert.ok(r.body.files['src/App.jsx'], 'source file mounted');
+    assert.ok(r.body.count >= 2);
+    assert.match(r.body.source, /fs:|db:/);
+  } finally {
+    projectStore.clearProjectFiles('instant-ut');
+  }
+});
+
+test('P6: files endpoint is honest 404 without package.json (never a fake run)', async () => {
+  const projectStore = require('../projectStore');
+  projectStore.saveProjectFile('instant-empty', 'notes.txt', 'no manifest here');
+  try {
+    const r = await req('GET', '/api/instant/instant-empty/files');
+    assert.equal(r.status, 404);
+    assert.equal(r.body.error, 'no-package-json');
+    assert.match(r.body.message, /Live mode/);
+  } finally {
+    projectStore.clearProjectFiles('instant-empty');
+  }
+});
+
+test('P6: vendored /wc/* runtime serves JS; path traversal is blocked', async () => {
+  const ok = await fetch(base + '/wc/index.js');
+  const js = await ok.text();
+  assert.equal(ok.status, 200);
+  assert.match(ok.headers.get('content-type') || '', /javascript/);
+  assert.match(js, /WebContainer/);
+
+  const evil = await fetch(base + '/wc/..%2f..%2fserver.js');
+  assert.ok(evil.status >= 400, 'traversal must not escape the dist dir, got ' + evil.status);
+  await evil.text();
+});
+
+test('P6: engine-status probe returns honest shape (network-safe, 30s cache)', async () => {
+  const r = await req('GET', '/api/instant/engine-status');
+  assert.equal(r.status, 200);
+  assert.equal(typeof r.body.ok, 'boolean', 'ok must be a boolean whatever the network does');
+  assert.equal(typeof r.body.status, 'number');
+  assert.ok(Number.isFinite(r.body.at), 'timestamp present');
+  const r2 = await req('GET', '/api/instant/engine-status');
+  assert.equal(r2.body.cached, true, 'second hit within 30s is served from cache');
+});
+
+// -- P9: background run status + SSE replay -------------------------------
+test('P9: run status + SSE replay streams persisted events in order', async () => {
+  const backgroundRuns = require('../services/backgroundRuns');
+  const runId = `run-itest-${Date.now().toString(36)}`;
+  backgroundRuns.begin({ runId, projectId: 'itest-p9', prompt: 'integration replay', background: true });
+  backgroundRuns.record(runId, { type: 'start', message: 'begin' });
+  backgroundRuns.record(runId, { type: 'step', message: 'work' });
+  backgroundRuns.record(runId, { type: 'done', message: 'all good', completed: true });
+  backgroundRuns.finish(runId, 'done', 'all good');
+
+  const st = await req('GET', `/api/agent/runs/${runId}`);
+  assert.equal(st.status, 200);
+  assert.equal(st.body.status, 'done');
+  assert.equal(st.body.background, true);
+  assert.equal(st.body.seq, 3);
+  assert.equal(st.body.running, false);
+  assert.equal(st.body.live, false);
+  assert.equal(st.body.finalMessage, 'all good');
+
+  // full replay � raw fetch (SSE never parses through req()'s JSON path);
+  // a finished run streams history then closes (no orphaned socket).
+  const resp = await fetch(`${base}/api/agent/runs/${runId}/events`);
+  assert.equal(resp.status, 200);
+  const text = await resp.text();
+  const dataLines = text.split('\n').filter(l => l.startsWith('data: ')).map(l => l.slice(6));
+  assert.equal(dataLines.length, 3, 'all persisted events replayed');
+  assert.equal(JSON.parse(dataLines[0]).type, 'start');
+  assert.equal(JSON.parse(dataLines[1]).type, 'step');
+  assert.equal(JSON.parse(dataLines[2]).message, 'all good');
+
+  // cursor: ?after=2 returns only what follows seq 2
+  const resp2 = await fetch(`${base}/api/agent/runs/${runId}/events?after=2`);
+  const text2 = await resp2.text();
+  const lines2 = text2.split('\n').filter(l => l.startsWith('data: ')).map(l => l.slice(6));
+  assert.equal(lines2.length, 1);
+  assert.equal(JSON.parse(lines2[0]).type, 'done');
+});
+
+test('P9: unknown run -> 404 on status and replay endpoints', async () => {
+  const a = await req('GET', '/api/agent/runs/run-never-existed');
+  assert.equal(a.status, 404);
+  assert.equal(a.body.error, 'unknown run');
+  const b = await fetch(`${base}/api/agent/runs/run-never-existed/events`);
+  assert.equal(b.status, 404);
+});
+
+// ── P8: Yjs collaboration (/yws/:projectId) ─────────────────────────────
+test('P8: /yws/:projectId accepts a WebSocket and starts Yjs sync (step 1 frame)', async () => {
+  const WebSocket = require('ws');
+  const ws = new WebSocket(`${base.replace(/^http/, 'ws')}/yws/itest-p8-handshake`);
+  const first = await new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('no sync frame within 5s')), 5000);
+    ws.once('message', (d) => { clearTimeout(t); resolve(d); });
+    ws.once('error', (e) => { clearTimeout(t); reject(e); });
+  });
+  assert.ok(first.length >= 2, 'frame has at least two varuints');
+  assert.equal(first[0], 0, 'MESSAGE_SYNC');
+  assert.equal(first[1], 0, 'SYNC_STEP_1');
+  ws.close();
+});
+
+test('P8: client update -> server doc, agent write -> client receives it (real sockets)', async () => {
+  const WebSocket = require('ws');
+  const Y = require('yjs');
+  const syncProtocol = require('y-protocols/sync');
+  const encoding = require('lib0/encoding');
+  const decoding = require('lib0/decoding');
+  const collabDoc = require('../services/collabDoc');
+
+  const ws = new WebSocket(`${base.replace(/^http/, 'ws')}/yws/itest-p8-sync`);
+  await new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('ws open timeout')), 5000);
+    ws.once('open', () => { clearTimeout(t); resolve(); });
+    ws.once('error', (e) => { clearTimeout(t); reject(e); });
+  });
+
+  // 1) Client applies its local doc to the server (sync update frame).
+  const clientDoc = new Y.Doc();
+  clientDoc.getText('file:src/App.jsx').insert(0, 'hello from client');
+  const enc = encoding.createEncoder();
+  encoding.writeVarUint(enc, collabDoc.MESSAGE_SYNC);
+  encoding.writeVarUint(enc, syncProtocol.messageYjsUpdate);
+  encoding.writeVarUint8Array(enc, Y.encodeStateAsUpdate(clientDoc));
+  ws.send(encoding.toUint8Array(enc));
+
+  // server runs in-process -> poll the room directly for the applied text
+  let applied = null;
+  for (let i = 0; i < 50 && applied === null; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+    applied = collabDoc.peekText('itest-p8-sync', 'src/App.jsx');
+  }
+  assert.equal(applied, 'hello from client', 'client update landed in the server doc');
+
+  // 2) Agent writes through applyFile -> connected client gets the frame.
+  const frames = [];
+  ws.on('message', (d) => frames.push(d));
+  collabDoc.applyFile('itest-p8-sync', 'src/App.jsx', 'agent wrote this');
+
+  let synced = null;
+  const localDoc = new Y.Doc();
+  Y.applyUpdate(localDoc, Y.encodeStateAsUpdate(clientDoc)); // client's known state
+  for (let i = 0; i < 60 && synced === null; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+    for (const frame of frames) {
+      if (frame[0] !== 0 || frame[1] !== 2) continue; // keep only sync/update frames
+      try {
+        const decoder = decoding.createDecoder(new Uint8Array(frame));
+        decoding.readVarUint(decoder); // MESSAGE_SYNC
+        decoding.readVarUint(decoder); // update subtype
+        Y.applyUpdate(localDoc, decoding.readVarUint8Array(decoder));
+      } catch (_) { /* partial frame */ }
+    }
+    const t = localDoc.getText('file:src/App.jsx').toString();
+    if (t === 'agent wrote this') synced = t;
+  }
+  assert.equal(synced, 'agent wrote this', 'agent write pushed to the connected client');
+  ws.close();
+
+  // cleanup: drop test rooms + their persisted rows (never leave fixtures in app.db)
+  collabDoc._resetForTests();
+  try {
+    db.prepare("DELETE FROM collab_docs WHERE project_id LIKE 'itest-p8%'").run();
+  } catch (_) { /* table missing (old db) — migration creates it on boot */ }
+});

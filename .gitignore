@@ -56,6 +56,9 @@ yarn-error.log*
 backend/data/*.db*
 # Server-side secret store (#101-#103) — never commit keys
 backend/data/local-settings.json
+# P7 runtime artifacts — downloaded tunnel binary + dev-server registry
+backend/data/bin/
+backend/data/live-servers.json
 # P3 #218: this line was one malformed concatenation of two paths
 # (memory-brain/.data/ + frontend/public/downloads/) and matched nothing.
 memory-brain/.data/

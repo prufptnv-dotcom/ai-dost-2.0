@@ -534,6 +534,11 @@ class DevServerManager extends EventEmitter {
     try {
       await this.waitForServer(serverInfo.url, 120000, serverInfo);
       this.emitState(serverInfo, 'READY');
+      // P7 always-on: local servers record themselves so server.js can restore
+      // them after a restart (Docker sandboxes are container-scoped — skip).
+      if (serverInfo.projectId && serverInfo.projectPath && !serverInfo.sandboxId) {
+        this.persistLiveServer(serverInfo.projectId, serverInfo.projectPath).catch(() => {});
+      }
       return {
         success: true,
         url: serverInfo.url,
@@ -591,7 +596,11 @@ class DevServerManager extends EventEmitter {
 
     this.emitState(server, 'STOPPED');
     this.servers.delete(targetId);
-    if (server.projectId) this.projectIndex.delete(server.projectId);
+    if (server.projectId) {
+      this.projectIndex.delete(server.projectId);
+      // P7: a user-stopped server must NOT come back on the next boot
+      this.unpersistLiveServer(server.projectId).catch(() => {});
+    }
     return true;
   }
 
@@ -627,6 +636,79 @@ class DevServerManager extends EventEmitter {
   getProjectByHmrToken(token) {
     if (!token) return null;
     return this.hmrTokenIndex.get(String(token)) || null;
+  }
+
+  // ── P7: always-on dev servers ───────────────────────────────────────────────
+  // Every successful LOCAL start records the project here; the backend restores
+  // them on boot (server.js `require.main` block) so previews survive restarts.
+  // File lives in backend/data/ (durable — unlike %TEMP%), env-overridable for
+  // tests via AIDOST_LIVE_FILE.
+  liveFilePath() {
+    return process.env.AIDOST_LIVE_FILE || path.join(__dirname, '..', 'data', 'live-servers.json');
+  }
+
+  async persistLiveServer(projectId, projectPath) {
+    if (!projectId || !projectPath) return false;
+    try {
+      const file = this.liveFilePath();
+      let all = {};
+      try { all = JSON.parse(await fs.readFile(file, 'utf8')); } catch (_) { all = {}; }
+      all[projectId] = { projectPath, at: Date.now() };
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.writeFile(file, JSON.stringify(all, null, 2));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async unpersistLiveServer(projectId) {
+    if (!projectId) return false;
+    try {
+      const file = this.liveFilePath();
+      let all = {};
+      try { all = JSON.parse(await fs.readFile(file, 'utf8')); } catch (_) { return true; }
+      if (!(projectId in all)) return true;
+      delete all[projectId];
+      await fs.writeFile(file, JSON.stringify(all, null, 2));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async listLiveServers() {
+    try {
+      const all = JSON.parse(await fs.readFile(this.liveFilePath(), 'utf8'));
+      return Object.entries(all).map(([projectId, e]) => ({ projectId, ...(e || {}) }));
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // Bring previously-live dev servers back after a backend restart. Sequential
+  // (port probing is racy in parallel) and failure-tolerant: one broken project
+  // never blocks the rest. Callers run this AFTER boot — never on the critical
+  // startup path, and never in tests.
+  async restoreLiveServers() {
+    const entries = await this.listLiveServers();
+    const restored = [];
+    const failed = [];
+    for (const { projectId, projectPath } of entries) {
+      if (!projectId || !projectPath) continue;
+      if (this.getServerByProject(projectId)) {
+        restored.push(projectId);
+        continue;
+      }
+      try {
+        const r = await this.startDevServer(projectId, projectPath);
+        if (r && r.success !== false) restored.push(projectId);
+        else failed.push(projectId);
+      } catch (_) {
+        failed.push(projectId);
+      }
+    }
+    return { restored, failed };
   }
 
   getAllServers() {

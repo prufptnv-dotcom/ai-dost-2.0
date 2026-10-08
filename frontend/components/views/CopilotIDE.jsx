@@ -6,6 +6,8 @@ import api from '../../services/api';
 import { isImageCreateRequest } from '../../lib/imageIntent';
 import { runCopilotImageRequest } from '../../lib/copilotImageRequest';
 import { cancelAgentRun } from '../../lib/copilotStop';
+import { saveBgRun, clearBgRun, loadBgRun, attachRunEvents, eventToActions } from '../../lib/backgroundRun';
+import { bindCurrentModel, unbindCurrent, subscribeParticipants } from '../../lib/collabClient';
 import { filePathOf, detectMention, parseMentionPaths } from '../../lib/copilotMentions';
 import { LANG_BY_EXT, TreeView, fileTreeFromFiles } from './CopilotTree';
 import { PromptModal, QuickOpen, CommandPalette, SearchOverlay, MODAL_ICONS } from './IDEOverlays';
@@ -373,6 +375,11 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   // Devin-style permission level: ask = approve every run, auto = canonical
   // policy, turbo = auto-approve (BLOCK still blocks).
   const [permissionLevel, setPermissionLevel] = useState('auto');
+  // P9: background runs outlive this socket (refresh / tab close) — persisted
+  // per-device, applied to the next /api/agent/run body.
+  const [runInBackground, setRunInBackground] = useState(() => {
+    try { return window.localStorage.getItem('ai_dost_copilot_background') === '1'; } catch (_) { return false; }
+  });
   // Devin-style watch mode: SSE (GET /api/agent/watch/:projectId) live-pushes
   // workspace file changes → auto-refresh tree + activity rows without polling.
   const [watching, setWatching] = useState(false);
@@ -382,6 +389,9 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [memoryNotes, setMemoryNotes] = useState([]);
   const [memoryCount, setMemoryCount] = useState(0);
+  // P8: multiplayer presence — other humans + the agent participant (from the
+  // shared Yjs doc's awareness; deduped so cursor moves don't re-render).
+  const [collabPeers, setCollabPeers] = useState([]);
 
   const loadMemoryNotes = async () => {
     try {
@@ -465,7 +475,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   const [milestonesExpanded, setMilestonesExpanded] = useState(true); // Plan checklist default open (Devin-style)
   const [inspectorActive, setInspectorActive] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(`/api/preview/${projectId}`);
-  const [previewSourceMode, setPreviewSourceMode] = useState('auto'); // 'auto' | 'live' | 'mock'
+  const [previewSourceMode, setPreviewSourceMode] = useState('auto'); // 'auto' | 'live' | 'instant' | 'mock'
   const [devServerStatus, setDevServerStatus] = useState({ running: false, state: 'STOPPED', url: null });
   const [devServerLoading, setDevServerLoading] = useState(false);
   const [deployModalOpen, setDeployModalOpen] = useState(false);
@@ -507,6 +517,30 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
   const endRef = useRef(null);
   const diagTimerRef = useRef(null);
   const [visualDebuggerOpen, setVisualDebuggerOpen] = useState(false);
+
+  // P8: presence subscription — dedupe by identity signature (awareness
+  // 'change' fires on every remote cursor move; never re-render for those).
+  useEffect(() => {
+    if (!projectId) return undefined;
+    let lastSig = '';
+    const unsub = subscribeParticipants(projectId, list => {
+      const sig = list.map(p => `${p.clientId}:${p.name}:${p.agent ? 1 : 0}:${p.editing || ''}`).join('|');
+      if (sig === lastSig) return;
+      lastSig = sig;
+      setCollabPeers(list);
+    });
+    return unsub;
+  }, [projectId]);
+
+  // P8: bind the editor to the shared Yjs doc for the active file. Cleanup
+  // disposes the binding on file switch/unmount so one model is never driven
+  // by two Y.Texts. (Single Monaco model — no `path` prop — so rebind here.)
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !projectId || !activePath) return undefined;
+    bindCurrentModel(projectId, editor, activePath);
+    return () => { unbindCurrent(editor); };
+  }, [projectId, activePath]);
 
   // Devin-style Stop: abort the local stream AND cancel server-side so the
   // director loop (signal.aborted) actually halts instead of running headless.
@@ -1663,6 +1697,14 @@ const animate = () => {
     editorRef.current = editor;
     monacoRef.current = monaco;
 
+    // P8: multiplayer — bind this fresh editor instance to the shared doc for
+    // the file active at mount time. (The [projectId, activePath] effect
+    // handles later switches; this covers editor remounts.)
+    try {
+      const initialCollabPath = activePathRef.current;
+      if (initialCollabPath) bindCurrentModel(projectId, editor, initialCollabPath);
+    } catch (_) { /* collab is optional — editor still works solo */ }
+
     try {
       configureMonacoThemes(monaco);
       monaco.editor.setTheme(isLight ? 'aidost-light' : 'aidost-dark');
@@ -1823,6 +1865,89 @@ const animate = () => {
   };
 
   // Main SSE Agent Stream Runner
+  // ── P9: reattach to a background run after refresh / tab return ────────────
+  // Applies one reattach action (pure eventToActions output) to UI state.
+  const applyBgAction = (action, runId) => {
+    if (!action) return;
+    if (action.do === 'latestRunId') {
+      setLatestRunId(action.runId);
+      latestRunIdRef.current = action.runId;
+    } else if (action.do === 'row') {
+      setCopilotMessages(prev => [...prev, action.row]);
+    } else if (action.do === 'plan') {
+      setPlanTasks(action.tasks);
+    } else if (action.do === 'status') {
+      setCopilotStatus({ label: action.label, tone: action.tone });
+    } else if (action.do === 'file') {
+      setFiles(prev => prev.some(f => f.path === action.path)
+        ? prev.map(f => (f.path === action.path ? { ...f, content: action.content, lastModified: Date.now() } : f))
+        : [...prev, { path: action.path, content: action.content, lastModified: Date.now() }]);
+      setContents(prev => ({ ...prev, [action.path]: action.content }));
+    } else if (action.do === 'done') {
+      clearBgRun(runId);
+    }
+  };
+
+  // Replay + live tail of a still-running background run. The stream only
+  // closes on terminal events (server cleanup) or network failure — storage is
+  // cleared ONLY on a real 'done', so a blip can be reattached again later.
+  const attachBgRun = async (runId) => {
+    setRunning(true);
+    runStartRef.current = Date.now();
+    setElapsedSec(0);
+    setCopilotStatus({ label: '↻ Reattached to background run…', tone: 'work' });
+    setCopilotMessages(prev => [...prev, {
+      role: 'assistant',
+      kind: 'thought',
+      content: `↻ Reattached to background run ${runId} — replaying what you missed…`
+    }]);
+    try {
+      await attachRunEvents({
+        runId,
+        backend: BACKEND,
+        onEvent: (data) => {
+          for (const action of eventToActions(data)) applyBgAction(action, runId);
+        }
+      });
+    } catch (e) {
+      setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'error', content: `Reattach ended: ${e.message}` }]);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  useEffect(() => {
+    const stored = loadBgRun();
+    if (!stored) return undefined;
+    if (projectId && stored.projectId && stored.projectId !== projectId) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${BACKEND}/api/agent/runs/${encodeURIComponent(stored.runId)}`);
+        if (!res.ok) {
+          if (res.status === 404) clearBgRun();
+          return;
+        }
+        const info = await res.json();
+        if (cancelled) return;
+        if (info.running) {
+          await attachBgRun(stored.runId);
+        } else {
+          clearBgRun(stored.runId);
+          if (info.finalMessage) {
+            setCopilotMessages(prev => [...prev, {
+              role: 'assistant',
+              kind: 'thought',
+              content: `↻ Background run finished while you were away:\n${String(info.finalMessage).slice(0, 1200)}`
+            }]);
+          }
+        }
+      } catch (_) { /* backend unreachable — storage kept for the next mount */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
   const runCopilot = async (prompt, attachedImages = [], planOverride = null, runOptions = {}) => {
     if (!prompt || running) return;
     // Resume inputs for a paused 'ask' run (approval banner → Approve) and
@@ -1911,7 +2036,10 @@ const animate = () => {
           // Devin-style permission level + single-use approval token resume.
           permissionLevel,
           ...(runOptions.approvalToken ? { approvalToken: runOptions.approvalToken } : {}),
-          preferredModel
+          preferredModel,
+          // P9: run outlives this socket — refresh/tab close won't kill it and
+          // the persisted event log makes reattach possible on return.
+          ...(runInBackground ? { background: true } : {})
         }),
         signal: controller.signal
       });
@@ -1947,6 +2075,8 @@ const animate = () => {
             if (data.type === 'run_started' || data.type === 'director_start') {
               setLatestRunId(data.runId || data.taskId || null);
               latestRunIdRef.current = data.runId || data.taskId || null;
+              // P9: remember a background run so a refresh can reattach to it.
+              if (runInBackground && data.runId) saveBgRun({ runId: data.runId, projectId });
               if (data.type === 'director_start') {
                 setCopilotStatus({ label: '🎯 Director accepted — inspecting workspace...', tone: 'work' });
                 setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: '🎯 Copilot Director accepted your request. Inspecting workspace and planning optimal execution path...' }]);
@@ -2200,6 +2330,8 @@ const animate = () => {
               setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: `👁️ Vision QA: ${data.message}` }]);
             }
             else if (data.type === 'done') {
+              // P9: live completion — this run needs no reattach anymore.
+              clearBgRun(latestRunIdRef.current);
               const stepCount = Array.isArray(data.steps) ? data.steps.length : (data.steps || '?');
               setPlanTasks(prev => prev.map(t => ({ ...t, status: 'completed' })));
               setCopilotStatus({ label: `✅ Done — ${stepCount} steps`, tone: 'success' });
@@ -2713,7 +2845,10 @@ const animate = () => {
 
     // Trigger preview refresh
     if (iframeRef.current) {
-      if (previewSourceMode === 'live' || (previewSourceMode === 'auto' && devServerStatus.state === 'READY')) {
+      if (previewSourceMode === 'instant') {
+        // P6: reload the isolated WebContainer wrapper (never clobber it with srcdoc)
+        iframeRef.current.src = `${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000'}/instant/${projectId}?t=${Date.now()}`;
+      } else if (previewSourceMode === 'live' || (previewSourceMode === 'auto' && devServerStatus.state === 'READY')) {
         iframeRef.current.src = `/api/preview/${projectId}?t=${Date.now()}`;
       } else {
         iframeRef.current.srcdoc = generateLiveAppHtml(files, { ...contents, [targetFile]: healedCode }, inspectorActive);
@@ -3225,6 +3360,28 @@ const animate = () => {
                   </button>
                 ))}
               </div>
+
+              {/* P9: background run toggle — survives refresh/tab close */}
+              <button
+                type="button"
+                data-testid="background-toggle"
+                aria-pressed={runInBackground}
+                onClick={() => {
+                  const next = !runInBackground;
+                  setRunInBackground(next);
+                  try { window.localStorage.setItem('ai_dost_copilot_background', next ? '1' : '0'); } catch (_) { /* ignore */ }
+                  showToast(next ? 'BG run ON — close the tab, the agent keeps working' : 'BG run OFF', 'info');
+                }}
+                title="Background run — refresh or close the tab and the agent keeps going; reattach on return"
+                className={`flex items-center gap-1 px-2 py-1 text-[10px] font-semibold rounded-md border transition-colors cursor-pointer shrink-0 ${
+                  runInBackground
+                    ? 'bg-emerald-400/15 text-emerald-300 border-emerald-400/40'
+                    : 'bg-canvas-elevated text-ink-muted hover:text-paper-200 border-border'
+                }`}
+              >
+                <AppIcon name="clock" size={10} />
+                BG
+              </button>
 
               <div
                 className="flex items-center rounded-md border border-border overflow-hidden shrink-0"
@@ -4024,6 +4181,41 @@ const animate = () => {
 
                   {/* Monaco Editor Container */}
                   <div className="flex-1 min-w-0 min-h-0 relative bg-canvas-base flex flex-col">
+                    {/* P8: multiplayer presence — humans + AI-Dost Agent */}
+                    <div
+                      className="flex items-center gap-2 px-3 py-1 border-b border-border-subtle bg-canvas-surface/70 text-[10px] shrink-0"
+                      data-testid="collab-presence"
+                    >
+                      <AppIcon name="users" size={11} className="text-ink-muted shrink-0" />
+                      <span className="text-ink-muted shrink-0 font-medium">Live:</span>
+                      <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                        {collabPeers.length === 0 && (
+                          <span className="text-ink-muted font-mono">connecting…</span>
+                        )}
+                        {collabPeers.map(p => (
+                          <span
+                            key={p.clientId}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border border-border-subtle"
+                            style={{ background: `${p.color}1f` }}
+                            title={p.editing ? `editing ${p.editing}` : p.name}
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: p.color }} />
+                            <span className="truncate max-w-[110px] font-mono" style={{ color: p.color }}>
+                              {p.name}{p.isSelf ? ' (you)' : ''}
+                            </span>
+                            {p.agent && (
+                              <span className="px-1 rounded bg-accent/15 text-accent font-semibold shrink-0">agent</span>
+                            )}
+                            {p.editing && (
+                              <span className="text-ink-muted truncate max-w-[130px] font-mono hidden sm:inline">
+                                ↳ {p.editing}
+                              </span>
+                            )}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
                     {/* Smart Missing Dependency Detector & 1-Click Installer */}
                     {detectedMissingPackages.length > 0 && (
                       <div className="bg-indigo-950/90 border-b border-indigo-500/40 px-3 py-1.5 flex items-center justify-between text-xs animate-in slide-in-from-top-1 z-20 shrink-0">

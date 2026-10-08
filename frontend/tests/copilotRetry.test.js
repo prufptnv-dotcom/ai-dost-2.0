@@ -13,9 +13,10 @@ const SRC = fs.readFileSync(
 );
 
 describe('error rows (static audit)', () => {
-  test('all four failure paths push kind:\'error\' rows', () => {
-    // SSE error event, director_error, runCopilot catch, runAskMode catch.
-    expect(SRC.match(/kind: 'error'/g) || []).toHaveLength(4);
+  test('all five failure paths push kind:\'error\' rows', () => {
+    // SSE error event, director_error, runCopilot catch, runAskMode catch,
+    // + P9 reattach stream failure (background run replay died).
+    expect(SRC.match(/kind: 'error'/g) || []).toHaveLength(5);
     expect(SRC).not.toMatch(/type === 'error'[\s\S]{0,300}kind: 'thought'/);
     expect(SRC).not.toMatch(/type === 'director_error'[\s\S]{0,300}kind: 'thought'/);
   });

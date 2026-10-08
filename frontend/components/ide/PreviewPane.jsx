@@ -1,8 +1,15 @@
 import React from 'react';
 import AppIcon from '../ui/AppIcon';
+import ShareButton from './ShareButton';
 import VisualDebugger from '../views/VisualDebugger';
 import VisualHealer from '../VisualHealer';
 import { generateLiveAppHtml } from './PreviewEngine';
+
+// P6 — Instant mode runs the project fully IN-THE-BROWSER (WebContainer
+// wrapper served by the backend with COOP/COEP). Loaded directly from the
+// backend origin — Next rewrites must not be trusted to forward those
+// isolation headers. Local-first default matches every other backend URL.
+const INSTANT_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
 
 export function PreviewPane({
   devServerStatus = {},
@@ -42,6 +49,24 @@ export function PreviewPane({
   consoleOpen = false,
   setConsoleOpen,
 }) {
+  // P6 — Instant mode: live phase chip fed by the wrapper's postMessage events
+  const [instantPhase, setInstantPhase] = React.useState(null);
+  React.useEffect(() => {
+    if (previewSourceMode !== 'instant') {
+      setInstantPhase(null);
+      return undefined;
+    }
+    setInstantPhase('starting');
+    const onMsg = (e) => {
+      const d = e && e.data;
+      if (!d || d.source !== 'aidost-instant') return;
+      if (d.project && projectId && d.project !== projectId) return;
+      if (d.phase) setInstantPhase(d.phase);
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, [previewSourceMode, projectId]);
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden min-h-0 bg-canvas-base w-full h-full">
       {/* Browser Address Bar & Device Toolbar */}
@@ -240,21 +265,31 @@ export function PreviewPane({
             onClick={() => {
               setPreviewSourceMode?.(m => {
                 if (m === 'auto') return 'live';
-                if (m === 'live') return 'mock';
+                if (m === 'live') return 'instant';
+                if (m === 'instant') return 'mock';
                 return 'auto';
               });
             }}
             className="px-2 py-0.5 rounded text-[9px] font-medium bg-canvas-subtle hover:bg-canvas-elevated text-paper-100 border border-border transition-colors cursor-pointer"
-            title="Toggle: Auto -> Live Proxy -> In-Browser"
+            title="Toggle: Auto -> Proxy -> Instant (in-browser run) -> In-Browser"
           >
-            {previewSourceMode === 'auto' ? 'Mode: Auto' : previewSourceMode === 'live' ? 'Mode: Proxy' : 'Mode: In-Browser'}
+            {previewSourceMode === 'auto'
+              ? 'Mode: Auto'
+              : previewSourceMode === 'live'
+                ? 'Mode: Proxy'
+                : previewSourceMode === 'instant'
+                  ? 'Mode: Instant'
+                  : 'Mode: In-Browser'}
           </button>
 
           <button
             type="button"
             onClick={() => {
               if (iframeRef?.current) {
-                if (previewSourceMode === 'live' || (previewSourceMode === 'auto' && devServerStatus.state === 'READY')) {
+                if (previewSourceMode === 'instant') {
+                  setInstantPhase('starting');
+                  iframeRef.current.src = `${INSTANT_BASE}/instant/${projectId}?t=${Date.now()}`;
+                } else if (previewSourceMode === 'live' || (previewSourceMode === 'auto' && devServerStatus.state === 'READY')) {
                   iframeRef.current.src = `/api/preview/${projectId}?t=${Date.now()}`;
                 } else {
                   iframeRef.current.srcdoc = generateLiveAppHtml(files, contents, inspectorActive);
@@ -276,6 +311,8 @@ export function PreviewPane({
           >
             <AppIcon name="external" size={12} />
           </button>
+
+          <ShareButton projectId={projectId} showToast={showToast} />
 
           <button
             type="button"
@@ -322,14 +359,26 @@ export function PreviewPane({
                 : { width: '100%', height: '100%' }
             }
           >
+            {/* P6 Instant: live phase chip (booting → files → install → running → ready) */}
+            {previewSourceMode === 'instant' && (
+              <div
+                data-testid="instant-chip"
+                className="absolute bottom-2 left-2 z-30 flex items-center gap-1.5 px-2 py-1 rounded-md bg-[#131622]/95 border border-indigo-500/40 text-[10px] font-mono text-indigo-300 backdrop-blur-md"
+              >
+                <AppIcon name={instantPhase === 'ready' ? 'check' : 'loader'} size={10} />
+                Instant: {instantPhase || 'starting'}
+              </div>
+            )}
             {/* Visual Healer — analyzes the preview iframe for UI issues */}
             <VisualHealer iframeRef={iframeRef} />
             <iframe
               ref={iframeRef}
               src={
-                (previewSourceMode === 'live' || (previewSourceMode === 'auto' && devServerStatus.state === 'READY'))
-                  ? `/api/preview/${projectId}`
-                  : undefined
+                previewSourceMode === 'instant'
+                  ? `${INSTANT_BASE}/instant/${projectId}`
+                  : (previewSourceMode === 'live' || (previewSourceMode === 'auto' && devServerStatus.state === 'READY'))
+                    ? `/api/preview/${projectId}`
+                    : undefined
               }
               srcDoc={
                 (previewSourceMode === 'mock' || (previewSourceMode === 'auto' && devServerStatus.state !== 'READY'))

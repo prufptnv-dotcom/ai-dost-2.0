@@ -383,6 +383,60 @@ The preview is served through the existing `GET /api/preview/:projectId/*` proxy
 - Tests: `backend/tests/persistentRuntimeLearning.test.js` → **34** (fix-memory learn/retrieve/signature + wiring audits + preview rewrite regex-safety + **AST rewrite regressions** for the three corruption patterns + CORS `selfOrigins` + 8.3-path + **HMR upgrade routing**: token round-trip + proxy-register/server-resolve wiring) → backend unit **284/284 (61 suites)**; integration 64/65 (same pre-existing memory-route failure); frontend 54 suites / 425 tests; eslint 0/0. Proxies: `devServerProxy.test.js` 10/10.
 - Gotcha: backend must be **restarted** after edits to `routes/agent.js` / `routes/preview.js` / `security-hardening.js` (boot ≈30s).
 
+## 25. P6 — Instant in-browser run (WebContainer) (2026-10-08)
+
+Bolt/Replit-style "preview without install", honestly gated on StackBlitz's engine.
+
+- **Wrapper**: `backend/routes/instant.js` — `GET /instant/:id` serves a standalone shell with `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp` (crossOriginIsolated=true), loads the app in an iframe + postMessage bridge (phase events → `instant-chip` in PreviewPane).
+- **Engine**: `@webcontainer/api@1.6.4` vendored same-origin at `/wc/*`, boots WITHOUT an API key (`DEFAULT_EDITOR_ORIGIN = 'https://stackblitz.com'`). Files API `/instant/:id/files/*` pushes the project in.
+- **Outage honesty (2026-10-08)**: StackBlitz `/headless` engine endpoint returned a genuine 404 (their site root still 200 — their outage, not ours). Instead of hanging: `GET /api/instant/engine-status` (5s timeout, 30s cache) + wrapper preflight + 45s boot-handshake `Promise.race` → truthful error card ("engine unreachable — switch Mode to Proxy"). Recovers with zero code changes when they fix it.
+- **PreviewPane**: mode cycle `auto→live→instant→mock`; `INSTANT_BASE = NEXT_PUBLIC_BACKEND_URL || http://localhost:5000` — wrapper loaded from the backend DIRECT (Next rewrites aren't trusted to forward COOP/COEP headers).
+- Tests: 4 P6 integration + 1 engine-status + `previewInstant.test.jsx` 6.
+
+## 26. P7 — Durable dev servers + share URL (2026-10-08)
+
+- `services/shareTunnel.js`: cloudflared quick tunnel (primary) + serveo fallback → public https URL for a running dev server; `routes/share.js` + `ide/ShareButton.jsx` (create/status/cancel + copy).
+- **Security**: scoped proxy strips tunnel identity headers (XFF/Origin/Referer/cf-*) before proxying; path allowlist + timing-safe share-key gate stay the boundary (share403 fix).
+- `devServerManager` persists READY server PIDs + ports; `server.js` restores them on boot (always-on feel).
+- **Gotcha**: share records live in memory → re-share after a backend restart.
+- Tests: `shareTunnel.test.js` + `shareButton.test.jsx` 6/6.
+
+## 27. P8 — Yjs multiplayer + agent-as-participant (2026-10-08)
+
+Two humans + the agent in the same editor, live.
+
+**Backend**
+- `services/collabDoc.js` — y-websocket wire protocol **hand-rolled** (y-websocket v3's exports map hides `bin/utils`): MESSAGE_SYNC + MESSAGE_AWARENESS via `y-protocols`/`lib0`. One Y.Text per file, key `file:<relativePath>`.
+- Route: `server.js` upgrade chain claims `/yws/:projectId` FIRST (`socket.__upgradeHandled = true` before preview/HMR guessing — otherwise the catch-all destroys the socket).
+- Persistence: debounced 1s snapshot → `collab_docs` BLOB (migration `012`); immediate flush when the last connection leaves; corrupt state ignored on load.
+- **Agent as participant**: `routes/agent.js` `send()` hook — every `file_written`/`file_changed` (events carry full `content`) → `collabDoc.applyFile()` → shared doc + server awareness `{name:'AI-Dost Agent', color:'#6366f1', agent:true, editing:<file>}` auto-cleared 20s after the last write. Connected humans see agent edits live AND in the presence strip.
+- **Gotcha**: a WS close arriving after `_resetForTests()`/shutdown tried to persist on a closed DB — guard `rooms.get(projectId) !== room` before touching storage.
+
+**Frontend**
+- `lib/collabClient.js`: singleton `getCollab` per project (WebsocketProvider → `ws://…/yws/<id>`), `bindCurrentModel`, `subscribeParticipants`, `destroySession`. Browser-guarded (`typeof window`) — SSR must never construct a socket.
+- **First-touch rule** `syncInitialDecision(ytext, model)`: doc empty → seed from model; doc has text → `model.setValue(doc)`; same → noop. Runs BEFORE `new MonacoBinding(...)` — y-monaco does NOT reconcile on construction; a diverged start corrupts silently later.
+- MonacoBinding's third arg is a **Set**: `new Set([editor])`.
+- CopilotIDE: rebind effect `[projectId, activePath]` (single Monaco model — there is NO `path` prop — so a file switch = rebind the same model) + a mount-time bind (covers editor remounts) + presence strip `data-testid="collab-presence"` with **signature dedupe** (awareness `change` fires on every remote cursor move — setState only when name/agent/editing identity changes, or a 4000-line component re-renders per keystroke).
+- Known limits: files changed on disk by paths that emit neither `file_written` nor the save route never reach the doc (doc wins at the next bind); rooms accumulate per visited project (no idle eviction — fine at personal scale).
+- Tests: `collabDoc.test.js` 10 (mirroring, broadcast frames, agent presence, restart round-trip) + integration 2 (**real sockets**: step-1 handshake, client→server update, agent→client push) + `collabClient.test.js` 18 (pure helpers, wiring audits, backend contract cross-check — yjs/y-websocket/y-monaco mocked, zero sockets).
+
+## 28. P9 — Background runs + browser/git/PR tools (2026-10-08)
+
+**Background runs (outlive the socket/refresh)**
+- Storage: `copilot_runs` / `copilot_run_events` (migration `011_task_events`) — **NOT `agent_runs`**: migration 002 owns that name with a different schema and `CREATE TABLE IF NOT EXISTS` silently skips → "no such column: project_id" explosion. (Same session: `git checkout HEAD --` to restore files — `git show > file` writes UTF-16 on this box.)
+- Run identity minted at request entry (before any await) — the `send()` closure and the disconnect handler share it.
+- `background:true` → `detached=true`: `isAborted` never set, every event `backgroundRuns.record()` BEFORE the abort check, ReAct keeps stepping. `done` is terminal (`completed:false` → `failed`), first-finish-wins (idempotent), Telegram notify only when `background && detached && firstFinish`. `markInterrupted()` flips stale `running` rows after a restart.
+- Replay: `GET /api/agent/runs/:id` + `GET /api/agent/runs/:id/events` SSE (history then live tail, `?after=` cursor, keepalive 4s, 60min cap).
+- Frontend `lib/backgroundRun.js`: toggle persisted (`ai_dost_copilot_background`), save on `run_started`, clear ONLY on a live `done`, auto-reattach on mount (status probe → replay/tail via pure `eventToActions`).
+- Stop semantics: aborting the fetch on a background run = detach (keeps running); a real cancel goes through `taskCancellation.js`.
+
+**Tools (`executeTool` switch in `routes/agent.js`, prompt entries 21–29)**
+- `services/browserTool.js` — persistent headless Chromium: `browser_navigate/snapshot/click/type/screenshot/close`. SSRF policy (pure, unit-tested): http(s) only, no URL credentials, **loopback on any port allowed** (preview verification is the point), literal private/link-local/metadata IPs blocked, public hostnames DNS-gated (every resolved address must be loopback-or-public). 10min idle auto-close. Snapshot = URL/title/text + up to 40 interactive elements with selector hints + recent console errors.
+- `services/repoTools.js` — `git_commit` / `git_push` / `create_pr`: `execFileSync` with arg arrays (no shell strings), `GIT_TERMINAL_PROMPT=0` (never hang a run on a password), identity fallback `-c user.name=AI-Dost -c user.email=aidost@local` scoped per commit. **Honest tiers**: no remote → `pushed:false` + the exact next command; no `gh` CLI → branch pushed + a ready-made GitHub compare URL; never a fake success.
+- **`parseLLMAction` normalizedParams is a WHITELIST** — unknown parameter keys are dropped silently. New tools needed `selector, value, message, title, body, branch, base` added (`url` already existed). The unknown-tool error string lists the new actions too.
+- **Observation hygiene**: base64 screenshots go to the UI as a `screenshot` event and are REPLACED in the model observation with `[image NKB sent to UI]` — one 500KB PNG would blow the context window (this also fixed `take_screenshot`'s pre-existing flood).
+- Tests: `backgroundRuns.test.js` 5 + `p9Tools.test.js` 11 (SSRF matrix, real git tiers in a temp repo, compareUrl) + integration (status/replay/cursor); frontend `backgroundRun.test.js` 17 (+ stale `copilotRetry` reattach count 4→5).
+
 ## ⌃ Keyboard Shortcuts
 
 | Shortcut | Action |
@@ -495,7 +549,7 @@ ai-dost version 2.o/
 ```powershell
 # Frontend: unit + component (Jest 30 + RTL, jsdom, 0 LLM calls)
 cd "C:\Users\vikash kumar\Pictures\ai dost 3.0\frontend"
- npm test                    # 425 tests / 54 suites
+ npm test                    # 472 tests / 58 suites
 npm test -- --coverage      # coverage thresholds enforced (statements 18 / branches 15 / functions 14 / lines 19)
 
 # Frontend: real-browser VisualHealer suite (Playwright + Chromium, file:// fixtures)
@@ -505,8 +559,8 @@ npx playwright test         # 13 tests — real geometry, computed styles, Mutat
 
 # Backend: unit + integration (node:test, 0 LLM calls, ephemeral port)
 cd "C:\Users\vikash kumar\Pictures\ai dost 3.0\backend"
-npm run test:unit           # 284 tests / 61 suites (unit + project/auth/settings/cache + agent run history/watch bus + copilot memory + runtime/repair/retrieval/dep-cache/fix-memory/HMR-routing)
-npm run test:integration    # 65 tests (real Express app on port 0)
+npm run test:unit           # 329 tests (unit + project/auth/settings/cache + agent run history/watch bus + copilot memory + runtime/repair/retrieval/dep-cache/fix-memory/HMR-routing + P6–P9: shareTunnel/backgroundRuns/p9Tools/collabDoc)
+npm run test:integration    # 73 pass + 1 pre-existing fail (memory DELETE baseline; real Express app on port 0)
 npm run test:all            # everything: unit(104) + integration(53) + security(14) + mcp(5) + api(12) + chat(13)
 node --test tests/unit.test.js tests/integration.test.js
 
@@ -525,7 +579,7 @@ npm run lint
 - `backend/tests/unit.test.js` — agent `parseLLMAction`, RAG search, CircuitBreaker/RateLimiter/RobustApiClient, `utils/errors`, sandbox path-traversal guard. Zero network.
 - `backend/tests/integration.test.js` — boots real Express app on port 0 (no listener, no Telegram): health, error envelopes (BAD_JSON/404), chat validation, chat history save/load round-trip, agent plan/tasks, eval status + bad ID, document validation, figma 503, deploy targets, sandbox 404s, root redirect. Zero LLM.
 - `backend/tests/e2e/smoke.spec.js` + `backend/playwright.config.js` — UI-deterministic; LLM replies asserted softly so free-tier rate limits don't flake CI.
-- `frontend/tests/` — 54 suites / 425 tests total: KanbanBoard (add-task + TDZ crash regression), ProjectsView (api mocked via jest.mock), AICompanion, chatContent (internal-tag + image-command stripping), copilotIde, copilotSessionUi (23 tests: Devin-style plan card / status strip / checklist rows / IdeFooter run meter / PreviewPane QA badge + console drawer / CopilotMarkdown code-copy + wrapCodeBlocks), appIcon (6 tests: FA svg render / size passthrough / unknown-name fallback / map validity / loader spin / brand prefix), appIconSourceAudit (4 tests: static source scan — mangled `<AppIcon>` tags + literal `name=` vs `APP_ICONS` + map validity), previewEngine (11 tests: `resolveRootAlias` + `generateLiveAppHtml` mount guard), chatSessions (5 tests: `useChatHistory` exposes `setSessionId`/`setBackendHistory`, createSession/switchSession/deleteSession crash-free), SmartChatHeader bridge, agent/task timeline+planner+runtime, taskRuntime/taskActivityOverlay (chat approval gate + completion summary + per-file diff view), chatAgentFallback (agent marker vs REST cascade + live plan attach), lineDiff (unified LCS diff), universal intent, accessibility audit, public website smoke, design system (live primitives), chatStreamStop (SSE stream abort/meta regression), copilotStop/copilotSseEvents/copilotCheckpoint/copilotAgentModes/copilotPermissions/copilotMentions/copilotSideChat/copilotRetry/copilotWatch (Devin upgrade Phase 1a–3b: stop-cancel, SSE events, checkpoint-rollback, ask-plan-code modes, permission levels + approval resume, @file mentions, /btw side chat, message retry, watch mode), copilotMemory (self-learning memory panel + backend contract cross-check), etc.
+- `frontend/tests/` — 58 suites / 472 tests total: KanbanBoard (add-task + TDZ crash regression), ProjectsView (api mocked via jest.mock), AICompanion, chatContent (internal-tag + image-command stripping), copilotIde, copilotSessionUi (23 tests: Devin-style plan card / status strip / checklist rows / IdeFooter run meter / PreviewPane QA badge + console drawer / CopilotMarkdown code-copy + wrapCodeBlocks), appIcon (6 tests: FA svg render / size passthrough / unknown-name fallback / map validity / loader spin / brand prefix), appIconSourceAudit (4 tests: static source scan — mangled `<AppIcon>` tags + literal `name=` vs `APP_ICONS` + map validity), previewEngine (11 tests: `resolveRootAlias` + `generateLiveAppHtml` mount guard), chatSessions (5 tests: `useChatHistory` exposes `setSessionId`/`setBackendHistory`, createSession/switchSession/deleteSession crash-free), SmartChatHeader bridge, agent/task timeline+planner+runtime, taskRuntime/taskActivityOverlay (chat approval gate + completion summary + per-file diff view), chatAgentFallback (agent marker vs REST cascade + live plan attach), lineDiff (unified LCS diff), universal intent, accessibility audit, public website smoke, design system (live primitives), chatStreamStop (SSE stream abort/meta regression), copilotStop/copilotSseEvents/copilotCheckpoint/copilotAgentModes/copilotPermissions/copilotMentions/copilotSideChat/copilotRetry/copilotWatch (Devin upgrade Phase 1a–3b: stop-cancel, SSE events, checkpoint-rollback, ask-plan-code modes, permission levels + approval resume, @file mentions, /btw side chat, message retry, watch mode), copilotMemory (self-learning memory panel + backend contract cross-check), previewInstant (6 — P6 instant-mode phases/chip/engine-error), shareButton (6 — P7 share UI states), backgroundRun (17 — P9 storage/reattach/eventToActions), collabClient (18 — P8 ws-url/first-touch/bind wiring/backend contract, yjs mocked), etc.
 - `jest.setup.js` polyfills TextEncoder/TextDecoder/Streams (jsdom lacks them).
 - **`frontend/jest.config.js` async wrapper**: next/jest apne factory se `transformIgnorePatterns` OVERWRITE karta tha (marked@18 ESM-only → `Unexpected token 'export'`); config ab `module.exports = async () => { … }` me `createJestConfig` await karke patterns ko map karta hai — `(?!(geist|` wale pattern me `marked|` inject. jsdom me `innerText` undefined hai → clipboard/copy asserts `textContent` use karein.
 - **Dead-code purge (2026-09-30)**: 41 unreferenced frontend modules + their 10 orphaned test suites were deleted (BFS import-graph verified from `pages/` entry points; live shell = `layout/AppShell` + `layout/CommandRail`, live chat = `views/ChatView`). Removed: legacy `Sidebar`/`TopBar`, old chat stack (`ActionSpine|ActionTimeline|ChatComposer|ChatExperienceLayerV4|ChatProcessingState|ComposerDock|MessageStream|QuickActionGrid|SessionInspector|SmartChatMessage|SmartComposer|TaskServerCancelBridge|ThinkingRail`), `HistoryModal|ProjectCard|ResumeBuilder|SettingsModal|TerminalModal`, `ui/{BrandLogo,ConfirmDialog,Input,Panel,ProjectSwitcher}`, `layout/{ContextInspector,SplitPane}`, `views/{AutonomousCopilotDirector,AutonomousCopilotWorkspace,ChatPromptBox,Header,TemplateHubModal}`, `sandbox/*`, `editor/*`, `CopilotWorkspace`, `agent/AgentDashboard`, `ide/CursorComposerHud`, `hooks/useWebContainer`, `lib/clientVisualHeuristics`, `services/FigmaMCPClient`, `public/audio-processor`. Also purged one-off scripts: frontend root `extract_*|refactor_*|test_overlay*`, `scripts/{e2e_full_project_test,run_1st_2nd_3rd_test,run_ui_test,verify_ui_live,visual_healer_test}`, `pages/dashboard.jsx.bak`, lighthouse report JSONs, backend root `copilottest*|debug_p1*|fix_*|patch*|test_*|verify_*|cascade_check|rag_run_check|aiServices|refactor*|chaos_*|inject_rules|extractChatLogic|broken_script|scratch_eval|news.txt`, `backend/sandbox_test_app/`, `backend/services/{refactorIntents,transformIntents}`, root `apply_patch|audit_codebase|fix_ollama*|fix_*|patch_*|test_*|notes.md|vs_BuildTools.exe`, ai-engine `{clean_main,fix,inspect_chroma,dummy_mcp_server}.py`. Kept (live): `scripts/apply-next-xff-patch.js` (postinstall), `public/sw.js` (registered in `_app.js`), `ecosystem.config.js`, `logger.js`, `projectStore.js`, `temp_test_workspace` (test fixture), `calculator_live_preview.html` (preview-server fixture).

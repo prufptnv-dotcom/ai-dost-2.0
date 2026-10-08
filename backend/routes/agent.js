@@ -53,6 +53,8 @@ const deterministicCodeGuard = require('../services/DeterministicCodeGuard');
 const { detectCategory, buildFullstackSystemPrompt, generateGoldenScaffold } = require('../agent/fullstackTrainer');
 const { saveProjectFile, deleteProjectFile, getProjectFiles, onWorkspaceChange } = require('../projectStore');
 const { learnNotes, retrieveNotes, formatNotes, extractRunNotes } = require('../services/copilotMemory');
+const backgroundRuns = require('../services/backgroundRuns'); // P9 background runs
+const collabDoc = require('../services/collabDoc'); // P8 agent-as-participant
 const DiffEngine = require('../agent/diffEngine');
 const { capabilityDiscovery } = require('../agent/registry/CapabilityDiscovery');
 const { capabilityGatekeeper } = require('../agent/policy/CapabilityGatekeeper');
@@ -121,6 +123,19 @@ TOOLS AVAILABLE:
 10. resume_from_chat(prompt) — Generate a structured resume from a user prompt
 11. web_search(query, maxResults) — Search the live web for real-time information, news, weather, stock prices, or documentation
 12. fetch_webpage(url, maxLength) — Safely open and read public webpage contents with SSRF protection
+
+BROWSER TOOLS (persistent headless Chromium — LOOK at the app you are building):
+21. browser_navigate(url) — Open a URL (your localhost preview or a public page) in the shared browser session
+22. browser_snapshot() — Read the loaded page: URL, title, visible text, interactive elements (use after navigate/click)
+23. browser_click(selector) — Click an element by CSS selector, falling back to visible text
+24. browser_type(selector, value) — Type/fill into an input, textarea or [placeholder=...]
+25. browser_screenshot() — Full-page PNG of the current page (goes to the UI, not your context)
+26. browser_close() — Close the browser session when done with visual checks
+
+GIT TOOLS (local repo first — a remote is optional and never faked):
+27. git_commit(message) — Stage all changes and create a LOCAL commit (reports sha or "nothing to commit")
+28. git_push(message, branch) — Commit + push to origin; with no remote/auth it reports pushed:false with the exact next step
+29. create_pr(title, body, base) — Push the branch and open a GitHub PR via the gh CLI; without gh it returns a ready-made compare link
 
 SANDBOX TOOLS (isolated Docker containers for safe code execution):
 11. sandbox_create(projectId, options) — Create a new isolated sandbox container
@@ -1300,6 +1315,25 @@ ${verification?.ok
       }
     }
 
+    // ── P9: headless browser session (visual checks on the live app) ─────────
+    case 'browser_navigate':
+    case 'browser_snapshot':
+    case 'browser_click':
+    case 'browser_type':
+    case 'browser_screenshot':
+    case 'browser_close': {
+      const browserTool = require('../services/browserTool');
+      return browserTool.execute(action, parameters);
+    }
+
+    // ── P9: git commit / push / PR (honest tiers, no faked remotes) ──────────
+    case 'git_commit':
+    case 'git_push':
+    case 'create_pr': {
+      const repoTools = require('../services/repoTools');
+      return repoTools.execute(action, parameters, projectPath);
+    }
+
     default: {
       // Dynamic routing for MCP, Skills, and other registered capabilities
       const dynamicTool = ToolRegistry.get(action);
@@ -1312,7 +1346,7 @@ ${verification?.ok
           return { success: false, error: err.message || err };
         }
       }
-      return { success: false, error: `Unknown tool: ${action}. Available: read_file, write_file, apply_diff, run_terminal, list_directory, search_codebase, run_tests, take_screenshot, generate_project_from_prompt, resume_from_chat, web_search, fetch_webpage, sandbox_create, sandbox_exec, sandbox_write, sandbox_read, sandbox_list, sandbox_dev_start, sandbox_dev_stop, sandbox_dev_build, sandbox_expose, sandbox_destroy, plan_project, execute_plan, list_templates, + ${ToolRegistry.list().map(t => t.name).join(', ')}` };
+      return { success: false, error: `Unknown tool: ${action}. Available: read_file, write_file, apply_diff, run_terminal, list_directory, search_codebase, run_tests, take_screenshot, generate_project_from_prompt, resume_from_chat, web_search, fetch_webpage, browser_navigate, browser_snapshot, browser_click, browser_type, browser_screenshot, browser_close, git_commit, git_push, create_pr, sandbox_create, sandbox_exec, sandbox_write, sandbox_read, sandbox_list, sandbox_dev_start, sandbox_dev_stop, sandbox_dev_build, sandbox_expose, sandbox_destroy, plan_project, execute_plan, list_templates, + ${ToolRegistry.list().map(t => t.name).join(', ')}` };
     }
   }
 }
@@ -2215,6 +2249,14 @@ function parseLLMAction(raw) {
       url:        params.url || params.link || params.uri || params.target_url,
       maxResults: params.maxResults || params.max_results || params.limit,
       maxLength:  params.maxLength || params.max_length || params.max_chars,
+      // P9 tools: browser session (navigate/click/type) + git commit/push/PR.
+      selector:   params.selector || params.element || params.css_selector || params.target_selector,
+      value:      params.value !== undefined ? params.value : params.input_value,
+      message:    params.message || params.commit_message || params.msg,
+      title:      params.title || params.pr_title,
+      body:       params.body !== undefined ? params.body : params.pr_body,
+      branch:     params.branch || params.branch_name,
+      base:       params.base || params.base_branch || params.target_branch,
     };
 
     // If textual SEARCH/REPLACE block was placed inside patch or content parameter
@@ -3115,6 +3157,16 @@ router.post('/run', async (req, res) => {
     return res.status(400).json({ error: 'userPrompt is required and must be a non-empty string' });
   }
 
+  // P9: mint run identity BEFORE anything can await — the send() closure and
+  // the disconnect handler both reference it, and awaits (RAG fetch,
+  // forceLocal tool calls) sit between here and where this used to be
+  // generated (TDZ crash if a client vanished mid-await). `background` runs
+  // survive the client: the loop is never told to abort, every event is
+  // persisted, and a replay endpoint can rebuild the whole stream later.
+  const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const background = req.body.background === true;
+  backgroundRuns.begin({ runId, projectId: projectId || null, prompt: userPrompt, background });
+
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
@@ -3151,7 +3203,16 @@ router.post('/run', async (req, res) => {
   if (!Array.isArray(projectFiles)) projectFiles = [];
 
   let isAborted = false;
+  let detached = false;
   const abortHandler = () => {
+    if (background) {
+      // P9: a background run does NOT die with its socket — the loop keeps
+      // stepping, events keep persisting, and completion notifies Telegram.
+      detached = true;
+      clearInterval(keepAliveTimer);
+      logger.info(`[Agent] Client disconnected — run ${runId} continues in BACKGROUND.`);
+      return;
+    }
     isAborted = true;
     clearInterval(keepAliveTimer);
     logger.info('[Agent] Client disconnected. Cancelling ReAct loop.');
@@ -3192,6 +3253,32 @@ router.post('/run', async (req, res) => {
   };
 
   const send = (data) => {
+    // P9: persist + fan out BEFORE the abort check — a detached background run
+    // (or a refresh during any run) replays these from SQLite later. Both
+    // helpers are no-throw, and publish() reaches reattach SSE listeners even
+    // when this response object is already gone.
+    if (data && typeof data.type === 'string') {
+      backgroundRuns.record(runId, data);
+      backgroundRuns.publish(runId, { event: data });
+      // P8: every agent write also lands in the shared Yjs doc, so connected
+      // human editors see the change live (no reload) and the agent shows up
+      // as a named participant in the presence strip. Events carry content.
+      if (data.type === 'file_written' || data.type === 'file_changed') {
+        const agentContent = typeof data.content === 'string' ? data.content : null;
+        const agentPath = data.path || data.file;
+        if (agentContent !== null && agentPath) {
+          collabDoc.applyFile(projectId || 'default', agentPath, agentContent);
+        }
+      }
+      if (data.type === 'done') {
+        const status = data.completed === false ? 'failed' : 'done';
+        const firstFinish = backgroundRuns.finish(runId, status, data.message || '');
+        if (firstFinish && background && detached) {
+          backgroundRuns.notifyTelegram({ runId, status, message: data.message || '' })
+            .catch((e) => logger.info(`[Agent] background notify skipped: ${e.message}`));
+        }
+      }
+    }
     if (isAborted) return;
     if (data && data.type === 'self_heal') {
       runHeals.push({ error: data.errorHint || data.message || '' });
@@ -3315,7 +3402,7 @@ router.post('/run', async (req, res) => {
     ).join('\n\n');
   }
 
-  const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // runId minted at request entry (P9) — snapshot binds the same identity.
   initRunSnapshot(runId, projectId, workspacePath, projectFiles);
   // P3: every code file this run touches, so the evidence gate knows whether
   // there is anything worth building.
@@ -3958,11 +4045,29 @@ REQUEST: "${String(userPrompt).slice(0, 1500)}"`
         selfHealState = null;
       }
 
-      // Normal observation
+      // P9: browser/screenshot tools return megabytes of base64 — send the
+      // image to the UI as its own event, and NEVER feed it into the model's
+      // observation (one 500KB PNG would blow the whole context window).
+      if (toolResult && typeof toolResult.screenshot === 'string' && toolResult.screenshot.length > 2000) {
+        send({
+          type: 'screenshot',
+          data: toolResult.screenshot,
+          screenshot: toolResult.screenshot,
+          mimeType: toolResult.mimeType || 'image/png',
+          url: toolResult.url || '',
+          message: toolResult.message || '📸 Browser screenshot captured.'
+        });
+      }
+
+      // Normal observation (screenshot payload stripped — see above)
+      const observation = { ...toolResult };
+      if (typeof observation.screenshot === 'string' && observation.screenshot.length > 2000) {
+        observation.screenshot = `[image ${Math.round(observation.screenshot.length / 1024)}KB sent to UI — not included here]`;
+      }
       messages.push({ role: 'assistant', content: JSON.stringify({ thought: parsed.thought, action: parsed.action, parameters: parsed.parameters }) });
       messages.push({
         role: 'user',
-        content: `OBSERVATION from ${parsed.action}:\n${JSON.stringify(toolResult)}\n\n${
+        content: `OBSERVATION from ${parsed.action}:\n${JSON.stringify(observation)}\n\n${
           toolResult.success
             ? 'Continue with the next step, or output FINAL_ANSWER if the task is complete.'
             : 'The tool call failed. Analyze the error and decide how to fix it.'
@@ -4053,6 +4158,105 @@ REQUEST: "${String(userPrompt).slice(0, 1500)}"`
     });
   }
   try { res.end(); } catch (_) { /* client already disconnected */ }
+});
+
+// ── P9: run status + event replay (reattach after refresh / background) ──────
+router.get('/runs/:runId', (req, res) => {
+  const run = backgroundRuns.get(req.params.runId);
+  if (!run) return res.status(404).json({ error: 'unknown run' });
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    runId: run.run_id,
+    projectId: run.project_id,
+    status: run.status,
+    background: Boolean(run.background),
+    seq: run.seq,
+    startedAt: run.started_at,
+    finishedAt: run.finished_at,
+    finalMessage: run.final_message,
+    running: run.status === 'running',
+    live: backgroundRuns.isLive(run.run_id),
+  });
+});
+
+/**
+ * SSE replay + live tail.
+ *   GET /runs/:runId/events?after=N
+ * Replays every persisted event with seq > N (seq is 1-based and dense, so a
+ * client can use "events seen so far" as its cursor), then — while the run is
+ * still going — tails the live bus until finish. Replay + subscribe happen in
+ * one synchronous block, so no event can slip into the gap between them.
+ * Run already terminal → history, then clean end (no infinite stream).
+ */
+router.get('/runs/:runId/events', (req, res) => {
+  const runId = req.params.runId;
+  const run = backgroundRuns.get(runId);
+  if (!run) return res.status(404).json({ error: 'unknown run' });
+
+  let after = Math.max(0, parseInt(req.query.after, 10) || 0);
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+  let closed = false;
+  let unsubscribe = () => {};
+  let keepAlive = null;
+  let maxTimer = null;
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    if (keepAlive) clearInterval(keepAlive);
+    if (maxTimer) clearTimeout(maxTimer);
+    try { unsubscribe(); } catch (_) {}
+    try { res.end(); } catch (_) { /* already gone */ }
+  };
+
+  const writeEvent = (payload) => {
+    if (closed) return;
+    try {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      if (typeof res.flush === 'function') res.flush();
+    } catch (_) {
+      cleanup();
+    }
+  };
+
+  // 1) persisted history (synchronous — see docblock)
+  const history = backgroundRuns.replay(runId, after, 5000);
+  for (const h of history) writeEvent(h.event);
+  if (history.length) after = history[history.length - 1].seq;
+
+  // 2) live tail while the run is running
+  const current = backgroundRuns.get(runId);
+  if (current && current.status === 'running') {
+    unsubscribe = backgroundRuns.onEvent(runId, (entry) => {
+      if (entry && entry.type === '__finished__') {
+        cleanup();
+        return;
+      }
+      const ev = entry && entry.event;
+      if (!ev) return; // shape surprise — never kill the stream on junk
+      after += 1;
+      writeEvent(ev);
+    });
+  } else {
+    // finished (or interrupted) — replay complete, close honestly
+    cleanup();
+    return;
+  }
+
+  keepAlive = setInterval(() => {
+    if (closed) return;
+    try { res.write(': keepalive\n\n'); } catch (_) { cleanup(); }
+  }, 4000);
+  // Safety valve: a reattach session never holds a socket forever; the client
+  // can reconnect with ?after=<count> and pick up exactly where it left off.
+  maxTimer = setTimeout(cleanup, 60 * 60 * 1000);
+  if (typeof maxTimer.unref === 'function') maxTimer.unref();
+  res.on('close', cleanup);
 });
 
 // ── Codebase Search Endpoint (can be called separately from UI) ───────────────

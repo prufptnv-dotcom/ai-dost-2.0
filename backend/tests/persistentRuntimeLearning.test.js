@@ -367,7 +367,13 @@ describe('P5 — HMR WebSocket upgrade routing (token → project)', () => {
     const upgradeBlock = serverSrc.slice(upgradeIdx, upgradeIdx + 4000);
     assert.match(upgradeBlock, /getProjectByHmrToken\(decodeURIComponent\(tok\)\)/,
       'upgrade handler must resolve the project from ?token=');
-    assert.ok(upgradeBlock.indexOf('getProjectByHmrToken') < upgradeBlock.indexOf('__upgradeHandled'),
+    // Scope to the preview/HMR section: P8's /yws/ claim sits ABOVE it on
+    // purpose (a collab socket must never fall into preview referer-guessing),
+    // so measure the claim that guards THIS path, not the first one overall.
+    const previewStart = upgradeBlock.indexOf('const previewMatch =');
+    assert.ok(previewStart > 0, 'preview matching must follow the yws claim');
+    const previewBlock = upgradeBlock.slice(previewStart);
+    assert.ok(previewBlock.indexOf('getProjectByHmrToken') < previewBlock.indexOf('__upgradeHandled'),
       'token lookup must happen BEFORE the socket is claimed');
   });
 });

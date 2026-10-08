@@ -542,6 +542,8 @@ const gitRoutes     = require('./routes/git');
 const agentRoutes   = require('./routes/agent');
 const figmaRoutes   = require('./routes/figma');
 const previewRoutes = require('./routes/preview');
+const shareRoutes = require('./routes/share');
+const instantRoutes = require('./routes/instant');
 const terminalRoutes = require('./routes/terminal');
 const sandboxRoutes = require('./sandbox/routes');
 const deployRoutes  = require('./routes/deploy');
@@ -594,6 +596,10 @@ app.use('/api/git',      gitRoutes);
 app.use('/api/agent',    agentRoutes);
 app.use('/api/figma',    figmaRoutes);
 app.use('/api/preview',  previewRoutes);
+app.use('/api/share',    shareRoutes);
+// P6 instant: router carries its own absolute paths (/instant/:id page with
+// COOP/COEP, /api/instant/:id/files, /wc/* vendored runtime) — mounted at root
+app.use(instantRoutes);
 app.use('/api/terminal', terminalRoutes);
 app.use('/api/sandbox',  sandboxRoutes);
 app.use('/api/deploy',   deployRoutes);
@@ -1698,6 +1704,7 @@ setupTerminalWsServer(server);
 
 // ── Dev Server HMR & WebSocket Reverse Proxy ────────────────────────
 const devServerManager = require('./sandbox/devServerManager');
+const collabDoc = require('./services/collabDoc');
 const net = require('net');
 
 server.on('upgrade', (request, socket, head) => {
@@ -1705,6 +1712,20 @@ server.on('upgrade', (request, socket, head) => {
   const pathname = url.split('?')[0];
   // engine.io registered its own upgrade listener first — never touch its path
   if (pathname.startsWith('/socket.io')) return;
+
+  // P8: Yjs collaboration sync (/yws/:projectId) — claim BEFORE any
+  // preview/HMR guessing so a collab socket is never proxied or destroyed.
+  const ywsMatch = pathname.match(/^\/yws\/([^\/]+)$/);
+  if (ywsMatch) {
+    socket.__upgradeHandled = true;
+    try {
+      collabDoc.handleUpgrade(request, socket, head, decodeURIComponent(ywsMatch[1]));
+    } catch (e) {
+      logger.warn('[Collab] upgrade failed:', e.message);
+      socket.destroy();
+    }
+    return;
+  }
 
   let projectId = null;
   const previewMatch = pathname.match(/^\/api\/preview\/([^\/]+)/);
@@ -1785,6 +1806,21 @@ if (require.main === module) {
     startTelegramBot();
   } catch (e) {
     logger.warn('⚠️ Telegram bot start fail:', e.message);
+  }
+
+  // ── P7 always-on: bring back dev servers that were live before restart ──────
+  // Fire-and-forget (each start can take seconds); NEVER on the test path —
+  // integration tests require() this module, so require.main guards them.
+  try {
+    const dm = require('./sandbox/devServerManager');
+    dm.restoreLiveServers()
+      .then((r) => {
+        if (r.restored.length) logger.info(`♻️ Restored ${r.restored.length} live dev server(s): ${r.restored.join(', ')}`);
+        if (r.failed.length) logger.warn(`⚠️ Live-server restore failed: ${r.failed.join(', ')}`);
+      })
+      .catch((e) => logger.warn('⚠️ Live-server restore error:', e.message));
+  } catch (e) {
+    logger.warn('⚠️ Live-server restore skipped:', e.message);
   }
 }
 
