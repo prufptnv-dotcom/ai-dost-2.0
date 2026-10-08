@@ -437,6 +437,25 @@ Two humans + the agent in the same editor, live.
 - **Observation hygiene**: base64 screenshots go to the UI as a `screenshot` event and are REPLACED in the model observation with `[image NKB sent to UI]` — one 500KB PNG would blow the context window (this also fixed `take_screenshot`'s pre-existing flood).
 - Tests: `backgroundRuns.test.js` 5 + `p9Tools.test.js` 11 (SSRF matrix, real git tiers in a temp repo, compareUrl) + integration (status/replay/cursor); frontend `backgroundRun.test.js` 17 (+ stale `copilotRetry` reattach count 4→5).
 
+## 29. P10.1 — OpenCode free gateway + restored MoE failover (2026-10-08)
+
+**Goal**: model-quality layer — "sabhi model se banaega" bina kisi API key ke.
+
+- **New service** `backend/services/opencodeService.js` — backend LLM calls ko locally installed OpenCode ke headless server se route karta hai → **OpenCode platform gateway (9 free models, cost 0, no key)**. Verified live: cold 30.2s (spawn+uncached), **warm 4.5s**.
+- **API contract (V1, empirically cracked)**: `GET /session` = health probe · `POST /session {directory}` (top-level `location.directory` IGNORED hota hai) → `POST /session/:id/message {parts:[{type:'text',text}], model:{providerID,modelID}, agent:'build', mode:'primary'}` → 200 `{info, parts[]}` — reply = `parts.filter(type==='text').map(text).join('')`. Basic auth `opencode:<password>`. Failures: model missing → `ProviderNoProvidersError: No providers are available` (500); parts missing → `Missing key ["parts"]` (400).
+- **Rejected path**: CLI `opencode run` — cold 23–35s (title auto-gen + boot) aur `--attach` streams `step_start` ke baad marte hain (V1 CLI bug: only `step_start`, no text, client exits). `--format json` CLI ka full form bhi yahi.
+- **Server lifecycle**: state file `%TEMP%/aidost-opencode-state.json` `{baseUrl,password,pid}` → backend restarts ke baad bhi SAME warm server reuse (orphan pid + `unref`). Random password per boot, `127.0.0.1` only, cwd = **scratch `%TEMP%\aidost-opencode-gen`** (sessions also run there — build agent external-directory permission `ask` → non-interactive DENIED → AI-Dost repo ko kabhi edit nahi kar sakta). Health-poll fail → fresh spawn; spawn crash → `serverPromise` reset → next call retry (self-heal). Best-effort `DELETE /session/:id` (TUI list saaf).
+- **Wiring (4 cascade points)**:
+  1. `routes/agent.js` `callLLM` providers[] **position 3** (groq → gemini → **opencode** → nvidia…) — keyless/rate-limited install pe strong model jaldi; `preferredModel:'opencode'` generic rotate se front aata hai.
+  2. `routes/agent.js` `callScaffoldLLM` **last-resort** (filter ke baad push — `hasKey` skip na kare) + **per-provider `timeoutMs`** (opencode 50s/45s; fast providers ka 12s slot untouched) — loop ab `provider.timeoutMs || 12000`.
+  3. `services/llmCascade.js` cascade tail (collaboration/MoE/self-heal helper).
+  4. `services/llmCascadeService.js` **forced tier** `model==='opencode'` → sync reply ek chunk me (auto mode me OFF — auto pe sync-fallback chain se aata hai).
+- **BUG FIXED — MoE failover was dead**: `moeRouterService` hamesha `require('./llmCascade').executeCascadingFailover` use karta tha jo **export hi nahi tha** → har `auto-cascade` route + har expert-failure fallback me `TypeError: executeCascadingFailover is not a function` (general chat ka failover silently mara hua tha). Restored: string-returning sequential cascade (MoE contract = string, `.match()` call karta hai; chat.js ka local `{response,winner}` variant alag hai, untouched) — **keyless providers skip BEFORE network** (`hasKey` env/custom pre-skip) → keyless install seedha **OpenCode → Ollama → honest "providers unavailable"** message.
+- **Pickers**: CopilotIDE (`ai_dost_copilot_model`), ChatView, useChatView, SettingsView me "OpenCode (free gateway)" option.
+- **Env** (`.env.example`): `OPENCODE_ENABLED` (false = off) · `OPENCODE_BIN` (PATH override; P0 rule — real `.exe` directly, `.cmd` → cmd.exe + literal-args guard) · `OPENCODE_PORT=4789` · `OPENCODE_MODEL=opencode/mimo-v2.6-flash-free` · `OPENCODE_TIMEOUT_MS=60000`.
+- Tests: `backend/tests/opencodeCascade.test.js` → **14** (parseModel/formatHistory/assertSafeArgs/enable-flag · chat() full contract vs **mock HTTP server** — state-file reuse se binary/spawn ZERO dependency, session dir = scratch assert · HTTP-500 + empty-reply + timeout · executeCascadingFailover export + STRING contract + OpenCode-wins keyless + honest degradation · agent.js static audits: position-3 + scaffold timeout + single require) → backend unit **343/343 (74 suites)**; integration 73/1 (same pre-existing memory-route failure); frontend 58 suites / 472 tests; eslint 0/0.
+- Gotchas: `test:unit` = **explicit file list** (naya test file wahan add karo warna gate chalta hi nahi) · `where opencode` → `opencode.cmd` (spawn EINVAL trap — APPDATA `.exe` candidate pehle) · `routes/agent.js` edit ke baad backend **restart** zaroori.
+
 ## ⌃ Keyboard Shortcuts
 
 | Shortcut | Action |
@@ -559,7 +578,7 @@ npx playwright test         # 13 tests — real geometry, computed styles, Mutat
 
 # Backend: unit + integration (node:test, 0 LLM calls, ephemeral port)
 cd "C:\Users\vikash kumar\Pictures\ai dost 3.0\backend"
-npm run test:unit           # 329 tests (unit + project/auth/settings/cache + agent run history/watch bus + copilot memory + runtime/repair/retrieval/dep-cache/fix-memory/HMR-routing + P6–P9: shareTunnel/backgroundRuns/p9Tools/collabDoc)
+npm run test:unit           # 343 tests (unit + project/auth/settings/cache + agent run history/watch bus + copilot memory + runtime/repair/retrieval/dep-cache/fix-memory/HMR-routing + P6–P9: shareTunnel/backgroundRuns/p9Tools/collabDoc + P10.1: opencodeCascade)
 npm run test:integration    # 73 pass + 1 pre-existing fail (memory DELETE baseline; real Express app on port 0)
 npm run test:all            # everything: unit(104) + integration(53) + security(14) + mcp(5) + api(12) + chat(13)
 node --test tests/unit.test.js tests/integration.test.js

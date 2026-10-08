@@ -59,6 +59,7 @@ const MODEL_OPTIONS = [
   { v: 'auto', l: 'Auto (cascade)' },
   { v: 'gemini', l: 'Gemini first' },
   { v: 'groq', l: 'Groq first' },
+  { v: 'opencode', l: 'OpenCode (free gateway)' },
   { v: 'openrouter', l: 'OpenRouter first' },
   { v: 'openrouter:nemotron_3_super', l: 'Nemotron 3 Super' },
   { v: 'openrouter:north_mini_code', l: 'Cohere North Code' },

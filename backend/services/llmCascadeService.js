@@ -4,6 +4,7 @@ const { DEEP_REASONING_SYSTEM_PROMPT: SHARED_DEEP_REASONING_SYSTEM_PROMPT } = re
 const { isValidResponse } = require('../utils/chatUtils');
 const { generateFuturistic2030Animation } = require('./threeJsSimulator');
 const { ReasoningStreamFilter } = require('../utils/streamUtils');
+const OpenCodeService = require('./opencodeService');
 
 async function runStreamCascade({
     model,
@@ -71,6 +72,23 @@ async function runStreamCascade({
                 }
             } catch (err) {
                 logger.warn('Ollama streaming error:', err.message);
+            }
+        }
+
+        // 1.5 OpenCode free gateway (forced pick) — sync by design: the platform
+        // gateway returns the complete reply, so it lands as ONE chunk. In auto
+        // mode this tier stays off; opencode still answers through the sync
+        // fallback (autoSelectModel → MoE failover → llmCascade.executeCascadingFailover).
+        if (!streamedSuccessfully && model === 'opencode' && OpenCodeService.isAvailable()) {
+            try {
+                const reply = await OpenCodeService.chat(groqMsg, cleanHistory, 'chat', null, { timeoutMs: 45000 });
+                if (reply && isValidResponse(reply)) {
+                    sendEvent({ chunk: reply });
+                    streamedSuccessfully = true;
+                    usedModel = 'opencode (free gateway)';
+                }
+            } catch (err) {
+                logger.warn('OpenCode forced tier failed:', err.message);
             }
         }
 

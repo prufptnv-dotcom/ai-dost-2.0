@@ -14,6 +14,7 @@ const MODEL_OPTIONS = [
   { value: 'auto', label: 'Auto Multi-Model Cascade (Gemini → Groq → OpenRouter)' },
   { value: 'gemini', label: 'Google Gemini 1.5 Flash (Free Tier)' },
   { value: 'groq', label: 'Groq Llama 3.3 70B (Fast Inference)' },
+  { value: 'opencode', label: 'OpenCode Free Gateway (9 free models, no key needed)' },
   { value: 'deepseek', label: 'DeepSeek R1 / V3' },
   { value: 'nvidia', label: 'NVIDIA Nemotron' },
   { value: 'openrouter', label: 'OpenRouter Auto Free (openrouter/free)' },

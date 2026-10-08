@@ -52,6 +52,7 @@ const MODEL_OPTIONS = [
   { id: 'vkp-omni', label: 'VKP-Omni-2B (Custom Trained)' },
   { id: 'groq', label: 'Groq' },
   { id: 'gemini', label: 'Gemini' },
+  { id: 'opencode', label: 'OpenCode (Free Gateway)' },
   { id: 'nvidia', label: 'NVIDIA' },
   { id: 'together', label: 'Together' },
   { id: 'deepseek', label: 'DeepSeek' },

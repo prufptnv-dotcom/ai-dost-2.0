@@ -57,6 +57,7 @@ const MODEL_OPTIONS = [
   { id: 'auto', label: 'Auto' },
   { id: 'groq', label: 'Groq' },
   { id: 'gemini', label: 'Gemini' },
+  { id: 'opencode', label: 'OpenCode (Free Gateway)' },
   { id: 'nvidia', label: 'NVIDIA' },
   { id: 'together', label: 'Together' },
   { id: 'deepseek', label: 'DeepSeek' },

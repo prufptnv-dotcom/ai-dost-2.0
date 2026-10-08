@@ -23,6 +23,7 @@ const GroqService       = require('../services/groqService');
 const OpenRouterService = require('../services/openrouterService');
 const NvidiaService     = require('../services/nvidiaService');
 const GeminiService     = require('../services/geminiService');
+const OpenCodeService   = require('../services/opencodeService');
 const MistralService    = require('../services/mistralService');
 const TogetherService   = require('../services/togetherService');
 const DeepSeekService   = require('../services/deepseekService');
@@ -1494,6 +1495,9 @@ async function callLLM(messages, customKeys = null, onFallbackNotice = null, pre
   const providers = [
     { key: 'groq', name: 'Groq', call: () => GroqService.chat(agentPrompt, [], 'agent', customKeys?.groq) },
     { key: 'gemini', name: 'Gemini', call: () => GeminiService.chat(agentPrompt, [], null, 'agent', customKeys?.gemini) },
+    // P10.1: key-less free gateway (OpenCode platform) — 3rd so a keyless or
+    // rate-limited install still gets a strong model before the long tail.
+    { key: 'opencode', name: 'OpenCode (free gateway)', call: () => OpenCodeService.chat(agentPrompt, [], 'agent') },
     { key: 'nvidia', name: 'NVIDIA', call: () => NvidiaService.chat(agentPrompt, [], customKeys?.nvidia, 'agent') },
     { key: 'together', name: 'Together', call: () => TogetherService.chat(agentPrompt, [], customKeys?.together) },
     { key: 'deepseek', name: 'DeepSeek', call: () => DeepSeekService.chat(agentPrompt, [], customKeys?.deepseek) },
@@ -1652,6 +1656,19 @@ async function callScaffoldLLM(scaffoldPrompt, customKeys = null, reqHeaders = {
 
   const providers = rawProviders.filter(p => hasKey(p.key, p.env));
 
+  // P10.1: OpenCode free gateway needs no API key — appended as the LAST cloud
+  // resort (after OpenRouter, before Ollama) with its own budget, so the fast
+  // 12s slots of keyed providers stay untouched.
+  if (OpenCodeService.isAvailable()) {
+    providers.push({
+      name: 'OpenCode (free gateway)',
+      key: 'opencode',
+      env: 'OPENCODE_MODEL',
+      timeoutMs: 50000,
+      fn: () => OpenCodeService.chat(scaffoldPrompt, [], 'agent', null, { timeoutMs: 45000 }),
+    });
+  }
+
   const withProviderTimeout = (promise, ms = 12000) => {
     let timeoutId;
     const timeoutPromise = new Promise((_, rej) => {
@@ -1665,7 +1682,7 @@ async function callScaffoldLLM(scaffoldPrompt, customKeys = null, reqHeaders = {
   } else {
     for (const provider of providers) {
       try {
-        const resp = await withProviderTimeout(provider.fn(), 12000);
+        const resp = await withProviderTimeout(provider.fn(), provider.timeoutMs || 12000);
         if (isErrorResp(resp)) continue;
         const files = extractFiles(resp);
         if (files && files.length >= 1) {
