@@ -32,6 +32,15 @@ const CopilotIDE = dynamic(() => import('../components/views/CopilotIDE'), {
   loading: () => <ViewSkeletonLoader type="ide" />,
 });
 
+// P11 A1 — "Aurora": from-scratch copilot cockpit (Replit + Devin + Bolt hybrid).
+// Default UI; localStorage `ai_dost_copilot_ui = 'classic'` reverts to CopilotIDE
+// (one click via the rail's Classic UI button). Classic tests mount CopilotIDE
+// directly, so the flag never touches the jest gate.
+const CopilotAurora = dynamic(() => import('../components/aurora/CopilotAurora'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="ide" />,
+});
+
 const ChatView = dynamic(() => import('../components/views/ChatView'), {
   ssr: false,
   loading: () => <ViewSkeletonLoader type="chat" />,
@@ -124,12 +133,23 @@ export default function Dashboard() {
   const [creating, setCreating] = useState(false);
   const [voiceAssistantOpen, setVoiceAssistantOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [copilotUi, setCopilotUi] = useState('aurora');
 
   const paletteRef = useRef(null);
   const paletteInputRef = useRef(null);
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  // P11 A1: read the copilot UI flag post-mount (no hydration mismatch —
+  // server/first paint stays 'aurora'; classic users flip on mount).
+  useEffect(() => {
+    try {
+      setCopilotUi(localStorage.getItem('ai_dost_copilot_ui') || 'aurora');
+    } catch (_) {
+      /* private mode: stay on aurora */
+    }
   }, []);
 
   // Load preferences
@@ -477,12 +497,21 @@ export default function Dashboard() {
           )}
           {view === 'copilot' && (
             <IDEErrorBoundary>
-              <CopilotIDE
-                key={activeSessionId}
-                projectId={activeSessionId}
-                projectName={activeChatTitle}
-                onToast={showToast}
-              />
+              {copilotUi === 'classic' ? (
+                <CopilotIDE
+                  key={activeSessionId}
+                  projectId={activeSessionId}
+                  projectName={activeChatTitle}
+                  onToast={showToast}
+                />
+              ) : (
+                <CopilotAurora
+                  key={activeSessionId}
+                  projectId={activeSessionId}
+                  projectName={activeChatTitle}
+                  onToast={showToast}
+                />
+              )}
             </IDEErrorBoundary>
           )}
           {view === 'analytics' && (
