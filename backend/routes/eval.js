@@ -44,13 +44,25 @@ router.post('/', async (req, res) => {
 });
 
 /**
- * GET /api/agent/eval/status - Check eval system status
+ * GET /api/eval/status - Check eval system status
  */
 router.get('/status', (req, res) => {
+  // P12.2: report the REAL catalog size — this used to hardcode 5 while the
+  // harness already shipped 8 (and now 50) scenarios.
+  const byCategory = {};
+  const byEndpoint = { agent: 0, chat: 0 };
+  for (const sc of EVAL_SCENARIOS) {
+    const cat = sc.category || 'other';
+    byCategory[cat] = (byCategory[cat] || 0) + 1;
+    if (sc.endpoint === 'chat') byEndpoint.chat += 1;
+    else byEndpoint.agent += 1;
+  }
   res.json({
     status: 'ok',
-    scenariosAvailable: 5,
-    description: 'AI-Dost Agent Eval Harness - Tests agent capabilities across project creation, document generation, data export, and self-correction'
+    scenariosAvailable: EVAL_SCENARIOS.length,
+    byCategory,
+    byEndpoint,
+    description: 'AI-Dost Agent Eval Harness - Tests agent capabilities across project creation, document generation, data export, chat intents, reasoning, self-correction, and adversarial probes'
   });
 });
 

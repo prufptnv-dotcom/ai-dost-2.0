@@ -805,6 +805,261 @@ describe('copilotDirectorHandler preset plan forwarding', () => {
   });
 });
 
+// -- P12.1: honest director completion (writes rejected? say so) -----------
+describe('copilotDirectorHandler honest completion (P12.1)', () => {
+  const { handleCopilotDirectorRequest } = require('../agent/runtime/copilotDirectorHandler');
+
+  function makeRes() {
+    return {
+      writableEnded: false,
+      destroyed: false,
+      statusCode: 200,
+      headers: {},
+      setHeader(k, v) { this.headers[k] = v; },
+      flushHeaders() {},
+      writes: [],
+      write(chunk) { this.writes.push(String(chunk)); },
+      end() { this.writableEnded = true; },
+      status(code) { this.statusCode = code; return this; },
+      json(payload) { this.payload = payload; this.writableEnded = true; return this; },
+    };
+  }
+
+  const parseFrames = (res) => res.writes.map((w) => {
+    const line = w.split('\n').find((l) => l.startsWith('data: '));
+    return JSON.parse(line ? line.slice(6) : '{}');
+  });
+
+  // script(onEvent, signal) drives the fake director's event stream.
+  const depsWith = (script) => ({
+    projectAuthorization: {
+      authorize: () => ({ authorized: true, user: { id: 'u1' }, project: { id: 'p1' } }),
+    },
+    runtime: {
+      director: {
+        run: async (args) => script(args.onEvent, args.signal),
+      },
+    },
+  });
+
+  const reqFor = (extra = {}) => ({
+    body: { copilotDirector: true, userPrompt: 'update the timer', ...extra },
+    get: (h) => (h === 'x-ai-dost-task-id' ? 't-honest-1' : undefined),
+  });
+
+  test('all writes rejected -> warning message, 0 files, writeAttempts counted', async () => {
+    const res = makeRes();
+    await handleCopilotDirectorRequest(reqFor(), res, () => { throw new Error('no fallthrough'); }, depsWith((onEvent) => {
+      // Two write steps run; guard refuses both -> no file_written frames.
+      onEvent({ type: 'step', tool: 'write_file', description: 'edit src/App.jsx', status: 'running' });
+      onEvent({ type: 'step', tool: 'write_file', description: 'edit src/App.jsx', status: 'running' });
+      onEvent({ type: 'step', tool: 'read_file', description: 'read', status: 'running' });
+      return { status: 'SUCCEEDED', taskCount: 2 };
+    }));
+    const done = parseFrames(res).find((e) => e.type === 'director_complete');
+    assert.ok(done, 'director_complete emitted');
+    assert.equal(done.filesWritten, 0);
+    assert.equal(done.writeAttempts, 2);
+    assert.match(done.message, /saved NO files/i);
+    assert.match(done.message, /2 write attempt\(s\) were rejected/);
+    assert.match(done.message, /apply_diff/);
+    assert.ok(!done.message.includes('🎉'), 'must not claim celebration with zero files saved');
+  });
+
+  test('writes landed -> message lists changed paths + structured fields', async () => {
+    const res = makeRes();
+    await handleCopilotDirectorRequest(reqFor(), res, () => {}, depsWith((onEvent) => {
+      onEvent({ type: 'step', tool: 'apply_diff', description: 'patch', status: 'running' });
+      onEvent({ type: 'file_written', path: 'src/App.jsx' });
+      onEvent({ type: 'step', tool: 'write_file', description: 'new file', status: 'running' });
+      onEvent({ type: 'file_written', path: 'src/hooks/useTimer.js' });
+      return { status: 'SUCCEEDED', taskCount: 2 };
+    }));
+    const done = parseFrames(res).find((e) => e.type === 'director_complete');
+    assert.equal(done.filesWritten, 2);
+    assert.equal(done.writeAttempts, 2);
+    assert.deepEqual(done.changedPaths, ['src/App.jsx', 'src/hooks/useTimer.js']);
+    assert.match(done.message, /2 file\(s\) changed/);
+    assert.match(done.message, /src\/App\.jsx/);
+    assert.ok(done.message.startsWith('🎉'));
+  });
+
+  test('analysis-only plan -> explicit no-change message (no false warning)', async () => {
+    const res = makeRes();
+    await handleCopilotDirectorRequest(reqFor(), res, () => {}, depsWith(() => ({ status: 'SUCCEEDED', taskCount: 3 })));
+    const done = parseFrames(res).find((e) => e.type === 'director_complete');
+    assert.equal(done.filesWritten, 0);
+    assert.equal(done.writeAttempts, 0);
+    assert.match(done.message, /analysis only/);
+    assert.match(done.message, /no file changes/i);
+  });
+
+  test('canceled run -> cancellation message (never "completed with verification")', async () => {
+    const res = makeRes();
+    await handleCopilotDirectorRequest(reqFor(), res, () => {}, depsWith((onEvent) => {
+      onEvent({ type: 'step', tool: 'write_file', description: 'edit', status: 'running' });
+      onEvent({ type: 'file_written', path: 'src/App.jsx' });
+      return { status: 'CANCELLED', taskCount: 4 };
+    }));
+    const frames = parseFrames(res);
+    const done = frames.find((e) => e.type === 'director_canceled');
+    assert.ok(done, 'director_canceled emitted');
+    assert.match(done.message, /canceled/i);
+    assert.ok(!done.message.includes('🎉'), 'canceled run must not celebrate completion');
+    assert.equal(done.filesWritten, 1);
+    assert.equal(frames.filter((e) => e.type === 'director_complete').length, 0);
+  });
+
+  test('file events are forwarded to the client with taskId intact', async () => {
+    const res = makeRes();
+    await handleCopilotDirectorRequest(reqFor(), res, () => {}, depsWith((onEvent) => {
+      onEvent({ type: 'file_written', path: 'src/x.js', content: 'const x=1' });
+      return { status: 'SUCCEEDED', taskCount: 1 };
+    }));
+    const fileFrame = parseFrames(res).find((e) => e.type === 'file_written');
+    assert.equal(fileFrame.path, 'src/x.js');
+    assert.equal(fileFrame.content, 'const x=1');
+    assert.equal(fileFrame.taskId, 't-honest-1');
+  });
+
+  test('writeSse is hardened against destroyed/ended streams (no throw, no write)', async () => {
+    const res = makeRes();
+    res.destroyed = true; // client aborted — writableEnded stays false
+    await handleCopilotDirectorRequest(reqFor(), res, () => {}, depsWith((onEvent) => {
+      onEvent({ type: 'step', tool: 'write_file', description: 'x', status: 'running' });
+      return { status: 'SUCCEEDED', taskCount: 1 };
+    }));
+    assert.equal(res.writes.length, 0, 'nothing written to a destroyed stream');
+    assert.equal(res.writableEnded, true, 'handler still terminates');
+  });
+});
+
+// -- P12.2: eval harness catalog + scoring + endpoint dispatch -------------
+describe('eval harness (P12.2)', () => {
+  const harness = require('../tests/eval_harness');
+  const { EVAL_SCENARIOS } = require('../tests/eval_scenarios');
+
+  test('catalog has 50 scenarios with unique ids and complete schema', () => {
+    assert.equal(EVAL_SCENARIOS.length, 50);
+    const ids = new Set();
+    const categories = new Set(['project', 'document', 'data', 'memory', 'adversarial', 'chat-intent', 'reasoning']);
+    const difficulties = new Set(['easy', 'medium', 'hard']);
+    for (const sc of EVAL_SCENARIOS) {
+      assert.match(String(sc.id), /^\d+$/, `id numeric: ${sc.id}`);
+      assert.equal(ids.has(sc.id), false, `duplicate id ${sc.id}`);
+      ids.add(sc.id);
+      for (const key of ['name', 'description', 'prompt', 'estimatedTime']) {
+        assert.ok(typeof sc[key] === 'string' && sc[key].trim().length > 0, `${sc.id}.${key} non-empty`);
+      }
+      assert.ok(difficulties.has(sc.difficulty), `${sc.id} difficulty`);
+      assert.ok(categories.has(sc.category), `${sc.id} category: ${sc.category}`);
+      assert.ok(sc.endpoint === 'agent' || sc.endpoint === 'chat', `${sc.id} endpoint`);
+      assert.ok(Array.isArray(sc.expectedOutput) && sc.expectedOutput.length >= 1, `${sc.id} expectations`);
+      for (const exp of sc.expectedOutput) {
+        assert.ok(typeof exp === 'string' && exp.trim(), `${sc.id} expectation non-empty`);
+        if (exp.includes('|')) {
+          const alts = exp.split('|').map((a) => a.trim()).filter(Boolean);
+          assert.ok(alts.length >= 2, `${sc.id} OR-group needs >=2 alternatives: ${exp}`);
+        }
+      }
+    }
+    assert.deepEqual([...ids].sort((a, b) => Number(a) - Number(b)).map(Number),
+      Array.from({ length: 50 }, (_, i) => i + 1));
+  });
+
+  test('both execution paths are represented (agent + chat)', () => {
+    const agents = EVAL_SCENARIOS.filter((s) => s.endpoint === 'agent');
+    const chats = EVAL_SCENARIOS.filter((s) => s.endpoint === 'chat');
+    assert.ok(agents.length >= 20, `agent scenarios: ${agents.length}`);
+    assert.ok(chats.length >= 20, `chat scenarios: ${chats.length}`);
+  });
+
+  test('evaluateScenario: full pass / partial / failed + case-insensitive', () => {
+    const sc = { expectedOutput: ['Todo', 'JAVASCRIPT'] };
+    assert.deepEqual(
+      (({ status, score, maxScore }) => ({ status, score, maxScore }))(harness.evaluateScenario('a todo app in javascript', sc)),
+      { status: 'passed', score: 2, maxScore: 2 });
+    const partial = harness.evaluateScenario('only a todo here', sc);
+    assert.equal(partial.status, 'partial');
+    assert.equal(partial.score, 1);
+    const failed = harness.evaluateScenario('nothing relevant', sc);
+    assert.equal(failed.status, 'failed');
+    assert.equal(failed.score, 0);
+  });
+
+  test('OR-groups score as ONE expectation (any alternative passes it)', () => {
+    const sc = { expectedOutput: ['patna', 'same|barabar|equal'] };
+    // group matched via second alternative, keyword1 absent -> partial 1/2
+    const r = harness.evaluateScenario('bilkul equal hain dono', sc);
+    assert.equal(r.score, 1);
+    assert.equal(r.maxScore, 2);
+    // both present -> full pass
+    const r2 = harness.evaluateScenario('Patna aur equal dono', sc);
+    assert.equal(r2.status, 'passed');
+    // empty alternatives in a group are ignored safely
+    assert.equal(harness.matchesExpectation('goa trip me chalo', ' || || goa '), true);
+    assert.equal(harness.matchesExpectation('anything', ' || || '), false);
+  });
+
+  test('summarize: no NaN, correct totals and percentage (old maxScore bug)', () => {
+    const results = [
+      { status: 'passed', score: 3, maxScore: 3 },
+      { status: 'partial', score: 1, maxScore: 4 },
+      { status: 'failed', score: 0, maxScore: 2 },
+    ];
+    const s = harness.summarize(results);
+    assert.equal(s.totalScenarios, 3);
+    assert.equal(s.passed, 1);
+    assert.equal(s.failed, 1);
+    assert.equal(s.score, 4);
+    assert.equal(s.maxScore, 9);
+    assert.equal(s.percentage, 44); // 4/9 = 44.4 -> 44
+    assert.equal(Number.isNaN(s.percentage), false);
+    // degenerate input must not divide by zero
+    const empty = harness.summarize([]);
+    assert.equal(empty.percentage, 0);
+    assert.equal(empty.maxScore, 0);
+  });
+
+  test('executeScenarioPrompt dispatches chat vs agent endpoints (stubbed fetch)', async () => {
+    const originalFetch = global.fetch;
+    const calls = [];
+    try {
+      global.fetch = async (url, opts) => {
+        calls.push({ url: String(url), body: JSON.parse(opts.body) });
+        if (String(url).includes('/api/chat')) {
+          return { ok: true, json: async () => ({ reply: 'GOA restaurants list' }) };
+        }
+        return {
+          ok: true,
+          text: async () => 'data: {"type":"done","message":"built todo"}\n',
+        };
+      };
+      const chatOut = await harness.executeScenarioPrompt({ endpoint: 'chat', prompt: 'Goa me batao' });
+      assert.equal(chatOut, 'GOA restaurants list');
+      assert.match(calls[0].url, /\/api\/chat$/);
+      assert.deepEqual(calls[0].body, { message: 'Goa me batao' });
+
+      const agentOut = await harness.executeScenarioPrompt({ endpoint: 'agent', prompt: 'todo banao' });
+      assert.match(agentOut, /built todo/);
+      assert.match(calls[1].url, /\/api\/agent\/run$/);
+      assert.equal(calls[1].body.userPrompt, 'todo banao');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  test('executeChatPrompt surfaces HTTP failures as an honest error', async () => {
+    const originalFetch = global.fetch;
+    try {
+      global.fetch = async () => ({ ok: false, status: 429, text: async () => 'rate limited' });
+      await assert.rejects(() => harness.executeChatPrompt('x'), /Chat failed \(HTTP 429\)/);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+});
+
 // -- Devin-style permission levels (Ask / Auto / Turbo) --------------------
 describe('CapabilityGatekeeper evaluateWithLevel (permission levels)', () => {
   const { CapabilityGatekeeper, DECISION } = require('../agent/policy/CapabilityGatekeeper');

@@ -184,11 +184,14 @@ test('GET /api/agent/tasks -> 200 { success, tasks }', async () => {
 });
 
 // ── Eval harness ────────────────────────────────────────────────────────
-test('GET /api/eval/status -> 200 with 5 scenarios', async () => {
+test('GET /api/eval/status -> 200, count matches the real catalog (P12.2: 50)', async () => {
+  const { EVAL_SCENARIOS } = require('../tests/eval_scenarios');
   const { status, body } = await req('GET', '/api/eval/status');
   assert.equal(status, 200);
   assert.equal(body.status, 'ok');
-  assert.equal(body.scenariosAvailable, 5);
+  assert.equal(body.scenariosAvailable, EVAL_SCENARIOS.length);
+  assert.ok(EVAL_SCENARIOS.length >= 50, `expected >=50 scenarios, got ${EVAL_SCENARIOS.length}`);
+  assert.ok(body.byEndpoint.agent >= 1 && body.byEndpoint.chat >= 1, 'both endpoints represented');
 });
 
 test('POST /api/eval unknown scenario id -> 400', async () => {

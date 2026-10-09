@@ -9,8 +9,13 @@ const { capabilityGatekeeper } = require('../../agent/policy/CapabilityGatekeepe
 const PERMISSION_LEVELS = ['ask', 'auto', 'turbo'];
 
 function writeSse(res, event) {
-  if (res.writableEnded) return;
-  res.write(`event: ${String(event.type || 'director_event')}\ndata: ${JSON.stringify(event)}\n\n`);
+  // Hardened: a client that aborted mid-run leaves `destroyed` true but
+  // `writableEnded` may still be false — writing then can emit an unhandled
+  // stream error. Never throw out of the completion path (P12.1).
+  if (!res || res.writableEnded || res.destroyed) return;
+  try {
+    res.write(`event: ${String(event.type || 'director_event')}\ndata: ${JSON.stringify(event)}\n\n`);
+  } catch (_) { /* stream gone — drop the frame */ }
 }
 
 function resolveProjectId(body) {
@@ -150,6 +155,30 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
     ? `${request}\n\nUser @-mentioned files (prioritize reading/editing these): ${contextFiles.join(', ')}`
     : request;
 
+  // ── P12.1 honest-completion accounting ──────────────────────────────────
+  // deterministicCodeGuard refuses full-file rewrites of EXISTING files; before
+  // P12 the completion line still said "🎉 completed ... with final
+  // verification" even when every write was refused and ZERO files changed.
+  // Observe the event stream: count write TOOL steps vs actual file_written
+  // events, then report exactly what happened.
+  const writtenPaths = new Set();
+  let writeAttempts = 0;
+  const countingOnEvent = (event) => {
+    if (event && typeof event.type === 'string') {
+      if (event.type === 'file_written' || event.type === 'file_changed') {
+        const p = event.path || event.file;
+        if (typeof p === 'string' && p) writtenPaths.add(p);
+      } else if (
+        event.type === 'step' &&
+        event.status === 'running' &&
+        (event.tool === 'write_file' || event.tool === 'apply_diff')
+      ) {
+        writeAttempts += 1;
+      }
+    }
+    writeSse(res, { ...event, taskId });
+  };
+
   const result = await runtime.director.run({
     userId: authorization.user.id,
     projectId: authorization.project.id,
@@ -157,17 +186,38 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
     signal,
     maxRepairs: 3,
     ...(presetPlan ? { plan: presetPlan } : {}),
-    onEvent: (event) => writeSse(res, { ...event, taskId }),
+    onEvent: countingOnEvent,
   });
 
     const taskCount = result?.summary?.match(/(\d+)\s+adaptive/)?.[1] || result?.taskCount || '?';
+    const filesWritten = writtenPaths.size;
+    const changedPaths = [...writtenPaths].slice(0, 50);
+    const canceled = result?.status === 'CANCELLED';
+
+    // Say the truth: files changed / writes rejected / analysis-only / canceled.
+    let message;
+    if (canceled) {
+      message = `⏹️ Director run canceled — ${taskCount} task(s) processed, ${filesWritten} file(s) had changed before the stop.`;
+    } else if (filesWritten > 0) {
+      const shown = changedPaths.slice(0, 6).join(', ');
+      const more = filesWritten > 6 ? ` +${filesWritten - 6} more` : '';
+      message = `🎉 Copilot Director completed ${taskCount} task(s) with verification — ${filesWritten} file(s) changed: ${shown}${more}`;
+    } else if (writeAttempts > 0) {
+      message = `⚠️ Copilot Director finished ${taskCount} task(s) but saved NO files — ${writeAttempts} write attempt(s) were rejected (existing files require surgical apply_diff / SEARCH-REPLACE edits, not full-file replacement). No changes were persisted; re-run asking for a targeted edit.`;
+    } else {
+      message = `🎯 Copilot Director completed ${taskCount} task(s) — analysis only, no file changes were requested.`;
+    }
+
     writeSse(res, {
-      type: result?.status === 'CANCELLED' ? 'director_canceled' : 'director_complete',
+      type: canceled ? 'director_canceled' : 'director_complete',
       taskId,
       runId,
       status: result?.status || 'SUCCEEDED',
       taskCount,
-      message: `🎉 Copilot Director completed ${taskCount} autonomous specialist task(s) with final verification.`,
+      filesWritten,
+      writeAttempts,
+      changedPaths,
+      message,
       result,
     });
     return res.end();
