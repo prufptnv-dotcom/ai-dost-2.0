@@ -69,6 +69,7 @@ export default function useAuroraRun({ projectId = 'default', onToast } = {}) {
   const [elapsed, setElapsed] = useState(0);
   const [approval, setApproval] = useState(null); // {token, gate}
   const [runId, setRunId] = useState(null);
+  const [lastPrompt, setLastPrompt] = useState(''); // A5: retry re-sends it
   const [contents, setContents] = useState({}); // path → current body (preview)
   const [devServer, setDevServer] = useState({
     state: null,
@@ -290,6 +291,7 @@ export default function useAuroraRun({ projectId = 'default', onToast } = {}) {
 
       if (!opts.approvalToken && !opts.skipUserRow) pushUserRow(text);
       lastPromptRef.current = text;
+      setLastPrompt(text);
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -314,7 +316,10 @@ export default function useAuroraRun({ projectId = 'default', onToast } = {}) {
             chatHistory: buildChatHistory(rowsRef.current),
             copilotDirector: true,
             permissionLevel: opts.permissionLevel || 'auto',
-            preferredModel: 'auto',
+            // A5: model picker + @file mention context (classic parity).
+            preferredModel: opts.preferredModel || 'auto',
+            ...(opts.projectFiles && opts.projectFiles.length ? { projectFiles: opts.projectFiles } : {}),
+            ...(opts.contextFiles && opts.contextFiles.length ? { contextFiles: opts.contextFiles } : {}),
             ...(opts.approvalToken ? { approvalToken: opts.approvalToken } : {}),
           }),
           signal: controller.signal,
@@ -500,6 +505,7 @@ export default function useAuroraRun({ projectId = 'default', onToast } = {}) {
     approval,
     stepCount,
     runId,
+    lastPrompt,
     send,
     stop,
     approve,

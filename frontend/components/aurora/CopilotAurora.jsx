@@ -5,6 +5,7 @@ import AuroraPalette from './AuroraPalette';
 import AuroraRail from './AuroraRail';
 import AuroraStage from './AuroraStage';
 import useAuroraRun from './useAuroraRun';
+import { detectMention, filePathOf, parseMentionPaths } from '../../lib/copilotMentions';
 import s from './Aurora.module.css';
 
 /**
@@ -23,6 +24,24 @@ import s from './Aurora.module.css';
  */
 
 const PERMISSIONS = ['ask', 'auto', 'turbo'];
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || '';
+
+// A5 model picker — keep in sync with views/CopilotIDE.jsx MODEL_OPTIONS;
+// both UIs share localStorage key `ai_dost_copilot_model` so the preference
+// follows the user across Classic/Aurora (preferred provider rotates
+// server-side cascade; fallback always on).
+const MODEL_OPTIONS = [
+  { v: 'auto', l: 'Auto (cascade)' },
+  { v: 'gemini', l: 'Gemini first' },
+  { v: 'groq', l: 'Groq first' },
+  { v: 'opencode', l: 'OpenCode (free gateway)' },
+  { v: 'openrouter', l: 'OpenRouter first' },
+  { v: 'openrouter:nemotron_3_super', l: 'Nemotron 3 Super' },
+  { v: 'openrouter:north_mini_code', l: 'Cohere North Code' },
+  { v: 'openrouter:laguna_s', l: 'Laguna-S Agent' },
+  { v: 'openrouter:lfm_reasoning', l: 'Liquid LFM 2.5' },
+  { v: 'ollama', l: 'Ollama local' },
+];
 
 function fmt(totalSeconds) {
   const m = Math.floor(totalSeconds / 60);
@@ -42,9 +61,70 @@ export default function CopilotAurora({
   const [stageTab, setStageTab] = useState('preview');
   const [stageOpen, setStageOpen] = useState(false); // narrow-viewport overlay
   const [focusPath, setFocusPath] = useState(null); // palette → file diff jump
+  const [model, setModel] = useState('auto'); // A5 picker (localStorage-shared)
+  const [modelMenu, setModelMenu] = useState(false);
+  const [wsFiles, setWsFiles] = useState([]); // A5: workspace list for @mentions
+  const [mentionQuery, setMentionQuery] = useState(null);
+  const [mentionIdx, setMentionIdx] = useState(0);
   const inputRef = useRef(null);
   const paletteOpenRef = useRef(false);
   const stageOpenRef = useRef(false);
+  const modelWrapRef = useRef(null);
+  const wasRunningRef = useRef(false);
+
+  // A5: shared model preference — read AFTER mount so server/first paint is
+  // always 'auto' (no hydration mismatch, same pattern as the UI flag).
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem('ai_dost_copilot_model');
+      if (saved && MODEL_OPTIONS.some((o) => o.v === saved)) setModel(saved);
+    } catch (_) {
+      /* private mode: default stays auto */
+    }
+  }, []);
+
+  // Workspace file list → @file mention suggestions + projectFiles for the
+  // director (classic parity: mentioned files first, then the rest).
+  const loadWsFiles = useCallback(async () => {
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/memory/project/${encodeURIComponent(projectId)}`);
+      if (!res || typeof res.json !== 'function') return;
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : Array.isArray(data && data.files) ? data.files : [];
+      const seen = new Set();
+      const next = [];
+      list.forEach((f) => {
+        const p = filePathOf(f);
+        if (p && !seen.has(p)) {
+          seen.add(p);
+          next.push({ path: p, content: f.content || '' });
+        }
+      });
+      if (next.length) setWsFiles(next); // empty response → keep last good list
+    } catch (_) {
+      /* offline → mentions degrade to plain text, runs still work */
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    loadWsFiles();
+  }, [loadWsFiles]);
+
+  // A run can create files — refresh the mention list when it finishes.
+  useEffect(() => {
+    if (wasRunningRef.current && !run.running) loadWsFiles();
+    wasRunningRef.current = run.running;
+  }, [run.running, loadWsFiles]);
+
+  // Model menu: Esc (shared window map) + outside click close.
+  useEffect(() => {
+    if (!modelMenu) return undefined;
+    function onDown(e) {
+      if (modelWrapRef.current && !modelWrapRef.current.contains(e.target)) setModelMenu(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [modelMenu]);
 
   useEffect(() => {
     paletteOpenRef.current = paletteOpen;
@@ -78,6 +158,69 @@ export default function CopilotAurora({
     }
   }, []);
 
+  // A5: @file mention suggestions (lib/copilotMentions — shared with classic).
+  const mentionMatches = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const q = mentionQuery.toLowerCase();
+    return wsFiles.map(filePathOf).filter((p) => p && p.toLowerCase().includes(q)).slice(0, 8);
+  }, [mentionQuery, wsFiles]);
+
+  const insertMention = useCallback(
+    (filePath) => {
+      const el = inputRef.current;
+      const value = input;
+      const caret = el && typeof el.selectionStart === 'number' ? el.selectionStart : value.length;
+      const before = value.slice(0, caret);
+      const after = value.slice(caret);
+      const token = before.match(/@[^\s@]*$/);
+      const start = token ? before.length - token[0].length : before.length;
+      const next = `${before.slice(0, start)}@${filePath} ${after}`;
+      setInput(next);
+      setMentionQuery(null);
+      setMentionIdx(0);
+      requestAnimationFrame(() => {
+        if (!el) return;
+        el.focus();
+        const pos = start + filePath.length + 2;
+        if (typeof el.setSelectionRange === 'function') el.setSelectionRange(pos, pos);
+      });
+    },
+    [input]
+  );
+
+  // A5: one submit path — @file context (mentioned-first projectFiles +
+  // contextFiles) + permission/model → run.send. Retry reuses it verbatim.
+  const submitPrompt = useCallback(
+    (raw) => {
+      const text = String(raw || '').trim();
+      if (!text || run.running) return;
+      const mentionedFiles = parseMentionPaths(text);
+      const mentionedSet = new Set(mentionedFiles);
+      const orderedFiles = wsFiles.length
+        ? mentionedFiles.length
+          ? [
+              ...wsFiles.filter((f) => mentionedSet.has(f.path)),
+              ...wsFiles.filter((f) => !mentionedSet.has(f.path)),
+            ]
+          : wsFiles
+        : null;
+      setInput('');
+      setMentionQuery(null);
+      run.send(text, {
+        permissionLevel: permission,
+        preferredModel: model,
+        ...(orderedFiles ? { projectFiles: orderedFiles } : {}),
+        ...(mentionedFiles.length ? { contextFiles: mentionedFiles } : {}),
+      });
+    },
+    [model, permission, run, wsFiles]
+  );
+
+  const retryLast = useCallback(() => {
+    if (run.running || !run.lastPrompt) return;
+    submitPrompt(run.lastPrompt);
+  }, [run, submitPrompt]);
+
   const paletteActions = useMemo(() => {
     const acts = [
       {
@@ -108,6 +251,15 @@ export default function CopilotAurora({
         disabled: !run.running,
         run: run.stop,
       },
+      {
+        id: 'run-retry',
+        group: 'run',
+        label: 'Run: retry last prompt',
+        icon: 'refresh',
+        hint: run.lastPrompt ? '' : 'no prompt yet',
+        disabled: run.running || !run.lastPrompt,
+        run: retryLast,
+      },
       ...PERMISSIONS.map((p) => ({
         id: `perm-${p}`,
         group: 'permission',
@@ -130,7 +282,7 @@ export default function CopilotAurora({
       })),
     ];
     return acts;
-  }, [goClassic, live, permission, run, showStage]);
+  }, [goClassic, live, permission, retryLast, run, showStage]);
 
   // Window-level command map (A4): palette toggle works from anywhere
   // (including inside the composer), Alt+mnemonics drive the stage/preview,
@@ -148,6 +300,10 @@ export default function CopilotAurora({
         return;
       }
       if (paletteOpenRef.current) return; // palette input owns Esc/arrows
+      if (k === 'Escape' && modelMenu) {
+        setModelMenu(false);
+        return;
+      }
       if (k === 'Escape' && stageOpenRef.current) {
         setStageOpen(false);
         return;
@@ -171,7 +327,7 @@ export default function CopilotAurora({
     }
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [run, showStage]);
+  }, [modelMenu, run, showStage]);
 
   const planDone = run.plan.filter((p) => p.status === 'done').length;
   const hasPlan = run.plan.length > 0;
@@ -179,10 +335,7 @@ export default function CopilotAurora({
   const planLabel = hasPlan ? `plan ${planDone}/${run.plan.length}` : run.running ? 'running' : 'ready';
 
   function handleSend() {
-    const text = input.trim();
-    if (!text || run.running) return;
-    setInput('');
-    run.send(text, { permissionLevel: permission });
+    submitPrompt(input);
   }
 
   return (
@@ -223,6 +376,48 @@ export default function CopilotAurora({
               {fmt(run.elapsed)}
             </span>
           )}
+          {/* A5: preferred-model picker (shared localStorage with classic) */}
+          <div className={s.modelWrap} ref={modelWrapRef}>
+            <button
+              type="button"
+              className={s.modelChip}
+              data-testid="model-chip"
+              aria-haspopup="listbox"
+              aria-expanded={modelMenu}
+              onClick={() => setModelMenu((o) => !o)}
+            >
+              <AppIcon name="cpu" size={11} />
+              <span data-testid="model-chip-label">{MODEL_OPTIONS.find((o) => o.v === model)?.l || 'auto'}</span>
+              <AppIcon name="chevronDown" size={9} />
+            </button>
+            {modelMenu && (
+              <div className={s.modelMenu} role="listbox" aria-label="Preferred model" data-testid="model-menu">
+                {MODEL_OPTIONS.map((o) => (
+                  <button
+                    key={o.v}
+                    type="button"
+                    role="option"
+                    aria-selected={model === o.v}
+                    data-testid={`model-opt-${o.v}`}
+                    className={`${s.modelOpt} ${model === o.v ? s.modelOptOn : ''}`}
+                    onClick={() => {
+                      setModel(o.v);
+                      setModelMenu(false);
+                      try {
+                        window.localStorage.setItem('ai_dost_copilot_model', o.v);
+                      } catch (_) {
+                        /* private mode: preference just won't persist */
+                      }
+                      if (typeof onToast === 'function') onToast(`Model: ${o.l}`);
+                    }}
+                  >
+                    <span>{o.l}</span>
+                    {model === o.v && <AppIcon name="check" size={10} />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             type="button"
             className={s.stageToggle}
@@ -246,7 +441,11 @@ export default function CopilotAurora({
           </button>
         </header>
 
-        <AgentStream events={run.rows} running={run.running} />
+        <AgentStream
+          events={run.rows}
+          running={run.running}
+          onRetry={run.lastPrompt && !run.running ? retryLast : null}
+        />
 
         <div className={s.composer} data-testid="aurora-composer">
           {run.approval && (
@@ -279,15 +478,66 @@ export default function CopilotAurora({
               data-testid="aurora-composer-input"
               rows={1}
               value={input}
-              placeholder={run.running ? 'Run in progress — Stop to interrupt…' : 'Message the copilot…'}
-              onChange={(e) => setInput(e.target.value)}
+              placeholder={run.running ? 'Run in progress — Stop to interrupt…' : 'Message the copilot… (@ for files)'}
+              onChange={(e) => {
+                setInput(e.target.value);
+                const caret = e.target.selectionStart ?? e.target.value.length;
+                setMentionQuery(detectMention(e.target.value, caret));
+                setMentionIdx(0);
+              }}
               onKeyDown={(e) => {
+                // A5: mention dropdown owns ↑↓/Tab/Enter while it is open
+                if (mentionQuery !== null && mentionMatches.length) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setMentionIdx((i) => (i + 1) % mentionMatches.length);
+                    return;
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setMentionIdx((i) => (i - 1 + mentionMatches.length) % mentionMatches.length);
+                    return;
+                  }
+                  if (e.key === 'Tab' || e.key === 'Enter') {
+                    e.preventDefault();
+                    insertMention(mentionMatches[mentionIdx]);
+                    return;
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setMentionQuery(null);
+                    return;
+                  }
+                }
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   handleSend();
                 }
               }}
             />
+            {mentionQuery !== null && mentionMatches.length > 0 && (
+              <div className={s.mentionPop} role="listbox" aria-label="File mentions" data-testid="mention-pop">
+                {mentionMatches.map((p, i) => (
+                  <button
+                    key={p}
+                    type="button"
+                    role="option"
+                    aria-selected={i === mentionIdx}
+                    data-testid="mention-item"
+                    className={`${s.mentionItem} ${i === mentionIdx ? s.mentionItemOn : ''}`}
+                    onMouseEnter={() => setMentionIdx(i)}
+                    // mousedown before click: click would move the caret first
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      insertMention(p);
+                    }}
+                  >
+                    <AppIcon name="file" size={11} />
+                    <span className={s.mentionPath}>{p}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             <button
               type="button"
               className={s.sendBtn}

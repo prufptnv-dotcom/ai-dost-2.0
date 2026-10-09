@@ -619,6 +619,108 @@ describe('CopilotAurora (P11 A2 — real run wiring)', () => {
     expect(shell).toHaveAttribute('data-stage-open', 'false');
   });
 
+  test('A5 model picker: shared localStorage → chip label + preferredModel in run body', async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem('ai_dost_copilot_model', 'groq');
+    const fetchMock = installFetch((url) => {
+      if (String(url).includes('/api/agent/run')) {
+        return sseResponse([{ type: 'done', message: 'model done' }]);
+      }
+      return { ok: true, status: 200, json: async () => ({ success: true, state: 'STOPPED' }) };
+    });
+    render(<CopilotAurora {...base} onToast={jest.fn()} />);
+
+    // post-mount read of the key BOTH UIs share
+    await waitFor(() => expect(screen.getByTestId('model-chip-label')).toHaveTextContent('Groq first'));
+
+    // open menu → pick OpenRouter first → persisted + label swaps + menu closes
+    fireEvent.click(screen.getByTestId('model-chip'));
+    const menu = await screen.findByTestId('model-menu');
+    expect(within(menu).getAllByTestId('model-opt-auto').length).toBe(1);
+    fireEvent.click(screen.getByTestId('model-opt-openrouter'));
+    expect(window.localStorage.getItem('ai_dost_copilot_model')).toBe('openrouter');
+    expect(screen.getByTestId('model-chip-label')).toHaveTextContent('OpenRouter first');
+    expect(screen.queryByTestId('model-menu')).toBeNull();
+
+    // run → body carries the chosen preferredModel (was hardcoded 'auto')
+    const input = screen.getByTestId('aurora-composer-input');
+    fireEvent.change(input, { target: { value: 'hello' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    await screen.findByText('model done');
+    const runCall = fetchMock.mock.calls.find(([u]) => String(u).includes('/api/agent/run'));
+    expect(JSON.parse(runCall[1].body).preferredModel).toBe('openrouter');
+    window.localStorage.clear();
+  });
+
+  test('A5 @file mentions: dropdown inserts path, run sends contextFiles + mentioned-first projectFiles', async () => {
+    const fetchMock = installFetch((url) => {
+      const u = String(url);
+      if (u.includes('/api/v1/memory/project')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            { path: 'package.json', content: '{}' },
+            { path: 'src/App.jsx', content: 'export default App' },
+            { path: 'src/App.jsx', content: 'dup ignored' },
+          ],
+        };
+      }
+      if (u.includes('/api/agent/run')) return sseResponse([{ type: 'done', message: 'mention done' }]);
+      return { ok: true, status: 200, json: async () => ({ success: true, state: 'STOPPED' }) };
+    });
+    render(<CopilotAurora {...base} onToast={jest.fn()} />);
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/api/v1/memory/project'))).toBe(true)
+    );
+
+    const input = screen.getByTestId('aurora-composer-input');
+    fireEvent.change(input, { target: { value: 'fix @App' } });
+    // workspace list loaded → pop matches src/App.jsx once (path dedup)
+    const pop = await screen.findByTestId('mention-pop');
+    expect(within(pop).getAllByTestId('mention-item')).toHaveLength(1);
+
+    // Enter inserts the path — it does NOT send yet (prefix "fix " preserved)
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    expect(screen.queryByTestId('mention-pop')).toBeNull();
+    expect(input.value).toBe('fix @src/App.jsx ');
+
+    // Enter again sends: contextFiles + projectFiles (mentioned first)
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    await screen.findByText('mention done');
+    const runCall = fetchMock.mock.calls.find(([u]) => String(u).includes('/api/agent/run'));
+    const body = JSON.parse(runCall[1].body);
+    expect(body.contextFiles).toEqual(['src/App.jsx']);
+    expect(body.projectFiles.map((f) => f.path)).toEqual(['src/App.jsx', 'package.json']);
+  });
+
+  test('A5 error row: failed run shows Retry; click re-sends the same prompt', async () => {
+    let runCalls = 0;
+    const fetchMock = installFetch((url) => {
+      const u = String(url);
+      if (u.includes('/api/agent/run')) {
+        runCalls += 1;
+        if (runCalls === 1) return { ok: false, status: 500, statusText: 'boom', json: async () => ({}) };
+        return sseResponse([{ type: 'done', message: 'retry ok' }]);
+      }
+      return { ok: true, status: 200, json: async () => ({ success: true, state: 'STOPPED' }) };
+    });
+    render(<CopilotAurora {...base} onToast={jest.fn()} />);
+
+    const input = screen.getByTestId('aurora-composer-input');
+    fireEvent.change(input, { target: { value: 'first try' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    // HTTP 500 → error row with a Retry button (no button while running)
+    const retry = await screen.findByTestId('retry-btn');
+    fireEvent.click(retry);
+
+    await screen.findByText('retry ok');
+    const calls = fetchMock.mock.calls.filter(([u]) => String(u).includes('/api/agent/run'));
+    expect(calls).toHaveLength(2);
+    expect(JSON.parse(calls[1][1].body).userPrompt).toBe('first try');
+  });
+
   test('classic escape hatch writes the fallback flag', () => {
     render(<CopilotAurora {...base} onToast={jest.fn()} />);
     expect(window.localStorage.getItem('ai_dost_copilot_ui')).toBeNull();

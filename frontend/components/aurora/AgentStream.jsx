@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import AppIcon from '../ui/AppIcon';
 import s from './Aurora.module.css';
 
 /**
@@ -18,7 +19,7 @@ const TONE_CLASS = {
   muted: s.toneMuted,
 };
 
-export default function AgentStream({ events = [], running = false }) {
+export default function AgentStream({ events = [], running = false, onRetry = null }) {
   const endRef = useRef(null);
 
   useEffect(() => {
@@ -43,6 +44,17 @@ export default function AgentStream({ events = [], running = false }) {
                 {e.detail}
               </span>
               <span className={s.rowMeta}>{e.meta || ''}</span>
+              {e.kind === 'error' && typeof onRetry === 'function' && (
+                <button
+                  type="button"
+                  className={s.retryBtn}
+                  data-testid="retry-btn"
+                  onClick={onRetry}
+                >
+                  <AppIcon name="refresh" size={10} />
+                  Retry
+                </button>
+              )}
             </div>
           );
         })}
