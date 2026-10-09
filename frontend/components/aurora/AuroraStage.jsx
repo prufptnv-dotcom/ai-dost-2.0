@@ -61,16 +61,22 @@ function DiffPanel({ file }) {
 // runs on the scaffold/ReAct routes), so the stage drives the preview lifecycle
 // itself through the same preview API CopilotIDE ships with:
 // POST /api/preview/:id/dev/start {projectPath:'.'} → READY, /dev/stop → STOPPED.
+//
+// P11 A4 — tab is CONTROLLED (tab/onTabChange from the parent) so the Cmd+K
+// palette and the Alt+P/Alt+F map can drive it; `focusPath` lets the palette
+// jump straight to a file's diff.
 export default function AuroraStage({
   files = [],
   contents = {},
   projectId = 'default',
   devServer = {},
   previewBusy = false,
+  tab = 'preview',
+  onTabChange,
+  focusPath = null,
   onStartPreview,
   onStopPreview,
 }) {
-  const [tab, setTab] = useState('preview');
   const [openPath, setOpenPath] = useState(null);
   const [tick, setTick] = useState(0);
 
@@ -79,9 +85,14 @@ export default function AuroraStage({
   // Bolt-style: when the dev server comes up, the preview IS the result.
   const wasLiveRef = useRef(false);
   useEffect(() => {
-    if (live && !wasLiveRef.current) setTab('preview');
+    if (live && !wasLiveRef.current && typeof onTabChange === 'function') onTabChange('preview');
     wasLiveRef.current = live;
-  }, [live]);
+  }, [live, onTabChange]);
+
+  // Palette jump: open the file's diff (parent already switched the tab).
+  useEffect(() => {
+    if (focusPath) setOpenPath(focusPath);
+  }, [focusPath]);
 
   const hasFiles = files.length > 0 || Object.keys(contents).length > 0;
   const srcDoc = useMemo(
@@ -106,7 +117,7 @@ export default function AuroraStage({
           aria-selected={tab === 'preview'}
           className={`${s.tab} ${tab === 'preview' ? s.tabOn : ''}`}
           data-testid="stage-tab-preview"
-          onClick={() => setTab('preview')}
+          onClick={() => onTabChange && onTabChange('preview')}
         >
           Preview
         </button>
@@ -116,7 +127,7 @@ export default function AuroraStage({
           aria-selected={tab === 'files'}
           className={`${s.tab} ${tab === 'files' ? s.tabOn : ''}`}
           data-testid="stage-tab-files"
-          onClick={() => setTab('files')}
+          onClick={() => onTabChange && onTabChange('files')}
         >
           Files{files.length ? ` (${files.length})` : ''}
         </button>

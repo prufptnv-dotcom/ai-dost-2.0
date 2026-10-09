@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AppIcon from '../ui/AppIcon';
 import AgentStream from './AgentStream';
+import AuroraPalette from './AuroraPalette';
 import AuroraRail from './AuroraRail';
 import AuroraStage from './AuroraStage';
 import useAuroraRun from './useAuroraRun';
@@ -14,6 +15,11 @@ import s from './Aurora.module.css';
  * A1 shipped this shell on mock data — A2 wires it to POST /api/agent/run
  * (SSE) via useAuroraRun: live plan, live file diffs, real stop, approval gate.
  * Props contract matches CopilotIDE: projectId / projectName / onToast.
+ *
+ * P11 A4 — command layer: Ctrl/⌘K palette (commands + run-file quick jump),
+ * Alt+P/Alt+F stage tabs, Alt+S preview server toggle, Esc closes palette or
+ * the narrow-viewport stage overlay (the header Stage button toggles it when
+ * the media query hides the third column).
  */
 
 const PERMISSIONS = ['ask', 'auto', 'turbo'];
@@ -32,7 +38,140 @@ export default function CopilotAurora({
   const run = useAuroraRun({ projectId, onToast });
   const [input, setInput] = useState('');
   const [permission, setPermission] = useState('auto');
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [stageTab, setStageTab] = useState('preview');
+  const [stageOpen, setStageOpen] = useState(false); // narrow-viewport overlay
+  const [focusPath, setFocusPath] = useState(null); // palette → file diff jump
   const inputRef = useRef(null);
+  const paletteOpenRef = useRef(false);
+  const stageOpenRef = useRef(false);
+
+  useEffect(() => {
+    paletteOpenRef.current = paletteOpen;
+  }, [paletteOpen]);
+  useEffect(() => {
+    stageOpenRef.current = stageOpen;
+  }, [stageOpen]);
+
+  const live = run.devServer.state === 'READY';
+
+  // Palette + keyboard actions (A4). `showStage` opens the overlay too — on
+  // wide screens the class is a no-op (media-scoped CSS), on narrow ones it
+  // surfaces the panel the user just asked for.
+  const showStage = useCallback((tab) => {
+    setStageTab(tab);
+    setStageOpen(true);
+  }, []);
+
+  const goClassic = useCallback(() => {
+    try {
+      localStorage.setItem('ai_dost_copilot_ui', 'classic');
+    } catch (_) {
+      /* private mode: flag just won't persist */
+    }
+    if (typeof window !== 'undefined' && typeof window.location?.reload === 'function') {
+      try {
+        window.location.reload();
+      } catch (_) {
+        /* jsdom: reload is not implemented — flag write above is the contract */
+      }
+    }
+  }, []);
+
+  const paletteActions = useMemo(() => {
+    const acts = [
+      {
+        id: 'preview-start',
+        group: 'preview',
+        label: 'Preview: start dev server',
+        icon: 'play',
+        hint: live ? 'already live' : run.previewBusy ? 'starting…' : '⌥S',
+        disabled: live || run.previewBusy,
+        run: run.startPreview,
+      },
+      {
+        id: 'preview-stop',
+        group: 'preview',
+        label: 'Preview: stop dev server',
+        icon: 'square',
+        hint: live ? '⌥S' : 'not running',
+        disabled: !live,
+        run: run.stopPreview,
+      },
+      { id: 'stage-preview', group: 'stage', label: 'Stage: open Preview', icon: 'eye', hint: '⌥P', run: () => showStage('preview') },
+      { id: 'stage-files', group: 'stage', label: 'Stage: open Files', icon: 'folderTree', hint: '⌥F', run: () => showStage('files') },
+      {
+        id: 'run-stop',
+        group: 'run',
+        label: 'Run: stop',
+        icon: 'square',
+        disabled: !run.running,
+        run: run.stop,
+      },
+      ...PERMISSIONS.map((p) => ({
+        id: `perm-${p}`,
+        group: 'permission',
+        label: `Permission: ${p}`,
+        icon: 'shield',
+        hint: permission === p ? 'active' : '',
+        run: () => setPermission(p),
+      })),
+      { id: 'classic', group: 'ui', label: 'UI: switch to Classic UI', icon: 'columns', run: goClassic },
+      ...run.files.map((f) => ({
+        id: `file-${f.path}`,
+        group: 'file',
+        label: f.path,
+        icon: f.isNew ? 'file' : 'fileDiff',
+        hint: f.isNew ? 'NEW' : `+${f.add} −${f.del}`,
+        run: () => {
+          setFocusPath(f.path);
+          showStage('files');
+        },
+      })),
+    ];
+    return acts;
+  }, [goClassic, live, permission, run, showStage]);
+
+  // Window-level command map (A4): palette toggle works from anywhere
+  // (including inside the composer), Alt+mnemonics drive the stage/preview,
+  // Esc closes the palette (owned by its input) or the narrow stage overlay.
+  // CAPTURE phase + stopImmediatePropagation on the handled keys: the app-wide
+  // "Search & actions" palette listens on the bubble path through React's root,
+  // so a plain window listener + preventDefault lets BOTH palettes open.
+  useEffect(() => {
+    function onKey(e) {
+      const k = e.key;
+      if ((e.metaKey || e.ctrlKey) && (k === 'k' || k === 'K')) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        setPaletteOpen((o) => !o);
+        return;
+      }
+      if (paletteOpenRef.current) return; // palette input owns Esc/arrows
+      if (k === 'Escape' && stageOpenRef.current) {
+        setStageOpen(false);
+        return;
+      }
+      if (e.altKey && !e.ctrlKey && !e.metaKey) {
+        if (k === 'p' || k === 'P') {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          showStage('preview');
+        } else if (k === 'f' || k === 'F') {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          showStage('files');
+        } else if (k === 's' || k === 'S') {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          if (run.devServer.state === 'READY') run.stopPreview();
+          else if (run.devServer.state !== 'STARTING' && !run.previewBusy) run.startPreview();
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [run, showStage]);
 
   const planDone = run.plan.filter((p) => p.status === 'done').length;
   const hasPlan = run.plan.length > 0;
@@ -46,23 +185,13 @@ export default function CopilotAurora({
     run.send(text, { permissionLevel: permission });
   }
 
-  function goClassic() {
-    try {
-      localStorage.setItem('ai_dost_copilot_ui', 'classic');
-    } catch (_) {
-      /* private mode: flag just won't persist */
-    }
-    if (typeof window !== 'undefined' && typeof window.location?.reload === 'function') {
-      try {
-        window.location.reload();
-      } catch (_) {
-        /* jsdom: reload is not implemented — flag write above is the contract */
-      }
-    }
-  }
-
   return (
-    <div className={s.shell} data-testid="aurora-shell" data-project={projectId}>
+    <div
+      className={`${s.shell} ${stageOpen ? s.stageOpen : ''}`}
+      data-testid="aurora-shell"
+      data-project={projectId}
+      data-stage-open={stageOpen ? 'true' : 'false'}
+    >
       <AuroraRail projectName={projectName} plan={run.plan} onClassic={goClassic} />
 
       <div className={s.main}>
@@ -94,6 +223,17 @@ export default function CopilotAurora({
               {fmt(run.elapsed)}
             </span>
           )}
+          <button
+            type="button"
+            className={s.stageToggle}
+            data-testid="stage-toggle"
+            aria-pressed={stageOpen}
+            aria-label="Toggle preview stage"
+            onClick={() => setStageOpen((o) => !o)}
+          >
+            <AppIcon name="columns" size={12} />
+            Stage
+          </button>
           <button
             type="button"
             className={s.stopBtn}
@@ -190,8 +330,27 @@ export default function CopilotAurora({
         projectId={projectId}
         devServer={run.devServer}
         previewBusy={run.previewBusy}
+        tab={stageTab}
+        onTabChange={setStageTab}
+        focusPath={focusPath}
         onStartPreview={run.startPreview}
         onStopPreview={run.stopPreview}
+      />
+
+      {/* narrow-viewport backdrop (CSS shows it only under the media query) */}
+      {stageOpen && (
+        <div
+          className={s.backdrop}
+          data-testid="stage-backdrop"
+          aria-hidden="true"
+          onClick={() => setStageOpen(false)}
+        />
+      )}
+
+      <AuroraPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        actions={paletteActions}
       />
     </div>
   );

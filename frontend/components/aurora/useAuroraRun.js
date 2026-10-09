@@ -31,6 +31,11 @@ import { buildChatHistory, mapRunEvent } from './auroraRun';
  *             paths), so the stage drives the existing preview API itself:
  *             POST /api/preview/:id/dev/start {projectPath:'.'} → READY, or
  *             /dev/stop → STOPPED. Same contracts CopilotIDE ships with.
+ *
+ * P11 A4 — run-finish auto-start: when a run ends having written files and
+ *             nothing is serving (state null/STOPPED/FAILED), the hook boots
+ *             the preview itself once (startPreviewRef); a Stop/abort skips it
+ *             and a live/starting server is never re-kicked (devRef mirror).
  */
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || '';
@@ -81,6 +86,9 @@ export default function useAuroraRun({ projectId = 'default', onToast } = {}) {
   const baselineRef = useRef({}); // path → run-scope diff baseline (first win)
   const unknownRef = useRef(new Map());
   const seqRef = useRef(0);
+  const devRef = useRef(null); // devServer mirror for the post-run auto-start
+  const runTouchedFilesRef = useRef(false);
+  const startPreviewRef = useRef(() => false);
 
   // P7: READY dev servers survive restarts — probe on mount so a running app
   // shows live immediately (failures just stay on the static fallback).
@@ -92,13 +100,15 @@ export default function useAuroraRun({ projectId = 'default', onToast } = {}) {
         if (!alive || !res || typeof res.json !== 'function') return;
         const data = await res.json();
         if (!alive || !data || !data.state || data.state === 'STOPPED') return;
-        setDevServer({
+        const next = {
           state: data.state,
           url: data.url || null,
           hostPort: data.hostPort ?? null,
           framework: data.framework || null,
           reason: data.error || null,
-        });
+        };
+        devRef.current = next;
+        setDevServer(next);
       } catch (_) {
         /* no server running — static preview is the honest fallback */
       }
@@ -107,6 +117,12 @@ export default function useAuroraRun({ projectId = 'default', onToast } = {}) {
       alive = false;
     };
   }, [projectId]);
+
+  // Keep the mirror fresh for the run-finish auto-start (state updates may
+  // batch; the finally handler reads the LATEST value, not the last render's).
+  useEffect(() => {
+    devRef.current = devServer;
+  }, [devServer]);
 
   useEffect(() => {
     rowsRef.current = rows;
@@ -146,6 +162,7 @@ export default function useAuroraRun({ projectId = 'default', onToast } = {}) {
 
   const handleFile = useCallback(
     (path, content, meta = {}) => {
+      runTouchedFilesRef.current = true;
       const hadLocal = typeof contentsRef.current[path] === 'string';
       const body =
         typeof content === 'string' && content.length > 0 ? content : hadLocal ? contentsRef.current[path] : '';
@@ -237,6 +254,7 @@ export default function useAuroraRun({ projectId = 'default', onToast } = {}) {
             handleFile(a.path, a.content, { previous: a.previous, isNew: a.isNew });
             break;
           case 'devServer':
+            devRef.current = a.server;
             setDevServer(a.server);
             break;
           case 'runId':
@@ -282,6 +300,8 @@ export default function useAuroraRun({ projectId = 'default', onToast } = {}) {
       setElapsed(0);
       setApproval(null);
       unknownRef.current = new Map();
+      runTouchedFilesRef.current = false;
+      let aborted = false;
 
       try {
         const res = await fetch(`${BACKEND}/api/agent/run`, {
@@ -343,6 +363,7 @@ export default function useAuroraRun({ projectId = 'default', onToast } = {}) {
         }
       } catch (err) {
         if (err && err.name === 'AbortError') {
+          aborted = true;
           pushRow({ kind: 'stop', label: 'stop', detail: 'run stopped', tone: 'muted' });
         } else {
           const message = String((err && err.message) || err).slice(0, 200);
@@ -355,6 +376,15 @@ export default function useAuroraRun({ projectId = 'default', onToast } = {}) {
         if (abortRef.current === controller) {
           abortRef.current = null;
           setRunning(false);
+          // A4: the director path never emits `dev_server` — boot the preview
+          // once the run actually produced files and nothing is serving yet.
+          // Skipped after Stop/abort (user chose to end the run) and when a
+          // server is already live/starting (devRef = latest state, batched or
+          // not). Failures land in the honest FAILED chip like a manual start.
+          const st = devRef.current ? devRef.current.state : null;
+          if (!aborted && runTouchedFilesRef.current && (st === null || st === 'STOPPED' || st === 'FAILED')) {
+            startPreviewRef.current();
+          }
         }
       }
       return true;
@@ -385,6 +415,7 @@ export default function useAuroraRun({ projectId = 'default', onToast } = {}) {
   const startPreview = useCallback(async () => {
     if (previewBusy) return false;
     setPreviewBusy(true);
+    devRef.current = { ...devRef.current, state: 'STARTING', reason: null };
     setDevServer((prev) => ({ ...prev, state: 'STARTING', reason: null }));
     try {
       const res = await fetch(`${BACKEND}/api/preview/${encodeURIComponent(projectId)}/dev/start`, {
@@ -394,13 +425,15 @@ export default function useAuroraRun({ projectId = 'default', onToast } = {}) {
       });
       const data = res && typeof res.json === 'function' ? await res.json() : null;
       if (data && data.success !== false && data.ok !== false && (data.url || data.hostPort != null)) {
-        setDevServer({
+        const next = {
           state: 'READY',
           url: data.url || null,
           hostPort: data.hostPort ?? null,
           framework: data.framework || null,
           reason: null,
-        });
+        };
+        devRef.current = next;
+        setDevServer(next);
         pushRow({
           kind: 'dev',
           label: 'preview',
@@ -411,12 +444,14 @@ export default function useAuroraRun({ projectId = 'default', onToast } = {}) {
         return true;
       }
       const reason = (data && (data.error || data.reason)) || 'dev server failed to start';
+      devRef.current = { state: 'FAILED', url: null, hostPort: null, framework: null, reason };
       setDevServer({ state: 'FAILED', url: null, hostPort: null, framework: null, reason });
       pushRow({ kind: 'dev', label: 'preview', detail: `preview server failed — ${reason}`, tone: 'err' });
       if (typeof onToast === 'function') onToast(reason, 'error');
       return false;
     } catch (err) {
       const reason = String((err && err.message) || err).slice(0, 160);
+      devRef.current = { state: 'FAILED', url: null, hostPort: null, framework: null, reason };
       setDevServer({ state: 'FAILED', url: null, hostPort: null, framework: null, reason });
       pushRow({ kind: 'dev', label: 'preview', detail: `preview server failed — ${reason}`, tone: 'err' });
       return false;
@@ -424,6 +459,12 @@ export default function useAuroraRun({ projectId = 'default', onToast } = {}) {
       setPreviewBusy(false);
     }
   }, [onToast, previewBusy, projectId, pushRow]);
+
+  // send()'s auto-start runs before this callback exists in the module graph —
+  // route it through a ref that always points at the live implementation.
+  useEffect(() => {
+    startPreviewRef.current = startPreview;
+  }, [startPreview]);
 
   const stopPreview = useCallback(async () => {
     if (previewBusy) return;
@@ -434,7 +475,9 @@ export default function useAuroraRun({ projectId = 'default', onToast } = {}) {
         headers: { 'Content-Type': 'application/json' },
         body: '{}',
       });
-      setDevServer({ state: 'STOPPED', url: null, hostPort: null, framework: null, reason: null });
+      const next = { state: 'STOPPED', url: null, hostPort: null, framework: null, reason: null };
+      devRef.current = next;
+      setDevServer(next);
       pushRow({ kind: 'dev', label: 'preview', detail: 'preview server stopped', tone: 'muted' });
     } catch (_) {
       /* keep the last known state — a failed stop must not blank the chip */

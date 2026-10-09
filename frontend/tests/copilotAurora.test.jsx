@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import CopilotAurora from '../components/aurora/CopilotAurora';
+import AuroraPalette, { filterActions } from '../components/aurora/AuroraPalette';
 import { mapRunEvent, normPlanTasks, buildChatHistory } from '../components/aurora/auroraRun';
 
 /**
@@ -280,16 +281,28 @@ describe('CopilotAurora (P11 A2 — real run wiring)', () => {
   });
 
   test('static preview renders generated files; file row expands a unified diff', async () => {
-    installFetch(() =>
-      sseResponse([
-        {
-          type: 'file_written',
-          path: 'index.html',
-          content: '<!doctype html><html><body><h1>Hello Aurora</h1></body></html>',
-        },
-        { type: 'done', message: 'built' },
-      ])
-    );
+    installFetch((url) => {
+      if (String(url).includes('/dev/start')) {
+        // A4 auto-start fires after a file-writing run; a static project
+        // refuses honestly and the stage KEEPS the static srcdoc fallback.
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: false, error: 'No dev server configuration detected (static project)' }),
+        };
+      }
+      if (String(url).includes('/api/agent/run')) {
+        return sseResponse([
+          {
+            type: 'file_written',
+            path: 'index.html',
+            content: '<!doctype html><html><body><h1>Hello Aurora</h1></body></html>',
+          },
+          { type: 'done', message: 'built' },
+        ]);
+      }
+      return { ok: true, status: 200, json: async () => ({ success: true, state: 'STOPPED' }) };
+    });
     render(<CopilotAurora {...base} onToast={jest.fn()} />);
 
     const input = screen.getByTestId('aurora-composer-input');
@@ -297,11 +310,14 @@ describe('CopilotAurora (P11 A2 — real run wiring)', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
     await screen.findByText('built');
 
-    // static srcdoc carries the generated file (no dev server yet)
+    // A4 auto-start tries to go live on finish; the refusal lands in the chip
+    // and the static srcdoc fallback survives it.
+    await waitFor(() =>
+      expect(screen.getByTestId('preview-chip')).toHaveTextContent('Preview server failed')
+    );
     const frame = screen.getByTestId('aurora-frame');
     expect(frame).toHaveAttribute('data-mode', 'static');
     expect(frame.getAttribute('srcdoc')).toContain('Hello Aurora');
-    expect(screen.getByTestId('preview-chip')).toHaveTextContent('Static');
 
     // file row → inline unified diff (NEW file = all additions)
     fireEvent.click(screen.getByTestId('stage-tab-files'));
@@ -452,6 +468,157 @@ describe('CopilotAurora (P11 A2 — real run wiring)', () => {
     expect(keyWarnings).toHaveLength(0);
   });
 
+  test('Ctrl+K opens the palette, filters, Enter executes (permission switch)', async () => {
+    installFetch(() => ({ ok: true, status: 200, json: async () => ({ success: true, state: 'STOPPED' }) }));
+    render(<CopilotAurora {...base} onToast={jest.fn()} />);
+
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    const palette = await screen.findByTestId('aurora-palette');
+    expect(within(palette).getByTestId('palette-input')).toBeInTheDocument();
+
+    // filter narrows to the turbo permission row…
+    fireEvent.change(screen.getByTestId('palette-input'), { target: { value: 'turbo' } });
+    const items = within(palette).getAllByTestId('palette-item');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toHaveTextContent('Permission: turbo');
+
+    // …Enter runs it: palette closes, segment flips, no palette left behind
+    fireEvent.keyDown(screen.getByTestId('palette-input'), { key: 'Enter' });
+    expect(screen.queryByTestId('aurora-palette')).toBeNull();
+    expect(screen.getByTestId('perm-turbo')).toHaveAttribute('aria-pressed', 'true');
+
+    // Esc closes without executing anything — turbo (from Enter) stays active
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    await screen.findByTestId('aurora-palette');
+    fireEvent.keyDown(screen.getByTestId('palette-input'), { key: 'Escape' });
+    expect(screen.queryByTestId('aurora-palette')).toBeNull();
+    expect(screen.getByTestId('perm-turbo')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('perm-auto')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('palette file entry jumps to the Files tab with the diff open', async () => {
+    installFetch(() =>
+      sseResponse([
+        { type: 'file_written', path: 'src/timer.js', content: 'export const t = 1;' },
+        { type: 'done', message: 'file done' },
+      ])
+    );
+    render(<CopilotAurora {...base} onToast={jest.fn()} />);
+
+    const input = screen.getByTestId('aurora-composer-input');
+    fireEvent.change(input, { target: { value: 'write timer file' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    await screen.findByText('file done');
+
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    await screen.findByTestId('aurora-palette');
+    fireEvent.change(screen.getByTestId('palette-input'), { target: { value: 'timer' } });
+    const entry = within(screen.getByTestId('aurora-palette')).getAllByTestId('palette-item')[0];
+    expect(entry).toHaveTextContent('src/timer.js');
+    expect(entry).toHaveTextContent('NEW');
+    fireEvent.click(entry);
+
+    expect(screen.queryByTestId('aurora-palette')).toBeNull();
+    expect(screen.getByTestId('stage-tab-files')).toHaveAttribute('aria-selected', 'true');
+    const row = screen.getByTestId('file-row');
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('diff-panel')).toBeInTheDocument();
+  });
+
+  test('Alt+P / Alt+F switch stage tabs; Alt+S boots the preview server', async () => {
+    const fetchMock = installFetch((url) => {
+      if (String(url).includes('/dev/start')) {
+        return { ok: true, status: 200, json: async () => ({ success: true, ok: true, url: 'http://localhost:8410', hostPort: 8410, framework: 'vite' }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ success: true, state: 'STOPPED' }) };
+    });
+    render(<CopilotAurora {...base} onToast={jest.fn()} />);
+
+    fireEvent.keyDown(window, { key: 'f', altKey: true });
+    expect(screen.getByTestId('stage-tab-files')).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(window, { key: 'p', altKey: true });
+    expect(screen.getByTestId('stage-tab-preview')).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.keyDown(window, { key: 's', altKey: true });
+    await screen.findByText('live preview on :8410');
+    expect(screen.getByTestId('preview-chip')).toHaveTextContent('Live · :8410');
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/dev/start'))).toBe(true);
+
+    // second Alt+S while live → STOP (toggle), not a second start
+    fireEvent.keyDown(window, { key: 's', altKey: true });
+    await waitFor(() => expect(screen.queryByTestId('preview-chip')).toBeNull());
+  });
+
+  test('run-finish auto-starts the preview when the run wrote files', async () => {
+    const fetchMock = installFetch((url) => {
+      if (String(url).includes('/dev/start')) {
+        return { ok: true, status: 200, json: async () => ({ success: true, ok: true, url: 'http://localhost:8311', hostPort: 8311, framework: 'vite' }) };
+      }
+      if (String(url).includes('/api/agent/run')) {
+        return sseResponse([
+          { type: 'file_written', path: 'src/App.jsx', content: 'export default App' },
+          { type: 'done', message: 'autostart done' },
+        ]);
+      }
+      return { ok: true, status: 200, json: async () => ({ success: true, state: 'STOPPED' }) };
+    });
+    render(<CopilotAurora {...base} onToast={jest.fn()} />);
+
+    const input = screen.getByTestId('aurora-composer-input');
+    fireEvent.change(input, { target: { value: 'build it' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    // director runs never emit dev_server — the hook boots the server itself
+    await screen.findByText('live preview on :8311');
+    expect(screen.getByTestId('preview-chip')).toHaveTextContent('Live · :8311');
+    const startCalls = fetchMock.mock.calls.filter(([u]) => String(u).includes('/dev/start'));
+    expect(startCalls).toHaveLength(1); // exactly once per run
+  });
+
+  test('no auto-start when the run wrote nothing', async () => {
+    const fetchMock = installFetch((url) => {
+      if (String(url).includes('/api/agent/run')) {
+        return sseResponse([
+          { type: 'thinking', message: 'hmm' },
+          { type: 'done', message: 'no files done' },
+        ]);
+      }
+      return { ok: true, status: 200, json: async () => ({ success: true, state: 'STOPPED' }) };
+    });
+    render(<CopilotAurora {...base} onToast={jest.fn()} />);
+
+    const input = screen.getByTestId('aurora-composer-input');
+    fireEvent.change(input, { target: { value: 'just talk' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    await screen.findByText('no files done');
+
+    await new Promise((r) => setTimeout(r, 60)); // let any stray auto-start land
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/dev/start'))).toBe(false);
+    expect(screen.queryByTestId('preview-chip')).toBeNull();
+  });
+
+  test('Stage toggle opens the narrow overlay (backdrop + Esc)', async () => {
+    installFetch(() => ({ ok: true, status: 200, json: async () => ({ success: true, state: 'STOPPED' }) }));
+    render(<CopilotAurora {...base} onToast={jest.fn()} />);
+
+    const shell = screen.getByTestId('aurora-shell');
+    expect(shell).toHaveAttribute('data-stage-open', 'false');
+
+    fireEvent.click(screen.getByTestId('stage-toggle'));
+    expect(shell).toHaveAttribute('data-stage-open', 'true');
+    expect(screen.getByTestId('stage-backdrop')).toBeInTheDocument();
+
+    // backdrop click closes
+    fireEvent.click(screen.getByTestId('stage-backdrop'));
+    expect(shell).toHaveAttribute('data-stage-open', 'false');
+
+    // Esc closes too
+    fireEvent.click(screen.getByTestId('stage-toggle'));
+    expect(shell).toHaveAttribute('data-stage-open', 'true');
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(shell).toHaveAttribute('data-stage-open', 'false');
+  });
+
   test('classic escape hatch writes the fallback flag', () => {
     render(<CopilotAurora {...base} onToast={jest.fn()} />);
     expect(window.localStorage.getItem('ai_dost_copilot_ui')).toBeNull();
@@ -461,6 +628,20 @@ describe('CopilotAurora (P11 A2 — real run wiring)', () => {
 });
 
 describe('auroraRun mapper (pure)', () => {
+  test('filterActions: multi-token AND over label/hint/group (A4 palette)', () => {
+    const acts = [
+      { id: 'a', label: 'Preview: start dev server', hint: 'alt+S', group: 'preview' },
+      { id: 'b', label: 'src/timer.js', hint: 'NEW', group: 'file' },
+      { id: 'c', label: 'Permission: turbo', group: 'permission' },
+    ];
+    expect(filterActions(acts, '')).toHaveLength(3); // empty → passthrough
+    expect(filterActions(acts, 'prev').map((a) => a.id)).toEqual(['a']);
+    expect(filterActions(acts, 'NEW timer').map((a) => a.id)).toEqual(['b']); // hint + label
+    expect(filterActions(acts, 'permission').map((a) => a.id)).toEqual(['c']); // group
+    expect(filterActions(acts, 'zzz')).toHaveLength(0);
+    expect(filterActions(undefined, 'x')).toHaveLength(0); // degenerate input
+  });
+
   test('normPlanTasks maps backend statuses to rail statuses', () => {
     const tasks = normPlanTasks([
       { id: 'a', objective: 'One', status: 'completed' },
