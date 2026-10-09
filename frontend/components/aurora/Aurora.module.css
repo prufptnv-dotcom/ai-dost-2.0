@@ -585,11 +585,16 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   padding: 7px 14px;
+  border: none;
   border-bottom: 1px solid var(--color-border-subtle);
+  background: transparent;
+  text-align: left;
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--color-text-secondary);
+  cursor: pointer;
   transition: background var(--motion-fast) var(--motion-ease);
 }
 
@@ -621,6 +626,178 @@
 .diffDel {
   color: var(--signal-error);
   font-size: 10.5px;
+}
+
+/* ─── Preview (A3: live proxy frame OR static generated-files srcdoc) ─── */
+
+.previewWrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.previewBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--bg-card);
+}
+
+.previewChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+}
+
+.previewDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-disabled);
+}
+
+.previewChipLive {
+  color: var(--signal-success);
+}
+
+.previewChipLive .previewDot {
+  background: var(--signal-success);
+  animation: liveBlink 1.6s ease-in-out infinite;
+}
+
+.previewChipBad {
+  color: var(--signal-error);
+}
+
+.previewChipBad .previewDot {
+  background: var(--signal-error);
+}
+
+.previewBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease);
+}
+
+.previewBtn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
+}
+
+.previewBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* labeled variant for the empty-state Start preview action */
+.previewStartBtn {
+  width: auto;
+  height: auto;
+  gap: 7px;
+  padding: 7px 15px;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+}
+
+.previewStartBtn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+}
+
+.previewFailText {
+  color: var(--signal-error);
+  max-width: 340px;
+  line-height: 1.5;
+}
+
+.previewFrame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: var(--bg-surface, var(--bg-card));
+}
+
+/* ─── Inline unified diff (A3: click a file row) ─── */
+
+.diffPanel {
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--bg-sunken, var(--bg-card));
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.diffHead {
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-disabled);
+  position: sticky;
+  top: 0;
+  background: var(--bg-sunken, var(--bg-card));
+}
+
+.diffLine {
+  display: flex;
+  gap: 8px;
+  padding: 1px 14px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diffLineAdd {
+  background: var(--signal-success-subtle);
+}
+
+.diffLineAdd .diffSign {
+  color: var(--signal-success);
+}
+
+.diffLineDel {
+  background: var(--signal-error-subtle);
+}
+
+.diffLineDel .diffSign {
+  color: var(--signal-error);
+}
+
+.diffSign {
+  flex: none;
+  width: 12px;
+  color: var(--color-text-disabled);
+  user-select: none;
+}
+
+.diffText {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text-secondary);
+}
+
+.diffMore {
+  padding: 6px 14px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-text-disabled);
 }
 
 /* ─── Approval gate (A2: ask-permission runs pause here) ─── */

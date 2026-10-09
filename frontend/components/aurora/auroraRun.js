@@ -16,7 +16,8 @@
  *   { op:'plan', tasks:[{id,label,status}] }     replace plan checklist
  *   { op:'task', id, status }                    patch one plan task
  *   { op:'planAllDone' }                         mark every task done
- *   { op:'file', path, content }                 file written (hook diffs)
+ *   { op:'file', path, content, previous, isNew }  file written (hook diffs)
+ *   { op:'devServer', server:{state,url,hostPort,...} }  P5 live preview
  *   { op:'runId', runId }                        run identity
  *   { op:'approval', token, gate }               approval gate → banner
  *   { op:'unknown', type, row }                  deduped catch-all
@@ -203,7 +204,42 @@ export function mapRunEvent(data) {
           : typeof data.contents === 'string'
             ? data.contents
             : '';
-      return [{ op: 'file', path: String(path), content }];
+      // previous/isNew (agent.js:927) power the run-scope diff baseline;
+      // events without them fall back to the hook's local stream state.
+      return [
+        {
+          op: 'file',
+          path: String(path),
+          content,
+          previous: typeof data.previous === 'string' ? data.previous : null,
+          isNew: typeof data.isNew === 'boolean' ? data.isNew : undefined,
+        },
+      ];
+    }
+
+    case 'dev_server': {
+      // P5: ensureLivePreview emits this after verification — READY flips the
+      // stage to a real iframe, FAILED keeps the static fallback + red chip.
+      const st = String(data.state || 'STARTING');
+      const detail =
+        st === 'READY'
+          ? `live preview on :${data.hostPort ?? '?'}${data.reused ? ' (reused)' : ''}`
+          : st === 'FAILED'
+            ? `preview server failed — ${data.reason || 'unknown reason'}`
+            : 'preview server starting…';
+      return [
+        row('dev', 'preview', detail, st === 'READY' ? 'ok' : st === 'FAILED' ? 'err' : 'info'),
+        {
+          op: 'devServer',
+          server: {
+            state: st,
+            url: data.url || null,
+            hostPort: data.hostPort ?? null,
+            framework: data.framework || null,
+            reason: data.reason || null,
+          },
+        },
+      ];
     }
 
     case 'director_file_diff': {

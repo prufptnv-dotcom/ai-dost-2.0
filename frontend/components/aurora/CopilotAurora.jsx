@@ -184,7 +184,15 @@ export default function CopilotAurora({
         </div>
       </div>
 
-      <AuroraStage files={run.files} />
+      <AuroraStage
+        files={run.files}
+        contents={run.contents}
+        projectId={projectId}
+        devServer={run.devServer}
+        previewBusy={run.previewBusy}
+        onStartPreview={run.startPreview}
+        onStopPreview={run.stopPreview}
+      />
     </div>
   );
 }

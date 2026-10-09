@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import CopilotAurora from '../components/aurora/CopilotAurora';
 import { mapRunEvent, normPlanTasks, buildChatHistory } from '../components/aurora/auroraRun';
 
@@ -92,6 +92,11 @@ describe('CopilotAurora (P11 A2 — real run wiring)', () => {
 
   beforeEach(() => {
     window.localStorage.clear();
+    // Default fetch: harmless preview-status probe (the hook probes on mount
+    // for a P7-persisted dev server). Tests override via installFetch.
+    global.fetch = jest.fn(() =>
+      Promise.resolve({ ok: true, status: 200, json: async () => ({ success: true, state: 'STOPPED' }) })
+    );
   });
 
   afterEach(() => {
@@ -196,14 +201,21 @@ describe('CopilotAurora (P11 A2 — real run wiring)', () => {
 
   test('approval gate → banner → Approve resumes with token, no duplicate user row', async () => {
     let runCalls = 0;
-    const fetchMock = installFetch(() => {
-      runCalls += 1;
-      if (runCalls === 1) {
-        return sseResponse([
-          { type: 'gate_approval_required', message: 'Approve npm install', gate: { approval_token: 'tok-1' } },
-        ]);
+    const fetchMock = installFetch((url) => {
+      const u = String(url);
+      if (u.includes('/api/chat/tasks/') && u.endsWith('/cancel')) {
+        return { ok: true, status: 200, json: async () => ({ ok: true }) };
       }
-      return sseResponse([{ type: 'done', message: 'resumed and done' }]);
+      if (u.includes('/api/agent/run')) {
+        runCalls += 1;
+        if (runCalls === 1) {
+          return sseResponse([
+            { type: 'gate_approval_required', message: 'Approve npm install', gate: { approval_token: 'tok-1' } },
+          ]);
+        }
+        return sseResponse([{ type: 'done', message: 'resumed and done' }]);
+      }
+      return { ok: true, status: 200, json: async () => ({ success: true, state: 'STOPPED' }) }; // status probe
     });
     render(<CopilotAurora {...base} onToast={jest.fn()} />);
 
@@ -234,6 +246,7 @@ describe('CopilotAurora (P11 A2 — real run wiring)', () => {
     render(<CopilotAurora {...base} onToast={jest.fn()} />);
 
     expect(screen.getByTestId('aurora-preview')).toBeInTheDocument();
+    expect(screen.queryByTestId('aurora-frame')).toBeNull(); // no fake preview
     expect(screen.queryByTestId('aurora-files')).toBeNull();
 
     fireEvent.click(screen.getByTestId('stage-tab-files'));
@@ -242,6 +255,201 @@ describe('CopilotAurora (P11 A2 — real run wiring)', () => {
 
     fireEvent.click(screen.getByTestId('stage-tab-preview'));
     expect(screen.getByTestId('aurora-preview')).toBeInTheDocument();
+  });
+
+  test('dev_server READY flips the stage to the live proxy frame', async () => {
+    installFetch(() =>
+      sseResponse([
+        { type: 'file_written', path: 'src/App.jsx', content: 'export default App' },
+        { type: 'dev_server', state: 'READY', url: 'http://localhost:5199', hostPort: 5199, framework: 'vite' },
+        { type: 'done', message: 'served' },
+      ])
+    );
+    render(<CopilotAurora {...base} onToast={jest.fn()} />);
+
+    const input = screen.getByTestId('aurora-composer-input');
+    fireEvent.change(input, { target: { value: 'serve it' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await screen.findByText('served');
+    const frame = screen.getByTestId('aurora-frame');
+    expect(frame).toHaveAttribute('data-mode', 'live');
+    expect(frame.getAttribute('src')).toContain('/api/preview/p1');
+    expect(screen.getByTestId('preview-chip')).toHaveTextContent('Live · :5199');
+    await screen.findByText('live preview on :5199'); // spine row
+  });
+
+  test('static preview renders generated files; file row expands a unified diff', async () => {
+    installFetch(() =>
+      sseResponse([
+        {
+          type: 'file_written',
+          path: 'index.html',
+          content: '<!doctype html><html><body><h1>Hello Aurora</h1></body></html>',
+        },
+        { type: 'done', message: 'built' },
+      ])
+    );
+    render(<CopilotAurora {...base} onToast={jest.fn()} />);
+
+    const input = screen.getByTestId('aurora-composer-input');
+    fireEvent.change(input, { target: { value: 'single html page' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    await screen.findByText('built');
+
+    // static srcdoc carries the generated file (no dev server yet)
+    const frame = screen.getByTestId('aurora-frame');
+    expect(frame).toHaveAttribute('data-mode', 'static');
+    expect(frame.getAttribute('srcdoc')).toContain('Hello Aurora');
+    expect(screen.getByTestId('preview-chip')).toHaveTextContent('Static');
+
+    // file row → inline unified diff (NEW file = all additions)
+    fireEvent.click(screen.getByTestId('stage-tab-files'));
+    const row = screen.getByTestId('file-row');
+    expect(row).toHaveAttribute('data-path', 'index.html');
+    expect(row).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(row);
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    const panel = screen.getByTestId('diff-panel');
+    expect(panel.querySelector('[data-type="add"]')).toBeTruthy();
+    expect(panel.textContent).toContain('Hello Aurora');
+    expect(panel.textContent).toContain('+1'); // +add −del header
+
+    fireEvent.click(row);
+    expect(screen.queryByTestId('diff-panel')).toBeNull();
+  });
+
+  test('mount probe adopts a P7-persisted dev server (live before first run)', async () => {
+    installFetch(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, running: true, state: 'READY', url: 'http://localhost:5222', hostPort: 5222 }),
+      })
+    );
+    render(<CopilotAurora {...base} onToast={jest.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId('preview-chip')).toHaveTextContent('Live · :5222'));
+    const frame = screen.getByTestId('aurora-frame');
+    expect(frame).toHaveAttribute('data-mode', 'live');
+    expect(frame.getAttribute('src')).toContain('/api/preview/p1');
+    expect(screen.getByTestId('aurora-stop')).toBeDisabled(); // no run needed
+  });
+
+  test('Start preview button boots the dev server via /dev/start → Live', async () => {
+    const fetchMock = installFetch((url) => {
+      if (String(url).includes('/dev/start')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true, ok: true, url: 'http://localhost:5432', hostPort: 5432, framework: 'vite' }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ success: true, state: 'STOPPED' }) };
+    });
+    render(<CopilotAurora {...base} onToast={jest.fn()} />);
+
+    // idle + no server → empty state carries the labeled Start action
+    const startBtn = await screen.findByTestId('preview-start');
+    expect(startBtn).toHaveTextContent('Start preview');
+    expect(screen.queryByTestId('preview-chip')).toBeNull(); // no fake chip
+
+    fireEvent.click(startBtn);
+    await screen.findByText('live preview on :5432'); // spine row
+    expect(screen.getByTestId('preview-chip')).toHaveTextContent('Live · :5432');
+    const frame = screen.getByTestId('aurora-frame');
+    expect(frame).toHaveAttribute('data-mode', 'live');
+    expect(frame.getAttribute('src')).toContain('/api/preview/p1');
+
+    // same contract CopilotIDE ships with
+    const startCall = fetchMock.mock.calls.find(([u]) => String(u).includes('/dev/start'));
+    expect(startCall).toBeTruthy();
+    expect(startCall[1].method).toBe('POST');
+    expect(JSON.parse(startCall[1].body).projectPath).toBe('.');
+    // start button swaps for stop
+    expect(screen.queryByTestId('preview-start')).toBeNull();
+    expect(screen.getByTestId('preview-stop')).toBeInTheDocument();
+  });
+
+  test('Stop preview posts /dev/stop and falls back to empty (no fake live chip)', async () => {
+    const fetchMock = installFetch((url, init) => {
+      if (String(url).includes('/dev/stop')) {
+        return { ok: true, status: 200, json: async () => ({ success: true, state: 'STOPPED' }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, running: true, state: 'READY', url: 'http://localhost:5240', hostPort: 5240 }),
+      };
+    });
+    render(<CopilotAurora {...base} onToast={jest.fn()} />);
+
+    // probe adopts the persisted server → live + stop control
+    await waitFor(() => expect(screen.getByTestId('preview-chip')).toHaveTextContent('Live · :5240'));
+    const stopBtn = screen.getByTestId('preview-stop');
+    expect(screen.queryByTestId('preview-start')).toBeNull();
+
+    fireEvent.click(stopBtn);
+    await waitFor(() => expect(screen.queryByTestId('preview-chip')).toBeNull()); // no server → honest empty
+    expect(screen.getByTestId('preview-start')).toBeInTheDocument();
+    expect(screen.getByText('No preview yet')).toBeInTheDocument();
+
+    const stopCall = fetchMock.mock.calls.find(([u]) => String(u).includes('/dev/stop'));
+    expect(stopCall).toBeTruthy();
+    expect(stopCall[1].method).toBe('POST');
+  });
+
+  test('failed start surfaces the honest reason in the empty state (not just spine)', async () => {
+    installFetch((url) => {
+      if (String(url).includes('/dev/start')) {
+        return { ok: true, status: 500, json: async () => ({ success: false, error: 'No dev server configuration detected (static project)' }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ success: true, state: 'STOPPED' }) };
+    });
+    render(<CopilotAurora {...base} onToast={jest.fn()} />);
+
+    const startBtn = await screen.findByTestId('preview-start');
+    fireEvent.click(startBtn);
+
+    // empty state now carries the failure line — no fake chip, no silent swallow.
+    // scoped to the stage: the same sentence also lives in the spine row (by design).
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('aurora-preview')).getByText(/preview server failed — No dev server configuration detected/)
+      ).toBeInTheDocument()
+    );
+    expect(screen.queryByTestId('preview-chip')).toBeNull();
+    expect(screen.queryByTestId('aurora-frame')).toBeNull();
+    // retry stays available (STARTING is the only state that hides Start)
+    expect(screen.getByTestId('preview-start')).toBeInTheDocument();
+  });
+
+  test('batched SSE events get unique row keys (no React duplicate-key warnings)', async () => {
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    installFetch(() =>
+      sseResponse([
+        { type: 'thinking', message: 'one' },
+        { type: 'thinking', message: 'two' },
+        { type: 'tool_call', action: 'read_file', thought: 'a' },
+        { type: 'tool_call', action: 'write_file', thought: 'b' },
+        { type: 'step', tool: 'list_directory', description: 'scan', status: 'done' },
+        { type: 'step', tool: 'write_file', description: 'w', status: 'done' },
+        { type: 'file_written', path: 'x.js', content: '1' },
+        { type: 'done', message: 'batched done' },
+      ])
+    );
+    render(<CopilotAurora {...base} onToast={jest.fn()} />);
+
+    const input = screen.getByTestId('aurora-composer-input');
+    fireEvent.change(input, { target: { value: 'batch' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    await screen.findByText('batched done');
+
+    // ids are minted OUTSIDE the state updater — React batching used to make
+    // queued updaters read the same final seqRef value → duplicate `r7` keys.
+    const keyWarnings = errSpy.mock.calls.filter((c) => String(c[0] || '').includes('same key'));
+    errSpy.mockRestore();
+    expect(keyWarnings).toHaveLength(0);
   });
 
   test('classic escape hatch writes the fallback flag', () => {
@@ -296,6 +504,20 @@ describe('auroraRun mapper (pure)', () => {
     expect(b[0].row.detail).toBe('html_write · Create page');
     // running frame (duplicate of the done frame) must not spam the spine
     expect(mapRunEvent({ type: 'step', tool: 'html_write', description: 'Create page', status: 'running' })).toEqual([]);
+  });
+
+  test('dev_server events → preview row + devServer op (READY/FAILED)', () => {
+    const ok = mapRunEvent({ type: 'dev_server', state: 'READY', url: 'http://x', hostPort: 5199 });
+    expect(ok[0].row).toMatchObject({ label: 'preview', tone: 'ok' });
+    expect(ok[0].row.detail).toContain(':5199');
+    expect(ok[1]).toEqual({
+      op: 'devServer',
+      server: expect.objectContaining({ state: 'READY', hostPort: 5199, url: 'http://x' }),
+    });
+    const fail = mapRunEvent({ type: 'dev_server', state: 'FAILED', reason: 'port busy' });
+    expect(fail[0].row.tone).toBe('err');
+    expect(fail[0].row.detail).toContain('port busy');
+    expect(fail[1].server.state).toBe('FAILED');
   });
 
   test('buildChatHistory keeps only user/reply/done rows, capped', () => {
