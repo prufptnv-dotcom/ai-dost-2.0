@@ -50,7 +50,11 @@ class PlannerExecutionLoop {
     return this.executeQueue(runId, taskId, context, stepQueue, repairAttempts, goal, maxRepairs);
   }
 
-  async runWithPlan(projectId, userId, plan, maxRepairs = 3, isCanceled = () => false) {
+  async runWithPlan(projectId, userId, plan, maxRepairs = 3, isCanceled = () => false, externalTaskId = null, options = {}) {
+    // P12.3: signature parity with ChatPlannerExecutionLoop — externalTaskId is
+    // accepted but the base loop keeps generating its own task id (the subclass
+    // is the one that honors it); options carry onEvent/permissionLevel/
+    // approvalState and are wired onto the context below.
     if (!projectId || !userId) throw new Error('projectId and userId are required');
     if (!plan || typeof plan !== 'object' || typeof plan.goal !== 'string') {
       throw new Error('runWithPlan requires a validated agent plan');
@@ -61,6 +65,22 @@ class PlannerExecutionLoop {
     if (isCanceled()) return { runId: null, status: 'CANCELLED', reason: 'Canceled before execution' };
 
     const context = await this.contextAssembler.assemble(projectId, userId, plan.goal);
+    // P12.3: same options→context wiring as ChatPlannerExecutionLoop (signature
+    // parity) — approvalState is a LIVE proxy so ExecutionController's token
+    // rotation crosses worker contexts instead of dying on the first one.
+    if (options && typeof options.onEvent === 'function') context.onEvent = options.onEvent;
+    if (options && options.permissionLevel) context.permissionLevel = options.permissionLevel;
+    if (options && options.approvalState && typeof options.approvalState === 'object') {
+      delete context.approvalToken;
+      Object.defineProperty(context, 'approvalToken', {
+        configurable: true,
+        enumerable: true,
+        get() { return options.approvalState.token; },
+        set(value) { options.approvalState.token = value; },
+      });
+    } else if (options && options.approvalToken) {
+      context.approvalToken = options.approvalToken;
+    }
     const taskId = this.executionController.generateId('task');
     this.agentTaskDao.create({
       id: taskId,
@@ -132,7 +152,45 @@ class PlannerExecutionLoop {
           console.error(`❌ [PlannerExecutionLoop] Step ${stepDef?.id} (${stepDef?.tool}) execution error: ${err.message}`);
           await this.executionController.recordObservation(step.id, 'TOOL_ERROR', err.message);
           await this.executionController.completeStep(step.id, 'FAILED', null, err.message).catch(() => {});
+          // P12.4: surface the failed step honestly in the run stream (status
+          // 'failed' → warn row in Aurora; silent fall-through used to leave the
+          // failure invisible until the run-level error).
+          if (context && typeof context.onEvent === 'function') {
+            context.onEvent({
+              type: 'step',
+              tool: stepDef.tool,
+              description: stepDef.description,
+              status: 'failed',
+              error: err.message,
+            });
+          }
           if (err.code === 'TASK_CANCELED' || isCanceled()) throw Object.assign(err, { code: 'TASK_CANCELED' });
+          // P12.3: approval gates are NOT repairable — a retry without a token
+          // always fails (the old path burned the entire repair budget on it and
+          // surfaced no banner). Surface the freshly minted token as a
+          // gate_approval_required event (amber Approve banner) and fail fast
+          // with an honest reason; the Approve re-POST resumes with that token.
+          if (err.code === 'APPROVAL_REQUIRED') {
+            if (context && typeof context.onEvent === 'function') {
+              context.onEvent({
+                type: 'gate_approval_required',
+                message: `Approval required: ${err.decision} for ${err.capabilityId || 'capability'} — press Approve to resume this run`,
+                gate: {
+                  decision: err.decision,
+                  approval_token: err.approvalToken,
+                  capabilities: err.capabilities,
+                  capabilityId: err.capabilityId,
+                },
+              });
+            }
+            await this.executionController.completeRun(runId, 'FAILED', `Step ${step.id} requires user approval: ${err.message}`).catch(() => {});
+            this.agentTaskDao.updateStatus(taskId, 'FAILED');
+            return {
+              status: 'FAILED',
+              reason: `APPROVAL_REQUIRED: ${err.message}`,
+              approvalGate: { decision: err.decision, approval_token: err.approvalToken, capabilityId: err.capabilityId },
+            };
+          }
           if (repairAttempts >= maxRepairs) {
             await this.executionController.completeRun(runId, 'FAILED', `Step ${step.id} failed: max repairs reached.`);
             this.agentTaskDao.updateStatus(taskId, 'FAILED');
@@ -146,6 +204,13 @@ class PlannerExecutionLoop {
 
       cancelGuard();
       await this.executionController.verifyRun(runId);
+      // P12.4: HONEST verification gate. The old block swallowed every
+      // verification error (and never inspected output.success) and then
+      // reported SUCCEEDED unconditionally — a run whose reads all came back
+      // "File not found" still passed the director's final gate. Evidence that
+      // does not confirm (success:false) or a throwing verify step now fails
+      // the run with the real reason; cancellation still maps to CANCELLED.
+      let verificationError = null;
       try {
         const verifyPlan = await this.taskPlanner.generateVerificationPlan(goal, context);
         if (verifyPlan && Array.isArray(verifyPlan.steps) && verifyPlan.steps.length > 0) {
@@ -159,18 +224,35 @@ class PlannerExecutionLoop {
               );
               cancelGuard();
               await this.executionController.recordObservation(step.id, 'VERIFICATION_OUTPUT', output);
+              if (output && typeof output === 'object' && output.success === false) {
+                const reason = `${vStep.tool} did not confirm: ${output.error || output.code || 'verification evidence check failed'}`;
+                await this.executionController.recordVerificationResult(step.id, 'FAILED', reason, output).catch(() => {});
+                await this.executionController.completeStep(step.id, 'FAILED', null, reason).catch(() => {});
+                verificationError = reason;
+                break;
+              }
               await this.executionController.recordVerificationResult(step.id, 'PASSED', 'Tool executed successfully', output);
               await this.executionController.completeStep(step.id, 'SUCCEEDED', output);
             } catch (err) {
               await this.executionController.recordObservation(step.id, 'VERIFICATION_FAILED', err.message);
               await this.executionController.recordVerificationResult(step.id, 'FAILED', err.message).catch(() => {});
               await this.executionController.completeStep(step.id, 'FAILED', null, err.message).catch(() => {});
-              if (isCanceled()) throw Object.assign(new Error('Chat task canceled by user'), { code: 'TASK_CANCELED' });
+              if (err.code === 'TASK_CANCELED' || isCanceled()) throw Object.assign(new Error('Chat task canceled by user'), { code: 'TASK_CANCELED' });
+              verificationError = err.message;
+              break;
             }
           }
         }
       } catch (vErr) {
         if (vErr.code === 'TASK_CANCELED' || isCanceled()) throw vErr;
+        verificationError = vErr.message || 'verification planning failed';
+      }
+
+      if (verificationError) {
+        const reason = `Verification failed: ${verificationError}`;
+        await this.executionController.completeRun(runId, 'FAILED', reason).catch(() => {});
+        this.agentTaskDao.updateStatus(taskId, 'FAILED');
+        return { status: 'FAILED', reason };
       }
 
       await this.executionController.completeRun(runId, 'SUCCEEDED');
@@ -292,6 +374,18 @@ class PlannerExecutionLoop {
                 step.id, vStep.tool, vStep.input, context, this.toolRegistry
               );
               await this.executionController.recordObservation(step.id, 'VERIFICATION_OUTPUT', output);
+              // P12.4: evidence that does not confirm (read_file on a missing
+              // file, failing checks, …) fails verification — "the tool ran" is
+              // not the same as "the check passed".
+              if (output && typeof output === 'object' && output.success === false) {
+                const reason = `${vStep.tool} did not confirm: ${output.error || output.code || 'verification evidence check failed'}`;
+                await this.executionController.recordVerificationResult(step.id, 'FAILED', reason, output);
+                await this.executionController.completeStep(step.id, 'FAILED', null, reason);
+                allVerified = false;
+                verificationError = reason;
+                failedVerifyStep = vStep;
+                break;
+              }
               await this.executionController.recordVerificationResult(step.id, 'PASSED', 'Tool executed successfully', output);
               await this.executionController.completeStep(step.id, 'SUCCEEDED', output);
            } catch (err) {

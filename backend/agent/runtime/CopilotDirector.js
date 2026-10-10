@@ -186,12 +186,14 @@ class CopilotDirector {
     if (!String(request || '').trim()) throw new Error('Director request is required');
     try {
       const prompt = `${DIRECTOR_PLANNER_PROMPT}\n\nREQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
-      const response = await this.aiService.chat(prompt, [], 'agent');
+      // P12.4: mode 'planner' (no system prompt) — 'agent' mode's FILE: format
+      // instruction fights this prompt's "respond with valid JSON" contract.
+      const response = await this.aiService.chat(prompt, [], 'planner');
       return normalizePlan(extractJson(response), request);
     } catch (_) { return normalizePlan(null, request); }
   }
 
-  async executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent = () => {} }) {
+  async executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent = () => {}, permissionLevel = 'auto', approvalToken = null, approvalState = null }) {
     let hasExistingFiles = false;
     try {
       const meta = this.workspaceManager?.getWorkspaceMetadata?.(projectId, userId);
@@ -237,7 +239,7 @@ class CopilotDirector {
           maxRepairs || 3, 
           () => Boolean(signal?.aborted), 
           `copilot_${delegated.workerRun.id}_att${attempt}`,
-          { onEvent }
+          { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined }
         );
 
         // Execution completed all steps successfully
@@ -246,8 +248,15 @@ class CopilotDirector {
         } else {
           lastError = lastResult?.error || lastResult?.reason || 'Unknown execution failure';
         }
+        // P12.3: an approval gate cannot self-heal — a repair plan without a
+        // token hits the same gate. Propagate immediately (code preserved) so
+        // the run pauses honestly instead of burning repair/LLM budget.
+        if (typeof lastError === 'string' && lastError.startsWith('APPROVAL_REQUIRED')) {
+          throw Object.assign(new Error(lastError), { code: 'APPROVAL_REQUIRED' });
+        }
         logger.warn(`[CopilotDirector] Worker ${task.id} attempt ${attempt} status: ${lastResult?.status}, error: ${lastError}`);
       } catch (error) {
+        if (error?.code === 'APPROVAL_REQUIRED') throw error;
         lastError = error.message;
         logger.warn(`[CopilotDirector] Worker ${task.id} attempt ${attempt} caught error: ${lastError}`);
       }
@@ -256,7 +265,14 @@ class CopilotDirector {
     throw new Error(`Worker ${task.id} failed after ${attempt} self-healing attempts. Final error: ${lastError}`);
   }
 
-  async run({ userId, projectId, request, signal = null, onEvent = () => {}, maxRepairs = 3, plan: presetPlan = null }) {
+  async run({ userId, projectId, request, signal = null, onEvent = () => {}, maxRepairs = 3, plan: presetPlan = null, permissionLevel = 'auto', approvalToken = null }) {
+    // P12.3: ONE shared mutable approval state for this run — every worker (and
+    // the final verification) gets the SAME holder. ExecutionController's
+    // single-use rotation writes through the ChatPlanner context proxy into it,
+    // so a worker that builds its context later reads the ROTATED token instead
+    // of the original one an earlier worker already consumed
+    // ("already consumed (replay rejected)" used to kill every later gated step).
+    const approvalState = { token: approvalToken || null };
     // Plan-mode override: use the user-approved plan (normalized + validated —
     // bad shapes fall back to a generic sequential plan, never crash).
     const plan = presetPlan ? normalizePlan(presetPlan, request) : await this.createPlan(request, { projectId });
@@ -273,20 +289,45 @@ class CopilotDirector {
       while (pending.size) {
         if (signal?.aborted) return { status: 'CANCELLED', taskId: supervisorTaskId, runId: supervisorRunId, plan, results };
         const ready = plan.tasks.filter((task) => pending.has(task.id) && task.dependsOn.every((dep) => completed.get(dep) === 'SUCCEEDED'));
-        if (!ready.length) throw new Error('Director plan is dependency-blocked or contains an invalid dependency graph');
+        if (!ready.length) {
+          // P12.3: remaining tasks are blocked by skipped/failed deps — report
+          // them honestly and proceed to verification instead of crashing the
+          // whole run ("dependency-blocked" used to discard completed work).
+          for (const stuck of plan.tasks.filter((task) => pending.has(task.id))) {
+            pending.delete(stuck.id);
+            results.push({ task: stuck, status: 'SKIPPED', error: 'Dependency did not succeed' });
+            onEvent({ type: 'director_task', status: 'SKIPPED', taskId: stuck.id, specialty: stuck.specialty, role: stuck.role, error: 'Dependency did not succeed' });
+          }
+          break;
+        }
         for (const task of ready) {
           pending.delete(task.id);
           let delegated = null;
           let executionResult = null;
           let lastError = null;
+          let delegateFailed = null;
           for (let attempt = 1; attempt <= MAX_WORKER_RETRIES + 1; attempt += 1) {
             onEvent({ type: 'director_task', status: attempt === 1 ? 'DELEGATING' : 'RETRYING', attempt, taskId: task.id, specialty: task.specialty, role: task.role, objective: task.objective });
-            delegated = await this.coordinator.delegate({ supervisorRunId, role: task.role, objective: task.objective, constraints: { specialty: task.specialty, directorTaskId: task.id, attempt }, expectedOutput: task.expectedOutput });
             try {
-              executionResult = await this.coordinator.startWorker(delegated.workerRun.id, { autoPlan: false, runner: () => this.executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent }) });
+              delegated = await this.coordinator.delegate({ supervisorRunId, role: task.role, objective: task.objective, constraints: { specialty: task.specialty, directorTaskId: task.id, attempt }, expectedOutput: task.expectedOutput });
+            } catch (delegateErr) {
+              // P12.3: a spawn failure (worker cap, project limits) must not
+              // nuke completed work — skip this task honestly and move on;
+              // its dependents are skipped by the !ready branch above.
+              logger.warn(`[CopilotDirector] delegate failed for task ${task.id}: ${delegateErr.message}`);
+              delegateFailed = delegateErr;
+              break;
+            }
+            try {
+              executionResult = await this.coordinator.startWorker(delegated.workerRun.id, { autoPlan: false, runner: () => this.executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent, permissionLevel, approvalToken, approvalState }) });
               lastError = null;
               break;
-            } catch (error) { lastError = error; if (signal?.aborted) break; }
+            } catch (error) { lastError = error; if (signal?.aborted || error?.code === 'APPROVAL_REQUIRED') break; }
+          }
+          if (delegateFailed) {
+            results.push({ task, status: 'SKIPPED', error: delegateFailed.message });
+            onEvent({ type: 'director_task', status: 'SKIPPED', taskId: task.id, specialty: task.specialty, role: task.role, error: delegateFailed.message });
+            continue;
           }
           if (lastError) {
             completed.set(task.id, 'FAILED');
@@ -324,7 +365,7 @@ class CopilotDirector {
       }
       onEvent({ type: 'director_verification', status: 'DELEGATING' });
       const verifier = await this.coordinator.delegate({ supervisorRunId, role: 'VERIFIER', objective: `Perform the final read-only verification gate for the requested outcome: ${request}. Inspect the current workspace state and confirm tests/build/runtime evidence where supported. Do not mutate the workspace.`, constraints: { specialty: 'verification', generatedByDirector: true }, expectedOutput: 'Final verification evidence and any remaining blockers.' });
-      const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, { runner: async () => { const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER' }); return this.plannerExecutionLoop.runWithPlan(projectId, userId, verificationPlan, 0, () => Boolean(signal?.aborted), `copilot_verify_${verifier.workerRun.id}`); } });
+      const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, { runner: async () => { const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER' }); return this.plannerExecutionLoop.runWithPlan(projectId, userId, verificationPlan, 0, () => Boolean(signal?.aborted), `copilot_verify_${verifier.workerRun.id}`, { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined }); } });
       onEvent({ type: 'director_verification', status: finalVerification?.status || 'FAILED', workerRunId: verifier.workerRun.id, result: finalVerification });
       if (finalVerification?.status !== 'SUCCEEDED') throw new Error('Final Director verification gate did not pass');
       this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');

@@ -93,6 +93,16 @@ function isPrivateOrReservedIp(ip) {
   // Check IPv6
   if (net.isIPv6(cleanIp)) {
     const lower = cleanIp.toLowerCase();
+    // IPv4-mapped IPv6 in the CANONICAL HEX form: the WHATWG URL parser
+    // normalizes http://[::ffff:127.0.0.1] to ::ffff:7f00:1, so the dotted
+    // quad detection above sees '7f00:1' (not an IPv4) and falls through —
+    // an actual SSRF bypass, because OS stacks route ::ffff:x:y as IPv4 x.y.
+    const mappedHex = lower.match(/^(?:::|0:0:0:0:0:)ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (mappedHex) {
+      const hi = parseInt(mappedHex[1], 16);
+      const lo = parseInt(mappedHex[2], 16);
+      return isPrivateOrReservedIp(`${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`);
+    }
     // Loopback
     if (lower === '::1' || lower === '0:0:0:0:0:0:0:1') return true;
     // Unspecified

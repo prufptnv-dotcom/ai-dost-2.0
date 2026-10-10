@@ -48,7 +48,15 @@ async function withApp(handler) {
 
 describe('security hardening configuration', () => {
   test('production CORS is deny-by-default', () => {
-    assert.deepEqual(hardening.corsOrigins, ['https://app.example.com']);
+    // Production allowlist = configured origins + the backend's OWN origin
+    // (selfOrigins() — the backend must accept its own proxied Live Preview
+    // module requests). Never the dev :3000 defaults, never third parties.
+    const selfPort = process.env.PORT || '5000';
+    assert.deepEqual(hardening.corsOrigins, [
+      'https://app.example.com',
+      `http://localhost:${selfPort}`,
+      `http://127.0.0.1:${selfPort}`,
+    ]);
     assert.equal(hardening.isOriginAllowed('https://app.example.com'), true);
     assert.equal(hardening.isOriginAllowed('https://evil.example'), false);
     assert.equal(hardening.isOriginAllowed(undefined), true);

@@ -201,7 +201,7 @@ class OpenRouterService {
     async _chat(message, history = [], customApiKey = null, mode = 'project', modelOverride = null) {
         try {
             const messages = [];
-            if (mode !== 'agent') {
+            if (mode !== 'agent' && mode !== 'planner') {
                 messages.push({
                     role: 'system',
                     content: withQualityStandard(`You are AI-Dost, an expert Senior Software Engineer and AI Assistant. Write clean, optimal, production-grade code wrapped inside markdown code blocks.`)

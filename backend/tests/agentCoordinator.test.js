@@ -245,21 +245,28 @@ test('Phase 2G.3 - AgentCoordinator, Supervisor Runtime, and Result Persistence'
       title: 'Limit Test Task'
     });
 
-    // Create 5 workers
-    for (let i = 1; i <= 5; i++) {
-      await limitSession.supervisor.delegate({
+    // Create 12 workers (P12.3: MAX_WORKERS_PER_SUPERVISOR raised 5 → 12 so
+    // realistic director plans + the verification delegate fit). Each worker
+    // run is completed right away — in real runs the director executes
+    // sequentially, so this mirrors the active-run count a single plan sees
+    // (otherwise the separate per-PROJECT active cap of 10 would trip first).
+    for (let i = 1; i <= 12; i++) {
+      const session = await limitSession.supervisor.delegate({
         role: 'RESEARCHER',
         objective: `Worker ${i} task`
       });
+      if (session && session.workerRun && session.workerRun.id) {
+        runDao.updateStatus(session.workerRun.id, 'SUCCEEDED');
+      }
     }
 
-    // 6th worker should be rejected
+    // 13th worker should be rejected (per-task cap counts ALL runs, completed included)
     await assert.rejects(
       limitSession.supervisor.delegate({
         role: 'RESEARCHER',
-        objective: 'Worker 6 exceeding limit'
+        objective: 'Worker 13 exceeding limit'
       }),
-      /Worker limit per supervisor task exceeded: max allowed is 5/
+      /Worker limit per supervisor task exceeded: max allowed is 12/
     );
   });
 

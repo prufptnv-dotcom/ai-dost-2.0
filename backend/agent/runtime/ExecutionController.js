@@ -199,6 +199,7 @@ class ExecutionController {
             err.decision = evaluation.decision;
             err.approvalToken = evaluation.approval_token;
             err.capabilities = evaluation.capabilities;
+            err.capabilityId = capId;
             throw err;
           }
 
@@ -212,6 +213,15 @@ class ExecutionController {
 
           if (!validation.valid) {
             throw new Error(`Invalid or expired approval token: ${validation.reason}`);
+          }
+          // P12.3: approval tokens are single-use by design (replay protection),
+          // but the user approved THIS run — a multi-step run (install, build…)
+          // died at its second gated step with TOKEN_ALREADY_USED. Continue the
+          // approved scope with the fresh token this step's evaluation already
+          // minted: every later gated step still runs the full validateApproval
+          // (TTL, capability scope, live re-evaluation) against an unconsumed token.
+          if (evaluation.approval_token) {
+            context.approvalToken = evaluation.approval_token;
           }
         }
       }
@@ -290,6 +300,26 @@ class ExecutionController {
       clearTimeout(timeoutHandle);
       removeParentAbortListener?.();
       const duration = Date.now() - startTime;
+
+      // P12.4: a MUTATION that did not apply is a FAILED step, not a silent
+      // success. write_file/apply_diff/run_terminal answering success:false
+      // (WRITE_FORBIDDEN_ON_EXISTING, guard rejection, non-zero exit code) used
+      // to resolve normally — the loop marked the step "done", skipped the
+      // file_written event, never entered repair, and the run still reported
+      // SUCCEEDED while nothing was written (E2E run #5: 3 files, claimed done).
+      // Throwing routes it into the planner loop's repair path exactly like a
+      // tool that rejects. Read tools keep returning success:false as an
+      // observation (a missing file is information, not an exception).
+      const isMutationTool = toolName === 'write_file' || toolName === 'apply_diff' || toolName === 'run_terminal';
+      if (output && typeof output === 'object' && output.success === false && isMutationTool) {
+        const message = `${toolName} did not apply: ${output.error || output.code || 'operation failed'}`;
+        await this.completeToolCall(toolCall.id, 'FAILED', output, message, { duration, errorCode: output.code || 'MUTATION_FAILED' });
+        const mutationErr = new Error(message);
+        mutationErr.code = output.code || 'MUTATION_FAILED';
+        mutationErr.mutationFailure = true;
+        throw mutationErr;
+      }
+
       await this.completeToolCall(toolCall.id, 'SUCCEEDED', output, null, { duration });
 
       if (output && output.success && (toolName === 'write_file' || toolName === 'apply_diff')) {
@@ -309,11 +339,15 @@ class ExecutionController {
       clearTimeout(timeoutHandle);
       removeParentAbortListener?.();
       const duration = Date.now() - startTime;
-      await this.completeToolCall(toolCall.id, 'FAILED', null, err.message, {
-        duration,
-        errorCode: err.code || 'TOOL_EXECUTION_FAILED',
-        ...(err.code === 'TOOL_TIMEOUT' ? { timeoutMs } : {})
-      });
+      // P12.4: the mutation-failure branch above already recorded this tool
+      // call as FAILED — do not double-record it here.
+      if (!err.mutationFailure) {
+        await this.completeToolCall(toolCall.id, 'FAILED', null, err.message, {
+          duration,
+          errorCode: err.code || 'TOOL_EXECUTION_FAILED',
+          ...(err.code === 'TOOL_TIMEOUT' ? { timeoutMs } : {})
+        });
+      }
       throw err;
     }
   }

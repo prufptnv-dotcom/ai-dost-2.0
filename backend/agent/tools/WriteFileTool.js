@@ -33,18 +33,20 @@ class WriteFileTool extends Tool {
       };
     }
 
-    const guard = deterministicCodeGuard.guard(relativePath, content);
+    // P12.3: accept single-unescape of escaped model blobs (guard-normalized);
+    // always persist `guard.content` (the source that actually passed).
+    const guard = deterministicCodeGuard.guardWithNormalization(relativePath, content);
     if (!guard.accepted) {
       return { success: false, error: `Code rejected before persistence: ${guard.reason}`, diagnostics: guard.diagnostics };
     }
     
     try {
       fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
-      fs.writeFileSync(resolvedPath, content, 'utf-8');
+      fs.writeFileSync(resolvedPath, guard.content, 'utf-8');
       return { 
         success: true, 
-        message: `Successfully wrote to ${relativePath}`,
-        metadata: { path: relativePath, byteLength: Buffer.byteLength(content, 'utf8') }
+        message: `Successfully wrote to ${relativePath}${guard.normalized ? ' (normalized escaped model output)' : ''}`,
+        metadata: { path: relativePath, byteLength: Buffer.byteLength(guard.content, 'utf8'), ...(guard.normalized ? { normalized: true } : {}) }
       };
     } catch (e) {
       throw new Error(`Failed to write file: ${e.message}`);

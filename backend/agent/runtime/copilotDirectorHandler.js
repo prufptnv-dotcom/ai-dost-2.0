@@ -5,6 +5,7 @@ const { getCopilotDirectorRuntime } = require('./createChatTaskGateway');
 const { getActiveTask } = require('../../taskCancellation');
 const { capabilityDiscovery } = require('../../agent/registry/CapabilityDiscovery');
 const { capabilityGatekeeper } = require('../../agent/policy/CapabilityGatekeeper');
+const logger = require('../../logger');
 
 const PERMISSION_LEVELS = ['ask', 'auto', 'turbo'];
 
@@ -64,6 +65,11 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
   const permissionLevel = PERMISSION_LEVELS.includes(String(body.permissionLevel || '').toLowerCase())
     ? String(body.permissionLevel).toLowerCase()
     : 'auto';
+  // P12.3: the approved token must be forwarded into the run context so the
+  // per-step CapabilityGatekeeper can validate it (previously it was read for
+  // the ask-mode probe and then dropped — even an approved run died at its
+  // first gated tool). Auto/turbo pass body.approvalToken straight through.
+  let runApprovalToken = body.approvalToken || req.headers?.['x-approval-token'] || null;
   if (permissionLevel === 'ask') {
     let capabilities = null;
     try { capabilities = capabilityDiscovery.discover(request); } catch (_) { /* fail-open: no caps → no gate */ }
@@ -128,8 +134,47 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
         tokenId: validation.token_id,
         gate: probe,
       });
+      // P12.3: the request-level token was consumed above (single-use replay
+      // protection) — mint a fresh run-scoped token so per-step gates can
+      // validate without dying at the first gated tool of the approved run.
+      runApprovalToken = capabilityGatekeeper._createApprovalToken({
+        requestId: taskId,
+        capabilityIds,
+        planId: null,
+      }).token;
     }
   }
+
+  // ── P12.1 honest-completion accounting ──────────────────────────────────
+  // deterministicCodeGuard refuses full-file rewrites of EXISTING files; before
+  // P12 the completion line still said "🎉 completed ... with final
+  // verification" even when every write was refused and ZERO files changed.
+  // Observe the event stream: count write TOOL steps vs actual file_written
+  // events, then report exactly what happened. Declared BEFORE the try so the
+  // error/paused paths report the same truth (P12.3).
+  const writtenPaths = new Set();
+  let writeAttempts = 0;
+  let tasksSkipped = 0;
+  let gateRequired = null;
+  const countingOnEvent = (event) => {
+    if (event && typeof event.type === 'string') {
+      if (event.type === 'file_written' || event.type === 'file_changed') {
+        const p = event.path || event.file;
+        if (typeof p === 'string' && p) writtenPaths.add(p);
+      } else if (
+        event.type === 'step' &&
+        event.status === 'running' &&
+        (event.tool === 'write_file' || event.tool === 'apply_diff')
+      ) {
+        writeAttempts += 1;
+      } else if (event.type === 'director_task' && event.status === 'SKIPPED') {
+        tasksSkipped += 1;
+      } else if (event.type === 'gate_approval_required' && event.gate) {
+        gateRequired = event.gate;
+      }
+    }
+    writeSse(res, { ...event, taskId });
+  };
 
   try {
     const runtime = dependencies.runtime || await getCopilotDirectorRuntime({
@@ -155,30 +200,6 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
     ? `${request}\n\nUser @-mentioned files (prioritize reading/editing these): ${contextFiles.join(', ')}`
     : request;
 
-  // ── P12.1 honest-completion accounting ──────────────────────────────────
-  // deterministicCodeGuard refuses full-file rewrites of EXISTING files; before
-  // P12 the completion line still said "🎉 completed ... with final
-  // verification" even when every write was refused and ZERO files changed.
-  // Observe the event stream: count write TOOL steps vs actual file_written
-  // events, then report exactly what happened.
-  const writtenPaths = new Set();
-  let writeAttempts = 0;
-  const countingOnEvent = (event) => {
-    if (event && typeof event.type === 'string') {
-      if (event.type === 'file_written' || event.type === 'file_changed') {
-        const p = event.path || event.file;
-        if (typeof p === 'string' && p) writtenPaths.add(p);
-      } else if (
-        event.type === 'step' &&
-        event.status === 'running' &&
-        (event.tool === 'write_file' || event.tool === 'apply_diff')
-      ) {
-        writeAttempts += 1;
-      }
-    }
-    writeSse(res, { ...event, taskId });
-  };
-
   const result = await runtime.director.run({
     userId: authorization.user.id,
     projectId: authorization.project.id,
@@ -187,6 +208,8 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
     maxRepairs: 3,
     ...(presetPlan ? { plan: presetPlan } : {}),
     onEvent: countingOnEvent,
+    permissionLevel,
+    approvalToken: runApprovalToken || undefined,
   });
 
     const taskCount = result?.summary?.match(/(\d+)\s+adaptive/)?.[1] || result?.taskCount || '?';
@@ -207,6 +230,11 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
     } else {
       message = `🎯 Copilot Director completed ${taskCount} task(s) — analysis only, no file changes were requested.`;
     }
+    // P12.3: say when tasks could not be delegated (worker cap / blocked deps)
+    // instead of silently implying every plan task ran.
+    if (tasksSkipped > 0) {
+      message += ` (${tasksSkipped} plan task(s) were skipped — worker/dependency limits)`;
+    }
 
     writeSse(res, {
       type: canceled ? 'director_canceled' : 'director_complete',
@@ -217,18 +245,70 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
       filesWritten,
       writeAttempts,
       changedPaths,
+      tasksSkipped,
       message,
       result,
     });
     return res.end();
   } catch (error) {
     const canceled = Boolean(signal?.aborted) || error?.code === 'TASK_CANCELED';
+    const filesWritten = writtenPaths.size;
+    const changedPaths = [...writtenPaths].slice(0, 50);
+
+    // P12.3: approval gates are a PAUSE, not a failure. The step-level gate
+    // already emitted gate_approval_required (with the minted token) — end the
+    // stream as `done` so the amber Approve banner is the last thing the UI
+    // sees; Approve re-POSTs the same prompt with body.approvalToken.
+    if (!canceled && (error?.code === 'APPROVAL_REQUIRED' || gateRequired)) {
+      if (!gateRequired) {
+        writeSse(res, {
+          type: 'gate_approval_required',
+          message: error?.message || 'Approval required to continue this run',
+          gate: {
+            decision: error?.decision,
+            approval_token: error?.approvalToken,
+            capabilities: error?.capabilities,
+            capabilityId: error?.capabilityId,
+          },
+        });
+      }
+      const capLabel = error?.capabilityId || gateRequired?.capabilityId || 'capability';
+      writeSse(res, {
+        type: 'done',
+        message: `⏸️ Run paused — approval required (${capLabel}) — ${filesWritten} file(s) already changed. Press Approve to resume with the same plan.`,
+        steps: [],
+        filesWritten,
+        writeAttempts,
+        changedPaths,
+        tasksSkipped,
+        approvalGate: gateRequired || { decision: error?.decision, approval_token: error?.approvalToken },
+      });
+      return res.end();
+    }
+
+    // P12.3: an error frame must be human-readable (frontend reads `message`)
+    // and must carry the P12.1 truth fields + a server-side log line.
+    const base = canceled
+      ? 'Director run canceled by user'
+      : (error?.message || 'Copilot Director failed');
+    const message = canceled
+      ? base
+      : `${base} — ${filesWritten} file(s) had changed before the failure.`;
+    logger.error(
+      `[CopilotDirector] run ${runId} failed: ${error?.stack || error?.message || 'unknown error'} ` +
+      `(filesWritten=${filesWritten}, writeAttempts=${writeAttempts}, tasksSkipped=${tasksSkipped})`
+    );
     writeSse(res, {
       type: canceled ? 'director_canceled' : 'director_error',
       taskId,
       runId,
       status: canceled ? 'CANCELLED' : 'FAILED',
-      error: canceled ? 'Director run canceled by user' : (error?.message || 'Copilot Director failed'),
+      error: message,
+      message,
+      filesWritten,
+      writeAttempts,
+      changedPaths,
+      tasksSkipped,
     });
     return res.end();
   }

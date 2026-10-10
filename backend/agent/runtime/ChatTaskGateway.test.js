@@ -1,10 +1,34 @@
 'use strict';
 
-const test = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const ChatTaskGateway = require('./ChatTaskGateway');
 const TaskIdempotencyStore = require('./TaskIdempotencyStore');
+const DurableTaskStore = require('./DurableTaskStore');
+
+// Each gateway gets its own throwaway durable-state file. The shared default
+// store journal (.data/agent-task-state.json) SURVIVES across local runs, so
+// fixed task identities replayed as SUCCEEDED on the second run and the tests
+// failed without ever reaching the executor (non-hermetic test).
+const isolatedStateFiles = [];
+test.after(() => {
+  for (const f of isolatedStateFiles) {
+    try { fs.rmSync(f, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+function isolatedDurableStore() {
+  const filePath = path.join(
+    os.tmpdir(),
+    `aidost-gateway-test-${process.pid}-${Math.random().toString(36).slice(2)}.json`
+  );
+  isolatedStateFiles.push(filePath);
+  return new DurableTaskStore({ filePath });
+}
 
 function makeTaskPlan(taskId = 'task-1') {
   return {
@@ -41,6 +65,7 @@ function makeGateway({ result = { status: 'SUCCEEDED', output: 'ok' }, validateR
     plannerExecutionLoop,
     adapter,
     idempotencyStore: new TaskIdempotencyStore({ ttlMs: 60_000, maxEntries: 100 }),
+    durableTaskStore: isolatedDurableStore(),
   });
 }
 
@@ -90,6 +115,7 @@ test('rejects duplicate task while execution is running', async () => {
       },
     },
     idempotencyStore: store,
+    durableTaskStore: isolatedDurableStore(),
   });
 
   const running = gateway.run({
@@ -125,6 +151,7 @@ test('stores validation failure as failed instead of completed', async () => {
       runWithPlan: async () => ({ status: 'SUCCEEDED' }),
     },
     idempotencyStore: store,
+    durableTaskStore: isolatedDurableStore(),
   });
 
   await assert.rejects(

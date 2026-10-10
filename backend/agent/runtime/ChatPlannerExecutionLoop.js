@@ -29,6 +29,25 @@ class ChatPlannerExecutionLoop extends PlannerExecutionLoop {
     context.workspaceManager = context.workspaceManager || this.workspaceManager || this.contextAssembler?.workspaceManager;
     if (options && typeof options.onEvent === 'function') context.onEvent = options.onEvent;
     if (options && options.permissionLevel) context.permissionLevel = options.permissionLevel;
+    // P12.3: the user-approved token must reach the per-step CapabilityGatekeeper
+    // (validateApproval) — without this, even an approved run died at its first
+    // gated tool because ExecutionController saw no token in context.
+    // approvalState = ONE shared holder for every worker of a director run,
+    // wired as a LIVE proxy: ExecutionController's single-use rotation
+    // (`context.approvalToken = fresh`) writes through it, so a worker that
+    // assembles its context later reads the ROTATED token instead of the
+    // original one an earlier worker consumed ("replay rejected").
+    if (options && options.approvalState && typeof options.approvalState === 'object') {
+      delete context.approvalToken;
+      Object.defineProperty(context, 'approvalToken', {
+        configurable: true,
+        enumerable: true,
+        get() { return options.approvalState.token; },
+        set(value) { options.approvalState.token = value; },
+      });
+    } else if (options && options.approvalToken) {
+      context.approvalToken = options.approvalToken;
+    }
 
     if (isCanceled()) {
       return { runId: null, taskId: externalTaskId || null, status: 'CANCELLED', reason: 'Canceled before execution' };

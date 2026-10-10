@@ -47,7 +47,14 @@ class ChatTaskGateway {
     }
     if (durable.state === 'SUCCEEDED' || durable.state === 'CANCELLED') {
       const result = durable.entry.result || { status: durable.state, taskId };
-      if (typeof onEvent === 'function') onEvent({ type: 'task_replay', taskId, status: durable.state });
+      if (typeof onEvent === 'function') {
+        onEvent({ type: 'task_replay', taskId, status: durable.state });
+        // Replay the stored terminal/progress events too — the durable check
+        // runs BEFORE the idempotency branch, so without this a client
+        // re-attaching to a finished task never receives its success phase
+        // (ChatTaskGateway.test.js 'includes terminal event').
+        for (const event of durable.entry.events || []) onEvent({ ...event, taskId });
+      }
       return result;
     }
     if (durable.state === 'FAILED') {

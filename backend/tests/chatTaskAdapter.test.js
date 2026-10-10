@@ -2,8 +2,32 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const ChatTaskAdapter = require('../agent/runtime/ChatTaskAdapter');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
 const ChatTaskGateway = require('../agent/runtime/ChatTaskGateway');
+const DurableTaskStore = require('../agent/runtime/DurableTaskStore');
+
+// Isolated durable-state file per gateway: the shared default journal
+// (.data/agent-task-state.json) survives across local runs and turns fixed
+// task identities into replays (executor never called) on the second run.
+const isolatedStateFiles = [];
+test.after(() => {
+  for (const f of isolatedStateFiles) {
+    try { fs.rmSync(f, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+function isolatedDurableStore() {
+  const filePath = path.join(
+    os.tmpdir(),
+    `aidost-adapter-test-${process.pid}-${Math.random().toString(36).slice(2)}.json`
+  );
+  isolatedStateFiles.push(filePath);
+  return new DurableTaskStore({ filePath });
+}
+const ChatTaskAdapter = require('../agent/runtime/ChatTaskAdapter');
 const PlannerExecutionLoop = require('../agent/runtime/PlannerExecutionLoop');
 
 function makeTool(name) {
@@ -82,13 +106,14 @@ test('gateway delegates validated chat tasks to the canonical execution loop', a
         return { runId: 'run_1', status: 'SUCCEEDED' };
       },
     },
+    durableTaskStore: isolatedDurableStore(),
   });
 
   const events = [];
   const result = await gateway.run({
     projectId: 'p1',
     userId: 'u1',
-    taskPlan: { type: 'task', taskId: 't1', intent: { originalMessage: 'Build a website' } },
+    taskPlan: { taskId: 't1', intent: { type: 'task', originalMessage: 'Build a website' } },
     onEvent: (event) => events.push(event),
   });
 
@@ -106,10 +131,11 @@ test('gateway fails closed when a task has no executable steps', async () => {
       validateAgentPlan: (plan) => plan,
     },
     plannerExecutionLoop: { runWithPlan: async () => ({ status: 'SUCCEEDED' }) },
+    durableTaskStore: isolatedDurableStore(),
   });
 
   await assert.rejects(
-    gateway.run({ projectId: 'p1', userId: 'u1', taskPlan: { type: 'task', intent: { originalMessage: 'do it' } } }),
+    gateway.run({ projectId: 'p1', userId: 'u1', taskPlan: { taskId: 'no-steps', intent: { type: 'task', originalMessage: 'do it' } } }),
     /no executable tool steps/
   );
 });
@@ -124,10 +150,11 @@ test('gateway does not enter runtime after pre-cancellation', async () => {
       validateAgentPlan: (plan) => plan,
     },
     plannerExecutionLoop: { runWithPlan: async () => { called = true; return { status: 'SUCCEEDED' }; } },
+    durableTaskStore: isolatedDurableStore(),
   });
 
   await assert.rejects(
-    gateway.run({ projectId: 'p1', userId: 'u1', taskPlan: { type: 'task', intent: { originalMessage: 'do it' } }, signal: controller.signal }),
+    gateway.run({ projectId: 'p1', userId: 'u1', taskPlan: { taskId: 'pre-cancel', intent: { type: 'task', originalMessage: 'do it' } }, signal: controller.signal }),
     /canceled before execution/
   );
   assert.equal(called, false);

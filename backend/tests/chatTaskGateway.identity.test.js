@@ -2,7 +2,30 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const ChatTaskGateway = require('../agent/runtime/ChatTaskGateway');
+const DurableTaskStore = require('../agent/runtime/DurableTaskStore');
+
+// Isolated durable-state file: the shared default journal persists across
+// local runs, so fixed task identities replay on the second run and the loop
+// is silently never invoked (test passes while testing nothing).
+const isolatedStateFiles = [];
+test.after(() => {
+  for (const f of isolatedStateFiles) {
+    try { fs.rmSync(f, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+function isolatedDurableStore() {
+  const filePath = path.join(
+    os.tmpdir(),
+    `aidost-identity-test-${process.pid}-${Math.random().toString(36).slice(2)}.json`
+  );
+  isolatedStateFiles.push(filePath);
+  return new DurableTaskStore({ filePath });
+}
 
 function makeLoop() {
   return {
@@ -30,6 +53,7 @@ test('ChatTaskGateway forwards external task id to canonical loop and events', a
         return { authorized: true };
       },
     },
+    durableTaskStore: isolatedDurableStore(),
   });
 
   const result = await gateway.run({

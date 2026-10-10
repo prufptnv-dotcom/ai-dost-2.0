@@ -1616,3 +1616,741 @@ describe('copilotMemory (self-learning notes)', () => {
     assert.equal(formatNotes(null), '');
   });
 });
+
+// -- P12.3: E2E-driven fixes ------------------------------------------------
+// Found by the portfolio end-to-end run: (a) escaped model blobs (literal \n)
+// were rejected and silently never written, (b) permissionLevel/approvalToken
+// never reached the run context so install/build died at the approval gate
+// with no banner and burned the repair budget, (c) director_error carried no
+// human-readable `message` / P12.1 fields, (d) a plan bigger than 5 tasks
+// crashed the whole run at the 6th delegate.
+describe('E2E-driven director fixes (P12.3)', () => {
+  // ── E1: one-shot unescape of escaped blobs, only after a rejection ──────
+  describe('DeterministicCodeGuard.guardWithNormalization', () => {
+    const codeGuard = require('../services/DeterministicCodeGuard');
+
+    test('single-line escaped package.json blob -> normalized + accepted', () => {
+      const real = '{\n  "name": "portfolio-frontend",\n  "version": "1.0.0",\n  "scripts": {\n    "dev": "concurrently \\"npm run frontend\\" \\"npm run backend\\""\n  }\n}';
+      const escapedBlob = JSON.stringify(real).slice(1, -1); // literal \n / \" sequences — exactly what the model emitted
+      const res = codeGuard.guardWithNormalization('package.json', escapedBlob);
+      assert.equal(res.accepted, true, 'normalized content must pass the guard');
+      assert.equal(res.normalized, true);
+      assert.ok(res.content.includes('\n'), 'real newlines restored');
+      assert.equal(JSON.parse(res.content).name, 'portfolio-frontend');
+    });
+
+    test('single-line escaped server.js blob -> normalized + accepted', () => {
+      const real = "const express = require('express');\nconst app = express();\nconst port = 3000;\napp.get('/', (req, res) => res.send('ok'));\napp.listen(port);\n";
+      const escapedBlob = JSON.stringify(real).slice(1, -1);
+      const res = codeGuard.guardWithNormalization('backend/server.js', escapedBlob);
+      assert.equal(res.accepted, true);
+      assert.equal(res.normalized, true);
+      assert.ok(res.content.split('\n').length > 1, 'multi-line source restored');
+    });
+
+    test('already-valid content is never touched', () => {
+      const valid = '{\n  "name": "ok"\n}';
+      const res = codeGuard.guardWithNormalization('package.json', valid);
+      assert.equal(res.accepted, true);
+      assert.equal(res.normalized, false);
+      assert.equal(res.content, valid);
+    });
+
+    test('rejection without escape sequences keeps original verdict + content', () => {
+      const broken = 'function broken( {';
+      const res = codeGuard.guardWithNormalization('app.js', broken);
+      assert.equal(res.accepted, false);
+      assert.equal(res.normalized, false);
+      assert.equal(res.content, broken);
+    });
+
+    test('escaped-but-still-invalid content is rejected with the ORIGINAL source', () => {
+      const escapedJunk = '{\\n  not json }';
+      const res = codeGuard.guardWithNormalization('package.json', escapedJunk);
+      assert.equal(res.accepted, false);
+      assert.equal(res.normalized, false);
+      assert.equal(res.content, escapedJunk, 'unescaped junk must never replace the original');
+    });
+  });
+
+  // ── E2: permissionLevel + approvalToken reach the execution context ─────
+  test('ChatPlannerExecutionLoop forwards permissionLevel/approvalToken into context', async () => {
+    const ChatPlannerExecutionLoop = require('../agent/runtime/ChatPlannerExecutionLoop');
+    const loop = new ChatPlannerExecutionLoop({
+      contextAssembler: { assemble: async () => ({}) },
+      taskPlanner: {},
+      executionController: { generateId: (p) => `${p}_x`, startRun: async () => {} },
+      toolRegistry: {},
+      agentTaskDao: { getById: () => null, create: () => {}, updateStatus: () => {} },
+      agentRunDao: { create: () => {} },
+    });
+    let captured = null;
+    loop.executeQueueWithCancellation = async (runId, taskId, context) => {
+      captured = context;
+      return { status: 'SUCCEEDED' };
+    };
+    const res = await loop.runWithPlan(
+      'p1', 'u1', { goal: 'g', steps: [{ tool: 'read_file', input: {} }] },
+      3, () => false, null,
+      { onEvent: () => {}, permissionLevel: 'turbo', approvalToken: 'tok-abc' }
+    );
+    assert.equal(res.status, 'SUCCEEDED');
+    assert.ok(captured, 'queue executed');
+    assert.equal(captured.permissionLevel, 'turbo');
+    assert.equal(captured.approvalToken, 'tok-abc');
+    assert.equal(typeof captured.onEvent, 'function');
+  });
+
+  // ── E2: ONE shared approvalState holder must cross worker contexts ─────
+  test('approvalState holder: rotation in worker 1 is visible to worker 2 context', async () => {
+    const ChatPlannerExecutionLoop = require('../agent/runtime/ChatPlannerExecutionLoop');
+    function makeLoop() {
+      return new ChatPlannerExecutionLoop({
+        contextAssembler: { assemble: async () => ({}) },
+        taskPlanner: {},
+        executionController: { generateId: (p) => `${p}_x`, startRun: async () => {} },
+        toolRegistry: {},
+        agentTaskDao: { getById: () => null, create: () => {}, updateStatus: () => {} },
+        agentRunDao: { create: () => {} },
+      });
+    }
+    const shared = { token: 'T-ORIGINAL' };
+    const seen = [];
+    const worker1 = makeLoop();
+    worker1.executeQueueWithCancellation = async (runId, taskId, context) => {
+      seen.push(context.approvalToken);
+      context.approvalToken = 'T-ROTATED'; // ExecutionController single-use rotation
+      return { status: 'SUCCEEDED' };
+    };
+    const plan = { goal: 'g', steps: [{ tool: 'run_terminal', input: {} }] };
+    await worker1.runWithPlan('p1', 'u1', plan, 3, () => false, null, { approvalState: shared });
+    assert.equal(shared.token, 'T-ROTATED', 'rotation must write through the shared holder');
+
+    const worker2 = makeLoop(); // a LATER worker assembles a brand-new context
+    worker2.executeQueueWithCancellation = async (runId, taskId, context) => {
+      seen.push(context.approvalToken);
+      return { status: 'SUCCEEDED' };
+    };
+    await worker2.runWithPlan('p1', 'u1', plan, 3, () => false, null, { approvalState: shared });
+    assert.deepEqual(seen, ['T-ORIGINAL', 'T-ROTATED'], 'worker 2 sees the rotated token, never the consumed original');
+  });
+
+  test('PlannerExecutionLoop: APPROVAL_REQUIRED fails fast with gate event, zero repair plans', async () => {
+    const PlannerExecutionLoop = require('../agent/runtime/PlannerExecutionLoop');
+    const events = [];
+    let repairPlans = 0;
+    const loop = new PlannerExecutionLoop({
+      contextAssembler: { assemble: async () => ({ onEvent: (e) => events.push(e) }) },
+      taskPlanner: {
+        generateRepairPlan: async () => { repairPlans += 1; return { steps: [] }; },
+        generateVerificationPlan: async () => ({ steps: [] }),
+      },
+      executionController: {
+        generateId: (p) => `${p}_x`,
+        startRun: async () => {},
+        saveCheckpoint: async () => {},
+        recordStep: async () => ({ id: 'step_1' }),
+        startStep: async () => {},
+        recordObservation: async () => {},
+        completeStep: async () => {},
+        completeRun: async () => {},
+        executeTool: async () => {
+          const err = new Error('Action requires user approval (REQUIRE_EXPLICIT_APPROVAL): devops.terminal');
+          err.code = 'APPROVAL_REQUIRED';
+          err.decision = 'REQUIRE_EXPLICIT_APPROVAL';
+          err.approvalToken = 'tok-minted';
+          err.capabilities = [{ capability_id: 'devops.terminal' }];
+          err.capabilityId = 'devops.terminal';
+          throw err;
+        },
+      },
+      toolRegistry: {},
+      agentTaskDao: { create: () => {}, updateStatus: () => {} },
+      agentRunDao: { create: () => {} },
+    });
+    const res = await loop.runWithPlan('p1', 'u1', {
+      goal: 'install deps',
+      steps: [{ tool: 'run_terminal', input: { command: 'npm install' } }],
+    }, 3, () => false);
+    assert.equal(res.status, 'FAILED');
+    assert.match(res.reason, /^APPROVAL_REQUIRED/);
+    assert.equal(res.approvalGate.approval_token, 'tok-minted');
+    const gate = events.find((e) => e.type === 'gate_approval_required');
+    assert.ok(gate, 'gate_approval_required emitted for the UI banner');
+    assert.equal(gate.gate.approval_token, 'tok-minted');
+    assert.equal(gate.gate.capabilityId, 'devops.terminal');
+    assert.match(gate.message, /devops\.terminal/);
+    assert.equal(repairPlans, 0, 'approval gates must not burn the repair budget');
+  });
+
+  // ── E2: single-use approval tokens rotate within an approved run ────────
+  describe('ExecutionController approval token lifecycle', () => {
+    const ExecutionController = require('../agent/runtime/ExecutionController');
+
+    const registry = { get: () => ({ name: 'run_terminal', execute: async (ctx, input) => ({ success: true, ran: input?.command }) }) };
+
+    function build(gatekeeper) {
+      return new ExecutionController({
+        db: null,
+        agentRunDao: {},
+        agentStepDao: {},
+        toolCallDao: { create: async (d) => d, update: async () => {} },
+        observationDao: {},
+        verificationResultDao: {},
+        workspaceManager: null,
+        gatekeeper,
+      });
+    }
+
+    function approvingGate() {
+      const calls = {};
+      return {
+        calls,
+        gatekeeper: {
+          evaluate: () => ({ decision: 'REQUIRE_EXPLICIT_APPROVAL' }),
+          evaluateWithLevel: (caps) => ({
+            decision: 'REQUIRE_EXPLICIT_APPROVAL',
+            approval_token: 'T-NEW',
+            capabilities: caps.map((c) => ({ capability_id: c })),
+          }),
+          validateApproval: (params) => {
+            calls.validatedToken = params.token;
+            return { valid: true, token_id: params.token };
+          },
+        },
+      };
+    }
+
+    test('valid approval rotates context.approvalToken to the freshly minted one', async () => {
+      const { calls, gatekeeper } = approvingGate();
+      const controller = build(gatekeeper);
+      const context = { userId: 'u1', projectId: 'p1', permissionLevel: 'auto', approvalToken: 'T-OLD' };
+      const out = await controller.executeTool('step_1', 'run_terminal', { command: 'npm install' }, context, registry);
+      assert.equal(out.success, true);
+      assert.equal(calls.validatedToken, 'T-OLD', 'the user-approved token is what gets validated');
+      assert.equal(context.approvalToken, 'T-NEW', 'rotate so the next gated step has an unconsumed token');
+    });
+
+    test('missing token throws APPROVAL_REQUIRED carrying capabilityId + minted token', async () => {
+      const { gatekeeper } = approvingGate();
+      const controller = build(gatekeeper);
+      const context = { userId: 'u1', projectId: 'p1', permissionLevel: 'auto' };
+      await assert.rejects(
+        () => controller.executeTool('step_1', 'run_terminal', { command: 'npm install' }, context, registry),
+        (err) => {
+          assert.equal(err.code, 'APPROVAL_REQUIRED');
+          assert.equal(err.capabilityId, 'devops.terminal');
+          assert.equal(err.approvalToken, 'T-NEW');
+          assert.equal(err.decision, 'REQUIRE_EXPLICIT_APPROVAL');
+          return true;
+        }
+      );
+    });
+  });
+
+  // ── E2/E4: approval fails fast, delegation failures skip gracefully ─────
+  describe('CopilotDirector approval propagation + graceful delegation', () => {
+    const { CopilotDirector } = require('../agent/runtime/CopilotDirector');
+
+    const makePlan = () => ({
+      summary: 'portfolio plan',
+      tasks: [
+        { id: 't1', specialty: 'frontend', objective: 'build UI', dependsOn: [] },
+        { id: 't2', specialty: 'integration', objective: 'wire API', dependsOn: ['t1'] },
+      ],
+    });
+
+    function harness({ onDelegate, startWorker }) {
+      const events = [];
+      const delegateCalls = [];
+      const runWithPlanArgs = [];
+      const coordinator = {
+        async createSupervisorTask() {
+          return { task: { id: 'sup-1' }, run: { id: 'sup-run-1' } };
+        },
+        async delegate(input) {
+          delegateCalls.push(input);
+          return onDelegate(delegateCalls.length, input);
+        },
+        async startWorker(id, opts = {}) {
+          return startWorker(id, opts);
+        },
+      };
+      const director = new CopilotDirector({
+        coordinator,
+        taskPlanner: {
+          generatePlan: async () => ({ steps: [] }),
+          generateVerificationPlan: async () => ({ goal: 'verify', steps: [] }),
+        },
+        plannerExecutionLoop: {
+          runWithPlan: async (...args) => {
+            runWithPlanArgs.push(args);
+            return { status: 'SUCCEEDED' };
+          },
+        },
+        agentTaskDao: { updateStatus: () => {} },
+        agentRunDao: { updateStatus: () => {} },
+      });
+      return { director, events, delegateCalls, runWithPlanArgs };
+    }
+
+    test('APPROVAL_REQUIRED from a worker fails fast — no re-delegate, code preserved', async () => {
+      const h = harness({
+        onDelegate: async (n) => ({ workerRun: { id: `w${n}` } }),
+        startWorker: async () => {
+          throw Object.assign(new Error('APPROVAL_REQUIRED: Action requires user approval (REQUIRE_EXPLICIT_APPROVAL): devops.terminal'), { code: 'APPROVAL_REQUIRED' });
+        },
+      });
+      await assert.rejects(
+        () => h.director.run({
+          userId: 'u1', projectId: 'p1', request: 'build app',
+          plan: makePlan(), permissionLevel: 'auto', approvalToken: 'tok-run',
+          onEvent: (e) => h.events.push(e),
+        }),
+        (err) => err.code === 'APPROVAL_REQUIRED'
+      );
+      assert.equal(h.delegateCalls.length, 1, 'no second delegate after an approval gate');
+      const statuses = h.events.filter((e) => e.type === 'director_task').map((e) => e.status);
+      assert.ok(statuses.includes('DELEGATING'));
+      assert.ok(!statuses.includes('RETRYING'), 'approval gate must not burn worker retries');
+      assert.ok(statuses.includes('FAILED'));
+    });
+
+    test('delegate failure skips tasks honestly and still completes with verification', async () => {
+      const h = harness({
+        onDelegate: async (n, input) => {
+          if (input.role === 'VERIFIER') return { workerRun: { id: 'worker-verify' } };
+          throw new Error('Worker limit per supervisor task exceeded: max allowed is 12');
+        },
+        startWorker: async (id, opts = {}) => (opts.runner ? opts.runner() : { status: 'SUCCEEDED' }),
+      });
+      const result = await h.director.run({
+        userId: 'u1', projectId: 'p1', request: 'build app',
+        plan: makePlan(), permissionLevel: 'turbo', approvalToken: 'tok-run',
+        onEvent: (e) => h.events.push(e),
+      });
+      assert.equal(result.status, 'COMPLETED');
+      const skipped = h.events.filter((e) => e.type === 'director_task' && e.status === 'SKIPPED');
+      assert.equal(skipped.length, 2, 'the failed task AND its blocked dependent are reported SKIPPED');
+      assert.ok(h.events.some((e) => e.type === 'director_complete'), 'verification still runs to completion');
+      assert.equal(h.runWithPlanArgs.length, 1, 'verification plan executed');
+      const options = h.runWithPlanArgs[0][6];
+      assert.equal(options.permissionLevel, 'turbo');
+      assert.equal(options.approvalToken, 'tok-run');
+    });
+
+    test('ONE shared approvalState holder reaches every worker + verification', async () => {
+      const h = harness({
+        onDelegate: async (n) => ({ workerRun: { id: `w${n}` } }),
+        startWorker: async (id, opts = {}) => (opts.runner ? opts.runner() : { status: 'SUCCEEDED' }),
+      });
+      const result = await h.director.run({
+        userId: 'u1', projectId: 'p1', request: 'build app',
+        plan: makePlan(), permissionLevel: 'auto', approvalToken: 'tok-run',
+        onEvent: (e) => h.events.push(e),
+      });
+      assert.equal(result.status, 'COMPLETED');
+      assert.equal(h.runWithPlanArgs.length, 3, '2 worker plans + final verification plan');
+      const holders = h.runWithPlanArgs.map((args) => args[6].approvalState);
+      assert.ok(holders.every((s) => s && typeof s === 'object'), 'every runWithPlan call carries the holder');
+      assert.equal(new Set(holders).size, 1, 'the SAME holder object — rotation in one context must cross to the next');
+      assert.equal(holders[0].token, 'tok-run', 'holder seeds from the request approval token');
+    });
+  });
+
+  // ── E3: honest error frames + approval pause (never a scary error) ──────
+  describe('copilotDirectorHandler honest errors + approval pause (P12.3)', () => {
+    const { handleCopilotDirectorRequest } = require('../agent/runtime/copilotDirectorHandler');
+
+    function makeRes() {
+      return {
+        writableEnded: false,
+        destroyed: false,
+        statusCode: 200,
+        headers: {},
+        setHeader(k, v) { this.headers[k] = v; },
+        flushHeaders() {},
+        writes: [],
+        write(chunk) { this.writes.push(String(chunk)); },
+        end() { this.writableEnded = true; },
+        status(code) { this.statusCode = code; return this; },
+        json(payload) { this.payload = payload; this.writableEnded = true; return this; },
+      };
+    }
+
+    const parseFrames = (res) => res.writes.map((w) => {
+      const line = w.split('\n').find((l) => l.startsWith('data: '));
+      return JSON.parse(line ? line.slice(6) : '{}');
+    });
+
+    const depsWith = (script) => ({
+      projectAuthorization: {
+        authorize: () => ({ authorized: true, user: { id: 'u1' }, project: { id: 'p1' } }),
+      },
+      runtime: {
+        director: {
+          run: async (args) => script(args.onEvent, args.signal),
+        },
+      },
+    });
+
+    const reqFor = (extra = {}) => ({
+      body: { copilotDirector: true, userPrompt: 'update the timer', ...extra },
+      get: (h) => (h === 'x-ai-dost-task-id' ? 't-p123-1' : undefined),
+    });
+
+    test('generic run failure -> director_error with human message + P12.1 fields', async () => {
+      const res = makeRes();
+      await handleCopilotDirectorRequest(reqFor(), res, () => {}, depsWith(() => {
+        throw new Error('Worker limit per supervisor task exceeded: max allowed is 12');
+      }));
+      const frame = parseFrames(res).find((e) => e.type === 'director_error');
+      assert.ok(frame, 'director_error emitted');
+      assert.match(frame.message, /Worker limit per supervisor task exceeded/);
+      assert.match(frame.message, /0 file\(s\) had changed/);
+      assert.equal(frame.error, frame.message, 'both message (UI contract) and error (legacy) present');
+      assert.equal(frame.filesWritten, 0);
+      assert.equal(frame.writeAttempts, 0);
+      assert.equal(frame.tasksSkipped, 0);
+    });
+
+    test('APPROVAL_REQUIRED -> stream ends PAUSED (gate + done), never an error frame', async () => {
+      const res = makeRes();
+      await handleCopilotDirectorRequest(reqFor(), res, () => {}, depsWith(() => {
+        const err = new Error('Action requires user approval (REQUIRE_EXPLICIT_APPROVAL): devops.terminal');
+        err.code = 'APPROVAL_REQUIRED';
+        err.decision = 'REQUIRE_EXPLICIT_APPROVAL';
+        err.approvalToken = 'tok-gate';
+        err.capabilityId = 'devops.terminal';
+        throw err;
+      }));
+      const frames = parseFrames(res);
+      const gate = frames.find((e) => e.type === 'gate_approval_required');
+      assert.ok(gate, 'gate frame carries the token for the Approve banner');
+      assert.equal(gate.gate.approval_token, 'tok-gate');
+      const done = frames.find((e) => e.type === 'done');
+      assert.ok(done, 'stream ends with done');
+      assert.match(done.message, /paused/i);
+      assert.match(done.message, /devops\.terminal/);
+      assert.equal(done.filesWritten, 0);
+      assert.ok(!frames.some((e) => e.type === 'director_error'), 'an approval pause must never render as an error');
+    });
+
+    test('step-level gate event is forwarded exactly once when the run pauses', async () => {
+      const res = makeRes();
+      await handleCopilotDirectorRequest(reqFor(), res, () => {}, depsWith((onEvent) => {
+        onEvent({
+          type: 'gate_approval_required',
+          message: 'Approval required: REQUIRE_EXPLICIT_APPROVAL for devops.terminal',
+          gate: { approval_token: 'tok-step', capabilityId: 'devops.terminal' },
+        });
+        const err = new Error('APPROVAL_REQUIRED: Action requires user approval');
+        err.code = 'APPROVAL_REQUIRED';
+        throw err;
+      }));
+      const frames = parseFrames(res);
+      assert.equal(frames.filter((e) => e.type === 'gate_approval_required').length, 1, 'exactly one gate frame (no duplicate fallback)');
+      assert.equal(frames.filter((e) => e.type === 'done').length, 1);
+      const done = frames.find((e) => e.type === 'done');
+      assert.equal(done.approvalGate.approval_token, 'tok-step');
+      assert.ok(!frames.some((e) => e.type === 'director_error'));
+    });
+  });
+});
+
+// ── P12.4: honest planner, mutation failures, verification gate ────────────
+// Found by E2E run #5 (2026-10-10): ~half of all specialist plan calls came
+// back as prose/classifier junk → a fabricated src/App.jsx template "plan"
+// landed once and was silently rejected every time after; mutation
+// rejections resolved as "done"; the verification gate reported SUCCEEDED
+// while every read said "File not found". Run claimed success with 3 files.
+describe('P12.4 — planner honesty, mutation failure, verification gate', () => {
+  const fsMod = require('fs');
+  const pathMod = require('path');
+  const { createStructuredAgentPlanner, extractJson } = require('../agent/runtime/structuredAgentPlanner');
+  const PlannerExecutionLoop = require('../agent/runtime/PlannerExecutionLoop');
+  const ExecutionController = require('../agent/runtime/ExecutionController');
+
+  const toolRegistry = {
+    list: () => [
+      { name: 'list_directory', description: 'List files', inputSchema: { type: 'object' }, permissions: [] },
+      { name: 'write_file', description: 'Write a file', inputSchema: { type: 'object' }, permissions: ['filesystem.write'] },
+    ],
+    get: () => null,
+  };
+
+  describe('structuredAgentPlanner (mode planner + retry, no fabricated plan)', () => {
+    test('retries non-JSON replies and returns the first parseable plan, always in mode "planner"', async () => {
+      const modes = [];
+      let calls = 0;
+      const planner = createStructuredAgentPlanner({
+        toolRegistry,
+        openai: {
+          chat: async (prompt, history, mode) => {
+            modes.push(mode);
+            calls += 1;
+            return calls < 3
+              ? "I'll start by inspecting the existing workspace before making any surgical edits."
+              : '{"goal":"inspect","steps":[{"id":"s1","tool":"list_directory","description":"list","input":{}}]}';
+          },
+        },
+      });
+      const plan = await planner.generateStructuredPlan('build a todo app', {});
+      assert.equal(plan.goal, 'inspect');
+      assert.equal(calls, 3, 'two garbage replies, third lands clean JSON');
+      assert.ok(modes.length === 3 && modes.every((m) => m === 'planner'),
+        'planner calls must use mode "planner" (Groq agent mode injects a FILE: system prompt that fights JSON output)');
+    });
+
+    test('always-garbage replies fail honestly instead of fabricating the src/App.jsx template', async () => {
+      let calls = 0;
+      const planner = createStructuredAgentPlanner({
+        toolRegistry,
+        openai: { chat: async () => { calls += 1; return 'User Safety: safe'; } },
+      });
+      await assert.rejects(() => planner.generateStructuredPlan('build a react app', {}), /invalid JSON/i);
+      assert.equal(calls, 3, 'exhausts retries before failing');
+      const src = fsMod.readFileSync(pathMod.join(__dirname, '../agent/runtime/structuredAgentPlanner.js'), 'utf8');
+      assert.ok(!src.includes('Application Ready'), 'hardcoded junk fallback content must be gone');
+      assert.ok(!src.includes('step-implement'), 'template write step must be gone');
+    });
+
+    test('repair planning gets the same retry treatment', async () => {
+      let calls = 0;
+      const planner = createStructuredAgentPlanner({
+        toolRegistry,
+        openai: {
+          chat: async () => {
+            calls += 1;
+            return calls === 1
+              ? 'hmm, let me think about this repair'
+              : '{"goal":"repair","steps":[{"id":"r1","tool":"list_directory","description":"re-inspect","input":{}}]}';
+          },
+        },
+      });
+      const plan = await planner.generateRepairPlan({ tool: 'write_file' }, 'WRITE_FORBIDDEN_ON_EXISTING', {});
+      assert.equal(plan.goal, 'repair');
+      assert.equal(calls, 2);
+    });
+
+    test('extractJson repairs structurally incomplete JSON (verbatim shapes from E2E run #5)', () => {
+      // Case A (run #5, README plan): response ended right after the last
+      // step's content string — final `]}` missing entirely.
+      const missingFinalClosers =
+        '{"goal":"g","steps":[{"id":"1","tool":"write_file","description":"d","input":{"path":"a","content":"x"}}';
+      const a = extractJson(missingFinalClosers);
+      assert.equal(a.goal, 'g');
+      assert.equal(a.steps.length, 1);
+
+      // Case B (run #5, jest-test plan): the step object's closing `}` was
+      // dropped — parser is inside the step object when `]` arrives.
+      const missingStepCloser =
+        '{"goal":"g","steps":[{"id":"1","tool":"write_file","description":"d","input":{"path":"a","content":"x"}]}';
+      const b = extractJson(missingStepCloser);
+      assert.equal(b.steps[0].input.path, 'a');
+      assert.equal(b.steps.length, 1);
+
+      // Case C (run #5, build-plan): fenced + missing step closer — repair
+      // runs after fence stripping.
+      const fenced = '```json\n{"goal":"g","steps":[{"id":"1","tool":"run_terminal","description":"d","input":{"command":"npm run build"}]}\n```';
+      const c = extractJson(fenced);
+      assert.equal(c.steps[0].tool, 'run_terminal');
+    });
+
+    test('extractJson closes an unterminated trailing string but never repairs prose or junk', () => {
+      assert.deepEqual(extractJson('{"goal":"unfinished'), { goal: 'unfinished' });
+      assert.deepEqual(extractJson('{"goal":"x","steps":['), { goal: 'x', steps: [] });
+      // half-written trailing value discarded via cut-back to last completed value
+      assert.deepEqual(extractJson('{"goal":"x","steps":[{"id":"1"},'), { goal: 'x', steps: [{ id: '1' }] });
+      // prose / classifier junk must still fail honestly — repair is not fabrication
+      assert.throws(() => extractJson('User Safety: safe'), /invalid JSON/i);
+      assert.throws(() => extractJson("I'll start by inspecting the workspace"), /invalid JSON/i);
+      assert.throws(() => extractJson(''), /invalid JSON/i);
+    });
+  });
+
+  describe('ExecutionController: mutations that did not apply are FAILED', () => {
+    function build() {
+      const recorded = [];
+      const controller = new ExecutionController({
+        db: null,
+        agentRunDao: {},
+        agentStepDao: {},
+        toolCallDao: {
+          create: async (d) => d,
+          update: async (id, patch) => { recorded.push({ id, ...patch }); return patch; },
+        },
+        observationDao: {},
+        verificationResultDao: {},
+        workspaceManager: null,
+        gatekeeper: { evaluate: () => ({ decision: 'ALLOW', capabilities: [] }) },
+      });
+      return { recorded, controller };
+    }
+
+    test('write_file success:false rejects with the guard error and records the tool call FAILED', async () => {
+      const { recorded, controller } = build();
+      const registry = { get: () => ({ name: 'write_file', execute: async () => ({ success: false, code: 'WRITE_FORBIDDEN_ON_EXISTING', error: 'Full-file replacement is forbidden for existing project files. Use apply_diff.' }) }) };
+      await assert.rejects(
+        () => controller.executeTool('step_1', 'write_file', { path: 'src/App.jsx', content: 'x' }, { userId: 'u', projectId: 'p' }, registry),
+        (err) => {
+          assert.equal(err.code, 'WRITE_FORBIDDEN_ON_EXISTING');
+          assert.match(err.message, /did not apply/);
+          assert.equal(err.mutationFailure, true);
+          return true;
+        }
+      );
+      assert.ok(recorded.some((r) => r.status === 'FAILED'), 'tool call must be recorded FAILED');
+      assert.ok(!recorded.some((r) => r.status === 'SUCCEEDED'), 'and never SUCCEEDED');
+    });
+
+    test('run_terminal success:false (non-zero exit) rejects instead of resolving "done"', async () => {
+      const { recorded, controller } = build();
+      const registry = { get: () => ({ name: 'run_terminal', execute: async () => ({ success: false, code: 'EXIT_1', error: 'command failed with exit code 1' }) }) };
+      await assert.rejects(
+        () => controller.executeTool('step_2', 'run_terminal', { command: 'npm run build' }, { userId: 'u', projectId: 'p' }, registry),
+        /did not apply/
+      );
+      assert.ok(recorded.some((r) => r.status === 'FAILED'));
+    });
+
+    test('a successful write still resolves and emits file_written', async () => {
+      const { recorded, controller } = build();
+      const events = [];
+      const registry = { get: () => ({ name: 'write_file', execute: async () => ({ success: true, message: 'wrote' }) }) };
+      const out = await controller.executeTool('step_3', 'write_file', { path: 'new.js', content: 'x' }, { userId: 'u', projectId: 'p', onEvent: (e) => events.push(e) }, registry);
+      assert.equal(out.success, true);
+      assert.ok(events.some((e) => e.type === 'file_written' && e.path === 'new.js'), 'file_written emitted on success');
+      assert.ok(recorded.some((r) => r.status === 'SUCCEEDED'));
+    });
+
+    test('read_file success:false still resolves as an observation (probes are information)', async () => {
+      const { recorded, controller } = build();
+      const registry = { get: () => ({ name: 'read_file', execute: async () => ({ success: false, exists: false, message: 'File not found: x' }) }) };
+      const out = await controller.executeTool('step_4', 'read_file', { path: 'x' }, { userId: 'u', projectId: 'p' }, registry);
+      assert.equal(out.success, false, 'a missing file is an observation, not an exception');
+      assert.ok(recorded.some((r) => r.status === 'SUCCEEDED'));
+    });
+  });
+
+  describe('PlannerExecutionLoop: honest verification gate + repair wiring', () => {
+    function harness({ executeTool, verifyPlan = { goal: 'v', steps: [{ id: 'v1', tool: 'list_directory', description: 'list', input: {} }] }, verifyPlanError = null, repairPlan = null, generatePlan = null } = {}) {
+      const events = [];
+      const state = { runs: [], taskStatuses: [], repairCalls: [] };
+      const loop = new PlannerExecutionLoop({
+        contextAssembler: { assemble: async () => ({ projectId: 'p1' }) },
+        taskPlanner: {
+          generatePlan: async () => {
+            if (generatePlan) return generatePlan;
+            throw new Error('generatePlan not configured for this harness');
+          },
+          generateRepairPlan: async (failedStep, errorInfo) => {
+            state.repairCalls.push({ failedStep, errorInfo });
+            if (repairPlan) return repairPlan;
+            throw new Error('no repair plan available');
+          },
+          generateVerificationPlan: async () => {
+            if (verifyPlanError) throw new Error(verifyPlanError);
+            return verifyPlan;
+          },
+        },
+        executionController: {
+          generateId: (p) => `${p}_${Math.random().toString(36).slice(2, 9)}`,
+          startRun: async () => {},
+          saveCheckpoint: async () => {},
+          verifyRun: async () => {},
+          recordStep: async () => ({ id: `step_${Math.random().toString(36).slice(2, 9)}` }),
+          startStep: async () => {},
+          recordObservation: async () => {},
+          recordVerificationResult: async () => {},
+          completeStep: async () => {},
+          completeRun: async (runId, status, reason) => { state.runs.push({ status, reason }); },
+          executeTool,
+        },
+        toolRegistry: {},
+        agentTaskDao: { create: () => {}, updateStatus: (id, s) => state.taskStatuses.push(s) },
+        agentRunDao: { create: () => {}, getById: () => ({ status: 'RUNNING' }) },
+      });
+      return { loop, events, state };
+    }
+
+    test('runWithPlan FAILS when verification evidence does not confirm (was: swallowed → SUCCEEDED)', async () => {
+      const { loop, state } = harness({
+        executeTool: async (stepId, tool) => (tool === 'read_file'
+          ? { success: false, error: 'File not found: package.json' }
+          : { success: true }),
+        verifyPlan: { goal: 'v', steps: [{ id: 'v1', tool: 'read_file', description: 'check package.json', input: { path: 'package.json' } }] },
+      });
+      const res = await loop.runWithPlan('p1', 'u1', { goal: 'build', steps: [{ id: 's1', tool: 'list_directory', description: 'list', input: {} }] }, 0, () => false);
+      assert.equal(res.status, 'FAILED');
+      assert.match(res.reason, /Verification failed/);
+      assert.match(res.reason, /File not found/);
+      assert.ok(state.runs.some((r) => r.status === 'FAILED'), 'run recorded FAILED');
+      assert.ok(state.taskStatuses.includes('FAILED'));
+    });
+
+    test('a verification-planner failure no longer reports SUCCEEDED', async () => {
+      const { loop } = harness({
+        executeTool: async () => ({ success: true }),
+        verifyPlanError: 'Planner returned invalid JSON',
+      });
+      const res = await loop.runWithPlan('p1', 'u1', { goal: 'build', steps: [{ id: 's1', tool: 'list_directory', description: 'list', input: {} }] }, 0, () => false);
+      assert.equal(res.status, 'FAILED');
+      assert.match(res.reason, /Verification failed/);
+      assert.match(res.reason, /invalid JSON/);
+    });
+
+    test('mutation failure enters repair with the real error and recovers', async () => {
+      let execCalls = 0;
+      const { loop, state } = harness({
+        executeTool: async (stepId, tool) => {
+          execCalls += 1;
+          if (tool === 'write_file' && execCalls === 1) {
+            const e = new Error('write_file did not apply: Full-file replacement is forbidden for existing project files. Use apply_diff.');
+            e.code = 'WRITE_FORBIDDEN_ON_EXISTING';
+            e.mutationFailure = true;
+            throw e;
+          }
+          return { success: true };
+        },
+        repairPlan: { goal: 'repair', steps: [{ id: 'r1', tool: 'list_directory', description: 're-inspect after rejection', input: {} }] },
+      });
+      const res = await loop.runWithPlan('p1', 'u1', { goal: 'g', steps: [{ id: 's1', tool: 'write_file', description: 'write App', input: {} }] }, 1, () => false);
+      assert.equal(res.status, 'SUCCEEDED');
+      assert.equal(state.repairCalls.length, 1, 'repair planner consulted exactly once');
+      assert.match(state.repairCalls[0].errorInfo, /did not apply/, 'repair sees the real mutation error');
+    });
+
+    test('with no repair plan and budget 0, the mutation failure is an honest FAILED + step row', async () => {
+      const { loop, events, state } = harness({
+        executeTool: async () => {
+          const e = new Error('write_file did not apply: WRITE_FORBIDDEN_ON_EXISTING');
+          e.code = 'WRITE_FORBIDDEN_ON_EXISTING';
+          e.mutationFailure = true;
+          throw e;
+        },
+        verifyPlan: { goal: 'v', steps: [{ id: 'v1', tool: 'list_directory', description: 'list', input: {} }] },
+      });
+      const res = await loop.runWithPlan('p1', 'u1', { goal: 'g', steps: [{ id: 's1', tool: 'write_file', description: 'write App', input: {} }] }, 0, () => false, null, { onEvent: (e) => events.push(e) });
+      assert.equal(res.status, 'FAILED');
+      assert.ok(state.runs.some((r) => r.status === 'FAILED'));
+      const failedRow = events.find((e) => e.type === 'step' && e.status === 'failed');
+      assert.ok(failedRow, 'failed step row emitted on the run stream');
+      assert.match(failedRow.error, /did not apply/);
+    });
+
+    test('executeQueue (run() path) also fails verification on non-confirming evidence', async () => {
+      const { loop, state } = harness({
+        executeTool: async (stepId, tool) => (tool === 'read_file'
+          ? { success: false, error: 'File not found: server.js' }
+          : { success: true }),
+        verifyPlan: { goal: 'v', steps: [{ id: 'v1', tool: 'read_file', description: 'check server.js', input: { path: 'server.js' } }] },
+        generatePlan: { goal: 'build', steps: [{ id: 's1', tool: 'list_directory', description: 'list', input: {} }] },
+      });
+      const res = await loop.run('p1', 'u1', 'build the app', 0);
+      assert.equal(res.status, 'FAILED');
+      assert.match(res.reason, /Verification failed|max repairs/i);
+      assert.ok(state.runs.some((r) => r.status === 'FAILED'));
+    });
+  });
+});

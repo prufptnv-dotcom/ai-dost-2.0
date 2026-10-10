@@ -322,23 +322,26 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
           };
         }
 
-        const guard = deterministicCodeGuard.guard(parameters.path, parameters.content || '');
+        // P12.3: guardWithNormalization accepts single-unescape of escaped model
+        // blobs; persist `guard.content` (the source that actually passed).
+        const guard = deterministicCodeGuard.guardWithNormalization(parameters.path, parameters.content || '');
         if (!guard.accepted) {
           return { success: false, error: `Code rejected before persistence: ${guard.reason}`, diagnostics: guard.diagnostics };
         }
+        const contentToWrite = guard.content;
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
-        fs.writeFileSync(filePath, parameters.content || '', 'utf-8');
+        fs.writeFileSync(filePath, contentToWrite, 'utf-8');
         // Update in-memory file array if present
         if (projectFiles && Array.isArray(projectFiles)) {
-          if (inMem) inMem.content = parameters.content || '';
-          else projectFiles.push({ path: parameters.path, content: parameters.content || '' });
+          if (inMem) inMem.content = contentToWrite;
+          else projectFiles.push({ path: parameters.path, content: contentToWrite });
         }
         const vReport = guard.verification;
         return {
           success: true,
           message: `File written: ${parameters.path}${!vReport.verified ? ' (Warning: ' + (vReport.repairSuggestion || 'verification issue detected') + ')' : ''}`,
           changedFile: parameters.path,
-          newContent: parameters.content || '',
+          newContent: contentToWrite,
           verification: vReport
         };
       } catch (e) {

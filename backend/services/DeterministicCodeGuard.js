@@ -34,6 +34,32 @@ class DeterministicCodeGuard {
     }
     return { accepted: true, filePath, grammarScore, verification };
   }
+
+  /**
+   * P12.3 (E2E-verified): models occasionally emit ONE-LINE escaped blobs —
+   * literal \n / \" sequences instead of real newlines/quotes (observed on a
+   * portfolio run: package.json = 1 line, `{\n \"name\"...`). The raw text is
+   * genuinely invalid so `guard` correctly rejects it — but a single unescape
+   * makes it valid. Normalization is attempted ONLY after a rejection and the
+   * unescaped variant must pass the SAME guard, so well-formed content is
+   * never touched and a failed unescape never weakens the original verdict.
+   * Returns { ...guardResult, content, normalized } — callers must persist
+   * `content` (the accepted source), not the raw input.
+   */
+  guardWithNormalization(filePath, content, options = {}) {
+    const source = String(content ?? '');
+    const primary = this.guard(filePath, source, options);
+    if (primary.accepted) return { ...primary, content: source, normalized: false };
+    if (!/\\[nrt"'\\]/.test(source)) return { ...primary, content: source, normalized: false };
+
+    const UNESCAPE = { n: '\n', r: '\r', t: '\t', '"': '"', "'": "'", '\\': '\\' };
+    const unescaped = source.replace(/\\([nrt"'\\])/g, (m, ch) => UNESCAPE[ch] ?? m);
+    if (unescaped === source) return { ...primary, content: source, normalized: false };
+
+    const retry = this.guard(filePath, unescaped, options);
+    if (retry.accepted) return { ...retry, content: unescaped, normalized: true };
+    return { ...primary, content: source, normalized: false };
+  }
 }
 
 module.exports = new DeterministicCodeGuard();

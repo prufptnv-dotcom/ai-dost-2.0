@@ -25,7 +25,11 @@ const { VerificationContract } = require('../verification/VerificationContract')
 const logger = require('../../logger');
 
 const MAX_DELEGATION_DEPTH = 3;
-const MAX_WORKERS_PER_SUPERVISOR = 5;
+// P12.3: was 5 — a 7-task director plan crashed the whole run at its 6th
+// delegate ("Worker limit per supervisor task exceeded"), discarding completed
+// work. Plans are capped at MAX_TASKS=32 by the director; 12 comfortably fits
+// real plans + the verification delegate, while still bounding runaway spawns.
+const MAX_WORKERS_PER_SUPERVISOR = 12;
 const MAX_ACTIVE_WORKERS_PER_PROJECT = 10;
 const MAX_REPAIR_CYCLES = 3;
 
