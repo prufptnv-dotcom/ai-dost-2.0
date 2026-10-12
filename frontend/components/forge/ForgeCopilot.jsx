@@ -24,6 +24,13 @@ const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false 
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || '';
 
+function displayProjectName(name, projectId) {
+  const label = String(name || '').trim();
+  const reservedWorkspace = ['default', 'copilot-workspace'].includes(String(projectId || '').toLowerCase());
+  if (reservedWorkspace && /^copilot workspace$/i.test(label)) return 'Forge Studio Workspace';
+  return label || 'Forge Studio Workspace';
+}
+
 const themePresets = [
   { id: 'violet', name: 'Violet', color: '#a78bfa' },
   { id: 'ocean', name: 'Ocean', color: '#62b5ff' },
@@ -187,7 +194,7 @@ function Rail({ activeTab, onSelectTab, user }) {
       <div className="rail-actions">
         <button
           className={`rail-item ${activeTab === 'builder' ? 'selected' : ''}`}
-          title="Builder IDE"
+          title="Forge Studio"
           onClick={() => onSelectTab('builder')}
         >
           <LuLayoutDashboard size={18} />
@@ -2468,7 +2475,7 @@ export default function ForgeCopilot({
   const [toast, setToast] = useState('');
   const [refreshCount, setRefreshCount] = useState(0);
   const [activeTab, setActiveTab] = useState('builder');
-  const [projectName, setProjectName] = useState(initialProjectName);
+  const [projectName, setProjectName] = useState(displayProjectName(initialProjectName, projectId));
   const [saved, setSaved] = useState(true);
   const [devServer, setDevServer] = useState({ state: null, url: null, hostPort: null });
   const [terminalLogs, setTerminalLogs] = useState([]);
@@ -2581,7 +2588,7 @@ export default function ForgeCopilot({
       const data = await fetchProject(currentProjectId);
       if (!data) return [];
       if (data.name || data.project_name) {
-        setProjectName(data.name || data.project_name);
+        setProjectName(displayProjectName(data.name || data.project_name, currentProjectId));
       }
       const fileList = Array.isArray(data.files) ? data.files : [];
       setFiles(fileList);
