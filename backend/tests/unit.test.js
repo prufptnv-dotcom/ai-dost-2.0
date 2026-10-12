@@ -2131,6 +2131,26 @@ describe('E2E-driven director fixes (P12.3)', () => {
       assert.equal(done.approvalGate.approval_token, 'tok-step');
       assert.ok(!frames.some((e) => e.type === 'director_error'));
     });
+
+
+    test('Ask mode blocks execution when capability discovery fails', async () => {
+      const res = makeRes();
+      let directorCalled = false;
+      const deps = depsWith(() => {
+        directorCalled = true;
+        return { status: 'SUCCEEDED' };
+      });
+      deps.capabilityDiscovery = {
+        discover: () => { throw new Error('simulated registry outage'); },
+      };
+
+      await handleCopilotDirectorRequest(reqFor({ permissionLevel: 'ask' }), res, () => {}, deps);
+      const frames = parseFrames(res);
+      assert.ok(frames.some((event) => event.type === 'gate_blocked'));
+      assert.ok(frames.some((event) => event.type === 'done' && /capability discovery failed/i.test(event.message)));
+      assert.equal(directorCalled, false, 'the Director must not run without a verified capability set');
+      assert.equal(res.writableEnded, true);
+    });
   });
 });
 
