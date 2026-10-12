@@ -2453,6 +2453,7 @@ export default function ForgeCopilot({
   const [sessionFilesWritten, setSessionFilesWritten] = useState([]);
   const [runElapsedSeconds, setRunElapsedSeconds] = useState(0);
   const [lastRunError, setLastRunError] = useState(null);
+  const [pendingApproval, setPendingApproval] = useState(null);
   const [lastPrompt, setLastPrompt] = useState('');
   const [toast, setToast] = useState('');
   const [refreshCount, setRefreshCount] = useState(0);
@@ -2840,15 +2841,18 @@ export default function ForgeCopilot({
   };
 
   // Real Autonomous Agent Run Execution (POST /api/agent/run SSE stream)
-  const submitPrompt = async (event) => {
+  const submitPrompt = async (event, resumeOptions = {}) => {
     event?.preventDefault();
-    const text = prompt.trim();
-    if (!text || isAssistantWorking) return;
+    const text = String(resumeOptions.prompt || prompt || '').trim();
+    const approvalToken = resumeOptions.approvalToken || null;
+    if (!text || (isAssistantWorking && !approvalToken)) return;
 
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setMessages((prev) => [...prev, { role: 'user', text, time }]);
-    setLastPrompt(text);
-    setPrompt('');
+    if (!approvalToken) {
+      setMessages((prev) => [...prev, { role: 'user', text, time }]);
+      setLastPrompt(text);
+      setPrompt('');
+    }
     setIsAssistantWorking(true);
     setActivityStep(0);
     setActivityDetail('Connecting to autonomous director...');
@@ -2857,8 +2861,9 @@ export default function ForgeCopilot({
     setLastRunError(null);
     setActiveSpecialist(null);
 
-    const taskId = `forge-${Date.now()}`;
+    const taskId = resumeOptions.taskId || `forge-${Date.now()}`;
     currentTaskIdRef.current = taskId;
+    let terminalOutcome = null;
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -2876,8 +2881,9 @@ export default function ForgeCopilot({
           projectId: currentProjectId,
           taskId,
           copilotDirector: true,
-          permissionLevel: autopilot ? 'auto' : 'ask',
+          permissionLevel: resumeOptions.permissionLevel || (autopilot ? 'auto' : 'ask'),
           preferredModel,
+          ...(approvalToken ? { approvalToken } : {}),
         }),
         signal: controller.signal,
       });
@@ -3095,26 +3101,34 @@ export default function ForgeCopilot({
               setTerminalLogs((prev) => [...prev, data.text]);
             }
 
-            // 8. Completion events (done / director_complete)
-            if (data.type === 'done' || data.type === 'director_complete' || data.status === 'completed' || data.status === 'SUCCEEDED') {
+            // Explicit terminal events only. A single successful worker is not the end of a multi-task run.
+            // Worker events also carry status=SUCCEEDED; only terminal event types finish the whole run.
+            if (data.type === 'done' || data.type === 'director_complete') {
               finished = true;
+              const terminalMessage = String(data.message || data.summary || '');
+              const approvalPaused = data.type === 'done' && Boolean(data.approvalGate || /approval required|run paused/i.test(terminalMessage));
+              const rejected = data.type === 'done' && /execution blocked|approval invalid|blocked by capabilitygatekeeper|^❌/i.test(terminalMessage);
+              terminalOutcome = approvalPaused ? 'paused' : rejected ? 'failed' : 'succeeded';
+              if (terminalOutcome === 'failed') setLastRunError(terminalMessage || 'Execution was blocked.');
               const replyTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              setLiveActivities((prev) => prev.map((a) => (a.status === 'running' ? { ...a, status: 'done' } : a)));
+              setLiveActivities((prev) => prev.map((a) => (a.status === 'running' ? { ...a, status: terminalOutcome === 'failed' ? 'failed' : 'done' } : a)));
               setMessages((prev) => [
                 ...prev,
                 {
                   role: 'assistant',
                   time: replyTime,
-                  text: data.message || data.summary || `🎉 Finished applying autonomous changes for: "${text}".`,
+                  text: terminalMessage || (terminalOutcome === 'succeeded' ? `Forge Studio finished the requested changes for: "${text}".` : terminalOutcome === 'paused' ? 'Run paused for approval.' : 'Execution was blocked.'),
                   files: data.changedPaths || sessionFilesWritten.map((f) => f.path),
+                  ...(terminalOutcome === 'failed' ? { error: terminalMessage || 'Execution was blocked.' } : {}),
                 },
               ]);
               break;
             }
 
             // 9. Error events (director_error / error / FAILED)
-            if (data.type === 'director_error' || data.type === 'error' || data.status === 'FAILED') {
+            if (data.type === 'director_error' || data.type === 'error') {
               finished = true;
+              terminalOutcome = 'failed';
               const errMsg = data.error || data.message || 'Execution failed';
               setLastRunError(errMsg);
               const replyTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -3133,8 +3147,9 @@ export default function ForgeCopilot({
             }
 
             // 10. Cancellation event
-            if (data.type === 'director_canceled' || data.status === 'CANCELLED') {
+            if (data.type === 'director_canceled' || data.type === 'task_canceled') {
               finished = true;
+              terminalOutcome = 'canceled';
               showToast('Run canceled');
               break;
             }
@@ -3144,7 +3159,15 @@ export default function ForgeCopilot({
 
       await loadProjectData();
       setRefreshCount((c) => c + 1);
-      showToast('Autonomous run complete');
+      if (terminalOutcome === 'succeeded') showToast('Forge Studio run complete');
+      else if (terminalOutcome === 'paused') showToast('Approval required to continue');
+      else if (terminalOutcome === 'canceled') showToast('Run canceled');
+      else if (!terminalOutcome) {
+        const incompleteMessage = 'Forge stream ended without a terminal completion event. The run was not marked successful.';
+        setLastRunError(incompleteMessage);
+        setMessages((prev) => [...prev, { role: 'assistant', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), text: `⚠️ **Run could not be verified**: ${incompleteMessage}`, error: incompleteMessage }]);
+        showToast('Forge run ended without confirmation');
+      }
     } catch (err) {
       if (err.name === 'AbortError') {
         showToast('Agent run cancelled');
