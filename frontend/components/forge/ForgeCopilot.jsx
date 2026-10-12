@@ -2841,6 +2841,7 @@ export default function ForgeCopilot({
           `> Dev server ready on http://localhost:${data.hostPort || 5173}`,
         ]);
         showToast('Dev server ready');
+        return true;
       } else {
         const reason = `Preview server request failed (HTTP ${res.status})`;
         setDevServer({ state: 'FAILED', url: null, hostPort: null, reason, error: reason });
@@ -2849,8 +2850,11 @@ export default function ForgeCopilot({
         return false;
       }
     } catch (err) {
-      setTerminalLogs((prev) => [...prev, `> Build notice: ${err.message}`]);
-      showToast('Live preview recompiled');
+      const reason = String(err?.message || err || 'Unknown preview error').slice(0, 220);
+      setDevServer({ state: 'FAILED', url: null, hostPort: null, reason, error: reason });
+      setTerminalLogs((prev) => [...prev, `> Live dev server failed: ${reason}`, '> The in-browser preview remains available as a fallback.']);
+      showToast('Live server failed; check Terminal');
+      return false;
     } finally {
       setIsRunning(false);
       setRefreshCount((c) => c + 1);
