@@ -497,11 +497,11 @@ test('POST /api/sandbox/create with local fallback -> 200 and lifecycle roundtri
   const sbId = body.sandbox.id;
 
   // File write
-  const { status: writeStatus } = await req('POST', `/api/sandbox/${sbId}/files/write`, {
+  const { status: writeStatus, body: writeBody } = await req('POST', `/api/sandbox/${sbId}/files/write`, {
     filePath: 'test.js',
     content: 'console.log("hello sandbox");'
   });
-  assert.equal(writeStatus, 200);
+  assert.equal(writeStatus, 200, `Sandbox file write failed: ${JSON.stringify(writeBody)}`);
 
   // File read
   const { status: readStatus, body: readBody } = await req('GET', `/api/sandbox/${sbId}/files/read?path=test.js`);
