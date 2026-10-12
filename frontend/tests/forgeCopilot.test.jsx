@@ -196,6 +196,8 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
 
     expect(screen.getByText('PROJECT WORKSPACES')).toBeInTheDocument();
 
+  });
+
   test('does not treat a successful specialist event as the end of the whole build', async () => {
     const previousFetch = global.fetch;
     const events = [
@@ -207,7 +209,7 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
       { type: 'director_task', status: 'SUCCEEDED', taskId: 'verifier', specialty: 'VERIFIER' },
       { type: 'director_complete', status: 'SUCCEEDED', taskCount: 2, changedPaths: ['src/NewComponent.jsx'], message: 'End of requested build — verified' },
     ];
-    const payload = events.map((data) => `event: ${data.type}\\ndata: ${JSON.stringify(data)}\\n\\n`).join('');
+    const payload = events.map((data) => `event: ${data.type}\ndata: ${JSON.stringify(data)}\n\n`).join('');
     let sent = false;
     const reader = {
       read: jest.fn(async () => {
@@ -240,6 +242,5 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
     } finally {
       global.fetch = previousFetch;
     }
-  });
   });
 });
