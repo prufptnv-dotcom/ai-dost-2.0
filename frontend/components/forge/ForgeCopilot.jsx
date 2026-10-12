@@ -2434,7 +2434,7 @@ function SettingsPage({ onToast }) {
 
 export default function ForgeCopilot({
   projectId = 'copilot-workspace',
-  projectName: initialProjectName = 'Copilot Workspace',
+  projectName: initialProjectName = 'Forge Studio Workspace',
   onToast: externalToast,
 }) {
   const [currentProjectId, setCurrentProjectId] = useState(projectId);
@@ -2677,7 +2677,7 @@ export default function ForgeCopilot({
           handleSelectProject(remaining[0]);
         } else {
           setCurrentProjectId('copilot-workspace');
-          setProjectName('Copilot Workspace');
+          setProjectName('Forge Studio Workspace');
           setFiles([]);
           setContents({});
           setActiveFile('');
