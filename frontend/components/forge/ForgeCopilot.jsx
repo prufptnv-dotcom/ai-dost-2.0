@@ -2579,25 +2579,26 @@ export default function ForgeCopilot({
   const loadProjectData = useCallback(async () => {
     try {
       const data = await fetchProject(currentProjectId);
-      if (data) {
-        if (data.name || data.project_name) {
-          setProjectName(data.name || data.project_name);
-        }
-        const fileList = data.files || [];
-        setFiles(fileList);
-
-        const newContents = {};
-        fileList.forEach((f) => {
-          newContents[f.path] = f.content || '';
-        });
-        setContents(newContents);
-
-        if (fileList.length > 0 && !activeFile) {
-          setActiveFile(fileList[0].path);
-        }
+      if (!data) return [];
+      if (data.name || data.project_name) {
+        setProjectName(data.name || data.project_name);
       }
+      const fileList = Array.isArray(data.files) ? data.files : [];
+      setFiles(fileList);
+
+      const newContents = {};
+      fileList.forEach((f) => {
+        newContents[f.path] = f.content || '';
+      });
+      setContents(newContents);
+
+      if (fileList.length > 0 && !activeFile) {
+        setActiveFile(fileList[0].path);
+      }
+      return fileList;
     } catch (err) {
       console.warn('Could not load project files from backend:', err?.message);
+      return null;
     }
   }, [currentProjectId, activeFile]);
 
