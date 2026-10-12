@@ -277,7 +277,7 @@ export default function Dashboard() {
         if (current && (current.title || current.name)) return current.title || current.name;
       }
     } catch (_) {}
-    return 'Copilot Workspace';
+    return 'Forge Studio Workspace';
   }, [activeSessionId]);
 
   const [initialChatPrompt, setInitialChatPrompt] = useState('');
