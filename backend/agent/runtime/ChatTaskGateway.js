@@ -47,7 +47,27 @@ class ChatTaskGateway {
     }
     if (durable.state === 'SUCCEEDED' || durable.state === 'CANCELLED') {
       const result = durable.entry.result || { status: durable.state, taskId };
-      if (typeof onEvent === 'function') onEvent({ type: 'task_replay', taskId, status: durable.state });
+      if (typeof onEvent === 'function') {
+        onEvent({ type: 'task_replay', taskId, status: durable.state });
+        const replayedEvents = Array.isArray(durable.entry.events) ? durable.entry.events : [];
+        for (const event of replayedEvents) onEvent({ ...event, taskId });
+
+        // Older durable records may not have persisted their terminal event.
+        // Avoid leaving replay consumers waiting for a final task state.
+        const hasTerminalEvent = replayedEvents.some((event) =>
+          event.phase === 'success' ||
+          event.phase === 'error' ||
+          event.type === 'task_canceled' ||
+          event.type === 'task_completed'
+        );
+        if (!hasTerminalEvent) {
+          if (durable.state === 'SUCCEEDED') {
+            onEvent({ type: 'task_phase', phase: 'success', status: 'Task completed', taskId });
+          } else {
+            onEvent({ type: 'task_canceled', reason: 'canceled', taskId });
+          }
+        }
+      }
       return result;
     }
     if (durable.state === 'FAILED') {
