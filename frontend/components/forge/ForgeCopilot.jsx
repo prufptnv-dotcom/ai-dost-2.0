@@ -2842,8 +2842,11 @@ export default function ForgeCopilot({
         ]);
         showToast('Dev server ready');
       } else {
-        setTerminalLogs((prev) => [...prev, '> Preview build generated via in-browser compiler.']);
-        showToast('Live preview updated');
+        const reason = `Preview server request failed (HTTP ${res.status})`;
+        setDevServer({ state: 'FAILED', url: null, hostPort: null, reason, error: reason });
+        setTerminalLogs((prev) => [...prev, `> Live dev server failed: ${reason}`, '> The in-browser preview remains available as a fallback.']);
+        showToast('Live server failed; check Terminal');
+        return false;
       }
     } catch (err) {
       setTerminalLogs((prev) => [...prev, `> Build notice: ${err.message}`]);
