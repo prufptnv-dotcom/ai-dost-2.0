@@ -2832,7 +2832,10 @@ export default function ForgeCopilot({
       });
       if (res.ok) {
         const data = await res.json();
-        setDevServer(data);
+        if (data?.success !== true || data?.state === 'FAILED' || (!data?.url && data?.hostPort == null)) {
+          throw new Error(data?.error || `Dev server did not become ready (HTTP ${res.status})`);
+        }
+        setDevServer({ ...data, state: 'READY' });
         setTerminalLogs((prev) => [
           ...prev,
           `> Dev server ready on http://localhost:${data.hostPort || 5173}`,
