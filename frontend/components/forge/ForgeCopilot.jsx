@@ -3196,12 +3196,69 @@ export default function ForgeCopilot({
         }
       }
 
-      await loadProjectData();
+      const reloadedFiles = await loadProjectData();
       setRefreshCount((c) => c + 1);
-      if (terminalOutcome === 'succeeded') showToast('Forge Studio run complete');
-      else if (terminalOutcome === 'paused') showToast('Approval required to continue');
-      else if (terminalOutcome === 'canceled') showToast('Run canceled');
-      else if (!terminalOutcome) {
+
+      const normalizeWorkspacePath = (value) => String(value || '')
+        .replaceAll('\\\\', '/')
+        .replace(/^\\.\\//, '')
+        .replace(/^\\/+/, '')
+        .toLowerCase();
+
+      // A successful tool event is not enough to prove persistence. Confirm the
+      // backend returns each changed path before reporting the run as complete.
+      if (terminalOutcome === 'succeeded' && terminalChangedPaths.size > 0) {
+        const savedPaths = new Set(
+          Array.isArray(reloadedFiles)
+            ? reloadedFiles.map((file) => normalizeWorkspacePath(file.path))
+            : []
+        );
+        const missingPaths = Array.isArray(reloadedFiles)
+          ? [...terminalChangedPaths].filter((filePath) => !savedPaths.has(normalizeWorkspacePath(filePath)))
+          : [...terminalChangedPaths];
+        if (missingPaths.length > 0) {
+          terminalOutcome = 'failed';
+          const persistenceError = Array.isArray(reloadedFiles)
+            ? `Workspace reload did not confirm saved files: ${missingPaths.slice(0, 6).join(', ')}`
+            : 'Workspace could not be reloaded to verify file persistence.';
+          setLastRunError(persistenceError);
+          setMessages((prev) => {
+            const next = [...prev];
+            const lastAssistant = next.map((message, index) => ({ message, index })).reverse()
+              .find(({ message }) => message.role === 'assistant');
+            const updated = {
+              role: 'assistant',
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              text: `⚠️ **Save verification failed**: ${persistenceError}`,
+              error: persistenceError,
+            };
+            if (lastAssistant) next[lastAssistant.index] = { ...next[lastAssistant.index], ...updated };
+            else next.push(updated);
+            return next;
+          });
+          showToast('Save verification failed; changes are not confirmed');
+        }
+      }
+
+      if (terminalOutcome === 'succeeded') {
+        const hasPackageJson = Array.isArray(reloadedFiles) && reloadedFiles.some(
+          (file) => normalizeWorkspacePath(file.path).split('/').pop() === 'package.json'
+        );
+        if (terminalChangedPaths.size > 0 && hasPackageJson) {
+          const previewReady = await runBuild({ silent: true });
+          showToast(previewReady
+            ? 'Forge Studio run complete — live preview ready'
+            : 'Code saved, but live build failed. Check Terminal; static preview remains available.');
+        } else {
+          showToast('Forge Studio run complete');
+        }
+      } else if (terminalOutcome === 'paused') {
+        showToast('Approval required to continue');
+      } else if (terminalOutcome === 'canceled') {
+        showToast('Run canceled');
+      } else if (terminalOutcome === 'failed' && !lastRunError) {
+        showToast('Forge run failed or was blocked');
+      } else if (!terminalOutcome) {
         const incompleteMessage = 'Forge stream ended without a terminal completion event. The run was not marked successful.';
         setLastRunError(incompleteMessage);
         setMessages((prev) => [...prev, { role: 'assistant', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), text: `⚠️ **Run could not be verified**: ${incompleteMessage}`, error: incompleteMessage }]);
