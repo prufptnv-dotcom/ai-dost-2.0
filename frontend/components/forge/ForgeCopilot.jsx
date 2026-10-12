@@ -3200,9 +3200,9 @@ export default function ForgeCopilot({
       setRefreshCount((c) => c + 1);
 
       const normalizeWorkspacePath = (value) => String(value || '')
-        .replaceAll('\\\\', '/')
-        .replace(/^\\.\\//, '')
-        .replace(/^\\/+/, '')
+        .replaceAll('\\', '/')
+        .replace(/^\.\//, '')
+        .replace(/^\/+/, '')
         .toLowerCase();
 
       // A successful tool event is not enough to prove persistence. Confirm the
