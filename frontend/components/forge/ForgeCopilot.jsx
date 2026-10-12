@@ -2887,6 +2887,7 @@ export default function ForgeCopilot({
     const taskId = resumeOptions.taskId || `forge-${Date.now()}`;
     currentTaskIdRef.current = taskId;
     let terminalOutcome = null;
+    const terminalChangedPaths = new Set();
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -3078,9 +3079,10 @@ export default function ForgeCopilot({
 
             // 5. File written / File diff event
             if (data.type === 'file_written' || data.file_written || data.action === 'write_file' || data.type === 'director_file_diff') {
-              const filePath = data.path || data.file || data.fullPath;
+              const filePath = data.path || data.fullPath || data.file;
               const content = data.content || '';
               if (filePath) {
+                if (data.type !== 'director_file_diff') terminalChangedPaths.add(String(filePath));
                 if (content) {
                   setContents((c) => ({ ...c, [filePath]: content }));
                 }
@@ -3145,6 +3147,7 @@ export default function ForgeCopilot({
               const approvalPaused = data.type === 'done' && Boolean(data.approvalGate || /approval required|run paused/i.test(terminalMessage));
               const rejected = data.type === 'done' && /execution blocked|approval invalid|blocked by capabilitygatekeeper|^❌/i.test(terminalMessage);
               terminalOutcome = approvalPaused ? 'paused' : rejected ? 'failed' : 'succeeded';
+              if (Array.isArray(data.changedPaths)) data.changedPaths.forEach((p) => { if (typeof p === 'string' && p.trim()) terminalChangedPaths.add(p); });
               if (terminalOutcome === 'failed') setLastRunError(terminalMessage || 'Execution was blocked.');
               const replyTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
               setLiveActivities((prev) => prev.map((a) => (a.status === 'running' ? { ...a, status: terminalOutcome === 'failed' ? 'failed' : 'done' } : a)));
