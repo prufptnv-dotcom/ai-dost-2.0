@@ -3230,7 +3230,7 @@ export default function ForgeCopilot({
             ? reloadedFiles.map((file) => [normalizeWorkspacePath(file.path), file])
             : []
         );
-        const normalizeContent = (value) => String(value ?? '').replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n');
+        const normalizeContent = (value) => String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
         const contentMismatchPaths = Array.isArray(reloadedFiles)
           ? [...terminalExpectedContent].filter(([filePath, expected]) => {
               const saved = savedByPath.get(normalizeWorkspacePath(filePath));
