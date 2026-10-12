@@ -88,7 +88,7 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
   if (permissionLevel === 'ask') {
     let capabilities;
     try {
-      capabilities = capabilityDiscovery.discover(request);
+      capabilities = (dependencies.capabilityDiscovery || capabilityDiscovery).discover(request);
     } catch (_) {
       // Approval mode must fail closed: a discovery outage must not silently
       // turn a protected request into an ungated execution.
