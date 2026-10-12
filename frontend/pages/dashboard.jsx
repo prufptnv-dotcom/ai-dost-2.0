@@ -86,7 +86,7 @@ const PALETTE_ACTIONS = [
   { id: 'chat', label: 'Open Chat', hint: 'Ctrl+1', icon: MessageSquare },
   { id: 'capabilities', label: '50-Domain Master Hub', hint: '50 Skills & Standards', icon: Sparkles },
   { id: 'agent', label: 'Open Agent Workbench', hint: 'Ctrl+2', icon: Bot },
-  { id: 'copilot', label: 'Open Copilot IDE', hint: 'Ctrl+3', icon: Code2 },
+  { id: 'copilot', label: 'Open Forge Studio', hint: 'Ctrl+3', icon: Code2 },
   { id: 'animations', label: 'Anime.js 3D Motion Studio', hint: '3D/Motion', icon: Move3d },
   { id: 'bharat', label: 'Bharat Hub (Free India APIs)', hint: 'Pincode/IFSC/ISRO', icon: Building2 },
   { id: 'analytics', label: 'Open Data Analytics', hint: 'Charts/Insights', icon: BarChart3 }, // P3 #88: no Ctrl+A — reserved for native Select All
@@ -268,7 +268,7 @@ export default function Dashboard() {
   }, []);
 
   const activeChatTitle = useMemo(() => {
-    if (typeof window === 'undefined') return 'Copilot Workspace';
+    if (typeof window === 'undefined') return 'Forge Studio Workspace';
     try {
       const stored = localStorage.getItem('ai_dost_chat_sessions');
       if (stored) {
