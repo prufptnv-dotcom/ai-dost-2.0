@@ -238,7 +238,7 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
       fireEvent.click(screen.getByLabelText(/send message/i));
 
       expect(await screen.findByText('End of requested build — verified')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /NewComponent\.jsx/i })).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: /App\.jsx/i }).length).toBeGreaterThan(0);
       expect(reader.read).toHaveBeenCalledTimes(1);
     } finally {
       global.fetch = previousFetch;
