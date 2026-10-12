@@ -88,7 +88,7 @@ test('gateway delegates validated chat tasks to the canonical execution loop', a
   const result = await gateway.run({
     projectId: 'p1',
     userId: 'u1',
-    taskPlan: { type: 'task', taskId: 't1', intent: { originalMessage: 'Build a website' } },
+    taskPlan: { type: 'task', taskId: 't1', intent: { type: 'task', originalMessage: 'Build a website' } },
     onEvent: (event) => events.push(event),
   });
 
@@ -109,7 +109,7 @@ test('gateway fails closed when a task has no executable steps', async () => {
   });
 
   await assert.rejects(
-    gateway.run({ projectId: 'p1', userId: 'u1', taskPlan: { type: 'task', intent: { originalMessage: 'do it' } } }),
+    gateway.run({ projectId: 'p1', userId: 'u1', taskPlan: { type: 'task', intent: { type: 'task', originalMessage: 'do it' } } }),
     /no executable tool steps/
   );
 });
@@ -127,7 +127,7 @@ test('gateway does not enter runtime after pre-cancellation', async () => {
   });
 
   await assert.rejects(
-    gateway.run({ projectId: 'p1', userId: 'u1', taskPlan: { type: 'task', intent: { originalMessage: 'do it' } }, signal: controller.signal }),
+    gateway.run({ projectId: 'p1', userId: 'u1', taskPlan: { type: 'task', intent: { type: 'task', originalMessage: 'do it' } }, signal: controller.signal }),
     /canceled before execution/
   );
   assert.equal(called, false);
