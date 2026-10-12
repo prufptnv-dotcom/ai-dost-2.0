@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import ForgeCopilot from '../components/forge/ForgeCopilot';
 
 // Mock API
@@ -195,5 +195,51 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
     fireEvent.click(switcher);
 
     expect(screen.getByText('PROJECT WORKSPACES')).toBeInTheDocument();
+
+  test('does not treat a successful specialist event as the end of the whole build', async () => {
+    const previousFetch = global.fetch;
+    const events = [
+      { type: 'run_started', taskId: 'forge-e2e-1', runId: 'director-e2e-1' },
+      { type: 'director_plan', summary: 'Implement and verify', tasks: [{ id: 'coder', specialty: 'CODER' }, { id: 'verifier', specialty: 'VERIFIER' }] },
+      // This is a non-terminal event: the first worker succeeding must not end the stream.
+      { type: 'director_task', status: 'SUCCEEDED', taskId: 'coder', specialty: 'CODER' },
+      { type: 'file_written', path: 'src/NewComponent.jsx', content: 'export default function NewComponent() { return <button>Ready</button>; }' },
+      { type: 'director_task', status: 'SUCCEEDED', taskId: 'verifier', specialty: 'VERIFIER' },
+      { type: 'director_complete', status: 'SUCCEEDED', taskCount: 2, changedPaths: ['src/NewComponent.jsx'], message: 'End of requested build — verified' },
+    ];
+    const payload = events.map((data) => `event: ${data.type}\\ndata: ${JSON.stringify(data)}\\n\\n`).join('');
+    let sent = false;
+    const reader = {
+      read: jest.fn(async () => {
+        if (sent) return { done: true, value: undefined };
+        sent = true;
+        return { done: false, value: Buffer.from(payload) };
+      }),
+      cancel: jest.fn(async () => {}),
+    };
+
+    global.fetch = jest.fn(async (url) => {
+      if (String(url).includes('/api/agent/run')) {
+        return { ok: true, status: 200, body: { getReader: () => reader } };
+      }
+      return {
+        ok: true,
+        json: async () => ({ state: 'STOPPED', projects: [], success: true }),
+      };
+    });
+
+    try {
+      render(<ForgeCopilot projectId="test-project" projectName="test-project" />);
+      const textarea = await screen.findByPlaceholderText(/Ask Forge AI/i);
+      fireEvent.change(textarea, { target: { value: 'Add a component and verify the build' } });
+      fireEvent.click(screen.getByLabelText(/send message/i));
+
+      expect(await screen.findByText('End of requested build — verified')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /NewComponent\.jsx/i })).toBeInTheDocument();
+      await waitFor(() => expect(reader.read).toHaveBeenCalledTimes(2));
+    } finally {
+      global.fetch = previousFetch;
+    }
+  });
   });
 });
