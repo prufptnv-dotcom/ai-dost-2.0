@@ -4,7 +4,6 @@ const fsSync = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { EventEmitter } = require('events');
-const { Writable } = require('stream');
 const { spawn } = require('child_process');
 const os = require('os');
 
@@ -554,25 +553,83 @@ class SandboxManager extends EventEmitter {
         closeTimer();
         reject(error);
       };
-      const capture = (channel, buffer, chunk) => {
-        const text = chunk.toString();
-        buffer.push(text);
+      const capture = (channel, target, chunk) => {
+        if (!chunk || chunk.length === 0) return;
+        const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
+        target.push(text);
         if (typeof options.onData === 'function') {
           try { options.onData(channel, text); } catch (_) {}
         }
       };
-      const stdoutSink = new Writable({
-        write(chunk, _encoding, callback) {
+
+      // Docker uses an 8-byte multiplex header for non-TTY exec output, but
+      // some daemon/TTY combinations return raw bytes. Parse frames across
+      // arbitrary TCP chunk boundaries and fall back to raw stdout if the
+      // initial bytes do not form a valid Docker frame.
+      const MAX_FRAME_SIZE = 64 * 1024 * 1024;
+      let outputMode = options.tty ? 'raw' : 'detect';
+      let pendingOutput = Buffer.alloc(0);
+
+      const processOutput = (chunk) => {
+        if (!chunk || chunk.length === 0) return;
+        if (outputMode === 'raw') {
           capture('stdout', stdout, chunk);
-          callback();
+          return;
         }
-      });
-      const stderrSink = new Writable({
-        write(chunk, _encoding, callback) {
-          capture('stderr', stderr, chunk);
-          callback();
+
+        pendingOutput = pendingOutput.length
+          ? Buffer.concat([pendingOutput, chunk])
+          : Buffer.from(chunk);
+
+        if (outputMode === 'detect') {
+          if (pendingOutput.length < 8) return;
+          const type = pendingOutput[0];
+          const reservedBytesAreZero =
+            pendingOutput[1] === 0 &&
+            pendingOutput[2] === 0 &&
+            pendingOutput[3] === 0;
+          const frameSize = pendingOutput.readUInt32BE(4);
+
+          if (
+            (type !== 1 && type !== 2) ||
+            !reservedBytesAreZero ||
+            frameSize > MAX_FRAME_SIZE
+          ) {
+            outputMode = 'raw';
+            capture('stdout', stdout, pendingOutput);
+            pendingOutput = Buffer.alloc(0);
+            return;
+          }
+          outputMode = 'multiplexed';
         }
-      });
+
+        while (outputMode === 'multiplexed' && pendingOutput.length >= 8) {
+          const type = pendingOutput[0];
+          const reservedBytesAreZero =
+            pendingOutput[1] === 0 &&
+            pendingOutput[2] === 0 &&
+            pendingOutput[3] === 0;
+          const frameSize = pendingOutput.readUInt32BE(4);
+
+          if (
+            (type !== 1 && type !== 2) ||
+            !reservedBytesAreZero ||
+            frameSize > MAX_FRAME_SIZE
+          ) {
+            // A malformed frame after valid frames should not make us lose
+            // any remaining output. Preserve these bytes as stdout.
+            outputMode = 'raw';
+            capture('stdout', stdout, pendingOutput);
+            pendingOutput = Buffer.alloc(0);
+            return;
+          }
+
+          if (pendingOutput.length < 8 + frameSize) return;
+          const payload = pendingOutput.subarray(8, 8 + frameSize);
+          capture(type === 2 ? 'stderr' : 'stdout', type === 2 ? stderr : stdout, payload);
+          pendingOutput = pendingOutput.subarray(8 + frameSize);
+        }
+      };
 
       if (timeoutMs > 0) {
         timer = setTimeout(() => {
@@ -585,20 +642,28 @@ class SandboxManager extends EventEmitter {
       exec.start({ hijack: true, stdin: !!options.input }, (err, outputStream) => {
         if (err) return fail(err);
         stream = outputStream;
-
-        // Docker multiplexes stdout/stderr with an 8-byte frame header when
-        // exec TTY is disabled. A TCP chunk is not guaranteed to start at a
-        // frame boundary, so checking chunk[0] loses valid output. Use the
-        // Dockerode demultiplexer for framed output; TTY sessions are raw.
-        if (options.tty) {
-          stream.on('data', (chunk) => capture('stdout', stdout, chunk));
-        } else {
-          docker.modem.demuxStream(stream, stdoutSink, stderrSink);
-        }
+        stream.on('data', processOutput);
 
         stream.on('end', async () => {
           if (settled) return;
           try {
+            if (pendingOutput.length > 0) {
+              if (outputMode === 'detect') {
+                capture('stdout', stdout, pendingOutput);
+              } else if (outputMode === 'multiplexed') {
+                // Incomplete final frames are unusual, but retain the payload
+                // rather than silently discarding the command's last output.
+                const type = pendingOutput.length >= 8 ? pendingOutput[0] : 1;
+                const hasHeader = pendingOutput.length >= 8 &&
+                  (type === 1 || type === 2) &&
+                  pendingOutput[1] === 0 &&
+                  pendingOutput[2] === 0 &&
+                  pendingOutput[3] === 0;
+                const payload = hasHeader ? pendingOutput.subarray(8) : pendingOutput;
+                capture(type === 2 ? 'stderr' : 'stdout', type === 2 ? stderr : stdout, payload);
+              }
+              pendingOutput = Buffer.alloc(0);
+            }
             closeTimer();
             const inspect = await exec.inspect();
             if (settled) return;
