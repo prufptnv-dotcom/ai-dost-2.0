@@ -28,7 +28,7 @@ function displayProjectName(name, projectId) {
   const label = String(name || '').trim();
   const reservedWorkspace = ['default', 'copilot-workspace'].includes(String(projectId || '').toLowerCase());
   if (reservedWorkspace && /^copilot workspace$/i.test(label)) return 'Forge Studio Workspace';
-  return label || 'Forge Studio Workspace';
+  return label || (reservedWorkspace ? 'Forge Studio Workspace' : 'Untitled');
 }
 
 const themePresets = [
@@ -418,7 +418,7 @@ function FileSidebar({
                 {projects.length > 0 ? (
                   projects.map((p) => {
                     const pId = p.project_id || p.id;
-                    const pName = p.project_name || p.name || 'Untitled';
+                    const pName = displayProjectName(p.project_name || p.name || 'Untitled', pId);
                     const isCurrent = pId === currentProjectId;
                     return (
                       <div
@@ -2660,9 +2660,10 @@ export default function ForgeCopilot({
     const pId = p.project_id || p.id;
     if (pId) {
       setCurrentProjectId(pId);
-      setProjectName(p.project_name || p.name || 'Workspace');
+      const nextProjectName = displayProjectName(p.project_name || p.name || 'Workspace', pId);
+      setProjectName(nextProjectName);
       setActiveFile('');
-      showToast(`Switched to ${p.project_name || p.name}`);
+      showToast(`Switched to ${nextProjectName}`);
     }
   };
 
