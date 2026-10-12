@@ -243,4 +243,62 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
       global.fetch = previousFetch;
     }
   });
+
+  test('approval prompt resumes the same Forge task with its single-use token', async () => {
+    const previousFetch = global.fetch;
+    const requestBodies = [];
+    const responses = [
+      [
+        { type: 'gate_approval_required', message: 'Approval required to modify the workspace.', gate: { approval_token: 'forge-approval-token', decision: 'REQUIRE_EXPLICIT_APPROVAL' } },
+        { type: 'done', message: '⏸️ Ask mode: run paused — press Approve in the chat to start.', steps: [] },
+      ],
+      [
+        { type: 'gate_approved', message: 'Approval verified.' },
+        { type: 'director_complete', status: 'SUCCEEDED', taskCount: 1, changedPaths: ['src/App.jsx'], message: 'Approved run completed successfully' },
+      ],
+    ];
+
+    global.fetch = jest.fn(async (url, init = {}) => {
+      if (String(url).includes('/api/agent/run')) {
+        requestBodies.push(JSON.parse(init.body));
+        const events = responses.shift() || [];
+        const payload = events.map((data) => `event: ${data.type}\\ndata: ${JSON.stringify(data)}\\n\\n`).join('');
+        let sent = false;
+        return {
+          ok: true,
+          status: 200,
+          body: {
+            getReader: () => ({
+              read: async () => {
+                if (sent) return { done: true, value: undefined };
+                sent = true;
+                return { done: false, value: Buffer.from(payload) };
+              },
+              cancel: async () => {},
+            }),
+          },
+        };
+      }
+      return { ok: true, json: async () => ({ state: 'STOPPED', projects: [], success: true }) };
+    });
+
+    try {
+      render(<ForgeCopilot projectId="test-project" projectName="test-project" />);
+      fireEvent.click(await screen.findByRole('button', { name: /Autopilot on/i }));
+      const textarea = await screen.findByPlaceholderText(/Ask Forge AI/i);
+      fireEvent.change(textarea, { target: { value: 'Build an account settings page' } });
+      fireEvent.click(screen.getByLabelText(/send message/i));
+
+      fireEvent.click(await screen.findByRole('button', { name: /Approve and continue/i }));
+      expect(await screen.findByText('Approved run completed successfully')).toBeInTheDocument();
+      expect(requestBodies).toHaveLength(2);
+      expect(requestBodies[0].permissionLevel).toBe('ask');
+      expect(requestBodies[1].permissionLevel).toBe('ask');
+      expect(requestBodies[1].taskId).toBe(requestBodies[0].taskId);
+      expect(requestBodies[1].approvalToken).toBe('forge-approval-token');
+      expect(screen.getAllByText('Build an account settings page')).toHaveLength(1);
+    } finally {
+      global.fetch = previousFetch;
+    }
+  });
 });
