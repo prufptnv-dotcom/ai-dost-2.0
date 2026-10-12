@@ -5,6 +5,8 @@ const path = require('path');
 const crypto = require('crypto');
 const { EventEmitter } = require('events');
 const { spawn } = require('child_process');
+const { PassThrough } = require('stream');
+const archiver = require('archiver');
 const os = require('os');
 
 const isWindows = process.platform === 'win32';
@@ -697,6 +699,36 @@ class SandboxManager extends EventEmitter {
     });
   }
 
+  async _syncFileToContainer(sandbox, fullPath, content) {
+    // Keep file writes visible to Docker exec even when the Docker daemon
+    // cannot see the application process's host filesystem (for example,
+    // a remote or nested daemon). The archive member path is relative to
+    // /workspace and is derived only from the already-validated sandbox path.
+    const relativePath = path.relative(sandbox.path, fullPath).split(path.sep).join('/');
+    const normalizedPath = path.posix.normalize(relativePath);
+    if (
+      !normalizedPath ||
+      normalizedPath === '.' ||
+      path.posix.isAbsolute(normalizedPath) ||
+      normalizedPath === '..' ||
+      normalizedPath.startsWith('../')
+    ) {
+      throw new Error('Invalid sandbox file path for container sync');
+    }
+
+    const archive = archiver('tar', { gzip: false });
+    const stream = new PassThrough();
+    archive.on('error', (error) => stream.destroy(error));
+    archive.pipe(stream);
+
+    const uploadPromise = sandbox.container.putArchive(stream, { path: '/workspace' });
+    archive.append(Buffer.isBuffer(content) ? content : Buffer.from(String(content ?? ''), 'utf8'), {
+      name: normalizedPath
+    });
+    await archive.finalize();
+    await uploadPromise;
+  }
+
   async writeFile(sandboxId, filePath, content) {
     const sandbox = this.containers.get(sandboxId);
     if (!sandbox) throw new Error(`Sandbox ${sandboxId} not found`);
@@ -704,6 +736,9 @@ class SandboxManager extends EventEmitter {
     const fullPath = this._resolveSafe(sandbox.path, filePath);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
     await fs.writeFile(fullPath, content);
+    if (!sandbox.isLocal && sandbox.container) {
+      await this._syncFileToContainer(sandbox, fullPath, content);
+    }
     sandbox.lastActivity = Date.now();
   }
 
