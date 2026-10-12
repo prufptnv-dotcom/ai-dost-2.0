@@ -389,18 +389,26 @@ class SandboxManager extends EventEmitter {
     } catch {
       // Image missing → pull with timeout
     }
-    await Promise.race([
-      new Promise((resolve, reject) => {
-        docker.pull(image, (err, stream) => {
-          if (err) return reject(err);
-          docker.modem.followProgress(stream, onFinished => {
-            if (onFinished) reject(onFinished);
-            else resolve();
+    let timeout;
+    try {
+      await Promise.race([
+        new Promise((resolve, reject) => {
+          docker.pull(image, (err, stream) => {
+            if (err) return reject(err);
+            docker.modem.followProgress(stream, onFinished => {
+              if (onFinished) reject(onFinished);
+              else resolve();
+            });
           });
-        });
-      }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error(`Image pull timeout for ${image}`)), 300000)),
-    ]);
+        }),
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error(`Image pull timeout for ${image}`)), 300000);
+        }),
+      ]);
+    } finally {
+      // Do not keep Node alive for five minutes after an image pull succeeds.
+      if (timeout) clearTimeout(timeout);
+    }
   }
 
   async execLocal(sandbox, cmd, options = {}) {

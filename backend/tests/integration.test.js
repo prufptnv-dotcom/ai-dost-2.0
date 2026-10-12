@@ -13,6 +13,7 @@ const assert = require('node:assert/strict');
 const { app, server, db, io } = require('../server.js');
 const { getWorkflowEngine } = require('../services/workflowEngine');
 const cacheService = require('../services/cacheService');
+const sandboxManager = require('../sandbox/SandboxManager');
 
 let base = '';
 
@@ -513,10 +514,13 @@ test('POST /api/sandbox/create with local fallback -> 200 and lifecycle roundtri
   });
   assert.equal(execStatus, 200);
   assert.equal(execBody.success, true);
+  const sandboxInstance = sandboxManager.getSandbox(sbId);
+  const dockerInfo = sandboxInstance?.container ? await sandboxInstance.container.inspect() : null;
+  const mountInfo = (dockerInfo?.Mounts || []).map(({ Type, Source, Destination, RW }) => ({ Type, Source, Destination, RW }));
   assert.match(
     execBody.result.stdout,
     /hello sandbox/,
-    `Sandbox exec did not return expected stdout. isolation=${body.sandbox.isolation}; result=${JSON.stringify(execBody.result)}`
+    `Sandbox exec did not return expected stdout. isolation=${body.sandbox.isolation}; hostPath=${body.sandbox.path}; mounts=${JSON.stringify(mountInfo)}; result=${JSON.stringify(execBody.result)}`
   );
 
   // Destroy
