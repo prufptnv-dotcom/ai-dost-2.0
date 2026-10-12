@@ -5,8 +5,6 @@ const path = require('path');
 const crypto = require('crypto');
 const { EventEmitter } = require('events');
 const { spawn } = require('child_process');
-const { PassThrough } = require('stream');
-const archiver = require('archiver');
 const os = require('os');
 
 const isWindows = process.platform === 'win32';
@@ -700,10 +698,8 @@ class SandboxManager extends EventEmitter {
   }
 
   async _syncFileToContainer(sandbox, fullPath, content) {
-    // Keep file writes visible to Docker exec even when the Docker daemon
-    // cannot see the application process's host filesystem (for example,
-    // a remote or nested daemon). The archive member path is relative to
-    // /workspace and is derived only from the already-validated sandbox path.
+    // Keep writes visible to Docker exec even when a nested/remote daemon
+    // cannot see the application process's filesystem bind mount.
     const relativePath = path.relative(sandbox.path, fullPath).split(path.sep).join('/');
     const normalizedPath = path.posix.normalize(relativePath);
     if (
@@ -716,17 +712,20 @@ class SandboxManager extends EventEmitter {
       throw new Error('Invalid sandbox file path for container sync');
     }
 
-    const archive = archiver('tar', { gzip: false });
-    const stream = new PassThrough();
-    archive.on('error', (error) => stream.destroy(error));
-    archive.pipe(stream);
-
-    const uploadPromise = sandbox.container.putArchive(stream, { path: '/workspace' });
-    archive.append(Buffer.isBuffer(content) ? content : Buffer.from(String(content ?? ''), 'utf8'), {
-      name: normalizedPath
+    const quote = (value) => "'" + String(value).replace(/'/g, "'\\''") + "'";
+    const directory = path.posix.dirname(normalizedPath);
+    const directoryArg = directory === '.' ? '.' : directory;
+    const command = `mkdir -p -- ${quote(directoryArg)} && base64 -d > ${quote(normalizedPath)}`;
+    const encodedContent = Buffer.from(content == null ? '' : content).toString('base64');
+    // Append a newline so even an empty file reliably closes stdin and
+    // produces a successful empty decode on BusyBox/coreutils base64.
+    const result = await this.exec(sandbox.id, command, {
+      input: encodedContent + '\n',
+      timeout: 15000
     });
-    await archive.finalize();
-    await uploadPromise;
+    if (!result.success) {
+      throw new Error(`Could not sync file into Docker sandbox: ${result.stderr || 'container write failed'}`);
+    }
   }
 
   async writeFile(sandboxId, filePath, content) {
