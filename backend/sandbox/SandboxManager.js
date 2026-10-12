@@ -4,6 +4,7 @@ const fsSync = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { EventEmitter } = require('events');
+const { Writable } = require('stream');
 const { spawn } = require('child_process');
 const os = require('os');
 
@@ -541,34 +542,79 @@ class SandboxManager extends EventEmitter {
     return new Promise((resolve, reject) => {
       // timeout: 0 means "no timeout" (long-running dev servers)
       const timeoutMs = options.timeout === 0 ? 0 : (options.timeout || 60000);
-      const timeout = timeoutMs ? setTimeout(() => reject(new Error('Exec timeout')), timeoutMs) : null;
-      const clearTimer = () => { if (timeout) clearTimeout(timeout); };
+      let timer = null;
+      let stream = null;
+      let settled = false;
+      const stdout = [];
+      const stderr = [];
+      const closeTimer = () => { if (timer) clearTimeout(timer); };
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        closeTimer();
+        reject(error);
+      };
+      const capture = (channel, buffer, chunk) => {
+        const text = chunk.toString();
+        buffer.push(text);
+        if (typeof options.onData === 'function') {
+          try { options.onData(channel, text); } catch (_) {}
+        }
+      };
+      const stdoutSink = new Writable({
+        write(chunk, _encoding, callback) {
+          capture('stdout', stdout, chunk);
+          callback();
+        }
+      });
+      const stderrSink = new Writable({
+        write(chunk, _encoding, callback) {
+          capture('stderr', stderr, chunk);
+          callback();
+        }
+      });
 
-      exec.start({ hijack: true, stdin: !!options.input }, (err, stream) => {
-        if (err) { clearTimer(); return reject(err); }
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          if (settled) return;
+          try { stream?.destroy(); } catch (_) {}
+          fail(new Error('Exec timeout'));
+        }, timeoutMs);
+      }
 
-        let stdout = '', stderr = '';
-        stream.on('data', chunk => {
-          const str = chunk.toString();
-          if (chunk[0] === 1) stdout += str;
-          else if (chunk[0] === 2) stderr += str;
-          if (typeof options.onData === 'function') {
-            try { options.onData(chunk[0] === 2 ? 'stderr' : 'stdout', str); } catch (_) {}
+      exec.start({ hijack: true, stdin: !!options.input }, (err, outputStream) => {
+        if (err) return fail(err);
+        stream = outputStream;
+
+        // Docker multiplexes stdout/stderr with an 8-byte frame header when
+        // exec TTY is disabled. A TCP chunk is not guaranteed to start at a
+        // frame boundary, so checking chunk[0] loses valid output. Use the
+        // Dockerode demultiplexer for framed output; TTY sessions are raw.
+        if (options.tty) {
+          stream.on('data', (chunk) => capture('stdout', stdout, chunk));
+        } else {
+          docker.modem.demuxStream(stream, stdoutSink, stderrSink);
+        }
+
+        stream.on('end', async () => {
+          if (settled) return;
+          try {
+            closeTimer();
+            const inspect = await exec.inspect();
+            if (settled) return;
+            settled = true;
+            resolve({
+              exitCode: inspect.ExitCode,
+              stdout: stdout.join(''),
+              stderr: stderr.join(''),
+              success: inspect.ExitCode === 0
+            });
+          } catch (inspectError) {
+            fail(inspectError);
           }
         });
 
-        stream.on('end', async () => {
-          clearTimer();
-          const inspect = await exec.inspect();
-          resolve({
-            exitCode: inspect.ExitCode,
-            stdout,
-            stderr,
-            success: inspect.ExitCode === 0
-          });
-        });
-
-        stream.on('error', err => { clearTimer(); reject(err); });
+        stream.on('error', fail);
 
         if (options.input) {
           stream.write(options.input);
