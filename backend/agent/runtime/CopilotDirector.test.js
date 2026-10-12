@@ -170,7 +170,7 @@ test('run fails closed when a worker resolves with a non-success result', async 
   };
 
   await assert.rejects(
-    director.run({ userId: 'user-1', projectId: 'project-1', request: 'change UI' }),
+    director.run({ userId: 'user-1', projectId: 'project-1', request: 'change UI', onEvent: (event) => director._testEvents.push(event) }),
     /Mutation did not apply/
   );
   assert.equal(
