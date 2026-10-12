@@ -66,7 +66,7 @@ class SandboxManager extends EventEmitter {
       /^[A-Za-z]:[\\/]/.test(rootInput) ||
       rootInput.startsWith('\\\\') ||
       rootInput.startsWith('\\') ||
-      /^\\/\\//.test(rootInput);
+      rootInput.startsWith('//');
     const foreignWindowsRoot = windowsRoot && process.platform !== 'win32';
     const pathApi = windowsRoot ? path.win32 : path;
     const realRootPath = pathApi.resolve(rootInput);
