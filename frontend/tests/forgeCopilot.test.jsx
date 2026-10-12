@@ -204,11 +204,11 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
       { type: 'run_started', taskId: 'forge-e2e-1', runId: 'director-e2e-1' },
       { type: 'director_plan', summary: 'Implement and verify', tasks: [{ id: 'coder', specialty: 'CODER' }, { id: 'verifier', specialty: 'VERIFIER' }] },
       // This is a non-terminal event: the first worker succeeding must not end the stream.
-      { type: 'file_written', path: 'src/NewComponent.jsx', content: 'export default function NewComponent() { return <button>Ready</button>; }' },
+      { type: 'file_written', path: 'package.json', content: '{"name":"test","scripts":{"dev":"vite"}}' },
       { type: 'director_task', status: 'SUCCEEDED', taskId: 'coder', specialty: 'CODER' },
-      { type: 'file_written', path: 'src/BuildSummary.jsx', content: 'export default function BuildSummary() { return <p>Verified</p>; }' },
+      { type: 'file_written', path: 'src/App.jsx', content: 'export default function App() { return <button>Ready</button>; }' },
       { type: 'director_task', status: 'SUCCEEDED', taskId: 'verifier', specialty: 'VERIFIER' },
-      { type: 'director_complete', status: 'SUCCEEDED', taskCount: 2, changedPaths: ['src/NewComponent.jsx', 'src/BuildSummary.jsx'], message: 'End of requested build — verified' },
+      { type: 'director_complete', status: 'SUCCEEDED', taskCount: 2, changedPaths: ['package.json', 'src/App.jsx'], message: 'End of requested build — verified' },
     ];
     const payload = events.map((data) => `event: ${data.type}\ndata: ${JSON.stringify(data)}\n\n`).join('');
     let sent = false;
