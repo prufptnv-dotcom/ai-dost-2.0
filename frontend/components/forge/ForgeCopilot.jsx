@@ -2895,6 +2895,7 @@ export default function ForgeCopilot({
     currentTaskIdRef.current = taskId;
     let terminalOutcome = null;
     const terminalChangedPaths = new Set();
+    const terminalExpectedContent = new Map();
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -3090,6 +3091,7 @@ export default function ForgeCopilot({
               const content = data.content || '';
               if (filePath) {
                 if (data.type !== 'director_file_diff') terminalChangedPaths.add(String(filePath));
+                if (data.type === 'file_written' && typeof data.content === 'string') terminalExpectedContent.set(String(filePath), data.content);
                 if (content) {
                   setContents((c) => ({ ...c, [filePath]: content }));
                 }
@@ -3223,11 +3225,26 @@ export default function ForgeCopilot({
         const missingPaths = Array.isArray(reloadedFiles)
           ? [...terminalChangedPaths].filter((filePath) => !savedPaths.has(normalizeWorkspacePath(filePath)))
           : [...terminalChangedPaths];
-        if (missingPaths.length > 0) {
+        const savedByPath = new Map(
+          Array.isArray(reloadedFiles)
+            ? reloadedFiles.map((file) => [normalizeWorkspacePath(file.path), file])
+            : []
+        );
+        const normalizeContent = (value) => String(value ?? '').replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n');
+        const contentMismatchPaths = Array.isArray(reloadedFiles)
+          ? [...terminalExpectedContent].filter(([filePath, expected]) => {
+              const saved = savedByPath.get(normalizeWorkspacePath(filePath));
+              return saved && normalizeContent(saved.content) !== normalizeContent(expected);
+            }).map(([filePath]) => filePath)
+          : [...terminalExpectedContent.keys()];
+        const unverifiedPaths = [...new Set([...missingPaths, ...contentMismatchPaths])];
+        if (unverifiedPaths.length > 0) {
           terminalOutcome = 'failed';
-          const persistenceError = Array.isArray(reloadedFiles)
-            ? `Workspace reload did not confirm saved files: ${missingPaths.slice(0, 6).join(', ')}`
-            : 'Workspace could not be reloaded to verify file persistence.';
+          const persistenceError = !Array.isArray(reloadedFiles)
+            ? 'Workspace could not be reloaded to verify file persistence.'
+            : missingPaths.length > 0
+              ? `Workspace reload did not confirm saved files: ${missingPaths.slice(0, 6).join(', ')}`
+              : `Workspace returned stale content for changed files: ${contentMismatchPaths.slice(0, 6).join(', ')}`;
           setLastRunError(persistenceError);
           setMessages((prev) => {
             const next = [...prev];
