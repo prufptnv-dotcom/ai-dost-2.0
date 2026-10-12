@@ -72,10 +72,20 @@ function isPrivateOrReservedIp(ip) {
 
   const cleanIp = ip.trim().replace(/^\[|\]$/g, '');
 
-  // Handle IPv4-mapped IPv6 addresses (e.g., ::ffff:127.0.0.1)
-  if (cleanIp.startsWith('::ffff:') || cleanIp.startsWith('0:0:0:0:0:ffff:')) {
-    const mappedIpv4 = cleanIp.split(':').pop();
-    if (net.isIPv4(mappedIpv4)) {
+  // Handle IPv4-mapped IPv6 addresses. WHATWG URL canonicalizes dotted
+  // tails (e.g. ::ffff:127.0.0.1) to hexadecimal words (e.g. ::ffff:7f00:1),
+  // so support both representations before applying the IPv4 CIDR policy.
+  const lowerIp = cleanIp.toLowerCase();
+  let mappedTail = null;
+  if (lowerIp.startsWith('::ffff:')) mappedTail = lowerIp.slice('::ffff:'.length);
+  else if (lowerIp.startsWith('0:0:0:0:0:ffff:')) mappedTail = lowerIp.slice('0:0:0:0:0:ffff:'.length);
+  if (mappedTail !== null) {
+    if (net.isIPv4(mappedTail)) return isPrivateOrReservedIp(mappedTail);
+    const words = mappedTail.split(':');
+    if (words.length === 2 && words.every((word) => /^[0-9a-f]{1,4}$/.test(word))) {
+      const high = parseInt(words[0], 16);
+      const low = parseInt(words[1], 16);
+      const mappedIpv4 = [high >> 8, high & 255, low >> 8, low & 255].join('.');
       return isPrivateOrReservedIp(mappedIpv4);
     }
   }
