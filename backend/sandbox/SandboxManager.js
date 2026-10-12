@@ -59,7 +59,14 @@ class SandboxManager extends EventEmitter {
   // runs on Linux; production paths still use native realpath/symlink checks.
   _resolveSafe(sandboxPath, relPath) {
     const rootInput = String(sandboxPath || '');
-    const windowsRoot = path.win32.isAbsolute(rootInput);
+    // path.win32.isAbsolute('/home/...') returns true for POSIX-rooted paths
+    // too. Only select win32 semantics for recognizable Windows roots; normal
+    // Unix absolute paths must retain native separators and realpath checks.
+    const windowsRoot =
+      /^[A-Za-z]:[\\/]/.test(rootInput) ||
+      rootInput.startsWith('\\\\') ||
+      rootInput.startsWith('\\') ||
+      /^\\/\\//.test(rootInput);
     const foreignWindowsRoot = windowsRoot && process.platform !== 'win32';
     const pathApi = windowsRoot ? path.win32 : path;
     const realRootPath = pathApi.resolve(rootInput);
@@ -697,37 +704,6 @@ class SandboxManager extends EventEmitter {
     });
   }
 
-  async _syncFileToContainer(sandbox, fullPath, content) {
-    // Keep writes visible to Docker exec even when a nested/remote daemon
-    // cannot see the application process's filesystem bind mount.
-    const relativePath = path.relative(sandbox.path, fullPath).split(path.sep).join('/');
-    const normalizedPath = path.posix.normalize(relativePath);
-    if (
-      !normalizedPath ||
-      normalizedPath === '.' ||
-      path.posix.isAbsolute(normalizedPath) ||
-      normalizedPath === '..' ||
-      normalizedPath.startsWith('../')
-    ) {
-      throw new Error('Invalid sandbox file path for container sync');
-    }
-
-    const quote = (value) => "'" + String(value).replace(/'/g, "'\\''") + "'";
-    const directory = path.posix.dirname(normalizedPath);
-    const directoryArg = directory === '.' ? '.' : directory;
-    const command = `mkdir -p -- ${quote(directoryArg)} && base64 -d > ${quote(normalizedPath)}`;
-    const encodedContent = Buffer.from(content == null ? '' : content).toString('base64');
-    // Append a newline so even an empty file reliably closes stdin and
-    // produces a successful empty decode on BusyBox/coreutils base64.
-    const result = await this.exec(sandbox.id, command, {
-      input: encodedContent + '\n',
-      timeout: 15000
-    });
-    if (!result.success) {
-      throw new Error(`Could not sync file into Docker sandbox: ${result.stderr || 'container write failed'}`);
-    }
-  }
-
   async writeFile(sandboxId, filePath, content) {
     const sandbox = this.containers.get(sandboxId);
     if (!sandbox) throw new Error(`Sandbox ${sandboxId} not found`);
@@ -735,9 +711,6 @@ class SandboxManager extends EventEmitter {
     const fullPath = this._resolveSafe(sandbox.path, filePath);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
     await fs.writeFile(fullPath, content);
-    if (!sandbox.isLocal && sandbox.container) {
-      await this._syncFileToContainer(sandbox, fullPath, content);
-    }
     sandbox.lastActivity = Date.now();
   }
 
