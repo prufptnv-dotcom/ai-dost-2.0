@@ -156,6 +156,30 @@ test('run retries a failed worker and succeeds without duplicating completed tas
   assert.equal(attempts, 2);
 });
 
+
+test('run fails closed when a worker resolves with a non-success result', async () => {
+  const plan = {
+    summary: 'failed mutation',
+    tasks: [{ id: 'change', specialty: 'frontend', role: 'CODER', objective: 'change UI', dependsOn: [], expectedOutput: 'updated UI' }]
+  };
+  const director = createExecutionHarness({ plan });
+  const originalStartWorker = director.coordinator.startWorker.bind(director.coordinator);
+  director.coordinator.startWorker = async (workerRunId, options = {}) => {
+    if (workerRunId === 'worker-1') return { status: 'FAILED', error: 'Mutation did not apply' };
+    return originalStartWorker(workerRunId, options);
+  };
+
+  await assert.rejects(
+    director.run({ userId: 'user-1', projectId: 'project-1', request: 'change UI' }),
+    /Mutation did not apply/
+  );
+  assert.equal(
+    director._testEvents.some((event) => event.type === 'director_task' && event.status === 'FAILED'),
+    true,
+    'the failure must be streamed instead of being reported as a successful worker'
+  );
+});
+
 test('run fails closed when final verification does not pass', async () => {
   const plan = {
     summary: 'verification failure',
