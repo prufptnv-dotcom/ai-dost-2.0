@@ -1417,6 +1417,8 @@ function AssistantPanel({
   sessionFilesWritten = [],
   elapsedSeconds = 0,
   lastError = null,
+  pendingApproval = null,
+  onApprove,
   onOpenFile,
   onRetry,
 }) {
@@ -1637,6 +1639,14 @@ function AssistantPanel({
                 onRetry={onRetry}
                 lastError={lastError}
               />
+            </div>
+          )}
+          {pendingApproval?.token && (
+            <div className="approval-banner rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs" role="alert">
+              <p className="mb-2">{pendingApproval.message || 'Forge needs your approval before continuing.'}</p>
+              <button type="button" onClick={onApprove} disabled={isAssistantWorking} className="rounded-md bg-amber-300 px-3 py-1.5 font-semibold text-zinc-950 disabled:opacity-50">
+                Approve and continue
+              </button>
             </div>
           )}
         </div>
@@ -2852,6 +2862,7 @@ export default function ForgeCopilot({
       setMessages((prev) => [...prev, { role: 'user', text, time }]);
       setLastPrompt(text);
       setPrompt('');
+      setPendingApproval(null);
     }
     setIsAssistantWorking(true);
     setActivityStep(0);
@@ -2915,6 +2926,19 @@ export default function ForgeCopilot({
 
           try {
             const data = JSON.parse(jsonStr);
+
+            // Surface a real approval action and retain the same task ID so the
+            // backend can validate/consume the single-use approval token.
+            if (data.type === 'gate_approval_required' && data.gate?.approval_token) {
+              setPendingApproval({
+                token: data.gate.approval_token,
+                taskId,
+                prompt: text,
+                permissionLevel: resumeOptions.permissionLevel || (autopilot ? 'auto' : 'ask'),
+                message: data.message || 'This action requires approval before Forge can continue.',
+              });
+              setActivityDetail('Waiting for your approval before making changes…');
+            }
 
             // 1. Plan established
             if (data.type === 'plan' || data.type === 'director_plan' || data.plan) {
@@ -3193,6 +3217,18 @@ export default function ForgeCopilot({
     }
   };
 
+  const handleApprove = () => {
+    const approval = pendingApproval;
+    if (!approval?.token || isAssistantWorking) return;
+    setPendingApproval(null);
+    submitPrompt(null, {
+      prompt: approval.prompt,
+      taskId: approval.taskId,
+      approvalToken: approval.token,
+      permissionLevel: approval.permissionLevel,
+    });
+  };
+
   // Stop running agent
   const handleStop = () => {
     cancelAgentRun({
@@ -3460,6 +3496,8 @@ export default function ForgeCopilot({
             sessionFilesWritten={sessionFilesWritten}
             elapsedSeconds={runElapsedSeconds}
             lastError={lastRunError}
+            pendingApproval={pendingApproval}
+            onApprove={handleApprove}
             onOpenFile={handleOpenFileInEditor}
             onRetry={handleRetryRun}
           />
