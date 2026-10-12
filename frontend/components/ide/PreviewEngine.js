@@ -63,21 +63,59 @@ export function resolveRootAlias(appCode, cleanedCode = '') {
   };
 }
 
-export function generateLiveAppHtml(files = [], contents = {}, inspectorActive = false) {
+export function generateLiveAppHtml(files = [], contents = {}, inspectorActive = false, activeFile = '') {
   const norm = (p) => (p || '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '').trim();
 
-  // Find index.html if present
+  let isInspector = Boolean(inspectorActive);
+  let activePath = typeof activeFile === 'string' ? activeFile : '';
+  if (typeof inspectorActive === 'string') {
+    activePath = inspectorActive;
+    isInspector = false;
+  }
+
+  const sanitizeCode = (str) => {
+    if (typeof str !== 'string') return '';
+    if (str.includes('\\n') && !str.includes('\n')) {
+      return str.replace(/\\r/g, '').replace(/\\n/g, '\n').replace(/\\t/g, '  ');
+    }
+    return str;
+  };
+
+  // Find index.html or active HTML file if present
+  let rawIndexHtml = '';
   const indexHtmlFile = (files || []).find(f => norm(f.path) === 'index.html' || norm(f.path).endsWith('/index.html'));
-  const rawIndexHtml = indexHtmlFile ? (contents[indexHtmlFile.path] || contents[norm(indexHtmlFile.path)] || indexHtmlFile.content || '') : (contents['index.html'] || '');
+  if (indexHtmlFile) {
+    rawIndexHtml = sanitizeCode(contents[indexHtmlFile.path] || contents[norm(indexHtmlFile.path)] || indexHtmlFile.content || '');
+  } else if (contents['index.html']) {
+    rawIndexHtml = sanitizeCode(contents['index.html']);
+  } else if (activePath && (norm(activePath).endsWith('.html') || norm(activePath).endsWith('.htm'))) {
+    rawIndexHtml = sanitizeCode(contents[activePath] || contents[norm(activePath)] || '');
+  } else {
+    for (const [p, c] of Object.entries(contents || {})) {
+      if (p.endsWith('.html') && c) {
+        rawIndexHtml = sanitizeCode(c);
+        break;
+      }
+    }
+  }
 
   // Look for primary React component (App.jsx, App.js, App.tsx, or main.jsx)
-  let appCode = contents['src/App.jsx'] || contents['App.jsx'] || contents['src/App.js'] || contents['App.js'] || '';
+  let appCode = sanitizeCode(contents['src/App.jsx'] || contents['App.jsx'] || contents['src/App.js'] || contents['App.js'] || contents['src/App.tsx'] || contents['App.tsx'] || '');
+
+  // If active file is an explicit React/JS component file with code, prioritize it if appCode is not standard
+  if (!appCode && activePath && (activePath.endsWith('.jsx') || activePath.endsWith('.tsx') || activePath.endsWith('.js')) && !activePath.endsWith('.config.js')) {
+    const candidate = sanitizeCode(contents[activePath] || contents[norm(activePath)] || '');
+    if (candidate && (candidate.includes('export default') || candidate.includes('function ') || candidate.includes('const ') || candidate.includes('return'))) {
+      appCode = candidate;
+    }
+  }
+
   if (!appCode) {
     const appFile = (files || []).find(f => {
       const p = norm(f.path);
       return p === 'App.jsx' || p.endsWith('/App.jsx') || p === 'App.js' || p.endsWith('/App.js') || p === 'App.tsx' || p.endsWith('/App.tsx');
     });
-    if (appFile) appCode = contents[appFile.path] || contents[norm(appFile.path)] || appFile.content || '';
+    if (appFile) appCode = sanitizeCode(contents[appFile.path] || contents[norm(appFile.path)] || appFile.content || '');
   }
 
   if (!appCode) {
@@ -85,35 +123,43 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
       const p = norm(f.path);
       return p.endsWith('main.jsx') || p.endsWith('main.js') || p.endsWith('index.jsx') || p.endsWith('index.js');
     });
-    if (mainFile) appCode = contents[mainFile.path] || contents[norm(mainFile.path)] || mainFile.content || '';
+    if (mainFile) appCode = sanitizeCode(contents[mainFile.path] || contents[norm(mainFile.path)] || mainFile.content || '');
   }
+
   if (!appCode) {
     for (const f of (files || [])) {
       const p = norm(f.path);
-      const code = contents[f.path] || contents[p] || f.content || '';
-      if (code && (p.endsWith('.jsx') || p.endsWith('.tsx') || p.endsWith('.js')) && !p.endsWith('.config.js') && (code.includes('export default') || code.includes('function App') || code.includes('const App'))) {
+      const code = sanitizeCode(contents[f.path] || contents[p] || f.content || '');
+      if (code && (p.endsWith('.jsx') || p.endsWith('.tsx') || p.endsWith('.js')) && !p.endsWith('.config.js') && !p.includes('.test.') && !p.includes('.spec.') && (code.includes('export default') || code.includes('function App') || code.includes('const App') || code.includes('return (') || code.includes('return <'))) {
         appCode = code;
         break;
       }
     }
   }
 
-  const isReactOrViteApp = Boolean(
-    appCode ||
-    (rawIndexHtml && (rawIndexHtml.includes('src/main') || rawIndexHtml.includes('src/App'))) ||
-    (files || []).some(f => {
-      const p = norm(f.path);
-      return p.endsWith('.jsx') || p.endsWith('.tsx') || p === 'package.json' || p.endsWith('/package.json');
-    })
-  );
+  if (!appCode) {
+    for (const [pRaw, codeRaw] of Object.entries(contents || {})) {
+      const p = norm(pRaw);
+      const code = sanitizeCode(codeRaw || '');
+      if (code && (p.endsWith('.jsx') || p.endsWith('.tsx') || p.endsWith('.js')) && !p.endsWith('.config.js') && !p.includes('.test.') && !p.includes('.spec.') && (code.includes('export default') || code.includes('function App') || code.includes('const App') || code.includes('return (') || code.includes('return <'))) {
+        appCode = code;
+        break;
+      }
+    }
+  }
+
+  const hasHtmlContent = Boolean(rawIndexHtml && (rawIndexHtml.includes('<html') || rawIndexHtml.includes('<body') || rawIndexHtml.includes('<div') || rawIndexHtml.includes('<h1') || rawIndexHtml.includes('<p') || rawIndexHtml.includes('<section') || rawIndexHtml.includes('<main')));
 
   // If this is a static website (HTML/CSS/JS without React App code, or contains full HTML structure)
-  if (!isReactOrViteApp && rawIndexHtml && rawIndexHtml.includes('<body')) {
+  if (!appCode && hasHtmlContent) {
     let injectedHtml = rawIndexHtml;
+    if (!injectedHtml.includes('<body')) {
+      injectedHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet"><style>body{font-family:'Inter',sans-serif;margin:0;padding:16px;background:#090d16;color:#e2e8f0;}</style></head><body>${injectedHtml}</body></html>`;
+    }
     // Inject style.css if present
     const cssFile = (files || []).find(f => norm(f.path).endsWith('.css'));
     if (cssFile && !injectedHtml.includes('<style>')) {
-      const cssContent = contents[cssFile.path] || contents[norm(cssFile.path)] || cssFile.content || '';
+      const cssContent = sanitizeCode(contents[cssFile.path] || contents[norm(cssFile.path)] || cssFile.content || '');
       if (cssContent) {
         injectedHtml = injectedHtml.replace('</head>', `<style>${cssContent}</style></head>`);
       }
@@ -121,7 +167,7 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
     // Inject script.js if present
     const jsFile = (files || []).find(f => norm(f.path).endsWith('script.js') || norm(f.path).endsWith('main.js'));
     if (jsFile && !injectedHtml.includes(jsFile.path)) {
-      const jsContent = contents[jsFile.path] || contents[norm(jsFile.path)] || jsFile.content || '';
+      const jsContent = sanitizeCode(contents[jsFile.path] || contents[norm(jsFile.path)] || jsFile.content || '');
       if (jsContent) {
         injectedHtml = injectedHtml.replace('</body>', `<script>${jsContent}</script></body>`);
       }
@@ -129,12 +175,21 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
     return injectedHtml.replace('</head>', `${PREVIEW_TELEMETRY_SCRIPT}</head>`);
   }
 
-  if (isReactOrViteApp && !appCode) {
+  const isReactOrViteApp = Boolean(
+    appCode ||
+    (rawIndexHtml && (rawIndexHtml.includes('src/main') || rawIndexHtml.includes('src/App'))) ||
+    (files || []).some(f => {
+      const p = norm(f.path);
+      return p.endsWith('.jsx') || p.endsWith('.tsx');
+    })
+  );
+
+  if (!appCode) {
     return `<!DOCTYPE html>
 <html lang="en" class="dark">
 <head>
   <meta charset="UTF-8">
-  <title>Loading Application...</title>
+  <title>Ready to Build</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
   <style>body { font-family: 'Inter', sans-serif; background: #090d16; color: #94a3b8; margin: 0; }</style>
@@ -153,7 +208,9 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
     .replace(/export\s+default\s+function\s*(\w*)/g, (m, name) => name ? `function ${name}` : 'function App')
     .replace(/export\s+default\s+const\s+(\w+)\s*=/g, 'const $1 =')
     .replace(/export\s+default\s+async\s+function\s*(\w*)/g, (m, name) => name ? `async function ${name}` : 'async function App')
-    .replace(/export\s+default\s+(\w+);?/g, '')
+    .replace(/export\s+default\s+class\s*(\w*)/g, (m, name) => name ? `class ${name}` : 'class App')
+    .replace(/export\s+default\s+(\(.*?\)\s*=>|[\w$]+\s*=>)/g, 'const App = $1')
+    .replace(/export\s+default\s+([a-zA-Z0-9_$]+);?/g, (m, name) => `if (typeof ${name} !== 'undefined') { window.__rootComponent = ${name}; }`)
     .replace(/export\s+async\s+function\s+(\w+)/g, 'async function $1')
     .replace(/export\s+function\s+(\w+)/g, 'function $1')
     .replace(/export\s+(?:const|let|var)\s+(\w+)/g, 'const $1')
@@ -184,8 +241,8 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
   // blanks the entire preview.
   const apiFile = (files || []).find(f => f.path?.endsWith('api.js') || f.path?.endsWith('api.ts'));
   let apiCode = '';
-  if (apiFile && contents[apiFile.path]) {
-    apiCode = (contents[apiFile.path] || '')
+  if (apiFile && (contents[apiFile.path] || apiFile.content)) {
+    apiCode = sanitizeCode(contents[apiFile.path] || apiFile.content || '')
       .replace(/import\s+[\s\S]*?from\s+['"].*?['"];?/g, '')
       .replace(/import\s+['"].*?['"];?/g, '')
       .replace(/export\s+(?:async\s+)?function\s+(\w+)/g, 'async function $1')
@@ -272,7 +329,7 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
       /\.config\.(js|ts|mjs|cjs)$/i.test(normP) ||
       /^(vite|webpack|rollup|esbuild|postcss|tailwind|drizzle|tsconfig|next)\./i.test(normP.split('/').pop() || '');
     if (isCode && !isEntry && !isTest && !isApiModule && !isServerSide) {
-      const subContent = contents[f.path] || f.content || '';
+      const subContent = sanitizeCode(contents[f.path] || f.content || '');
       // Final guard: a CJS/Node module slipped past the path checks above.
       if (subContent && !/\brequire\s*\(|\bmodule\.exports\b/.test(subContent)) {
         // Record bindings before the import lines are removed.
@@ -330,14 +387,20 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
   // components resolve off the React global / the injected `window.X`
   // declarations; anything unresolved falls back to undefined so a missing
   // module degrades to an inert stub instead of a thrown ReferenceError.
+  const reactBuiltins = new Set([
+    'React', 'ReactDOM', 'useState', 'useEffect', 'useRef', 'useMemo',
+    'useCallback', 'useContext', 'useReducer', 'createContext', 'Fragment',
+    'useId', 'useTransition', 'useDeferredValue', 'useLayoutEffect', 'useImperativeHandle'
+  ]);
+
   const subImportAliases = Array.from(strippedImports.entries())
-    .filter(([local]) => !declaredNames.has(local))
+    .filter(([local]) => !declaredNames.has(local) && !reactBuiltins.has(local))
     .map(([local, meta]) => {
       const fromReact = /(^|\/)react($|\/)/.test(meta.source) && !/react-router|react-dom/.test(meta.source);
       const expr = fromReact
         ? `(typeof React !== 'undefined' && React[${JSON.stringify(meta.imported)}])`
         : `(typeof window !== 'undefined' && window[${JSON.stringify(meta.imported)}])`;
-      return `const ${local} = ${expr};`;
+      return `var ${local} = ${expr};`;
     })
     .join('\n');
 
@@ -389,6 +452,22 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script>
+    (function() {
+      var origWarn = console.warn;
+      console.warn = function(...args) {
+        var msg = (args && args[0] ? String(args[0]) : '');
+        if (msg.includes('cdn.tailwindcss.com') || msg.includes('Babel transformer')) return;
+        origWarn.apply(console, args);
+      };
+      var origInfo = console.info;
+      console.info = function(...args) {
+        var msg = (args && args[0] ? String(args[0]) : '');
+        if (msg.includes('cdn.tailwindcss.com') || msg.includes('Babel transformer')) return;
+        origInfo.apply(console, args);
+      };
+    })();
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -612,7 +691,25 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
     if (!_previewMountRoot && _appMountContainer) {
       _previewMountRoot = window.__aiDostRootInstance = ReactDOM.createRoot(_appMountContainer);
     }
-    if (typeof App === 'undefined' || !App) {
+    let _RootComponent = typeof App !== 'undefined' && App ? App :
+      (typeof Main !== 'undefined' && Main ? Main :
+      (typeof Page !== 'undefined' && Page ? Page :
+      (typeof Dashboard !== 'undefined' && Dashboard ? Dashboard :
+      (typeof Portfolio !== 'undefined' && Portfolio ? Portfolio :
+      (typeof Home !== 'undefined' && Home ? Home :
+      (typeof Index !== 'undefined' && Index ? Index :
+      (typeof window.__rootComponent !== 'undefined' ? window.__rootComponent : null)))))));
+
+    if (!_RootComponent) {
+      for (const k of Object.keys(window)) {
+        if (typeof window[k] === 'function' && /^[A-Z]/.test(k) && !['React', 'ReactDOM', 'GlobalErrorBoundary', 'Fragment'].includes(k)) {
+          _RootComponent = window[k];
+          break;
+        }
+      }
+    }
+
+    if ((typeof App === 'undefined' || !App) && !_RootComponent) {
       // Mount failure is outside GlobalErrorBoundary's reach (the ReferenceError
       // fires while evaluating <App />), so surface it as a readable card.
       try { report('RUNTIME_ERROR', { error: 'Root component not found: no App export in workspace entry file' }); } catch (_) {}
@@ -624,9 +721,10 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
           '</div>';
       }
     } else {
+      const TargetComponent = _RootComponent || App;
       _previewMountRoot.render(
         <GlobalErrorBoundary>
-          <App />
+          <TargetComponent />
         </GlobalErrorBoundary>
       );
     }

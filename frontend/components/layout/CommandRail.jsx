@@ -226,7 +226,7 @@ export function CommandRail({
             }`}
           >
             <AppIcon name="code" size={14} className={currentView === 'copilot' ? 'text-accent' : 'opacity-70'} />
-            <span>Copilot IDE</span>
+            <span>Forge Copilot</span>
           </button>
 
           <button

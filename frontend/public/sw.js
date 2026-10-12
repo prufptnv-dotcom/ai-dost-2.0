@@ -47,6 +47,15 @@ self.addEventListener('fetch', (event) => {
   // Skip cross-origin requests
   if (url.origin !== location.origin) return;
 
+  // Skip Next.js dev assets, manifests, and HMR
+  if (
+    url.pathname.includes('/development/') ||
+    url.pathname.includes('_clientMiddlewareManifest') ||
+    url.pathname.includes('.hot-update.')
+  ) {
+    return;
+  }
+
   // API requests - network first. P3 #211: the old `caches.match(request)`
   // fallback could only ever return undefined (API GETs are never put() into
   // a cache) — return an honest offline error instead.

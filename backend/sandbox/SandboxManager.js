@@ -20,6 +20,7 @@ class SandboxManager extends EventEmitter {
     this._dockerChecked = false;
     this._dockerAvailable = false;
     this._dockerPingLatency = null;
+    this._dockerUnavailableAt = null; // P12.8: negative-cache timestamp (60s TTL)
     // P3 #37: creates in flight — reserved synchronously before the first
     // await so concurrent createSandbox calls cannot both pass the limit check.
     this._pendingCreates = 0;
@@ -30,27 +31,41 @@ class SandboxManager extends EventEmitter {
 
   // Check Docker availability once (lazy, non-blocking at boot).
   async isDockerAvailable() {
-    if (!this._dockerChecked) {
-      const start = Date.now();
-      try {
-        await Promise.race([
-          docker.ping(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Docker ping timeout')), 4000)),
-        ]);
-        this._dockerAvailable = true;
-        this._dockerPingLatency = Date.now() - start;
-      } catch {
-        this._dockerAvailable = false;
-        this._dockerPingLatency = null;
-      }
-      this._dockerChecked = true;
+    // P12.8 (E2E run #14): a NEGATIVE result used to be cached for the ENTIRE
+    // backend lifetime — one transient ping failure at the wrong moment (Docker
+    // Desktop restarting / named pipe busy) denied every run_terminal of every
+    // later run with "Sandbox exec denied: Docker is unavailable" while
+    // `docker info` on the same machine was perfectly healthy. Cache positives
+    // (docker rarely dies mid-run and containers are already up), but expire
+    // negatives after 60s so starting Docker Desktop self-heals without an
+    // explicit refreshDockerStatus() call.
+    const NEGATIVE_TTL_MS = 60 * 1000;
+    if (this._dockerChecked) {
+      if (this._dockerAvailable) return true;
+      if (this._dockerUnavailableAt && Date.now() - this._dockerUnavailableAt < NEGATIVE_TTL_MS) return false;
+      // stale negative → fall through and re-ping
     }
+    const start = Date.now();
+    try {
+      await Promise.race([
+        docker.ping(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Docker ping timeout')), 4000)),
+      ]);
+      this._dockerAvailable = true;
+      this._dockerPingLatency = Date.now() - start;
+    } catch {
+      this._dockerAvailable = false;
+      this._dockerPingLatency = null;
+      this._dockerUnavailableAt = Date.now();
+    }
+    this._dockerChecked = true;
     return this._dockerAvailable;
   }
 
   // Force re-check of Docker availability (e.g. after user starts Docker Desktop)
   async refreshDockerStatus() {
     this._dockerChecked = false;
+    this._dockerUnavailableAt = null;
     return this.isDockerAvailable();
   }
 
@@ -536,18 +551,46 @@ class SandboxManager extends EventEmitter {
       exec.start({ hijack: true, stdin: !!options.input }, (err, stream) => {
         if (err) { clearTimer(); return reject(err); }
 
+        // Docker exec (Tty:false) multiplexes stdout+stderr as frames:
+        // [1B stream-id (1=stdout, 2=stderr)][3B zero][4B BE payload length][payload]
+        // = an 8-BYTE header. The old code appended whole chunks raw, so every
+        // line of output was prefixed with binary framing bytes (E2E pre-flight
+        // saw "....PRE_FLIGHT_OK") — polluting both the model-facing
+        // observation and the honest `error` text built from stderr.
+        // Buffer + parse frames; a leading byte that is not a frame header
+        // (Tty/raw mode) passes through untouched.
         let stdout = '', stderr = '';
-        stream.on('data', chunk => {
-          const str = chunk.toString();
-          if (chunk[0] === 1) stdout += str;
-          else if (chunk[0] === 2) stderr += str;
+        let buf = Buffer.alloc(0);
+        const emit = (kind, text) => {
+          if (!text) return;
+          if (kind === 2) stderr += text; else stdout += text;
           if (typeof options.onData === 'function') {
-            try { options.onData(chunk[0] === 2 ? 'stderr' : 'stdout', str); } catch (_) {}
+            try { options.onData(kind === 2 ? 'stderr' : 'stdout', text); } catch (_) {}
+          }
+        };
+        stream.on('data', chunk => {
+          buf = Buffer.concat([buf, chunk]);
+          let progressed = true;
+          while (progressed && buf.length > 0) {
+            progressed = false;
+            const type = buf[0];
+            if (type === 1 || type === 2) {
+              if (buf.length < 8) break;                       // header split — wait
+              const len = buf.readUInt32BE(4);
+              if (buf.length < 8 + len) break;                 // payload split — wait
+              emit(type, buf.subarray(8, 8 + len).toString());
+              buf = buf.subarray(8 + len);
+              progressed = true;
+            } else {
+              emit(1, buf.toString());                         // raw/Tty mode passthrough
+              buf = Buffer.alloc(0);
+            }
           }
         });
 
         stream.on('end', async () => {
           clearTimer();
+          if (buf.length > 0) emit(1, buf.toString());         // flush any tail bytes
           const inspect = await exec.inspect();
           resolve({
             exitCode: inspect.ExitCode,

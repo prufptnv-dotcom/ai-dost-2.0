@@ -39,7 +39,7 @@ class ApplyDiffTool extends Tool {
 
     const resolvedPath = context.workspaceManager.resolvePath(context.projectId, relativePath, context.userId);
     if (!fs.existsSync(resolvedPath)) {
-      return { success: false, error: `File not found: ${relativePath}. Use read_file first.` };
+      return { success: false, error: `File not found: ${relativePath}. The file does not exist yet — verify the path with list_directory, or create it with write_file (apply_diff works only on existing files).` };
     }
 
     const content = fs.readFileSync(resolvedPath, 'utf-8');
@@ -52,7 +52,7 @@ class ApplyDiffTool extends Tool {
     const newContent = diffResult.newContent;
     const guard = deterministicCodeGuard.guard(relativePath, newContent);
     if (!guard.accepted) {
-      return { success: false, error: `Code rejected before persistence: ${guard.reason}`, diagnostics: guard.diagnostics };
+      return { success: false, error: `Code rejected before persistence: ${deterministicCodeGuard.rejectionDetail(guard)}`, diagnostics: guard.diagnostics };
     }
 
     const backupContent = content;

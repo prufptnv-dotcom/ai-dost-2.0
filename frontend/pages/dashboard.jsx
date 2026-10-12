@@ -27,15 +27,16 @@ import { useMode } from '../context/ModeContext';
 import { useRouter } from 'next/router';
 import ViewSkeletonLoader from '../components/ui/ViewSkeletonLoader';
 
+const ForgeCopilot = dynamic(() => import('../components/forge/ForgeCopilot'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="ide" />,
+});
+
 const CopilotIDE = dynamic(() => import('../components/views/CopilotIDE'), {
   ssr: false,
   loading: () => <ViewSkeletonLoader type="ide" />,
 });
 
-// P11 A1 — "Aurora": from-scratch copilot cockpit (Replit + Devin + Bolt hybrid).
-// Default UI; localStorage `ai_dost_copilot_ui = 'classic'` reverts to CopilotIDE
-// (one click via the rail's Classic UI button). Classic tests mount CopilotIDE
-// directly, so the flag never touches the jest gate.
 const CopilotAurora = dynamic(() => import('../components/aurora/CopilotAurora'), {
   ssr: false,
   loading: () => <ViewSkeletonLoader type="ide" />,
@@ -497,21 +498,12 @@ export default function Dashboard() {
           )}
           {view === 'copilot' && (
             <IDEErrorBoundary>
-              {copilotUi === 'classic' ? (
-                <CopilotIDE
-                  key={activeSessionId}
-                  projectId={activeSessionId}
-                  projectName={activeChatTitle}
-                  onToast={showToast}
-                />
-              ) : (
-                <CopilotAurora
-                  key={activeSessionId}
-                  projectId={activeSessionId}
-                  projectName={activeChatTitle}
-                  onToast={showToast}
-                />
-              )}
+              <ForgeCopilot
+                key={activeProject?.id || 'copilot-workspace'}
+                projectId={activeProject?.id || 'copilot-workspace'}
+                projectName={activeProject?.name || 'Copilot Workspace'}
+                onToast={showToast}
+              />
             </IDEErrorBoundary>
           )}
           {view === 'analytics' && (

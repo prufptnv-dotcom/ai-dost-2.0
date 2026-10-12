@@ -166,6 +166,70 @@ test('Phase 2B - Tool Porting & Execution Boundaries', async (t) => {
     }
   });
 
+  await t.test('TerminalTool - honest error surfacing + project sandbox reuse', async () => {
+    const terminalTool = registry.get('run_terminal');
+    const origGet = sandboxManager.getSandboxesForProject;
+    const origCreate = sandboxManager.createSandbox;
+    const origExec = sandboxManager.exec;
+
+    try {
+      // 1) A failing command must carry the REAL reason in `error` — the
+      //    step-failure path renders output.error || output.code || 'operation
+      //    failed', so without this field every failure surfaced as the useless
+      //    generic "operation failed" (E2E run #9 burned 3 self-heal attempts
+      //    retrying blind against an invisible exec denial).
+      sandboxManager.getSandboxesForProject = () => [];
+      sandboxManager.createSandbox = async () => ({ id: 'sb-honest' });
+      sandboxManager.exec = async () => ({
+        success: false,
+        stdout: '',
+        stderr: 'Sandbox exec denied: Docker is unavailable and host execution was not explicitly enabled.',
+        exitCode: 126
+      });
+      const res = await terminalTool.execute(getContext('p1', 'u1'), { command: 'echo hi' });
+      assert.strictEqual(res.success, false);
+      assert.ok(res.error && res.error.includes('Docker is unavailable'),
+        `error must carry real stderr, got: ${res.error}`);
+
+      // 2) An existing sandbox for the project is REUSED (createSandbox not
+      //    called) — creating one per specialist context hit MAX_CONTAINERS
+      //    (10) mid-run and every later run_terminal threw "limit reached".
+      let created = 0;
+      sandboxManager.getSandboxesForProject = () => [{ id: 'existing-sb', createdAt: 123, hostWorkdir: '/tmp/ws' }];
+      sandboxManager.createSandbox = async () => { created += 1; return { id: 'new-sb' }; };
+      sandboxManager.exec = async (id) => {
+        assert.strictEqual(id, 'existing-sb');
+        return { success: true, stdout: 'ok', stderr: '', exitCode: 0 };
+      };
+      const res2 = await terminalTool.execute(getContext('p1', 'u1'), { command: 'echo hi' });
+      assert.strictEqual(res2.success, true);
+      assert.strictEqual(created, 0, 'must reuse the existing project sandbox');
+
+      // 2b) A workdir-less sandbox must NOT be reused (commands would run in
+      //     an empty temp dir) — create a fresh one instead.
+      sandboxManager.getSandboxesForProject = () => [{ id: 'no-workdir-sb', createdAt: 456 }];
+      sandboxManager.exec = async (id) => {
+        assert.strictEqual(id, 'new-sb');
+        return { success: true, stdout: 'ok', stderr: '', exitCode: 0 };
+      };
+      const res2b = await terminalTool.execute(getContext('p1', 'u1'), { command: 'echo hi' });
+      assert.strictEqual(res2b.success, true);
+      assert.strictEqual(created, 1, 'workdir-less sandbox must be skipped');
+
+      // 3) Empty stderr on failure still yields an honest fallback message
+      sandboxManager.getSandboxesForProject = () => [];
+      sandboxManager.createSandbox = async () => ({ id: 'sb-x' });
+      sandboxManager.exec = async () => ({ success: false, stdout: '', stderr: '', exitCode: 2 });
+      const res3 = await terminalTool.execute(getContext('p1', 'u1'), { command: 'bad-cmd' });
+      assert.strictEqual(res3.success, false);
+      assert.match(res3.error || '', /exit code 2/);
+    } finally {
+      sandboxManager.getSandboxesForProject = origGet;
+      sandboxManager.createSandbox = origCreate;
+      sandboxManager.exec = origExec;
+    }
+  });
+
 });
 
 

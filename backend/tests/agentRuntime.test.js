@@ -227,5 +227,29 @@ test('Phase 2A - Agent Runtime Foundation', async (t) => {
     const res = await t2.execute({}, { command: 'ls' });
     assert.strictEqual(res.success, true);
   });
+
+  await t.test('18. executeTool records honest FAILED status for success:false read tools', async () => {
+    // E2E forensics for runs #10/#11: read_file answering "File not found"
+    // (output.success === false) was recorded as SUCCEEDED — the status column
+    // only distinguished throw vs return, which produced apparently impossible
+    // same-second read-OK/apply-missing contradictions during diagnosis.
+    const runHonest = runDao.create({ id: 'run_honest', taskId: 'task_1' });
+    await controller.startRun(runHonest.id);
+    const step = await controller.recordStep(runHonest.id, 'EXECUTE_TOOL', { tool: 'read_file' });
+    const stubRegistry = {
+      get: (name) => name === 'read_file'
+        ? { name: 'read_file', execute: async () => ({ success: false, exists: false, message: 'File not found: nope.' }) }
+        : null
+    };
+    const out = await controller.executeTool(step.id, 'read_file', { path: 'nope' }, {}, stubRegistry);
+    // Read tools still return success:false as an observation (not a throw)…
+    assert.strictEqual(out.success, false);
+    // …but the recorded status/error must reflect what the tool reported.
+    const rows = toolCallDao.listByStep(step.id);
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].status, 'FAILED');
+    assert.ok(String(rows[0].error_info).includes('File not found'));
+    await controller.completeRun(runHonest.id, 'SUCCEEDED');
+  });
 });
 

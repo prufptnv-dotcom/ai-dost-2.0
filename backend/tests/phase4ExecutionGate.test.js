@@ -158,9 +158,13 @@ test('Phase 4 — Execution Engine & Gatekeeper Binding', async (t) => {
     const firstResult = await controller.executeTool(step.id, 'run_terminal', { command: 'ls' }, context, mockToolRegistry);
     assert.strictEqual(firstResult.success, true);
 
-    // Second use with SAME token: must fail closed (Replay attack prevention)
+    // P12.3 (d7cd61a) rotates context.approvalToken to a fresh mint AFTER a
+    // successful validate so multi-step approved runs (install → build …) keep
+    // working — so re-sending the same context object is a legitimate
+    // continuation, not a replay. Replay = re-using the ORIGINAL consumed
+    // token (what an attacker would copy), which must still fail closed.
     await assert.rejects(async () => {
-      await controller.executeTool(step.id, 'run_terminal', { command: 'rm -rf /' }, context, mockToolRegistry);
+      await controller.executeTool(step.id, 'run_terminal', { command: 'rm -rf /' }, { ...context, approvalToken: token }, mockToolRegistry);
     }, (err) => {
       assert.ok(err.message.includes('Invalid or expired approval token') || err.message.includes('Action requires user approval'));
       return true;

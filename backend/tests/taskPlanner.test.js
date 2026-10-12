@@ -15,6 +15,7 @@ test('TaskPlanner', async (t) => {
   register(toolRegistry, 'take_screenshot');
   register(toolRegistry, 'run_tests');
   register(toolRegistry, 'write_file');
+  register(toolRegistry, 'mystery_service');
 
   let mockLLMResponse = null;
   const aiService = {
@@ -60,9 +61,25 @@ test('TaskPlanner', async (t) => {
     assert.equal(plan.steps.length, 2);
   });
 
-  await t.test('Verification rejects mutation tools', async () => {
+  await t.test('Verification drops mutation tools instead of failing the run (run #13)', async () => {
+    // All-mutating plan → deterministic read-only fallback. The old contract
+    // THREW here and failed a run whose execution had already succeeded
+    // (run #13 attempt 3: "Verification failed: mutating tool 'write_file'").
     mockLLMResponse = { goal: 'verify', steps: [{ id: 'v1', tool: 'write_file', description: 'mutate', input: {} }] };
-    await assert.rejects(planner.generateVerificationPlan('verify', {}), /mutating tool 'write_file'/);
+    const fb = await planner.generateVerificationPlan('verify', {});
+    assert.equal(fb.steps.length, 1);
+    assert.equal(fb.steps[0].tool, 'list_directory');
+    assert.equal(fb.steps[0].id, 'verify_fallback_list');
+
+    // Mixed plan → mutating + unclassified tools dropped, read-only kept
+    mockLLMResponse = { goal: 'verify', steps: [
+      { id: 'v1', tool: 'read_file', description: 'read', input: { path: 'src/main.js' } },
+      { id: 'v2', tool: 'write_file', description: 'mutate', input: {} },
+      { id: 'v3', tool: 'mystery_service', description: 'unclassified', input: {} }
+    ] };
+    const mixed = await planner.generateVerificationPlan('verify', {});
+    assert.equal(mixed.steps.length, 1);
+    assert.equal(mixed.steps[0].tool, 'read_file');
   });
 
   await t.test('Planner has no FS/DB access', async () => {

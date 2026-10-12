@@ -9,7 +9,7 @@ let pty;
 try {
   pty = require('node-pty');
 } catch (e) {
-  logger.warn('node-pty not available, falling back to standard shell');
+  logger.info('node-pty not available, using standard shell');
 }
 
 // ── Terminal Session Manager ─────────────────────────────────────────

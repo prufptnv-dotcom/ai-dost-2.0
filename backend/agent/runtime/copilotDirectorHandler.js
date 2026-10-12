@@ -50,6 +50,21 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
+  // Keep-alive heartbeat: emit comment frame every 10 seconds to prevent
+  // proxy timeouts and connection drops during long LLM reasoning/planning.
+  const pingInterval = setInterval(() => {
+    if (res && !res.writableEnded && !res.destroyed) {
+      try {
+        res.write(': ping\n\n');
+      } catch (_) {}
+    }
+  }, 10000);
+  const stopPing = () => clearInterval(pingInterval);
+  if (typeof res.on === 'function') {
+    res.on('close', stopPing);
+    res.on('finish', stopPing);
+  }
+
   const activeTask = getActiveTask(taskId);
   const signal = activeTask?.controller?.signal;
 

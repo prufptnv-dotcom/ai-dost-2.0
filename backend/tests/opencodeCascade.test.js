@@ -269,6 +269,13 @@ describe('llmCascade.executeCascadingFailover (restored MoE contract)', () => {
       saveEnv(k);
       delete process.env[k];
     }
+    // Ollama is keyless too: if the local daemon is warm (it is, on dev boxes
+    // running E2E runs), it answered the "no tier can answer" test with a real
+    // reply and the honest-degradation assertion flaked. Point it at a closed
+    // port so this describe is hermetic regardless of daemon state.
+    saveEnv('OLLAMA_HOST');
+    saveEnv('OLLAMA_BASE_URL');
+    process.env.OLLAMA_HOST = 'http://127.0.0.1:1';
     saveStateFile();
   });
 
@@ -276,6 +283,8 @@ describe('llmCascade.executeCascadingFailover (restored MoE contract)', () => {
     restoreEnv('OPENCODE_ENABLED');
     restoreEnv('OPENCODE_BIN');
     for (const k of ['GROQ_API_KEY', 'GEMINI_API_KEY', 'CEREBRAS_API_KEY', 'OPENROUTER_API_KEY', 'NVIDIA_API_KEY', 'DEEPSEEK_API_KEY', 'MISTRAL_API_KEY']) restoreEnv(k);
+    restoreEnv('OLLAMA_HOST');
+    restoreEnv('OLLAMA_BASE_URL');
     restoreStateFile();
     OpenCodeService._resetForTests();
   });
@@ -358,5 +367,21 @@ describe('routes/agent.js wiring (P10.1 static audit)', () => {
   it('requires the service exactly once with the canonical path', () => {
     const requires = src.match(/require\('\.\.\/services\/opencodeService'\)/g) || [];
     assert.strictEqual(requires.length, 1);
+  });
+});
+
+describe('AgentCascadeAiService preferred-ollama branch (P12.6 picker gap)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'agent', 'runtime', 'AgentCascadeAiService.js'), 'utf8');
+
+  it('preferredModel ollama has a first-tier branch (the UI picker was silently ignored)', () => {
+    assert.match(src, /preferredModel === 'ollama'/);
+    // Same call shape as the terminal tier (keep_alive pin + 150s cold-load budget):
+    assert.match(src, /preferredModel === 'ollama'[\s\S]{0,600}?\/api\/generate/);
+    assert.match(src, /preferredModel === 'ollama'[\s\S]{0,600}?keep_alive:\s*'2h'/);
+    // It must run BEFORE the Groq tier, or "Ollama first" still walks dead cloud tiers.
+    const ollamaPreferred = src.indexOf("preferredModel === 'ollama'");
+    const groqTier = src.indexOf("Cascade Tier 1: Groq");
+    assert.ok(ollamaPreferred > -1 && groqTier > -1 && ollamaPreferred < groqTier,
+      'preferred ollama branch must precede the normal cascade');
   });
 });

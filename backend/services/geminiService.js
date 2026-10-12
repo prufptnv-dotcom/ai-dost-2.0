@@ -134,8 +134,12 @@ Here is what you can do and what features are available to the user on this plat
                 bodyPayload.systemInstruction = { parts: [{ text: withQualityStandard(systemPrompt) }] };
             }
 
-            // Try multiple models in order — free tier quota varies per model/key
-            const models = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+            // Try multiple models in order — free tier quota varies per model/key.
+            // 2026-10: gemini-2.0-flash and gemini-1.5-flash are RETIRED (404
+            // "not found") — every cascade wasted two dead hops on them.
+            // Google's own 404 message points to gemini-3.8-flash, which is
+            // live (verified: 429-rate-limited when quota spent, not 404).
+            const models = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3.8-flash'];
             let lastError = null;
 
             for (const model of models) {

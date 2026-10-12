@@ -282,7 +282,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           const filePath = this.resolveSafePath(currentWorkspace, parameters.path);
           if (!filePath) return { success: false, error: 'Access denied: Invalid or unsafe path' };
           const guard = deterministicCodeGuard.guard(parameters.path, parameters.content || '');
-          if (!guard.accepted) return { success: false, error: `Code rejected before persistence: ${guard.reason}`, diagnostics: guard.diagnostics };
+          if (!guard.accepted) return { success: false, error: `Code rejected before persistence: ${deterministicCodeGuard.rejectionDetail(guard)}`, diagnostics: guard.diagnostics };
           
           if (!fs.existsSync(filePath)) {
             const inMem = projectFiles.find(f => f.path === parameters.path);
@@ -290,7 +290,15 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             return { success: false, error: `File not found: ${parameters.path}` };
           }
           const content = fs.readFileSync(filePath, 'utf-8');
-          return { success: true, content: content.substring(0, 8000) };
+          // P12.6: legitimate expectedSourceHash source (models were inventing
+          // hashes because nothing ever returned one) + truncation flag.
+          const sourceHash = require('crypto').createHash('sha256').update(content).digest('hex');
+          return {
+            success: true,
+            content: content.substring(0, 8000),
+            ...(content.length > 8000 ? { truncated: true, totalLength: content.length } : {}),
+            sourceHash
+          };
         } catch (e) {
           return { success: false, error: e.message };
         }
@@ -307,19 +315,68 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           const inMem = projectFiles && Array.isArray(projectFiles) ? projectFiles.find(f => f.path === parameters.path) : null;
           const exists = existsOnDisk || Boolean(inMem);
 
+          // P12.6 (E2E run #12): directory target (e.g. "src/") — existsSync is
+          // true for dirs, which used to answer "Use apply_diff on src/"
+          // (impossible advice; the model retried the same dead end 7 times).
+          const isDirTarget = /[\\/]\s*$/.test(String(parameters.path)) ||
+            (existsOnDisk && fs.statSync(filePath).isDirectory());
+          if (isDirTarget) {
+            const dirLabel = String(parameters.path).replace(/[\\/]+$/, '');
+            // P12.7 (E2E run #13): empty content = "create this directory"
+            // ({"path":"src/","content":""}) → satisfy via <dir>/.gitkeep so the
+            // step succeeds; run #13 died on a bare-dir retry once the worker's
+            // repair budget was spent. Non-empty content still gets PATH_IS_DIRECTORY.
+            if (!String(parameters.content || '').trim()) {
+              try {
+                fs.mkdirSync(filePath, { recursive: true });
+                const keepRel = `${dirLabel}/.gitkeep`;
+                const keepAbs = require('path').join(filePath, '.gitkeep');
+                if (!fs.existsSync(keepAbs)) fs.writeFileSync(keepAbs, '', 'utf-8');
+                if (projectFiles && Array.isArray(projectFiles) && !projectFiles.find(f => f.path === keepRel)) {
+                  projectFiles.push({ path: keepRel, content: '' });
+                }
+                return { success: true, message: `Directory created: ${dirLabel}/ (via ${keepRel})`, changedFile: keepRel, newContent: '' };
+              } catch (e) {
+                return { success: false, code: 'PATH_IS_DIRECTORY', error: `Failed to create directory "${parameters.path}": ${e.message}` };
+              }
+            }
+            return {
+              success: false,
+              code: 'PATH_IS_DIRECTORY',
+              error: `"${parameters.path}" is a directory, not a file. write_file writes FILE content — give a path inside it, e.g. "${dirLabel}/App.jsx" (parent directories are created automatically). To create an empty directory, send empty content with the trailing slash (path: "${dirLabel}/").`
+            };
+          }
+
   // Phase 1: Existing-file write enforcement
   // P2 #59: parameters.allowOverwrite was LLM-controlled (bypassable) — removed.
   if (exists) {
+            // P12.8 (E2E run #14): model read the file and still sent an
+            // apply_diff SEARCH from its imagination — embed the REAL bytes
+            // (disk first, else in-mem) so the repair planner copies SEARCH
+            // verbatim instead of guessing (same P12.5 pattern as diffEngine).
+            let currentExcerpt = '';
+            try {
+              const MAXC = 8000;
+              let current = null;
+              if (existsOnDisk) current = fs.readFileSync(filePath, 'utf-8');
+              else if (inMem && typeof inMem.content === 'string') current = inMem.content;
+              if (current !== null) {
+                currentExcerpt = current.length > MAXC
+                  ? `${current.slice(0, 6000)}\n… [truncated — file is ${current.length} chars — use a SMALLER unique SEARCH block] …\n${current.slice(-400)}`
+                  : current;
+              }
+            } catch (_) {}
             return {
               success: false,
               code: 'WRITE_FORBIDDEN_ON_EXISTING',
-              error: `Full-file replacement is forbidden for existing project files. Use apply_diff with a validated SEARCH/REPLACE patch on ${parameters.path}.`
+              error: `Full-file replacement is forbidden for existing project files. Use apply_diff with a validated SEARCH/REPLACE patch on ${parameters.path}. read_file it first: SEARCH must be text that is ACTUALLY in the file (for a whole-file rewrite, SEARCH = the file's entire current content), REPLACE = your new text.` +
+                (currentExcerpt ? `\n--- CURRENT FILE CONTENT ---\n${currentExcerpt}\n--- END FILE CONTENT ---` : '')
             };
           }
 
           const guard = deterministicCodeGuard.guard(parameters.path, parameters.content || '');
           if (!guard.accepted) {
-            return { success: false, error: `Code rejected before persistence: ${guard.reason}`, diagnostics: guard.diagnostics };
+            return { success: false, error: `Code rejected before persistence: ${deterministicCodeGuard.rejectionDetail(guard)}`, diagnostics: guard.diagnostics };
           }
           
           fs.mkdirSync(require('path').dirname(filePath), { recursive: true });
@@ -361,7 +418,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             content = fs.readFileSync(filePath, 'utf-8');
           } catch (_) {
             const inMem = projectFiles.find(f => f.path === parameters.path);
-            if (!inMem) return { success: false, error: `File not found: ${parameters.path}. Use read_file first.` };
+            if (!inMem) return { success: false, error: `File not found: ${parameters.path}. The file does not exist yet — verify the path with list_directory, or create it with write_file (apply_diff works only on existing files).` };
             content = inMem.content || '';
           }
           
@@ -379,7 +436,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           
           const newContent = diffResult.newContent;
           const guard = deterministicCodeGuard.guard(parameters.path, newContent);
-          if (!guard.accepted) return { success: false, error: `Code rejected before persistence: ${guard.reason}`, diagnostics: guard.diagnostics };
+          if (!guard.accepted) return { success: false, error: `Code rejected before persistence: ${deterministicCodeGuard.rejectionDetail(guard)}`, diagnostics: guard.diagnostics };
           
           const priorContent = content;
           try {

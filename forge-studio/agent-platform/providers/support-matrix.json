@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "1.0",
+  "checkedAt": "2026-10-10",
+  "note": "Capability snapshots from official docs; APIs, model support, regions, pricing, and account access change. Capability-discover at runtime.",
+  "providers": [
+    {
+      "id": "openai",
+      "products": [
+        "Responses API",
+        "Agents SDK"
+      ],
+      "mcp": {
+        "remoteTransports": [
+          "streamable-http",
+          "http-sse"
+        ],
+        "approvalSupport": true,
+        "allowedToolFiltering": true,
+        "privateTunnelOption": true
+      },
+      "context": [
+        "prompt-prefix-caching",
+        "compaction"
+      ],
+      "adapterRule": "Use Responses/SDK-specific approval and state handling; do not assume provider APIs share a schema."
+    },
+    {
+      "id": "anthropic",
+      "products": [
+        "Messages API",
+        "Claude Code/Agent SDK"
+      ],
+      "mcp": {
+        "connectorOrClientSupport": true,
+        "capabilityCheckAtRuntime": true
+      },
+      "skills": {
+        "portableFormat": "Agent Skills SKILL.md supported in Anthropic workflows"
+      },
+      "context": [
+        "prompt-caching"
+      ],
+      "adapterRule": "Map OAuth, tool discovery, cache controls, and approval behavior to the specific Anthropic product/API used."
+    },
+    {
+      "id": "google-gemini",
+      "products": [
+        "Gemini Interactions API",
+        "Gemini GenerateContent API"
+      ],
+      "mcp": {
+        "remoteTransports": [
+          "streamable-http"
+        ],
+        "allowedToolFiltering": true,
+        "nameFormat": "snake_case"
+      },
+      "context": [
+        "implicit-caching-on-supported-APIs",
+        "explicit-caching-availability-varies-by-API"
+      ],
+      "adapterRule": "Remote MCP constraints differ by API/model; probe support, transport, tool schema, and token cache telemetry before routing."
+    }
+  ]
+}

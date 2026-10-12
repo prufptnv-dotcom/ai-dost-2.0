@@ -1,3 +1,5 @@
+const logger = require('../../logger');
+
 class TaskPlanner {
   constructor({ toolRegistry, aiService, limits = {} }) {
     this.toolRegistry = toolRegistry;
@@ -29,18 +31,46 @@ class TaskPlanner {
       'verify_project', 'sandbox_read', 'sandbox_list', 'sandbox_dev_build'
     ]);
     const obviouslyMutating = /^(write|create|delete|remove|move|rename|apply|edit|update|patch|run_terminal|execute|sandbox_(write|exec|create|destroy|dev_start|dev_stop|expose))/i;
+    // P12.7 (E2E run #13): the model once put a write_file step in its
+    // verification plan — the old code THREW and failed a run whose execution
+    // had already succeeded ("Verification failed: mutating tool 'write_file'").
+    // Two problems: (1) evidence gathering destroyed the run instead of the
+    // plan, (2) the safety goal was never at risk — a dropped step is never
+    // executed. Now mutating / unclassified steps are FILTERED OUT (safety
+    // preserved) and the surviving read-only steps run as before. If nothing
+    // read-only survives, fall back to a deterministic list_directory so the
+    // gate still records REAL evidence instead of passing with zero checks
+    // (P12.4 honesty: a silently-empty verification is exactly the lie the
+    // honest gate was built to prevent).
+    const validSteps = [];
+    const dropped = [];
     for (const step of plan.steps) {
       const tool = this.toolRegistry.get(step.tool);
       const permissions = Array.isArray(tool?.permissions) ? tool.permissions : [];
       const mutates = tool?.mutates === true || tool?.sideEffect === true || permissions.some((p) => /write|mutation|destructive/i.test(String(p)));
-      if (mutates || obviouslyMutating.test(step.tool)) {
-        throw new Error(`Invalid verification plan: mutating tool '${step.tool}' is not allowed`);
+      const readOnlyClassified = explicitlyReadOnly.has(step.tool) || /^(read|list|search|fetch|get|inspect|status|verify|check|test)/i.test(step.tool);
+      if (mutates || obviouslyMutating.test(step.tool) || !readOnlyClassified) {
+        dropped.push(step.tool);
+        continue;
       }
-      if (!explicitlyReadOnly.has(step.tool) && !/^(read|list|search|fetch|get|inspect|status|verify|check|test)/i.test(step.tool)) {
-        throw new Error(`Invalid verification plan: tool '${step.tool}' is not classified as read-only`);
-      }
+      validSteps.push(step);
     }
-    return plan;
+    if (dropped.length) {
+      logger.warn(`[TaskPlanner] Verification plan sanitized — dropped ${dropped.length} non-read-only step(s): ${dropped.join(', ')}`);
+    }
+    if (validSteps.length === 0) {
+      logger.warn('[TaskPlanner] No read-only verification steps survived sanitization — falling back to list_directory evidence check');
+      return {
+        goal: plan.goal,
+        steps: [{
+          id: 'verify_fallback_list',
+          tool: 'list_directory',
+          description: 'List the workspace root to confirm the project tree exists',
+          input: {}
+        }]
+      };
+    }
+    return { goal: plan.goal, steps: validSteps };
   }
 
   async _generate(method, ...args) {

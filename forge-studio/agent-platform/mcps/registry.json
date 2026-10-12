@@ -1,0 +1,373 @@
+{
+  "schemaVersion": "1.0",
+  "updatedAt": "2026-10-10",
+  "catalogDisclaimer": "Templates only. No endpoint/official server is pre-connected or verified by this file. Verify the actual operator, transport, scopes, tools, and data policy before connection.",
+  "policy": {
+    "defaultConnected": false,
+    "defaultAllowedToolsAreAllowlist": true,
+    "writesNeedApproval": true,
+    "destructiveActionsNeedApproval": true,
+    "memberCannotMutateProtectedDefinitions": true,
+    "secretsStoredServerSideOnly": true
+  },
+  "entries": [
+    {
+      "id": "project-files",
+      "category": "Core",
+      "summary": "Read/write only inside selected project root; diff, checkpoint, and rollback on writes.",
+      "kind": "forge-native",
+      "connected": false,
+      "endpoint": null,
+      "transportPreference": [
+        "streamable-http",
+        "stdio"
+      ],
+      "compatibilityProbeRequired": true,
+      "defaultAllowedTools": [
+        "read",
+        "write"
+      ],
+      "defaultPermission": "read-only",
+      "writeApproval": "per-action",
+      "risk": "medium",
+      "verifiedOfficialEndpoint": false,
+      "managedBy": "platform",
+      "memberMayConnect": true,
+      "memberMayEditDefinition": false,
+      "memberMayDeleteDefinition": false,
+      "secretRefRequired": false
+    },
+    {
+      "id": "sandbox-terminal",
+      "category": "Core",
+      "summary": "Run approved project build/test commands in an isolated container with time, memory, and network limits.",
+      "kind": "forge-native",
+      "connected": false,
+      "endpoint": null,
+      "transportPreference": [
+        "streamable-http",
+        "stdio"
+      ],
+      "compatibilityProbeRequired": true,
+      "defaultAllowedTools": [
+        "run-approved-command"
+      ],
+      "defaultPermission": "read-only",
+      "writeApproval": "per-action",
+      "risk": "high",
+      "verifiedOfficialEndpoint": false,
+      "managedBy": "platform",
+      "memberMayConnect": true,
+      "memberMayEditDefinition": false,
+      "memberMayDeleteDefinition": false,
+      "secretRefRequired": false
+    },
+    {
+      "id": "browser-preview",
+      "category": "Core",
+      "summary": "Open the app preview, inspect console/network, take responsive screenshots, and run accessible checks.",
+      "kind": "forge-native",
+      "connected": false,
+      "endpoint": null,
+      "transportPreference": [
+        "streamable-http",
+        "stdio"
+      ],
+      "compatibilityProbeRequired": true,
+      "defaultAllowedTools": [
+        "preview",
+        "screenshot",
+        "inspect"
+      ],
+      "defaultPermission": "read-only",
+      "writeApproval": "per-action",
+      "risk": "low",
+      "verifiedOfficialEndpoint": false,
+      "managedBy": "platform",
+      "memberMayConnect": true,
+      "memberMayEditDefinition": false,
+      "memberMayDeleteDefinition": false,
+      "secretRefRequired": false
+    },
+    {
+      "id": "git-provider",
+      "category": "Git",
+      "summary": "Connect GitHub or GitLab for repository/branch/diff/PR workflows; narrow repository grants.",
+      "kind": "mcp-template",
+      "connected": false,
+      "endpoint": null,
+      "transportPreference": [
+        "streamable-http",
+        "stdio"
+      ],
+      "compatibilityProbeRequired": true,
+      "defaultAllowedTools": [
+        "repo.read"
+      ],
+      "defaultPermission": "read-only",
+      "writeApproval": "per-action",
+      "risk": "medium",
+      "verifiedOfficialEndpoint": false,
+      "managedBy": "platform",
+      "memberMayConnect": true,
+      "memberMayEditDefinition": false,
+      "memberMayDeleteDefinition": false,
+      "secretRefRequired": true
+    },
+    {
+      "id": "web-research",
+      "category": "Research",
+      "summary": "Search/read web and official docs, return source URLs and dates; treat pages as untrusted input.",
+      "kind": "mcp-template",
+      "connected": false,
+      "endpoint": null,
+      "transportPreference": [
+        "streamable-http",
+        "stdio"
+      ],
+      "compatibilityProbeRequired": true,
+      "defaultAllowedTools": [
+        "search.read",
+        "page.read"
+      ],
+      "defaultPermission": "read-only",
+      "writeApproval": "per-action",
+      "risk": "low",
+      "verifiedOfficialEndpoint": false,
+      "managedBy": "platform",
+      "memberMayConnect": true,
+      "memberMayEditDefinition": false,
+      "memberMayDeleteDefinition": false,
+      "secretRefRequired": true
+    },
+    {
+      "id": "postgresql",
+      "category": "Database",
+      "summary": "Inspect schema/query data; read-only role by default; migrations and writes require separate approval.",
+      "kind": "mcp-template",
+      "connected": false,
+      "endpoint": null,
+      "transportPreference": [
+        "streamable-http",
+        "stdio"
+      ],
+      "compatibilityProbeRequired": true,
+      "defaultAllowedTools": [
+        "schema.read",
+        "query.read"
+      ],
+      "defaultPermission": "read-only",
+      "writeApproval": "per-action",
+      "risk": "high",
+      "verifiedOfficialEndpoint": false,
+      "managedBy": "platform",
+      "memberMayConnect": true,
+      "memberMayEditDefinition": false,
+      "memberMayDeleteDefinition": false,
+      "secretRefRequired": true
+    },
+    {
+      "id": "google-drive",
+      "category": "Knowledge",
+      "summary": "Search/read selected Drive files; sharing, export, and writes require approval.",
+      "kind": "mcp-template",
+      "connected": false,
+      "endpoint": null,
+      "transportPreference": [
+        "streamable-http",
+        "stdio"
+      ],
+      "compatibilityProbeRequired": true,
+      "defaultAllowedTools": [
+        "files.read"
+      ],
+      "defaultPermission": "read-only",
+      "writeApproval": "per-action",
+      "risk": "medium",
+      "verifiedOfficialEndpoint": false,
+      "managedBy": "platform",
+      "memberMayConnect": true,
+      "memberMayEditDefinition": false,
+      "memberMayDeleteDefinition": false,
+      "secretRefRequired": true
+    },
+    {
+      "id": "slack",
+      "category": "Collaboration",
+      "summary": "Search approved channels; post/send actions are always per-action confirmation.",
+      "kind": "mcp-template",
+      "connected": false,
+      "endpoint": null,
+      "transportPreference": [
+        "streamable-http",
+        "stdio"
+      ],
+      "compatibilityProbeRequired": true,
+      "defaultAllowedTools": [
+        "messages.read"
+      ],
+      "defaultPermission": "read-only",
+      "writeApproval": "per-action",
+      "risk": "medium",
+      "verifiedOfficialEndpoint": false,
+      "managedBy": "platform",
+      "memberMayConnect": true,
+      "memberMayEditDefinition": false,
+      "memberMayDeleteDefinition": false,
+      "secretRefRequired": true
+    },
+    {
+      "id": "notion",
+      "category": "Knowledge",
+      "summary": "Search/read approved pages/databases; page edits need user confirmation.",
+      "kind": "mcp-template",
+      "connected": false,
+      "endpoint": null,
+      "transportPreference": [
+        "streamable-http",
+        "stdio"
+      ],
+      "compatibilityProbeRequired": true,
+      "defaultAllowedTools": [
+        "pages.read"
+      ],
+      "defaultPermission": "read-only",
+      "writeApproval": "per-action",
+      "risk": "medium",
+      "verifiedOfficialEndpoint": false,
+      "managedBy": "platform",
+      "memberMayConnect": true,
+      "memberMayEditDefinition": false,
+      "memberMayDeleteDefinition": false,
+      "secretRefRequired": true
+    },
+    {
+      "id": "linear",
+      "category": "Project management",
+      "summary": "Read assigned issues/projects; creation or state changes need approval.",
+      "kind": "mcp-template",
+      "connected": false,
+      "endpoint": null,
+      "transportPreference": [
+        "streamable-http",
+        "stdio"
+      ],
+      "compatibilityProbeRequired": true,
+      "defaultAllowedTools": [
+        "issues.read"
+      ],
+      "defaultPermission": "read-only",
+      "writeApproval": "per-action",
+      "risk": "medium",
+      "verifiedOfficialEndpoint": false,
+      "managedBy": "platform",
+      "memberMayConnect": true,
+      "memberMayEditDefinition": false,
+      "memberMayDeleteDefinition": false,
+      "secretRefRequired": true
+    },
+    {
+      "id": "figma",
+      "category": "Design",
+      "summary": "Read selected files/frames/tokens; expose only granted projects and asset export permissions.",
+      "kind": "mcp-template",
+      "connected": false,
+      "endpoint": null,
+      "transportPreference": [
+        "streamable-http",
+        "stdio"
+      ],
+      "compatibilityProbeRequired": true,
+      "defaultAllowedTools": [
+        "design.read"
+      ],
+      "defaultPermission": "read-only",
+      "writeApproval": "per-action",
+      "risk": "medium",
+      "verifiedOfficialEndpoint": false,
+      "managedBy": "platform",
+      "memberMayConnect": true,
+      "memberMayEditDefinition": false,
+      "memberMayDeleteDefinition": false,
+      "secretRefRequired": true
+    },
+    {
+      "id": "supabase",
+      "category": "Backend data",
+      "summary": "Inspect selected project schema and logs; default read-only; mutations/migrations require approval.",
+      "kind": "mcp-template",
+      "connected": false,
+      "endpoint": null,
+      "transportPreference": [
+        "streamable-http",
+        "stdio"
+      ],
+      "compatibilityProbeRequired": true,
+      "defaultAllowedTools": [
+        "schema.read",
+        "logs.read"
+      ],
+      "defaultPermission": "read-only",
+      "writeApproval": "per-action",
+      "risk": "high",
+      "verifiedOfficialEndpoint": false,
+      "managedBy": "platform",
+      "memberMayConnect": true,
+      "memberMayEditDefinition": false,
+      "memberMayDeleteDefinition": false,
+      "secretRefRequired": true
+    },
+    {
+      "id": "artifact-renderer",
+      "category": "Artifacts",
+      "summary": "Render/validate PDF, DOCX, PPTX, SVG, image, and video output in sandbox. Usually Forge-native, not a third-party MCP.",
+      "kind": "forge-native",
+      "connected": false,
+      "endpoint": null,
+      "transportPreference": [
+        "streamable-http",
+        "stdio"
+      ],
+      "compatibilityProbeRequired": true,
+      "defaultAllowedTools": [
+        "render",
+        "validate"
+      ],
+      "defaultPermission": "read-only",
+      "writeApproval": "per-action",
+      "risk": "medium",
+      "verifiedOfficialEndpoint": false,
+      "managedBy": "platform",
+      "memberMayConnect": true,
+      "memberMayEditDefinition": false,
+      "memberMayDeleteDefinition": false,
+      "secretRefRequired": false
+    },
+    {
+      "id": "media-tools",
+      "category": "Media",
+      "summary": "Optional isolated 3D/game/media processing tools; verify source, license, runtime, and resource caps.",
+      "kind": "mcp-template",
+      "connected": false,
+      "endpoint": null,
+      "transportPreference": [
+        "streamable-http",
+        "stdio"
+      ],
+      "compatibilityProbeRequired": true,
+      "defaultAllowedTools": [
+        "asset.read",
+        "render.sandbox"
+      ],
+      "defaultPermission": "read-only",
+      "writeApproval": "per-action",
+      "risk": "medium",
+      "verifiedOfficialEndpoint": false,
+      "managedBy": "platform",
+      "memberMayConnect": true,
+      "memberMayEditDefinition": false,
+      "memberMayDeleteDefinition": false,
+      "secretRefRequired": true
+    }
+  ]
+}

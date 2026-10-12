@@ -81,13 +81,18 @@ class VerifierService {
 
       if (inLineComment || inBlockComment) continue;
 
-      // Strings
+      // Strings — a quote only OPENS a string in expression position. JSX/HTML
+      // text apostrophes (We're, It's, don't) are NOT string delimiters;
+      // treating them as such flipped inSingleQuote and rejected clean
+      // components with "Unclosed string" (E2E run #10: Home.jsx rejected 4x,
+      // and the generic error gave the model no way to learn why). A quote
+      // while already inside the same string still closes it (first operand).
       if (char === "'" && !inDoubleQuote && !inBacktick && content[i - 1] !== '\\') {
-        inSingleQuote = !inSingleQuote;
+        if (inSingleQuote || this._quoteOpensString(content, i)) inSingleQuote = !inSingleQuote;
         continue;
       }
       if (char === '"' && !inSingleQuote && !inBacktick && content[i - 1] !== '\\') {
-        inDoubleQuote = !inDoubleQuote;
+        if (inDoubleQuote || this._quoteOpensString(content, i)) inDoubleQuote = !inDoubleQuote;
         continue;
       }
       if (char === '`' && !inSingleQuote && !inDoubleQuote && content[i - 1] !== '\\') {
@@ -121,6 +126,29 @@ class VerifierService {
     }
 
     return { valid: true };
+  }
+
+  /**
+   * Does the quote at index i sit in EXPRESSION position (a real string
+   * delimiter) or glued to prose (JSX/HTML/Python text)? Scans backwards over
+   * spaces/tabs: line start, an operator/punct char (=([{,:;!?&|+-*%<>), or a
+   * keyword (return 'x') → opener. An identifier-preceded quote (We're,
+   * don't, it's) is prose → must NOT flip quote state.
+   */
+  _quoteOpensString(content, i) {
+    let j = i - 1;
+    while (j >= 0 && (content[j] === ' ' || content[j] === '\t')) j--;
+    if (j < 0 || content[j] === '\n' || content[j] === '\r') return true;
+    const prev = content[j];
+    if ('=([{,:;!?&|+-*%<>'.includes(prev)) return true;
+    if (/[\w$]/.test(prev)) {
+      let k = j;
+      while (k >= 0 && /[\w$]/.test(content[k])) k--;
+      const word = content.slice(k + 1, j + 1);
+      return ['return', 'case', 'throw', 'yield', 'await', 'typeof', 'new', 'in', 'of',
+        'delete', 'void', 'instanceof', 'else', 'do', 'default'].includes(word);
+    }
+    return false;
   }
 
   /**

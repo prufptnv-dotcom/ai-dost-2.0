@@ -54,7 +54,7 @@ Key Guidelines:
             messagesPayload.push({ role: 'user', content: message });
 
             const result = await this.client.post('/chat/completions', {
-                model: 'meta/llama3-70b-instruct',
+                model: 'meta/llama-3.1-70b-instruct',
                 messages: messagesPayload,
                 temperature: 1,
                 top_p: 1,
@@ -69,7 +69,7 @@ Key Guidelines:
             if (result.data.choices && result.data.choices[0] && result.data.choices[0].message) {
                 return result.data.choices[0].message.content;
             } else {
-                return 'NVIDIA returned an unexpected response.';
+                throw new Error('NVIDIA returned an unexpected response structure.');
             }
 
         } catch (error) {
@@ -83,7 +83,7 @@ Key Guidelines:
                 return 'NVIDIA_CIRCUIT_OPEN';
             }
 
-            return 'NVIDIA service me error: ' + error.message;
+            throw new Error('NVIDIA service error: ' + error.message);
         }
     }
 }

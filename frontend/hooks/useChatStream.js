@@ -239,7 +239,7 @@ export async function streamChatResponse({
       const imagePromptText = imageMatch[1].trim();
       const turboUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
         imagePromptText
-      )}?width=1024&height=768&model=turbo&seed=${Date.now()}&nologo=true`;
+      )}?width=1024&height=768&seed=${Date.now()}&nologo=true`;
       finalReply = finalReply.replace(imageTagRegex, '').trim();
       finalReply += `\n\n![⚡ Z-Image Turbo: ${imagePromptText}](${turboUrl})\n\n[⬇️ Download Image](${turboUrl})`;
     }
@@ -416,7 +416,7 @@ export async function streamChatResponse({
         const restImgPrompt = restImgMatch[1].trim();
         const restTurboUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
           restImgPrompt
-        )}?width=1024&height=768&model=turbo&seed=${Date.now()}&nologo=true`;
+        )}?width=1024&height=768&seed=${Date.now()}&nologo=true`;
         reply0 = reply0.replace(/\[GENERATE_IMAGE:\s*(.*?)\]/i, '').trim();
         reply0 += `\n\n![⚡ Z-Image Turbo: ${restImgPrompt}](${restTurboUrl})`;
       }

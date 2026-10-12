@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const logger = require('../../logger');
 
 function createExecutionError(message, code, metadata = {}) {
   const error = new Error(message);
@@ -212,7 +213,22 @@ class ExecutionController {
           });
 
           if (!validation.valid) {
-            throw new Error(`Invalid or expired approval token: ${validation.reason}`);
+            // P12.6 (E2E run #12): a 10-min TTL blew mid-run — non-gated steps
+            // plus slow cascade walks stretched an approved run past 10 minutes,
+            // so the FIRST terminal step died with "Approval token has expired"
+            // → plain error → 3 repair retries → Max repairs → run failed. The
+            // user approved THIS run; expiry mid-run is an artifact of run
+            // duration, not a security event (a never-approved token is
+            // TOKEN_NOT_FOUND, not expired). Continue the approved scope with
+            // the fresh token this step's evaluation already minted — same rule
+            // as the single-use rotation below (TTL, capability scope and live
+            // re-evaluation still apply to that minted token at every later step).
+            if (validation.code === 'TOKEN_EXPIRED' && evaluation.approval_token) {
+              logger.info(`[ExecutionController] Approval token expired mid-run — rotating fresh token (run already approved, cap=${capId})`);
+              context.approvalToken = evaluation.approval_token;
+            } else {
+              throw new Error(`Invalid or expired approval token: ${validation.reason}`);
+            }
           }
           // P12.3: approval tokens are single-use by design (replay protection),
           // but the user approved THIS run — a multi-step run (install, build…)
@@ -320,7 +336,19 @@ class ExecutionController {
         throw mutationErr;
       }
 
-      await this.completeToolCall(toolCall.id, 'SUCCEEDED', output, null, { duration });
+      // P12.x (E2E forensics for runs #10/#11): read tools answering
+      // success:false (read_file "File not found") were recorded as SUCCEEDED
+      // — the status column only distinguished throw vs return, which sent my
+      // own diagnosis down a wrong path (apparently impossible same-second
+      // read-OK/apply-missing contradictions). Record what the tool reported.
+      const toolReportedFailure = !!(output && typeof output === 'object' && output.success === false);
+      await this.completeToolCall(
+        toolCall.id,
+        toolReportedFailure ? 'FAILED' : 'SUCCEEDED',
+        output,
+        toolReportedFailure ? (output.error || output.message || 'tool reported success:false') : null,
+        { duration }
+      );
 
       if (output && output.success && (toolName === 'write_file' || toolName === 'apply_diff')) {
         if (context && typeof context.onEvent === 'function') {

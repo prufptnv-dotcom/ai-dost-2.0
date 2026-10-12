@@ -2,6 +2,7 @@
 @import './chat-ux.css';
 @import "./tokens.css";
 @import './markdown.css';
+@import './forge.css';
 
 /* ─── Local Fonts ─── */
 @font-face {

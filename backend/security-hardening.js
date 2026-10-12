@@ -19,6 +19,14 @@
 const Module = require('module');
 const http = require('http');
 
+// Suppress punycode deprecation warning from transitive libraries (whatwg-url, etc.)
+const originalEmitWarning = process.emitWarning;
+process.emitWarning = function(warning, ...args) {
+  if (typeof warning === 'string' && warning.includes('punycode')) return;
+  if (warning && (warning.name === 'DeprecationWarning' || warning.code === 'DEP0040') && String(warning.message || '').includes('punycode')) return;
+  return originalEmitWarning.call(process, warning, ...args);
+};
+
 const isProduction = process.env.NODE_ENV === 'production';
 
 function parseCsv(value) {

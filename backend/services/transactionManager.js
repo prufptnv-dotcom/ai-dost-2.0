@@ -120,7 +120,7 @@ class TransactionManager {
     }
 
     if (!fs.existsSync(resolvedPath)) {
-      return { success: false, code: 'FILE_NOT_FOUND', error: `File not found: ${relPath}. Use read_file first.` };
+      return { success: false, code: 'FILE_NOT_FOUND', error: `File not found: ${relPath}. The file does not exist yet — verify the path with list_directory, or create it with write_file (apply_diff works only on existing files).` };
     }
 
     // Capture snapshot of original state before any modification
@@ -147,7 +147,7 @@ class TransactionManager {
       return {
         success: false,
         code: 'GUARD_REJECTED',
-        error: `Code rejected before persistence: ${guard.reason}`,
+        error: `Code rejected before persistence: ${deterministicCodeGuard.rejectionDetail(guard)}`,
         diagnostics: guard.diagnostics,
         verification: guard.verification
       };

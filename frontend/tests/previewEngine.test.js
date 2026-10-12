@@ -75,4 +75,28 @@ describe('generateLiveAppHtml (mount guard)', () => {
     expect(html).toContain('Preview could not mount a root component');
     expect(html).toContain('Root component not found');
   });
+
+  it('does not re-declare React hooks from subcomponents (prevents Identifier useState already declared)', () => {
+    const html = generateLiveAppHtml(
+      [
+        { path: 'src/App.jsx' },
+        { path: 'src/components/Header.jsx' }
+      ],
+      {
+        'src/App.jsx': 'import Header from "./components/Header"; export default function App() { return <Header />; }',
+        'src/components/Header.jsx': 'import React, { useState, useEffect } from "react"; export default function Header() { const [s, setS] = useState(0); return <h1>{s}</h1>; }'
+      }
+    );
+    // Should NOT have `const useState =` or `var useState =` in aliases
+    expect(html).not.toMatch(/var\s+useState\s*=/);
+    expect(html).not.toMatch(/const\s+useState\s*=/);
+    expect(html).not.toMatch(/var\s+useEffect\s*=/);
+    expect(html).not.toMatch(/const\s+useEffect\s*=/);
+  });
+
+  it('includes warning filters for Tailwind and Babel in iframe head', () => {
+    const html = htmlFor('export default function App() { return <div>test</div>; }');
+    expect(html).toContain('cdn.tailwindcss.com');
+    expect(html).toContain('Babel transformer');
+  });
 });

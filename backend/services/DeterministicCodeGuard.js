@@ -36,6 +36,24 @@ class DeterministicCodeGuard {
   }
 
   /**
+   * P12.x (E2E run #10): guard rejections surfaced to the model as the bare
+   * string "Code rejected before persistence: WASM grammar policy rejected
+   * candidate code" while the actual parser diagnostic (Unclosed string / line
+   * info) sat in `diagnostics` where no prompt ever saw it — the model guessed
+   * blindly 4x on the same file and burned its repair budget. Surface the first
+   * diagnostic in the message so re-planning can act on it.
+   */
+  rejectionDetail(guardResult) {
+    if (!guardResult) return 'policy rejected candidate code';
+    const first = Array.isArray(guardResult.diagnostics)
+      ? guardResult.diagnostics.find((d) => d && d.message)
+      : null;
+    if (!first) return guardResult.reason || 'policy rejected candidate code';
+    const loc = Number.isFinite(first.line) ? ` (line ${first.line})` : '';
+    return `${guardResult.reason} — ${first.message}${loc}`;
+  }
+
+  /**
    * P12.3 (E2E-verified): models occasionally emit ONE-LINE escaped blobs —
    * literal \n / \" sequences instead of real newlines/quotes (observed on a
    * portfolio run: package.json = 1 line, `{\n \"name\"...`). The raw text is

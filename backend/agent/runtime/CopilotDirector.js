@@ -1,5 +1,7 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const OpenAIService = require('../../services/openaiService');
 const AgentCascadeAiService = require('./AgentCascadeAiService');
 const AgentCoordinator = require('./AgentCoordinator');
@@ -18,21 +20,79 @@ const SPECIALTY_TO_ROLE = {
   security: 'VERIFIER', browser_qa: 'VERIFIER', repair: 'CODER'
 };
 
+// P12.8 (E2E run #14): bounded workspace listing for the specialist planner.
+// Pass 2 of run #14 regenerated the whole plan from scratch and burned its
+// entire repair budget re-creating files that pass 1 had already written
+// ("Create package.json" ×4 → WRITE_FORBIDDEN → hallucinated-SEARCH apply_diff).
+// The planner knew files EXISTED (SURGICAL directive) but not WHICH ones.
+function listExistingFilesBounded(root, max = 100) {
+  const out = [];
+  const skip = new Set(['node_modules', '.git', '.checkpoints']);
+  const walk = (dir, depth) => {
+    if (out.length >= max || depth > 6) return;
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+    for (const e of entries) {
+      if (skip.has(e.name)) continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full, depth + 1);
+      else if (e.isFile()) {
+        out.push(path.relative(root, full).split(path.sep).join('/'));
+        if (out.length >= max) return;
+      }
+    }
+  };
+  walk(root, 0);
+  return out.sort();
+}
+
+// P12.9 (E2E run #15): knowing the file LIST was not enough — the specialist
+// still baked SEARCH strings from imagination (31× SEARCH-not-found; it
+// assumed pretty-printed 2-space package.json while the file was SINGLE-LINE
+// compact JSON). Give the planner the REAL bytes of the key small files so
+// SEARCH is copied verbatim, not recalled. Bounded: priority names first,
+// ≤6 files, ≤2600 chars each (truncated marker beyond), ≤9000 chars total.
+function readKeyFileContents(diskPath, files) {
+  const PRIORITY = ['package.json', 'src/styles/global.css', 'src/index.css', 'src/App.jsx', 'index.html', 'vite.config.js', 'src/main.jsx'];
+  const pick = [];
+  for (const p of PRIORITY) if (files.includes(p)) pick.push(p);
+  for (const p of files) { if (pick.length >= 5) break; if (!pick.includes(p)) pick.push(p); }
+  const out = {};
+  let budget = 4800;
+  for (const p of pick) {
+    if (budget <= 0) break;
+    try {
+      const full = path.join(diskPath, p);
+      const st = fs.statSync(full);
+      if (!st.isFile() || st.size > 60000) continue;
+      let c = fs.readFileSync(full, 'utf-8');
+      if (c.length > 1500) c = `${c.slice(0, 1300)}\n… [truncated — ${c.length} chars total — copy the REAL lines you need as SEARCH] …`;
+      out[p] = c;
+      budget -= c.length;
+    } catch (_) {}
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 const DIRECTOR_PLANNER_PROMPT = `You are the AI-Dost Copilot Director/Boss. Convert ONE software outcome request into the minimum sufficient set of specialist tasks. 
 
-MANDATORY ARCHITECTURE RULE: For any non-trivial task, the first task MUST be 'architecture' (specialty: requirements). The agent must define a blueprint, file structure, and API contracts before any coding starts.
+CODE-FIRST IMPLEMENTATION RULE (MANDATORY):
+When the user asks to build, create, or code an application, website, component, or feature (e.g. "website banao", "portfolio banao", "build app", "code likho"):
+- The primary task MUST be code implementation (specialty: frontend or integration, role: CODER).
+- The agent MUST immediately create or modify real executable code files (such as 'src/App.jsx', 'App.jsx', 'src/index.css', 'index.html', 'src/main.jsx').
+- NEVER plan or create markdown blueprint files (such as 'docs/architecture.md', 'README.md', or design specs) when the user asked for an app, website, or code. The user expects runnable code, not markdown documentation!
+- Write complete, beautiful, interactive, production-ready code with responsive styling and working components.
 
-FRONTEND / UI IMPLEMENTATION RULE: If the request asks to build, create, or modify an application, website, component, or UI feature, you MUST include a 'frontend' task (specialty: frontend) that writes the primary working UI component (such as 'src/App.jsx' or 'App.jsx') with a clean default export, complete interactive logic, and modern styling. Never finish without delivering the actual working implementation.
-
-INCREMENTAL UPGRADE RULE: If the request is an upgrade or change to an existing project, the first task MUST be 'analysis' (specialty: research). The agent must index the existing codebase, identify affected files, and determine the impact of the change before planning the implementation.
+INCREMENTAL UPGRADE RULE: If the request is an upgrade, bug fix, or addition to an existing project, plan targeted surgical code edits directly to the affected files.
 
 Decide the task count dynamically from the actual scope, dependencies, risk, affected files, and verification needs. 
 
 Return ONLY JSON:
-{"summary":"string","tasks":[{"id":"string","specialty":"requirements|research|frontend|backend|integration|data|testing|verification|visual_qa|security|browser_qa|repair","objective":"string","dependsOn":["task-id"],"expectedOutput":"string"}]}
+{"summary":"string","tasks":[{"id":"string","specialty":"frontend|backend|integration|data|testing|verification|visual_qa|security|browser_qa|repair|research|requirements","objective":"string","dependsOn":["task-id"],"expectedOutput":"string"}]}
 
 Rules:
 - Choose 1 to 32 tasks only when justified.
+- For building websites/apps/UIs, task 1 MUST have specialty 'frontend' or 'integration' to write working code.
 - Dependencies may reference any task id in the returned plan.
 - For upgrades/fixes, target the affected subsystem; do not rebuild unrelated areas.
 - Include testing, security, browser QA, or verification when the request/risk requires it.
@@ -108,13 +168,13 @@ function fallbackPlan(request) {
   const complex = /\b(full|complete|entire|platform|app|application|website|dashboard|integrat|database|backend|frontend|deploy|production|security)\b/.test(text);
   if (!complex) return {
     summary: 'Single-task adaptive execution',
-    tasks: [{ id: 'task-1', specialty: 'integration', objective: request, dependsOn: [], expectedOutput: 'Working requested outcome with verification evidence.' }]
+    tasks: [{ id: 'task-1', specialty: 'frontend', objective: `Implement working code for: ${request}`, dependsOn: [], expectedOutput: 'Working requested outcome with verification evidence.' }]
   };
   return {
     summary: 'Adaptive multi-specialist execution',
     tasks: [
-      { id: 'task-1', specialty: 'requirements', objective: `Inspect the existing workspace and define the smallest safe implementation for: ${request}`, dependsOn: [], expectedOutput: 'Concrete implementation scope and constraints.' },
-      { id: 'task-2', specialty: 'integration', objective: request, dependsOn: ['task-1'], expectedOutput: 'Implemented outcome in affected subsystem(s).' },
+      { id: 'task-1', specialty: 'frontend', objective: `Implement complete working code and UI components for: ${request}`, dependsOn: [], expectedOutput: 'Working runnable application source code files.' },
+      { id: 'task-2', specialty: 'integration', objective: `Integrate and wire complete functionality for: ${request}`, dependsOn: ['task-1'], expectedOutput: 'Implemented outcome in affected subsystem(s).' },
       { id: 'task-3', specialty: 'testing', objective: `Test the completed implementation for: ${request}`, dependsOn: ['task-2'], expectedOutput: 'Test/build/runtime evidence and actionable failures.' }
     ]
   };
@@ -148,11 +208,19 @@ function normalizePlan(raw, request) {
     if (!id || ids.has(id)) continue;
     const specialty = String(task.specialty || 'integration').trim().toLowerCase();
     const role = SPECIALTY_TO_ROLE[specialty] || 'CODER';
+    const taskObjective = (
+      (typeof task.objective === 'string' && task.objective.trim()) ||
+      (typeof task.description === 'string' && task.description.trim()) ||
+      (typeof task.goal === 'string' && task.goal.trim()) ||
+      (typeof task.title === 'string' && task.title.trim()) ||
+      (typeof task.summary === 'string' && task.summary.trim()) ||
+      String(request || 'Implement requested code outcome').trim()
+    );
     tasks.push({
       id,
       specialty,
       role: ALLOWED_ROLES.has(role) ? role : 'CODER',
-      objective: String(task.objective || request).trim().slice(0, 12000),
+      objective: taskObjective.slice(0, 12000),
       dependsOn: Array.isArray(task.dependsOn) ? [...new Set(task.dependsOn.map(String).map((dep) => dep.trim()).filter(Boolean))] : [],
       expectedOutput: String(task.expectedOutput || 'Evidence-backed completion of the objective.').trim().slice(0, 4000)
     });
@@ -195,13 +263,29 @@ class CopilotDirector {
 
   async executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent = () => {}, permissionLevel = 'auto', approvalToken = null, approvalState = null }) {
     let hasExistingFiles = false;
+    let existingFiles = [];
+    let existingFileContents = null;
     try {
       const meta = this.workspaceManager?.getWorkspaceMetadata?.(projectId, userId);
       hasExistingFiles = Boolean(meta && meta.fileCount > 0);
+      // P12.8 (E2E run #14): pass the REAL file list to the specialist planner.
+      // The SURGICAL directive alone was not enough — the planner kept emitting
+      // "Create package.json"/"Create App.jsx" for files that already existed
+      // (WRITE_FORBIDDEN ×4 burned the whole repair budget on pass 2). With the
+      // list in AUTHORIZED CONTEXT it can plan read_file + apply_diff instead.
+      if (hasExistingFiles && meta?.diskPath && fs.existsSync(meta.diskPath)) {
+        existingFiles = listExistingFilesBounded(meta.diskPath, 100);
+        // P12.9 (E2E run #15): the LIST alone still left SEARCH guessing —
+        // the planner baked imagined content (31× SEARCH-not-found). Hand it
+        // the actual bytes of the key small files so SEARCH is verbatim.
+        existingFileContents = existingFiles.length ? readKeyFileContents(meta.diskPath, existingFiles) : null;
+      }
     } catch (_) {}
 
     const directive = hasExistingFiles
-      ? `[SURGICAL_DIRECTIVE: Inspect existing workspace files first. Apply surgical targeted edits to affected files only without wiping or regenerating unrelated code.]`
+      ? `[SURGICAL_DIRECTIVE: Inspect existing workspace files first. Apply surgical targeted edits to affected files only without wiping or regenerating unrelated code.` +
+        (existingFiles.length ? ` EXISTING FILES (these paths ALREADY EXIST — never plan write_file for them, it is REJECTED; to change one, read_file it then apply_diff): ${existingFiles.join(', ')}` : '') +
+        `]`
       : `[GREENFIELD_DIRECTIVE: Workspace is new/empty. Create required source and component files directly using write_file. Do not attempt to read non-existent legacy files.]`;
 
     const objectiveWithDirective = `${directive}\n${task.objective}`;
@@ -226,7 +310,9 @@ class CopilotDirector {
           specialty: task.specialty, 
           directorTaskId: task.id, 
           request, 
-          expectedOutput: task.expectedOutput 
+          expectedOutput: task.expectedOutput,
+          ...(existingFiles.length ? { existingFiles } : {}),
+          ...(existingFileContents ? { existingFileContents } : {})
         });
 
         onEvent({ type: 'thinking', message: `⚡ Specialist [${task.id}] executing ${workerPlan.steps?.length || 0} step(s)...` });

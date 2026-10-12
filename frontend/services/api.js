@@ -128,6 +128,15 @@ export const fetchProject = async (projectId, options = {}) => {
   }
 };
 
+export const deleteProject = async (projectId, options = {}) => {
+  try {
+    const res = await api.delete(`/memory/project/${encodeURIComponent(projectId)}`, { signal: options.signal });
+    return res.data;
+  } catch (error) {
+    throw buildApiError('Delete project', error);
+  }
+};
+
 export const executeCode = async (codeData, options = {}) => {
   try {
     const res = await api.post('/sandbox/execute', codeData, { signal: options.signal });

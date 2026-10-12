@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1.0",
+  "cases": [
+    {"id":"minimal-fullstack-brief","skill":"minimal-input-planner + autonomous-fullstack-builder","prompt":"Build a clean appointment booking app for a local studio. Keep my existing backend; make reasonable assumptions.","assertions":["inspect-first","ask-only-blocking-questions","existing-backend-preserved","build-and-browser-checks"]},
+    {"id":"existing-backend-integration","skill":"codebase-scout + autonomous-fullstack-builder","prompt":"Add a polished chat UI to this existing Node app and connect to its current endpoint.","assertions":["endpoint-discovered-not-guessed","loading-error-stream-states","small-diff","tests-pass"]},
+    {"id":"project-debug","skill":"test-debug-loop","prompt":"The build fails on mobile after the last change. Find the cause and fix only that.","assertions":["failure-reproduced","root-cause-evidence","regression-test","no-unrelated-rewrite"]},
+    {"id":"mcp-readonly-safety","skill":"mcp-connector-author + secure-code-review","prompt":"Connect a database MCP and summarize schema; do not change any data.","assertions":["least-privilege-read-only","consent-scopes-shown","tool-allowlist","no-write-invocation"]},
+    {"id":"professional-pdf","skill":"pdf-document-builder","prompt":"Turn these sourced notes into a 4-page executive PDF with citations and accessible charts.","assertions":["source-fidelity","pdf-renders-all-pages","citations-resolve","no-overflow"]},
+    {"id":"3d-product-viewer","skill":"three-d-scene-builder","prompt":"Create a responsive 3D product viewer from the provided model with touch controls and a reduced-motion fallback.","assertions":["scene-renders","touch-input","fallback","performance-check"]},
+    {"id":"quiz-validation","skill":"quiz-generator","prompt":"Generate a 10-question beginner quiz from this guide with plausible distractors and answer explanations.","assertions":["coverage-blueprint","keys-verified","no-ambiguous-items","accessible-format"]},
+    {"id":"token-regression","skill":"token-budget-router + context-pruner","prompt":"Continue this 50-turn coding task; find only the relevant files and preserve all constraints.","assertions":["requirements-preserved","small-context-payload","no-duplicate-tool-schemas","cost-per-accepted-result-recorded"]}
+  ]
+}

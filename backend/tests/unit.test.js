@@ -464,6 +464,38 @@ describe('verifierService', () => {
     assert.match(result.secretLeaks[0].type, /Google/i);
   });
 
+  // E2E run #10: apostrophes in JSX text (We're / It's / don't) toggled
+  // inSingleQuote → "Unclosed string" → four clean Home.jsx components were
+  // rejected with a generic policy error the model could not act on.
+  test('verifyCode accepts JSX with apostrophes in text (E2E run #10 Home.jsx x4)', () => {
+    const jsx = [
+      'export default function Home() {',
+      '  return (',
+      '    <section>',
+      "      <h1>We're glad you're here</h1>",
+      "      <p>It's time — don't miss it</p>",
+      "      <span title='Home'>It's 2026</span>",
+      '    </section>',
+      '  );',
+      '}'
+    ].join('\n');
+    const result = verifier.verifyCode('Home.jsx', jsx);
+    assert.equal(result.valid, true, JSON.stringify(result.diagnostics));
+  });
+
+  test('verifyCode still rejects genuinely unclosed strings (heuristic is not a bypass)', () => {
+    const bad = "const x = 'oops;\nconst y = 2;";
+    const result = verifier.verifyCode('Bad.jsx', bad);
+    assert.equal(result.valid, false);
+    assert.match(result.diagnostics[0].message, /Unclosed string/i);
+  });
+
+  test('verifyCode tracks real strings in expression position even with unbalanced brackets inside', () => {
+    const code = "export const a = ' unmatched ) bracket ';\nexport const b = fn(' unmatched ( bracket ');";
+    const result = verifier.verifyCode('strings.jsx', code);
+    assert.equal(result.valid, true, JSON.stringify(result.diagnostics));
+  });
+
   test('verifyDocument checks PDF and Office Open XML magic bytes', () => {
     // Valid PDF header
     const pdfBuf = Buffer.from('%PDF-1.5\n%EOF');
@@ -1846,6 +1878,50 @@ describe('E2E-driven director fixes (P12.3)', () => {
         }
       );
     });
+
+    // P12.6 (E2E run #12): the 10-min TTL blew mid-run — the first terminal
+    // step died with "Approval token has expired", the plain error fell into
+    // the repair loop (3 retries → Max repairs) and the whole run failed.
+    test('expired token mid-run rotates to the fresh mint instead of failing the step', async () => {
+      const { calls, gatekeeper } = approvingGate();
+      gatekeeper.validateApproval = (params) => {
+        calls.validatedToken = params.token;
+        return { valid: false, code: 'TOKEN_EXPIRED', reason: 'Approval token has expired' };
+      };
+      const controller = build(gatekeeper);
+      const context = { userId: 'u1', projectId: 'p1', permissionLevel: 'auto', approvalToken: 'T-EXPIRED' };
+      const out = await controller.executeTool('step_1', 'run_terminal', { command: 'npm install' }, context, registry);
+      assert.equal(out.success, true, 'expiry mid-run must not fail the step — the run was approved');
+      assert.equal(calls.validatedToken, 'T-EXPIRED', 'the user-approved token is what gets validated');
+      assert.equal(context.approvalToken, 'T-NEW', 'rotated to the fresh minted token for later gated steps');
+    });
+
+    test('non-expiry validation failures still fail the step (scope mismatches stay hard)', async () => {
+      const { gatekeeper } = approvingGate();
+      gatekeeper.validateApproval = () => ({ valid: false, code: 'CAPABILITY_SET_MISMATCH', reason: 'Capability mismatch: approved [a], requested [b]' });
+      const controller = build(gatekeeper);
+      const context = { userId: 'u1', projectId: 'p1', permissionLevel: 'auto', approvalToken: 'T-OLD' };
+      await assert.rejects(
+        () => controller.executeTool('step_1', 'run_terminal', { command: 'npm install' }, context, registry),
+        /Invalid or expired approval token: Capability mismatch/
+      );
+    });
+
+    test('expired token with NO minted replacement still fails (cannot rotate to nothing)', async () => {
+      const { gatekeeper } = approvingGate();
+      gatekeeper.evaluateWithLevel = (caps) => ({
+        decision: 'REQUIRE_EXPLICIT_APPROVAL',
+        approval_token: null,
+        capabilities: caps.map((c) => ({ capability_id: c })),
+      });
+      gatekeeper.validateApproval = () => ({ valid: false, code: 'TOKEN_EXPIRED', reason: 'Approval token has expired' });
+      const controller = build(gatekeeper);
+      const context = { userId: 'u1', projectId: 'p1', permissionLevel: 'auto', approvalToken: 'T-EXPIRED' };
+      await assert.rejects(
+        () => controller.executeTool('step_1', 'run_terminal', { command: 'npm install' }, context, registry),
+        /Invalid or expired approval token: Approval token has expired/
+      );
+    });
   });
 
   // ── E2/E4: approval fails fast, delegation failures skip gracefully ─────
@@ -2085,6 +2161,7 @@ describe('P12.4 — planner honesty, mutation failure, verification gate', () =>
       let calls = 0;
       const planner = createStructuredAgentPlanner({
         toolRegistry,
+        retryDelayMs: 1,
         openai: {
           chat: async (prompt, history, mode) => {
             modes.push(mode);
@@ -2106,6 +2183,7 @@ describe('P12.4 — planner honesty, mutation failure, verification gate', () =>
       let calls = 0;
       const planner = createStructuredAgentPlanner({
         toolRegistry,
+        retryDelayMs: 1,
         openai: { chat: async () => { calls += 1; return 'User Safety: safe'; } },
       });
       await assert.rejects(() => planner.generateStructuredPlan('build a react app', {}), /invalid JSON/i);
@@ -2119,6 +2197,7 @@ describe('P12.4 — planner honesty, mutation failure, verification gate', () =>
       let calls = 0;
       const planner = createStructuredAgentPlanner({
         toolRegistry,
+        retryDelayMs: 1,
         openai: {
           chat: async () => {
             calls += 1;
@@ -2166,6 +2245,29 @@ describe('P12.4 — planner honesty, mutation failure, verification gate', () =>
       assert.throws(() => extractJson('User Safety: safe'), /invalid JSON/i);
       assert.throws(() => extractJson("I'll start by inspecting the workspace"), /invalid JSON/i);
       assert.throws(() => extractJson(''), /invalid JSON/i);
+    });
+
+    test('retry backs off between attempts and execution prompts teach the existing-file rules', async () => {
+      const prompts = [];
+      let calls = 0;
+      const planner = createStructuredAgentPlanner({
+        toolRegistry,
+        retryDelayMs: 60,
+        openai: {
+          chat: async (prompt) => {
+            prompts.push(prompt);
+            calls += 1;
+            return calls < 3 ? 'prose again' : '{"goal":"g","steps":[]}';
+          },
+        },
+      });
+      const t0 = Date.now();
+      await planner.generateStructuredPlan('do something', {});
+      const elapsed = Date.now() - t0;
+      // 60ms + 120ms of deliberate waiting (free-tier per-minute rate windows)
+      assert.ok(elapsed >= 170, `expected backoff >= 170ms, got ${elapsed}ms`);
+      assert.ok(prompts.every((p) => p.includes('FILE RULES (strict)')), 'execution prompts must teach write_file=only-new + verbatim apply_diff');
+      assert.ok(prompts.every((p) => p.includes('Planner mode: execution')));
     });
   });
 
@@ -2229,7 +2331,11 @@ describe('P12.4 — planner honesty, mutation failure, verification gate', () =>
       const registry = { get: () => ({ name: 'read_file', execute: async () => ({ success: false, exists: false, message: 'File not found: x' }) }) };
       const out = await controller.executeTool('step_4', 'read_file', { path: 'x' }, { userId: 'u', projectId: 'p' }, registry);
       assert.equal(out.success, false, 'a missing file is an observation, not an exception');
-      assert.ok(recorded.some((r) => r.status === 'SUCCEEDED'));
+      // P12.x: it resolves without throwing, but the RECORDED status must
+      // reflect what the tool reported (was SUCCEEDED — the lie behind the
+      // run #10/#11 read-OK/apply-missing "contradictions" during forensics).
+      assert.ok(recorded.some((r) => r.status === 'FAILED'), 'success:false must be recorded FAILED');
+      assert.ok(recorded.some((r) => r.errorInfo && String(r.errorInfo).includes('File not found')), 'reason recorded');
     });
   });
 

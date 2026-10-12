@@ -1,0 +1,19 @@
+{
+  "name": "forge-autonomous-ide",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Frontend-only autonomous website building workspace",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "preview": "python3 -m http.server 5173 --directory dist"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-icons": "^5.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

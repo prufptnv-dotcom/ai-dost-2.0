@@ -197,7 +197,7 @@ router.post('/turbo', async (req, res) => {
     const enhanced = buildEnhancedImageRequest(prompt, cat, { width, height });
     const turboSeed = seed || Math.floor(Math.random() * 999999);
 
-    const turboUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhanced.prompt)}?width=${enhanced.width}&height=${enhanced.height}&model=turbo&seed=${turboSeed}&nologo=true`;
+    const turboUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhanced.prompt)}?width=${enhanced.width}&height=${enhanced.height}&seed=${turboSeed}&nologo=true`;
 
     logger.info(`⚡ Z-Image Turbo requested: "${prompt}" [category: ${cat}, seed: ${turboSeed}]`);
 
@@ -287,7 +287,7 @@ router.post('/edit', async (req, res) => {
 
     const enhanced = buildEnhancedImageRequest(editPrompt, category);
     const turboSeed = Math.floor(Math.random() * 999999);
-    const editUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhanced.prompt)}?width=${enhanced.width}&height=${enhanced.height}&model=turbo&seed=${turboSeed}&nologo=true`;
+    const editUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhanced.prompt)}?width=${enhanced.width}&height=${enhanced.height}&seed=${turboSeed}&nologo=true`;
 
     return res.json({
         success: true,

@@ -7,6 +7,7 @@ const NvidiaService = require('./nvidiaService');
 const DeepseekService = require('./deepseekService');
 const MistralService = require('./mistralService');
 const OpenCodeService = require('./opencodeService');
+const { ollamaBaseUrl } = require('./ollamaEnv');
 
 /**
  * Shared Multi-Model AI Cascade Helper
@@ -68,12 +69,16 @@ function withTimeout(promise, ms, label) {
 }
 
 async function ollamaLocal(prompt) {
-  const tagsRes = await fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(3000) });
+  // P3 #191 convention (llmCascade had missed it): endpoint comes from
+  // OLLAMA_HOST/OLLAMA_BASE_URL instead of a hard-coded 127.0.0.1:11434 —
+  // also gives tests a knob to prove the honest-degradation path hermetically.
+  const base = ollamaBaseUrl();
+  const tagsRes = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(3000) });
   if (!tagsRes.ok) throw new Error('ollama: not reachable');
   const tagsData = await tagsRes.json();
   const models = tagsData.models || [];
   if (models.length === 0) throw new Error('ollama: no models pulled');
-  const genRes = await fetch('http://127.0.0.1:11434/api/generate', {
+  const genRes = await fetch(`${base}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: models[0].name, prompt, stream: false }),
