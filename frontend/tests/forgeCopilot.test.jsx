@@ -200,6 +200,16 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
 
   test('does not treat a successful specialist event as the end of the whole build', async () => {
     const previousFetch = global.fetch;
+    const api = require('../services/api');
+    const previousFetchProject = api.fetchProject.getMockImplementation();
+    api.fetchProject.mockResolvedValue({
+      id: 'test-project',
+      name: 'test-project',
+      files: [
+        { path: 'src/App.jsx', content: 'export default function App() { return <button>Ready</button>; }' },
+        { path: 'package.json', content: '{"name":"test","scripts":{"dev":"vite"}}' },
+      ],
+    });
     const events = [
       { type: 'run_started', taskId: 'forge-e2e-1', runId: 'director-e2e-1' },
       { type: 'director_plan', summary: 'Implement and verify', tasks: [{ id: 'coder', specialty: 'CODER' }, { id: 'verifier', specialty: 'VERIFIER' }] },
@@ -242,6 +252,7 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
       expect(reader.read).toHaveBeenCalledTimes(1);
     } finally {
       global.fetch = previousFetch;
+      api.fetchProject.mockImplementation(previousFetchProject);
     }
   });
 
