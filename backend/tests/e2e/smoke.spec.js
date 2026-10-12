@@ -82,7 +82,7 @@ test.describe('Chat flow', () => {
     await page.goto('/dashboard');
     await page.waitForLoadState('networkidle');
 
-    const input = page.getByPlaceholder(/Ask AI-Dost anything/i);
+    const input = page.getByLabel(/Ask AI-Dost anything/i);
     await expect(input).toBeVisible();
     await input.fill('E2E test message');
     await input.press('Enter');
