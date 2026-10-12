@@ -55,34 +55,45 @@ class SandboxManager extends EventEmitter {
   }
 
   // Resolve a requested file path inside the sandbox dir, rejecting traversal.
+  // Use win32 path semantics for Windows-style roots even when the unit suite
+  // runs on Linux; production paths still use native realpath/symlink checks.
   _resolveSafe(sandboxPath, relPath) {
-    const fullPath = path.resolve(sandboxPath, relPath || '');
-    if (!fullPath.startsWith(sandboxPath + path.sep) && fullPath !== sandboxPath) {
+    const rootInput = String(sandboxPath || '');
+    const windowsRoot = path.win32.isAbsolute(rootInput);
+    const foreignWindowsRoot = windowsRoot && process.platform !== 'win32';
+    const pathApi = windowsRoot ? path.win32 : path;
+    const realRootPath = pathApi.resolve(rootInput);
+    const fullPath = pathApi.resolve(realRootPath, relPath || '');
+    const rootPrefix = realRootPath.endsWith(pathApi.sep) ? realRootPath : `${realRootPath}${pathApi.sep}`;
+    if (fullPath !== realRootPath && !fullPath.startsWith(rootPrefix)) {
       throw new Error(`Invalid sandbox path: ${relPath} (path traversal blocked)`);
     }
-    // P3 #36: a plain prefix check is fooled by symlinks — a link INSIDE the
-    // sandbox pointing outside would pass the check but read/write elsewhere.
-    // Resolve the real path of the deepest existing ancestor and require it to
-    // stay inside the real sandbox root.
-    try {
-      const realRoot = fsSync.realpathSync(sandboxPath);
-      let probe = fullPath;
-      const missing = [];
-      while (!fsSync.existsSync(probe)) {
-        const parent = path.dirname(probe);
-        if (parent === probe) break;
-        missing.unshift(path.basename(probe));
-        probe = parent;
+
+    // P3 #36: a plain prefix check is fooled by symlinks. On the native
+    // filesystem, resolve the deepest existing ancestor to block symlink escape.
+    // A foreign Windows path on Linux has no filesystem object to realpath-check.
+    if (!foreignWindowsRoot) {
+      try {
+        const realRoot = fsSync.realpathSync(realRootPath);
+        let probe = fullPath;
+        const missing = [];
+        while (!fsSync.existsSync(probe)) {
+          const parent = pathApi.dirname(probe);
+          if (parent === probe) break;
+          missing.unshift(pathApi.basename(probe));
+          probe = parent;
+        }
+        let realProbe = fsSync.realpathSync(probe);
+        for (const seg of missing) realProbe = pathApi.join(realProbe, seg);
+        const realPrefix = realRoot.endsWith(pathApi.sep) ? realRoot : `${realRoot}${pathApi.sep}`;
+        const inRoot = realProbe === realRoot || realProbe.startsWith(realPrefix);
+        if (!inRoot) {
+          throw new Error(`Invalid sandbox path: ${relPath} (symlink escape blocked)`);
+        }
+      } catch (err) {
+        if (err && /symlink escape blocked|path traversal blocked/.test(err.message)) throw err;
+        // realpath failures on exotic filesystems fall back to the prefix check above
       }
-      let realProbe = fsSync.realpathSync(probe);
-      for (const seg of missing) realProbe = path.join(realProbe, seg);
-      const inRoot = realProbe === realRoot || realProbe.startsWith(realRoot + path.sep);
-      if (!inRoot) {
-        throw new Error(`Invalid sandbox path: ${relPath} (symlink escape blocked)`);
-      }
-    } catch (err) {
-      if (err && /symlink escape blocked|path traversal blocked/.test(err.message)) throw err;
-      // realpath failures on exotic filesystems fall back to the prefix check above
     }
     return fullPath;
   }
