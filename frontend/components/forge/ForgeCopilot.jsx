@@ -2821,7 +2821,8 @@ export default function ForgeCopilot({
   };
 
   // Real Run / Dev Server Trigger
-  const runBuild = async () => {
+  const runBuild = async (options = {}) => {
+    const silent = options?.silent === true;
     setIsRunning(true);
     setTerminalLogs((prev) => [...prev, '> Starting dev server in sandbox container...']);
     try {
@@ -2840,20 +2841,20 @@ export default function ForgeCopilot({
           ...prev,
           `> Dev server ready on http://localhost:${data.hostPort || 5173}`,
         ]);
-        showToast('Dev server ready');
+        if (!silent) showToast('Dev server ready');
         return true;
       } else {
         const reason = `Preview server request failed (HTTP ${res.status})`;
         setDevServer({ state: 'FAILED', url: null, hostPort: null, reason, error: reason });
         setTerminalLogs((prev) => [...prev, `> Live dev server failed: ${reason}`, '> The in-browser preview remains available as a fallback.']);
-        showToast('Live server failed; check Terminal');
+        if (!silent) showToast('Live server failed; check Terminal');
         return false;
       }
     } catch (err) {
       const reason = String(err?.message || err || 'Unknown preview error').slice(0, 220);
       setDevServer({ state: 'FAILED', url: null, hostPort: null, reason, error: reason });
       setTerminalLogs((prev) => [...prev, `> Live dev server failed: ${reason}`, '> The in-browser preview remains available as a fallback.']);
-      showToast('Live server failed; check Terminal');
+      if (!silent) showToast('Live server failed; check Terminal');
       return false;
     } finally {
       setIsRunning(false);
