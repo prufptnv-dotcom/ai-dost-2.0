@@ -421,7 +421,21 @@ class CopilotDirector {
             onEvent({ type: 'director_task', status: 'FAILED', taskId: task.id, specialty: task.specialty, role: task.role, error: lastError.message });
             throw lastError;
           }
-          const taskStatus = executionResult?.status === 'CANCELLED' ? 'CANCELLED' : 'SUCCEEDED';
+          const executionStatus = String(executionResult?.status || '').toUpperCase();
+          const taskStatus = executionStatus === 'CANCELLED'
+            ? 'CANCELLED'
+            : ['SUCCEEDED', 'COMPLETED'].includes(executionStatus)
+              ? 'SUCCEEDED'
+              : 'FAILED';
+          if (taskStatus === 'FAILED') {
+            const failureMessage = executionResult?.error || executionResult?.reason ||
+              `Worker ${task.id} returned non-success status "${executionResult?.status || 'unknown'}".`;
+            completed.set(task.id, 'FAILED');
+            results.push({ task, status: 'FAILED', error: failureMessage, workerRunId: delegated.workerRun.id, result: executionResult });
+            onEvent({ type: 'director_task', status: 'FAILED', taskId: task.id, specialty: task.specialty, role: task.role, workerRunId: delegated.workerRun.id, error: failureMessage, result: executionResult });
+            throw new Error(failureMessage);
+          }
+
           completed.set(task.id, taskStatus);
           results.push({ task, status: taskStatus, workerRunId: delegated.workerRun.id, result: executionResult });
           onEvent({ type: 'director_task', status: taskStatus, taskId: task.id, specialty: task.specialty, role: task.role, workerRunId: delegated.workerRun.id, result: executionResult });
