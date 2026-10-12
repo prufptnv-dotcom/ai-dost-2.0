@@ -513,7 +513,11 @@ test('POST /api/sandbox/create with local fallback -> 200 and lifecycle roundtri
   });
   assert.equal(execStatus, 200);
   assert.equal(execBody.success, true);
-  assert.match(execBody.result.stdout, /hello sandbox/);
+  assert.match(
+    execBody.result.stdout,
+    /hello sandbox/,
+    `Sandbox exec did not return expected stdout. isolation=${body.sandbox.isolation}; result=${JSON.stringify(execBody.result)}`
+  );
 
   // Destroy
   const { status: delStatus } = await req('DELETE', `/api/sandbox/${sbId}`);
