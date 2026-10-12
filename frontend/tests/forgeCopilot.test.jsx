@@ -238,7 +238,7 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
 
       expect(await screen.findByText('End of requested build — verified')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /NewComponent\.jsx/i })).toBeInTheDocument();
-      await waitFor(() => expect(reader.read).toHaveBeenCalledTimes(2));
+      expect(reader.read).toHaveBeenCalledTimes(1);
     } finally {
       global.fetch = previousFetch;
     }
@@ -262,7 +262,7 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
       if (String(url).includes('/api/agent/run')) {
         requestBodies.push(JSON.parse(init.body));
         const events = responses.shift() || [];
-        const payload = events.map((data) => `event: ${data.type}\\ndata: ${JSON.stringify(data)}\\n\\n`).join('');
+        const payload = events.map((data) => `event: ${data.type}\ndata: ${JSON.stringify(data)}\n\n`).join('');
         let sent = false;
         return {
           ok: true,
