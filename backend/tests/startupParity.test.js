@@ -35,12 +35,22 @@ test('production start preloads required runtime policy modules', () => {
 
 test('Docker runtime matches production preload chain', () => {
   const cmdLine = dockerfile
-    .split('\n')
+    .split('\\n')
     .find((line) => line.trim().startsWith('CMD '));
 
   assert.ok(cmdLine, 'Dockerfile must declare an explicit CMD');
-  for (const preload of requiredPreloads) {
-    assert.match(cmdLine, new RegExp(`-r\\s+['\"]?${preload.replace('.', '\\.')}`), `Docker CMD must preload ${preload}`);
+  const rawCommand = cmdLine.trim().replace(/^CMD\\s+/i, '');
+  let commandParts;
+  try {
+    const parsed = JSON.parse(rawCommand);
+    commandParts = Array.isArray(parsed) ? parsed.map(String) : [String(parsed)];
+  } catch (_) {
+    // Also accept a legacy shell-form CMD, while preferring exec-form arrays.
+    commandParts = [rawCommand];
   }
-  assert.match(cmdLine, /server\.js/);
+  const command = commandParts.join(' ');
+  for (const preload of requiredPreloads) {
+    assert.ok(command.includes(preload), 'Docker CMD must preload ' + preload);
+  }
+  assert.match(command, /server\\.js/);
 });
