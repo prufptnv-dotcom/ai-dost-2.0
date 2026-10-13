@@ -50,7 +50,7 @@ jobs:
           const fs = require('node:fs');
           const file = 'next.config.mjs';
           let source = fs.readFileSync(file, 'utf8');
-          const loader = /async function loadPWA\\(\\) \\{[\\s\\S]*?\\n\\}\\n\\n(?=const nextConfig)/;
+          const loader = /async function loadPWA\(\) \{[\s\S]*?\n\}\n\n(?=const nextConfig)/;
           const endExport = 'export default loadPWA().then(withPWA => withPWA(nextConfig));';
           const isAlreadyClean = !source.includes('loadPWA')
             && !source.includes('@ducanh2912/next-pwa')
