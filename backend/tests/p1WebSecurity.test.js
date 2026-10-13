@@ -12,6 +12,7 @@ const path = require('path');
 const { isBlocked, safeTermPath } = require('../sockets/terminal');
 const { upgradeGuard } = require('../middleware/localApiGuard');
 const { shellEnv, isSensitiveEnvKey, mcpChildEnv } = require('../services/shellEnv');
+const { isPrivateOrReservedIp } = require('../services/urlFetcherService');
 
 test('P1#22 isBlocked blocks documented bypasses', () => {
   const blocked = [
@@ -171,4 +172,14 @@ test('P1#30 mcpChildEnv is an allowlist — never full process.env', () => {
   } finally {
     delete process.env.ZZ_MCP_SECRET_TOKEN;
   }
+});
+
+
+test('SSRF guard blocks canonical hexadecimal IPv4-mapped IPv6 private targets', () => {
+  // WHATWG URL parsing can canonicalize dotted IPv4-mapped addresses such as
+  // ::ffff:127.0.0.1 into hexadecimal words (e.g. ::ffff:7f00:1).
+  assert.equal(isPrivateOrReservedIp('::ffff:7f00:1'), true, 'loopback mapping blocked');
+  assert.equal(isPrivateOrReservedIp('::ffff:a00:1'), true, 'RFC1918 mapping blocked');
+  assert.equal(isPrivateOrReservedIp('::ffff:a9fe:a9fe'), true, 'link-local metadata mapping blocked');
+  assert.equal(isPrivateOrReservedIp('::ffff:808:808'), false, 'public IPv4 mapping remains allowed');
 });
