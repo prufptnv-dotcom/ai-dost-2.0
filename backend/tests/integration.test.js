@@ -13,6 +13,7 @@ const assert = require('node:assert/strict');
 const { app, server, db, io } = require('../server.js');
 const { getWorkflowEngine } = require('../services/workflowEngine');
 const cacheService = require('../services/cacheService');
+const sandboxManager = require('../sandbox/SandboxManager');
 
 let base = '';
 
@@ -499,11 +500,11 @@ test('POST /api/sandbox/create with local fallback -> 200 and lifecycle roundtri
   const sbId = body.sandbox.id;
 
   // File write
-  const { status: writeStatus } = await req('POST', `/api/sandbox/${sbId}/files/write`, {
+  const { status: writeStatus, body: writeBody } = await req('POST', `/api/sandbox/${sbId}/files/write`, {
     filePath: 'test.js',
     content: 'console.log("hello sandbox");'
   });
-  assert.equal(writeStatus, 200);
+  assert.equal(writeStatus, 200, `Sandbox file write failed: ${JSON.stringify(writeBody)}`);
 
   // File read
   const { status: readStatus, body: readBody } = await req('GET', `/api/sandbox/${sbId}/files/read?path=test.js`);
@@ -516,7 +517,19 @@ test('POST /api/sandbox/create with local fallback -> 200 and lifecycle roundtri
   });
   assert.equal(execStatus, 200);
   assert.equal(execBody.success, true);
-  assert.match(execBody.result.stdout, /hello sandbox/);
+  const sandboxInstance = sandboxManager.getSandbox(sbId);
+  let mountInfo = [];
+  try {
+    const dockerInfo = sandboxInstance?.container ? await sandboxInstance.container.inspect() : null;
+    mountInfo = (dockerInfo?.Mounts || []).map(({ Type, Source, Destination, RW }) => ({ Type, Source, Destination, RW }));
+  } catch (_) {
+    // Diagnostics must never turn an otherwise valid fallback sandbox into a test failure.
+  }
+  assert.match(
+    execBody.result.stdout,
+    /hello sandbox/,
+    `Sandbox exec did not return expected stdout. isolation=${body.sandbox.isolation}; hostPath=${body.sandbox.path}; mounts=${JSON.stringify(mountInfo)}; result=${JSON.stringify(execBody.result)}`
+  );
 
   // Destroy
   const { status: delStatus } = await req('DELETE', `/api/sandbox/${sbId}`);
