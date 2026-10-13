@@ -25,11 +25,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: fix/forge-studio-primary-runtime-2026-10
           persist-credentials: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - name: Update direct dependencies to patched compatible versions
@@ -65,7 +65,7 @@ jobs:
           (cd frontend && npm audit --json > ../frontend-npm-audit-after.json || true)
       - name: Upload post-remediation audit reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dependency-audit-after-remediation
           path: '*-npm-audit-after.json'
