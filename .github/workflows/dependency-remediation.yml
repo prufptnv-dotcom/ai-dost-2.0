@@ -32,12 +32,36 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - name: Update direct dependencies to patched compatible versions
+      - name: Remove unused and vulnerable dependency chains
         run: |
           cd backend
-          npm pkg set 'dependencies.@modelcontextprotocol/sdk=^1.31.0' 'dependencies.axios=^1.20.0' 'dependencies.compression=^1.8.2' 'dependencies.multer=^2.4.0' 'devDependencies.eslint=^10.12.0'
+          # Replace nodemon with Node 22's built-in watch mode and fix ExcelJS's vulnerable nested UUID dependency.
+          npm pkg delete 'devDependencies.nodemon'
+          npm pkg set 'scripts.dev=node --watch -r ./security-hardening.js -r ./taskCancellation.js -r ./chatAgentRouteBridge.js server.js' 'overrides.exceljs.uuid=^11.1.1'
           cd ../frontend
-          npm pkg set 'dependencies.next=16.4.0' 'dependencies.axios=^1.20.0' 'dependencies.sharp=^0.35.5' 'devDependencies.eslint=^10.12.0' 'devDependencies.eslint-config-next=^16.4.0'
+          # These language-client and PWA packages have no source imports; the app uses Monaco React/y-monaco and registers its own public/sw.js.
+          npm pkg delete 'dependencies.@ducanh2912/next-pwa'
+          npm pkg delete 'dependencies.monaco-languageclient'
+          npm pkg delete 'dependencies.vscode-ws-jsonrpc'
+          npm pkg set 'dependencies.next=16.4.0' 'dependencies.axios=^1.20.0' 'dependencies.sharp=^0.35.5' 'dependencies.dompurify=^3.4.16' 'devDependencies.eslint=^10.12.0' 'devDependencies.eslint-config-next=^16.4.0' 'overrides.dompurify=^3.4.16' 'overrides.monaco-editor.dompurify=^3.4.16'
+          # Drop the force-disabled PWA wrapper. The app explicitly registers its maintained public/sw.js in pages/_app.js.
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const file = 'next.config.mjs';
+          let source = fs.readFileSync(file, 'utf8');
+          const loader = /async function loadPWA\(\) \{[\s\S]*?\n\}\n\n(?=const nextConfig)/;
+          const endExport = 'export default loadPWA().then(withPWA => withPWA(nextConfig));';
+          if (!loader.test(source) || !source.includes(endExport)) {
+            throw new Error('Next PWA removal anchors changed; refusing to edit config blindly.');
+          }
+          source = source.replace(loader, '');
+          source = source.replace(endExport, 'export default nextConfig;');
+          if (source.includes('loadPWA') || source.includes('@ducanh2912/next-pwa')) {
+            throw new Error('Next PWA references remain after attempted removal.');
+          }
+          fs.writeFileSync(file, source);
+          console.log('Removed disabled PWA plugin; kept the explicit public/sw.js registration.');
+          NODE
       - name: Regenerate lockfiles and apply non-breaking audit fixes
         run: |
           (cd backend && npm install --package-lock-only --ignore-scripts && npm audit fix || true)
@@ -59,6 +83,7 @@ jobs:
           npm ci
           npm run lint
           npm test -- --coverage --runInBand
+          npm run build
       - name: Recheck dependency audit
         run: |
           (cd backend && npm audit --json > ../backend-npm-audit-after.json || true)
