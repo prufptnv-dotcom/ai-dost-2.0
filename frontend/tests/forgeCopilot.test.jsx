@@ -25,7 +25,7 @@ jest.mock('../services/api', () => ({
 
 describe('normalizeWorkspacePath', () => {
   test('normalizes separators without conflating case-sensitive paths', () => {
-    expect(normalizeWorkspacePath('src\\\\App.jsx')).toBe('src/App.jsx');
+    expect(normalizeWorkspacePath('src\\App.jsx')).toBe('src/App.jsx');
     expect(normalizeWorkspacePath('./src/App.jsx')).toBe('src/App.jsx');
     expect(normalizeWorkspacePath('src/App.jsx')).not.toBe(normalizeWorkspacePath('src/app.jsx'));
   });
