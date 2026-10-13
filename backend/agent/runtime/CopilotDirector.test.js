@@ -105,7 +105,17 @@ function createExecutionHarness({ plan, workerStatuses = ['SUCCEEDED'], verifica
       generateVerificationPlan: async () => ({ steps: [] })
     },
     plannerExecutionLoop: {
-      runWithPlan: async () => ({ status: workerStatuses[workerIndex++] || 'SUCCEEDED', result: { artifact_refs: [] } })
+      runWithPlan: async (...args) => {
+        if (String(args[5] || '').startsWith('copilot_verify_')) {
+          return {
+            status: verificationStatus,
+            summary: 'Build and smoke test passed',
+            artifact_refs: ['verification:build-pass'],
+            result: { artifact_refs: [] }
+          };
+        }
+        return { status: workerStatuses[workerIndex++] || 'SUCCEEDED', result: { artifact_refs: [] } };
+      }
     },
     agentTaskDao: { updateStatus: (...args) => events.push(['taskStatus', ...args]) },
     agentRunDao: { updateStatus: (...args) => events.push(['runStatus', ...args]) }
@@ -234,4 +244,29 @@ test('self-healing retries a failed build with the concrete failure in the repai
   assert.equal(objectives.length, 2);
   assert.match(objectives[1], /REPAIR ATTEMPT 2/);
   assert.match(objectives[1], /Cannot find module \.\/Button/);
+});
+
+
+test('successful completion preserves final verification evidence in terminal event and result', async () => {
+  const plan = {
+    summary: 'verified plan',
+    tasks: [{ id: 'frontend', specialty: 'frontend', role: 'CODER', objective: 'build UI', dependsOn: [], expectedOutput: 'UI' }]
+  };
+  const director = createExecutionHarness({ plan });
+  const events = [];
+  const result = await director.run({
+    userId: 'user-1',
+    projectId: 'project-1',
+    request: 'build UI',
+    onEvent: (event) => events.push(event)
+  });
+
+  const completion = events.find((event) => event.type === 'director_complete');
+  const verification = events.find((event) => event.type === 'director_verification' && event.status === 'SUCCEEDED');
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(completion.verification.status, 'SUCCEEDED');
+  assert.equal(completion.verification.summary, 'Build and smoke test passed');
+  assert.deepEqual(completion.verification.artifact_refs, ['verification:build-pass']);
+  assert.equal(verification.summary, 'Build and smoke test passed');
+  assert.ok(result.artifact_refs.includes('verification:build-pass'));
 });
