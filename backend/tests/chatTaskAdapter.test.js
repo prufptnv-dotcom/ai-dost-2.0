@@ -50,7 +50,7 @@ test('adapts a universal chat task into canonical agent plan shape', () => {
   const adapter = new ChatTaskAdapter({ toolRegistry });
 
   const plan = adapter.toAgentPlan({
-    intent: { originalMessage: 'Build a website', action: 'create', target: 'website' },
+    intent: { type: 'task', originalMessage: 'Build a website', action: 'create', target: 'website' },
     steps: [
       { id: 'understand', kind: 'reason', action: 'understand-intent' },
       { id: 'tool', kind: 'tool', action: 'create', target: 'website' },
@@ -68,7 +68,7 @@ test('adapts a universal chat task into canonical agent plan shape', () => {
 test('rejects an unavailable tool during agent-plan validation', () => {
   const adapter = new ChatTaskAdapter({ toolRegistry: { get: () => null } });
   const plan = adapter.toAgentPlan({
-    intent: { originalMessage: 'Run something', action: 'run', target: 'terminal' },
+    intent: { type: 'task', originalMessage: 'Run something', action: 'run', target: 'terminal' },
     steps: [{ id: 'tool', kind: 'tool', action: 'run', target: 'terminal' }],
   });
 
