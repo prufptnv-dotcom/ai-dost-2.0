@@ -9,6 +9,7 @@ on:
       - 'backend/package-lock.json'
       - 'frontend/package.json'
       - 'frontend/package-lock.json'
+      - 'frontend/next.config.mjs'
   push:
     branches:
       - fix/forge-studio-primary-runtime-2026-10
@@ -49,18 +50,25 @@ jobs:
           const fs = require('node:fs');
           const file = 'next.config.mjs';
           let source = fs.readFileSync(file, 'utf8');
-          const loader = /async function loadPWA\(\) \{[\s\S]*?\n\}\n\n(?=const nextConfig)/;
+          const loader = /async function loadPWA\\(\\) \\{[\\s\\S]*?\\n\\}\\n\\n(?=const nextConfig)/;
           const endExport = 'export default loadPWA().then(withPWA => withPWA(nextConfig));';
-          if (!loader.test(source) || !source.includes(endExport)) {
-            throw new Error('Next PWA removal anchors changed; refusing to edit config blindly.');
+          const isAlreadyClean = !source.includes('loadPWA')
+            && !source.includes('@ducanh2912/next-pwa')
+            && source.includes('export default nextConfig;');
+          if (isAlreadyClean) {
+            console.log('Next PWA wrapper already removed; nothing to do.');
+          } else {
+            if (!loader.test(source) || !source.includes(endExport)) {
+              throw new Error('Next PWA removal anchors changed; refusing to edit config blindly.');
+            }
+            source = source.replace(loader, '');
+            source = source.replace(endExport, 'export default nextConfig;');
+            if (source.includes('loadPWA') || source.includes('@ducanh2912/next-pwa')) {
+              throw new Error('Next PWA references remain after attempted removal.');
+            }
+            fs.writeFileSync(file, source);
+            console.log('Removed disabled PWA plugin; kept the explicit public/sw.js registration.');
           }
-          source = source.replace(loader, '');
-          source = source.replace(endExport, 'export default nextConfig;');
-          if (source.includes('loadPWA') || source.includes('@ducanh2912/next-pwa')) {
-            throw new Error('Next PWA references remain after attempted removal.');
-          }
-          fs.writeFileSync(file, source);
-          console.log('Removed disabled PWA plugin; kept the explicit public/sw.js registration.');
           NODE
       - name: Regenerate lockfiles and apply non-breaking audit fixes
         run: |
