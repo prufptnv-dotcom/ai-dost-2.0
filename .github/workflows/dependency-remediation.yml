@@ -44,7 +44,10 @@ jobs:
           npm pkg delete 'dependencies.@ducanh2912/next-pwa'
           npm pkg delete 'dependencies.monaco-languageclient'
           npm pkg delete 'dependencies.vscode-ws-jsonrpc'
-          npm pkg set 'dependencies.next=16.4.0' 'dependencies.axios=^1.20.0' 'dependencies.sharp=^0.35.5' 'dependencies.dompurify=^3.4.16' 'devDependencies.eslint=^10.12.0' 'devDependencies.eslint-config-next=^16.4.0' 'overrides.dompurify=^3.4.16' 'overrides.monaco-editor.dompurify=^3.4.16'
+          # Keep the custom flat config out of the vulnerable Next lint preset chain.
+          # ESLint 9 stays inside all selected React/a11y plugin peer ranges.
+          npm pkg delete 'devDependencies.eslint-config-next'
+          npm pkg set 'dependencies.next=16.4.0' 'dependencies.axios=^1.20.0' 'dependencies.sharp=^0.35.5' 'dependencies.dompurify=^3.4.16' 'devDependencies.eslint=^9.39.5' 'devDependencies.@eslint/js=^9.39.5' 'devDependencies.eslint-plugin-react=^7.37.5' 'devDependencies.eslint-plugin-react-hooks=^7.1.1' 'devDependencies.eslint-plugin-jsx-a11y=^6.10.2' 'devDependencies.globals=^16.4.0' 'overrides.dompurify=^3.4.16' 'overrides.monaco-editor.dompurify=^3.4.16'
           # Drop the force-disabled PWA wrapper. The app explicitly registers its maintained public/sw.js in pages/_app.js.
           node - <<'NODE'
           const fs = require('node:fs');
