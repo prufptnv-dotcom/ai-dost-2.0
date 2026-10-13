@@ -42,21 +42,75 @@ class DurableTaskStore {
     const directory = path.dirname(this.filePath);
     fs.mkdirSync(directory, { recursive: true });
 
-    // A fixed '.tmp' name races when independent worker/test processes share
-    // the same state file: one writer can rename the temp file while another
-    // writer is still waiting to rename it. Give each write a private temp file,
-    // then atomically publish it at the target path.
+    // Serialize writers across processes. Unique temp files alone prevent temp
+    // file collisions but do not prevent one process from replacing another
+    // process's newer snapshot with a stale in-memory copy.
+    const lockPath = this.filePath + '.lock';
+    let lockFd;
+    const waitBuffer = new Int32Array(new SharedArrayBuffer(4));
+    const deadline = Date.now() + 5000;
+    while (lockFd === undefined) {
+      try {
+        lockFd = fs.openSync(lockPath, 'wx', 0o600);
+        fs.writeFileSync(lockFd, String(process.pid));
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+        try {
+          const stat = fs.statSync(lockPath);
+          if (Date.now() - stat.mtimeMs > 30000) {
+            fs.unlinkSync(lockPath);
+            continue;
+          }
+        } catch (statError) {
+          if (statError.code === 'ENOENT') continue;
+          throw statError;
+        }
+        if (Date.now() >= deadline) {
+          throw new Error('[DurableTaskStore] timed out waiting for state-file lock');
+        }
+        Atomics.wait(waitBuffer, 0, 0, 10);
+      }
+    }
+
     const temporary = this.filePath + '.' + process.pid + '.' + crypto.randomBytes(8).toString('hex') + '.tmp';
     try {
+      // Merge snapshots while holding the lock so independent processes writing
+      // different task IDs cannot erase each other's durable records. A single
+      // task ID must still have one owning worker process.
+      const merged = new Map();
+      try {
+        const diskEntries = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
+        for (const entry of Array.isArray(diskEntries) ? diskEntries : []) {
+          if (entry?.key && entry.taskId) merged.set(entry.key, entry);
+        }
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+      for (const [key, entry] of this.entries) {
+        const diskEntry = merged.get(key);
+        if (!diskEntry || Number(entry.updatedAt || 0) >= Number(diskEntry.updatedAt || 0)) {
+          merged.set(key, entry);
+        }
+      }
+
+      const entries = [...merged.values()]
+        .sort((a, b) => Number(a.updatedAt || 0) - Number(b.updatedAt || 0))
+        .slice(-this.maxEntries);
       fs.writeFileSync(
         temporary,
-        JSON.stringify([...this.entries.values()].slice(-this.maxEntries), null, 2),
+        JSON.stringify(entries, null, 2),
         { flag: 'wx', mode: 0o600 }
       );
       fs.renameSync(temporary, this.filePath);
+      this.entries = new Map(entries.map((entry) => [entry.key, entry]));
     } finally {
       try { fs.unlinkSync(temporary); } catch (error) {
         if (error.code !== 'ENOENT') throw error;
+      }
+      try { fs.closeSync(lockFd); } finally {
+        try { fs.unlinkSync(lockPath); } catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+        }
       }
     }
   }
