@@ -1,5 +1,6 @@
 import { defineConfig, globalIgnores } from "eslint/config";
-import { parse, parseForESLint } from "next/dist/compiled/babel/eslint-parser.js";
+import babelParser from "next/dist/compiled/babel/eslint-parser.js";
+const { parse, parseForESLint } = babelParser;
 import react from "eslint-plugin-react";
 import reactHooks from "eslint-plugin-react-hooks";
 import * as importPlugin from "eslint-plugin-import";
