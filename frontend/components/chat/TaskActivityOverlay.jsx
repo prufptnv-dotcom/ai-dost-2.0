@@ -499,7 +499,6 @@ export default function TaskActivityOverlay() {
       {expanded && active.screenshot ? (
         <div className="mb-2 overflow-hidden rounded-lg border border-border" data-testid="session-screenshot">
           {/* transient agent screenshot (data: URL) — next/image can't optimize dynamic data URLs */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={active.screenshot} alt="Live preview screenshot" className="h-24 w-full object-cover object-top" />
         </div>
       ) : null}
