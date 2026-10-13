@@ -1,0 +1,76 @@
+name: Targeted dependency remediation
+
+on:
+  push:
+    branches:
+      - fix/forge-studio-primary-runtime-2026-10
+    paths:
+      - '.github/workflows/dependency-remediation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  remediate:
+    name: Update vulnerable dependencies safely
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/forge-studio-primary-runtime-2026-10
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Update direct dependencies to patched compatible versions
+        run: |
+          cd backend
+          npm pkg set 'dependencies.@modelcontextprotocol/sdk=^1.31.0' 'dependencies.axios=^1.20.0' 'dependencies.compression=^1.8.2'
+          cd ../frontend
+          npm pkg set 'dependencies.next=16.4.0' 'dependencies.axios=^1.20.0' 'dependencies.sharp=^0.35.6'
+      - name: Regenerate lockfiles and apply non-breaking audit fixes
+        run: |
+          (cd backend && npm install --package-lock-only --ignore-scripts && npm audit fix || true)
+          (cd frontend && npm install --package-lock-only --ignore-scripts && npm audit fix || true)
+      - name: Validate backend install and tests
+        working-directory: backend
+        run: |
+          npm ci
+          node --check server.js
+          node --test --test-force-exit tests/unit.test.js tests/integration.test.js tests/mcpClientManager.test.js tests/security-hardening.test.js tests/projectAuthorization.security.test.js tests/ssrf.security.test.js tests/chatTaskEvents.test.js tests/taskCancellation.test.js tests/chatTaskAdapter.test.js tests/chatTaskGateway.identity.test.js tests/chatTaskGateway.idempotency.test.js tests/durableTaskIdempotencyStore.test.js tests/startupParity.test.js tests/codeDiffHardening.test.js
+          node --test agent/runtime/CopilotDirector.test.js
+          node --test agent/runtime/ChatTaskGateway.test.js
+          node --test agent/runtime/ExecutionController.test.js
+          node --test agent/runtime/DurableTaskStore.test.js
+          node --test agent/security/ProductionExecutionGuard.test.js agent/security/ProductionHardeningRuntime.test.js agent/security/ProductionRuntimeIntegration.test.js agent/security/ResourceGuard.test.js tests/orchestratorSecurityBoundary.test.js
+      - name: Validate frontend install, lint, and unit tests
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm test -- --coverage --runInBand
+      - name: Recheck dependency audit
+        run: |
+          (cd backend && npm audit --json > ../backend-npm-audit-after.json || true)
+          (cd frontend && npm audit --json > ../frontend-npm-audit-after.json || true)
+      - name: Upload post-remediation audit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-audit-after-remediation
+          path: '*-npm-audit-after.json'
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Commit tested dependency manifests and lockfiles
+        run: |
+          if git diff --quiet -- backend/package.json backend/package-lock.json frontend/package.json frontend/package-lock.json; then
+            echo "No dependency changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/package.json backend/package-lock.json frontend/package.json frontend/package-lock.json
+          git commit -m "security: apply targeted dependency fixes"
+          git push origin HEAD:fix/forge-studio-primary-runtime-2026-10
