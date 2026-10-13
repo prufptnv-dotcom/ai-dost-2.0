@@ -77,6 +77,19 @@ test.describe('Sidebar navigation', () => {
   });
 });
 
+test.describe('Forge Studio workspace', () => {
+  test('opens the primary coding workspace with project and builder controls', async ({ page }) => {
+    await page.goto('/dashboard');
+    await page.waitForLoadState('networkidle');
+    await navButton(page, 'Forge Studio').click();
+
+    await expect(page.getByLabel('Workspace navigation')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('button', { name: 'New project' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Current project' })).toBeVisible();
+    await expect(page.getByText('Builder', { exact: true }).first()).toBeVisible();
+  });
+});
+
 test.describe('Chat flow', () => {
   test('user message appears in the conversation after Enter', async ({ page }) => {
     await page.goto('/dashboard');
