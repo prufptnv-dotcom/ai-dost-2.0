@@ -40,9 +40,24 @@ class DurableTaskStore {
   _persist() {
     const directory = path.dirname(this.filePath);
     fs.mkdirSync(directory, { recursive: true });
-    const temporary = `${this.filePath}.tmp`;
-    fs.writeFileSync(temporary, JSON.stringify([...this.entries.values()].slice(-this.maxEntries), null, 2), { mode: 0o600 });
-    fs.renameSync(temporary, this.filePath);
+
+    // A fixed '.tmp' name races when independent worker/test processes share
+    // the same state file: one writer can rename the temp file while another
+    // writer is still waiting to rename it. Give each write a private temp file,
+    // then atomically publish it at the target path.
+    const temporary = this.filePath + '.' + process.pid + '.' + crypto.randomBytes(8).toString('hex') + '.tmp';
+    try {
+      fs.writeFileSync(
+        temporary,
+        JSON.stringify([...this.entries.values()].slice(-this.maxEntries), null, 2),
+        { flag: 'wx', mode: 0o600 }
+      );
+      fs.renameSync(temporary, this.filePath);
+    } finally {
+      try { fs.unlinkSync(temporary); } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+    }
   }
 
   _entry(identity) {
