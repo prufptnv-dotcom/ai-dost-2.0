@@ -3869,7 +3869,6 @@ const animate = () => {
                       {m.message}
                     </span>
                     {m.image && m.image.length > 30 && !m.image.endsWith('undefined') && (
-                      // eslint-disable-next-line @next/next/no-img-element
                       <img src={m.image} alt="Live App UI" className="rounded-lg border border-border w-full object-cover" />
                     )}
                   </div>
@@ -3893,8 +3892,7 @@ const animate = () => {
                     {Array.isArray(m.images) && m.images.length > 0 && (
                       <div className="flex gap-1.5 flex-wrap justify-end max-w-[85%]">
                         {m.images.map((imgSrc, imgIdx) => (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
+                              <img
                             key={imgIdx}
                             src={imgSrc}
                             alt="Attached reference"
@@ -3961,8 +3959,7 @@ const animate = () => {
                       key={img.id}
                       className="relative group rounded-lg overflow-hidden border border-accent/40 bg-accent/10 flex items-center gap-2 pr-2 animate-in fade-in"
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={img.dataUrl} alt={img.name} className="w-8 h-8 object-cover rounded-l-md border-r border-accent/20" />
+                            <img src={img.dataUrl} alt={img.name} className="w-8 h-8 object-cover rounded-l-md border-r border-accent/20" />
                       <div className="flex flex-col min-w-0 max-w-[120px]">
                         <span className="text-[10px] text-paper-100 font-medium truncate">{img.name}</span>
                         <span className="text-[8px] text-ink-muted font-mono">{img.size}</span>
