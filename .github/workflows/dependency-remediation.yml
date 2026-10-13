@@ -98,12 +98,14 @@ jobs:
           retention-days: 14
       - name: Commit tested dependency manifests and lockfiles
         run: |
-          if git diff --quiet -- backend/package.json backend/package-lock.json frontend/package.json frontend/package-lock.json; then
+          if git diff --quiet -- backend/package.json backend/package-lock.json frontend/package.json frontend/package-lock.json frontend/next.config.mjs; then
             echo "No dependency changes to commit"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/package.json backend/package-lock.json frontend/package.json frontend/package-lock.json
+          # The remediation step also removes the disabled PWA wrapper from next.config.mjs.
+          # Commit that configuration together with the manifests so clean CI installs work.
+          git add backend/package.json backend/package-lock.json frontend/package.json frontend/package-lock.json frontend/next.config.mjs
           git commit -m "security: apply targeted dependency fixes"
           git push origin HEAD:fix/forge-studio-primary-runtime-2026-10
