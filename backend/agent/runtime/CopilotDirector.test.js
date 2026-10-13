@@ -198,3 +198,40 @@ test('run fails closed when final verification does not pass', async () => {
   );
   assert.equal(director._testEvents.some((event) => event[0] === 'taskStatus' && event[2] === 'FAILED'), true);
 });
+
+
+test('self-healing retries a failed build with the concrete failure in the repair prompt', async () => {
+  const plan = {
+    summary: 'self-healing regression',
+    tasks: [{ id: 'build', specialty: 'frontend', role: 'CODER', objective: 'build the requested UI', dependsOn: [], expectedOutput: 'working UI' }]
+  };
+  const director = createExecutionHarness({ plan });
+  const objectives = [];
+  let executionAttempts = 0;
+  director.taskPlanner.generatePlan = async (objective) => {
+    objectives.push(objective);
+    return { steps: [{ action: 'run_command', params: { command: 'npm run build' } }] };
+  };
+  director.plannerExecutionLoop.runWithPlan = async () => {
+    executionAttempts += 1;
+    if (executionAttempts === 1) {
+      return { status: 'FAILED', error: 'Build failed: Cannot find module ./Button' };
+    }
+    return { status: 'SUCCEEDED', result: { artifact_refs: ['build:verified'] } };
+  };
+
+  const result = await director.executeWorker({
+    task: plan.tasks[0],
+    delegated: { workerRun: { id: 'worker-self-heal' } },
+    projectId: 'project-1',
+    userId: 'user-1',
+    request: 'build the requested UI',
+    maxRepairs: 1
+  });
+
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.equal(executionAttempts, 2);
+  assert.equal(objectives.length, 2);
+  assert.match(objectives[1], /REPAIR ATTEMPT 2/);
+  assert.match(objectives[1], /Cannot find module \.\/Button/);
+});
