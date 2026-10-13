@@ -9,6 +9,8 @@ on:
       - 'backend/package-lock.json'
       - 'frontend/package.json'
       - 'frontend/package-lock.json'
+      - 'frontend/eslint.config.mjs'
+      - 'frontend/scripts/check-audit-policy.mjs'
       - 'frontend/next.config.mjs'
   push:
     branches:
