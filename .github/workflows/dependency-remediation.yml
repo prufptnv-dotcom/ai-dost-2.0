@@ -1,6 +1,14 @@
 name: Targeted dependency remediation
 
 on:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - '.github/workflows/dependency-remediation.yml'
+      - 'backend/package.json'
+      - 'backend/package-lock.json'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
   push:
     branches:
       - fix/forge-studio-primary-runtime-2026-10
