@@ -22,7 +22,6 @@ export function SmartImg({ src, alt = '', className, style, onLoad, onError, ret
   if (!show) return null;
 
   return (
-    /* eslint-disable-next-line @next/next/no-img-element */
     <img
       key={attempt}
       src={src}
