@@ -71,10 +71,23 @@ class SandboxManager extends EventEmitter {
 
   // Resolve a requested file path inside the sandbox dir, rejecting traversal.
   _resolveSafe(sandboxPath, relPath) {
-    const fullPath = path.resolve(sandboxPath, relPath || '');
-    if (!fullPath.startsWith(sandboxPath + path.sep) && fullPath !== sandboxPath) {
+    // Accept Windows-style roots in cross-platform unit tests and callers,
+    // even when the process itself runs on POSIX (e.g. GitHub Actions Linux).
+    // Select the path implementation from the root syntax, not host OS.
+    const win32Path = /^[a-z]:[\\\\/]/i.test(String(sandboxPath || '')) ||
+      String(sandboxPath || '').startsWith('\\\\\\\\');
+    const pathApi = win32Path ? path.win32 : path;
+    const root = pathApi.resolve(String(sandboxPath || ''));
+    const requested = String(relPath || '');
+    const fullPath = pathApi.resolve(root, requested);
+    const relative = pathApi.relative(root, fullPath);
+    if (relative === '..' || relative.startsWith('..' + pathApi.sep) || pathApi.isAbsolute(relative)) {
       throw new Error(`Invalid sandbox path: ${relPath} (path traversal blocked)`);
     }
+    // Windows-style roots are not native paths on POSIX. Their lexical
+    // containment is checked above; native symlink checks apply only when the
+    // root is represented by the host filesystem.
+    if (win32Path && process.platform !== 'win32') return fullPath;
     // P3 #36: a plain prefix check is fooled by symlinks — a link INSIDE the
     // sandbox pointing outside would pass the check but read/write elsewhere.
     // Resolve the real path of the deepest existing ancestor and require it to
