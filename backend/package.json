@@ -20,12 +20,12 @@
     "test:all": "npm run test:unit && npm run test:integration && npm run test:security && npm run test:mcp && npm run test:api && npm run test:chat"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "@testing-library/react": "^16.3.3",
     "@webcontainer/api": "^1.6.4",
     "archiver": "^8.0.0",
-    "axios": "^1.6.0",
-    "compression": "^1.8.1",
+    "axios": "^1.20.0",
+    "compression": "^1.8.2",
     "cors": "^2.8.5",
     "dockerode": "^5.0.1",
     "docx": "^9.7.1",
