@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import ForgeCopilot from '../components/forge/ForgeCopilot';
+import ForgeCopilot, { normalizeWorkspacePath } from '../components/forge/ForgeCopilot';
 
 // Mock API
 jest.mock('../services/api', () => ({
@@ -22,6 +22,14 @@ jest.mock('../services/api', () => ({
     { id: 'legacy-project', name: 'legacy-project' }
   ]),
 }));
+
+describe('normalizeWorkspacePath', () => {
+  test('normalizes separators without conflating case-sensitive paths', () => {
+    expect(normalizeWorkspacePath('src\\\\App.jsx')).toBe('src/App.jsx');
+    expect(normalizeWorkspacePath('./src/App.jsx')).toBe('src/App.jsx');
+    expect(normalizeWorkspacePath('src/App.jsx')).not.toBe(normalizeWorkspacePath('src/app.jsx'));
+  });
+});
 
 describe('ForgeCopilot Autonomous Builder UI', () => {
   beforeEach(() => {
