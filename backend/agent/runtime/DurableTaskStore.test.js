@@ -37,8 +37,9 @@ test('merges snapshots from independent store instances without losing task reco
   assert.equal(second.begin(secondIdentity).state, 'started');
 
   const reloaded = new DurableTaskStore({ filePath });
-  assert.equal(reloaded.get(firstIdentity).status, 'RUNNING');
-  assert.equal(reloaded.get(secondIdentity).status, 'RUNNING');
+  // A fresh store treats persisted RUNNING tasks as interrupted after restart.
+  assert.equal(reloaded.get(firstIdentity).status, 'RECOVERY_REQUIRED');
+  assert.equal(reloaded.get(secondIdentity).status, 'RECOVERY_REQUIRED');
 });
 
 test('marks active tasks recovery-required after restart', () => {
