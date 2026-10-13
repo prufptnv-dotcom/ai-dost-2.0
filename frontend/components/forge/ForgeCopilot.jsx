@@ -31,6 +31,15 @@ function displayProjectName(name, projectId) {
   return label || (reservedWorkspace ? 'Forge Studio Workspace' : 'Untitled');
 }
 
+// Workspace paths are case-sensitive on Linux. Normalize separators and leading
+// relative/root markers, but never fold case when verifying persisted files.
+export function normalizeWorkspacePath(value) {
+  return String(value || '')
+    .replaceAll('\\', '/')
+    .replace(/^\.\//, '')
+    .replace(/^\/+/, '');
+}
+
 const themePresets = [
   { id: 'violet', name: 'Violet', color: '#a78bfa' },
   { id: 'ocean', name: 'Ocean', color: '#62b5ff' },
@@ -3208,12 +3217,6 @@ export default function ForgeCopilot({
 
       const reloadedFiles = await loadProjectData();
       setRefreshCount((c) => c + 1);
-
-      const normalizeWorkspacePath = (value) => String(value || '')
-        .replaceAll('\\', '/')
-        .replace(/^\.\//, '')
-        .replace(/^\/+/, '')
-        .toLowerCase();
 
       // A successful tool event is not enough to prove persistence. Confirm the
       // backend returns each changed path before reporting the run as complete.
