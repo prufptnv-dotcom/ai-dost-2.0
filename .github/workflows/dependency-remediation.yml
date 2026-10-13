@@ -37,7 +37,7 @@ jobs:
           cd backend
           npm pkg set 'dependencies.@modelcontextprotocol/sdk=^1.31.0' 'dependencies.axios=^1.20.0' 'dependencies.compression=^1.8.2'
           cd ../frontend
-          npm pkg set 'dependencies.next=16.4.0' 'dependencies.axios=^1.20.0' 'dependencies.sharp=^0.35.6'
+          npm pkg set 'dependencies.next=16.4.0' 'dependencies.axios=^1.20.0' 'dependencies.sharp=^0.35.5'
       - name: Regenerate lockfiles and apply non-breaking audit fixes
         run: |
           (cd backend && npm install --package-lock-only --ignore-scripts && npm audit fix || true)
