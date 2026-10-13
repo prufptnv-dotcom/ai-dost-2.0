@@ -18,8 +18,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -27,11 +27,32 @@ jobs:
       - run: npm ci
       - name: Capture dependency audit report (baseline)
         if: always()
-        continue-on-error: true
-        run: npm audit --json > npm-audit-report.json
+        run: |
+          npm audit --json > npm-audit-report.json || audit_exit=$?
+          AUDIT_EXIT="${audit_exit:-0}" node - <<'NODE'
+          const fs = require('node:fs');
+          let report;
+          try {
+            report = JSON.parse(fs.readFileSync('npm-audit-report.json', 'utf8'));
+          } catch (error) {
+            console.error(`npm audit did not produce valid JSON: ${error.message}`);
+            process.exit(1);
+          }
+          if (report.error || !report.metadata || !report.metadata.vulnerabilities) {
+            console.error(`npm audit could not complete: ${report.error?.summary || report.error?.code || 'report metadata is missing'}`);
+            process.exit(1);
+          }
+          const v = report.metadata.vulnerabilities;
+          console.log(`Dependency audit snapshot saved: ${v.total} total (critical=${v.critical}, high=${v.high}, moderate=${v.moderate}, low=${v.low}, info=${v.info}).`);
+          console.log('This baseline step records vulnerabilities for review; it does not hide them or fail solely because findings exist.');
+          if (Number(process.env.AUDIT_EXIT) > 1) {
+            console.error(`npm audit exited with unexpected status ${process.env.AUDIT_EXIT}.`);
+            process.exit(1);
+          }
+          NODE
       - name: Upload frontend dependency audit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: frontend-npm-audit-report
           path: frontend/npm-audit-report.json
@@ -48,8 +69,8 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -57,11 +78,32 @@ jobs:
       - run: npm ci
       - name: Capture dependency audit report (baseline)
         if: always()
-        continue-on-error: true
-        run: npm audit --json > npm-audit-report.json
+        run: |
+          npm audit --json > npm-audit-report.json || audit_exit=$?
+          AUDIT_EXIT="${audit_exit:-0}" node - <<'NODE'
+          const fs = require('node:fs');
+          let report;
+          try {
+            report = JSON.parse(fs.readFileSync('npm-audit-report.json', 'utf8'));
+          } catch (error) {
+            console.error(`npm audit did not produce valid JSON: ${error.message}`);
+            process.exit(1);
+          }
+          if (report.error || !report.metadata || !report.metadata.vulnerabilities) {
+            console.error(`npm audit could not complete: ${report.error?.summary || report.error?.code || 'report metadata is missing'}`);
+            process.exit(1);
+          }
+          const v = report.metadata.vulnerabilities;
+          console.log(`Dependency audit snapshot saved: ${v.total} total (critical=${v.critical}, high=${v.high}, moderate=${v.moderate}, low=${v.low}, info=${v.info}).`);
+          console.log('This baseline step records vulnerabilities for review; it does not hide them or fail solely because findings exist.');
+          if (Number(process.env.AUDIT_EXIT) > 1) {
+            console.error(`npm audit exited with unexpected status ${process.env.AUDIT_EXIT}.`);
+            process.exit(1);
+          }
+          NODE
       - name: Upload backend dependency audit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: backend-npm-audit-report
           path: backend/npm-audit-report.json
@@ -89,8 +131,8 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -110,7 +152,7 @@ jobs:
         working-directory: frontend
         run: npm ci
       - run: npx playwright test
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: failure()
         with:
           name: playwright-report
@@ -126,8 +168,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -140,7 +182,7 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: failure()
         with:
           name: frontend-browser-report
@@ -151,7 +193,7 @@ jobs:
     name: Docker (compose validation + agent SSE smoke test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Validate compose files (P3 #200)
         run: |
           docker compose config -q
@@ -162,7 +204,7 @@ jobs:
           docker buildx build --check ./frontend
           docker buildx build --check ./ai-engine
           docker buildx build --check ./memory-brain
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -215,7 +257,7 @@ jobs:
       VERCEL_PROJECT_ID_SET: ${{ secrets.VERCEL_PROJECT_ID != '' }}
       RAILWAY_TOKEN_SET: ${{ secrets.RAILWAY_TOKEN != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Deploy to Vercel (Frontend)
         if: env.VERCEL_TOKEN_SET == 'true' && env.VERCEL_ORG_ID_SET == 'true' && env.VERCEL_PROJECT_ID_SET == 'true'
         uses: amondnet/vercel-action@v25
