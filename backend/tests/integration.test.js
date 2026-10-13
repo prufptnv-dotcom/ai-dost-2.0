@@ -267,9 +267,12 @@ test('GET /api/v1/memory/project/default -> 200 (auto-created shared workspace)'
 });
 
 test('DELETE /api/v1/memory/project unknown session id -> still reports an error envelope', async () => {
-  // Writes keep their 404 semantics — only the GET read was softened.
-  const { status, body } = await req('DELETE', '/api/v1/memory/project/copilot-session-000000000000');
-  assert.ok(status === 403 || status === 404, `expected 403/404, got ${status}`);
+  // Use a unique ID: CI databases can retain rows from previous runs, and a
+  // fixed copilot-session ID may already exist from a local/manual workspace.
+  // Writes must preserve 404 semantics; only GET reads may return an empty view.
+  const missingId = `missing-delete-it-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const { status, body } = await req('DELETE', `/api/v1/memory/project/${missingId}`);
+  assert.equal(status, 404, `expected unknown project to return 404, got ${status}`);
   assert.ok(body && (body.error || body.success === false), 'error envelope preserved');
 });
 
