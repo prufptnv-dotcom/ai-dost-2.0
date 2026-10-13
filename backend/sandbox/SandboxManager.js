@@ -558,62 +558,145 @@ class SandboxManager extends EventEmitter {
     return new Promise((resolve, reject) => {
       // timeout: 0 means "no timeout" (long-running dev servers)
       const timeoutMs = options.timeout === 0 ? 0 : (options.timeout || 60000);
-      const timeout = timeoutMs ? setTimeout(() => reject(new Error('Exec timeout')), timeoutMs) : null;
-      const clearTimer = () => { if (timeout) clearTimeout(timeout); };
+      let timer = null;
+      let stream = null;
+      let settled = false;
+      const stdout = [];
+      const stderr = [];
+      const closeTimer = () => { if (timer) clearTimeout(timer); };
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        closeTimer();
+        reject(error);
+      };
+      const capture = (channel, target, chunk) => {
+        if (!chunk || chunk.length === 0) return;
+        const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
+        target.push(text);
+        if (typeof options.onData === 'function') {
+          try { options.onData(channel, text); } catch (_) {}
+        }
+      };
 
-      exec.start({ hijack: true, stdin: !!options.input }, (err, stream) => {
-        if (err) { clearTimer(); return reject(err); }
+      // Docker uses an 8-byte multiplex header for non-TTY exec output, but
+      // some daemon/TTY combinations return raw bytes. Parse frames across
+      // arbitrary TCP chunk boundaries and fall back to raw stdout if the
+      // initial bytes do not form a valid Docker frame.
+      const MAX_FRAME_SIZE = 64 * 1024 * 1024;
+      let outputMode = options.tty ? 'raw' : 'detect';
+      let pendingOutput = Buffer.alloc(0);
 
-        // Docker exec (Tty:false) multiplexes stdout+stderr as frames:
-        // [1B stream-id (1=stdout, 2=stderr)][3B zero][4B BE payload length][payload]
-        // = an 8-BYTE header. The old code appended whole chunks raw, so every
-        // line of output was prefixed with binary framing bytes (E2E pre-flight
-        // saw "....PRE_FLIGHT_OK") — polluting both the model-facing
-        // observation and the honest `error` text built from stderr.
-        // Buffer + parse frames; a leading byte that is not a frame header
-        // (Tty/raw mode) passes through untouched.
-        let stdout = '', stderr = '';
-        let buf = Buffer.alloc(0);
-        const emit = (kind, text) => {
-          if (!text) return;
-          if (kind === 2) stderr += text; else stdout += text;
-          if (typeof options.onData === 'function') {
-            try { options.onData(kind === 2 ? 'stderr' : 'stdout', text); } catch (_) {}
+      const processOutput = (chunk) => {
+        if (!chunk || chunk.length === 0) return;
+        if (outputMode === 'raw') {
+          capture('stdout', stdout, chunk);
+          return;
+        }
+
+        pendingOutput = pendingOutput.length
+          ? Buffer.concat([pendingOutput, chunk])
+          : Buffer.from(chunk);
+
+        if (outputMode === 'detect') {
+          if (pendingOutput.length < 8) return;
+          const type = pendingOutput[0];
+          const reservedBytesAreZero =
+            pendingOutput[1] === 0 &&
+            pendingOutput[2] === 0 &&
+            pendingOutput[3] === 0;
+          const frameSize = pendingOutput.readUInt32BE(4);
+
+          if (
+            (type !== 1 && type !== 2) ||
+            !reservedBytesAreZero ||
+            frameSize > MAX_FRAME_SIZE
+          ) {
+            outputMode = 'raw';
+            capture('stdout', stdout, pendingOutput);
+            pendingOutput = Buffer.alloc(0);
+            return;
           }
-        };
-        stream.on('data', chunk => {
-          buf = Buffer.concat([buf, chunk]);
-          let progressed = true;
-          while (progressed && buf.length > 0) {
-            progressed = false;
-            const type = buf[0];
-            if (type === 1 || type === 2) {
-              if (buf.length < 8) break;                       // header split — wait
-              const len = buf.readUInt32BE(4);
-              if (buf.length < 8 + len) break;                 // payload split — wait
-              emit(type, buf.subarray(8, 8 + len).toString());
-              buf = buf.subarray(8 + len);
-              progressed = true;
-            } else {
-              emit(1, buf.toString());                         // raw/Tty mode passthrough
-              buf = Buffer.alloc(0);
-            }
+          outputMode = 'multiplexed';
+        }
+
+        while (outputMode === 'multiplexed' && pendingOutput.length >= 8) {
+          const type = pendingOutput[0];
+          const reservedBytesAreZero =
+            pendingOutput[1] === 0 &&
+            pendingOutput[2] === 0 &&
+            pendingOutput[3] === 0;
+          const frameSize = pendingOutput.readUInt32BE(4);
+
+          if (
+            (type !== 1 && type !== 2) ||
+            !reservedBytesAreZero ||
+            frameSize > MAX_FRAME_SIZE
+          ) {
+            // A malformed frame after valid frames should not make us lose
+            // any remaining output. Preserve these bytes as stdout.
+            outputMode = 'raw';
+            capture('stdout', stdout, pendingOutput);
+            pendingOutput = Buffer.alloc(0);
+            return;
           }
-        });
+
+          if (pendingOutput.length < 8 + frameSize) return;
+          const payload = pendingOutput.subarray(8, 8 + frameSize);
+          capture(type === 2 ? 'stderr' : 'stdout', type === 2 ? stderr : stdout, payload);
+          pendingOutput = pendingOutput.subarray(8 + frameSize);
+        }
+      };
+
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          if (settled) return;
+          try { stream?.destroy(); } catch (_) {}
+          fail(new Error('Exec timeout'));
+        }, timeoutMs);
+      }
+
+      exec.start({ hijack: true, stdin: !!options.input }, (err, outputStream) => {
+        if (err) return fail(err);
+        stream = outputStream;
+        stream.on('data', processOutput);
 
         stream.on('end', async () => {
-          clearTimer();
-          if (buf.length > 0) emit(1, buf.toString());         // flush any tail bytes
-          const inspect = await exec.inspect();
-          resolve({
-            exitCode: inspect.ExitCode,
-            stdout,
-            stderr,
-            success: inspect.ExitCode === 0
-          });
+          if (settled) return;
+          try {
+            if (pendingOutput.length > 0) {
+              if (outputMode === 'detect') {
+                capture('stdout', stdout, pendingOutput);
+              } else if (outputMode === 'multiplexed') {
+                // Incomplete final frames are unusual, but retain the payload
+                // rather than silently discarding the command's last output.
+                const type = pendingOutput.length >= 8 ? pendingOutput[0] : 1;
+                const hasHeader = pendingOutput.length >= 8 &&
+                  (type === 1 || type === 2) &&
+                  pendingOutput[1] === 0 &&
+                  pendingOutput[2] === 0 &&
+                  pendingOutput[3] === 0;
+                const payload = hasHeader ? pendingOutput.subarray(8) : pendingOutput;
+                capture(type === 2 ? 'stderr' : 'stdout', type === 2 ? stderr : stdout, payload);
+              }
+              pendingOutput = Buffer.alloc(0);
+            }
+            closeTimer();
+            const inspect = await exec.inspect();
+            if (settled) return;
+            settled = true;
+            resolve({
+              exitCode: inspect.ExitCode,
+              stdout: stdout.join(''),
+              stderr: stderr.join(''),
+              success: inspect.ExitCode === 0
+            });
+          } catch (inspectError) {
+            fail(inspectError);
+          }
         });
 
-        stream.on('error', err => { clearTimer(); reject(err); });
+        stream.on('error', fail);
 
         if (options.input) {
           stream.write(options.input);
