@@ -25,6 +25,22 @@ test('persists task lifecycle and reloads terminal result', () => {
   assert.equal(state.result.status, 'SUCCEEDED');
 });
 
+test('merges snapshots from independent store instances without losing task records', () => {
+  const filePath = tempFile();
+  const firstIdentity = { taskId: 'task-a', projectId: 'project-1', userId: 'user-1' };
+  const secondIdentity = { taskId: 'task-b', projectId: 'project-1', userId: 'user-1' };
+
+  // Both instances load the same initially empty snapshot before either writes.
+  const first = new DurableTaskStore({ filePath });
+  const second = new DurableTaskStore({ filePath });
+  assert.equal(first.begin(firstIdentity).state, 'started');
+  assert.equal(second.begin(secondIdentity).state, 'started');
+
+  const reloaded = new DurableTaskStore({ filePath });
+  assert.equal(reloaded.get(firstIdentity).status, 'RUNNING');
+  assert.equal(reloaded.get(secondIdentity).status, 'RUNNING');
+});
+
 test('marks active tasks recovery-required after restart', () => {
   const filePath = tempFile();
   const identity = { taskId: 'task-2', projectId: 'project-1', userId: 'user-1' };
