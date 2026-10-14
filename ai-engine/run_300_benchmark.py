@@ -93,8 +93,9 @@ def run_benchmark():
                 "prompt": prompt,
                 "model_answer": reply,
                 "latency_s": round(dt, 2),
-                "generated_tokens": tokens,
-                "tokens_per_sec": tps,
+                "estimated_tokens": tokens,
+                "estimated_tokens_per_sec": tps,
+                "token_count_method": "response_characters_divided_by_3.8",
                 "score": score,
                 "pass_fail": "NOT_EVALUATED",
                 "format_status": format_status,
@@ -113,8 +114,9 @@ def run_benchmark():
                 "prompt": prompt,
                 "error": last_err,
                 "latency_s": round(dt, 2),
-                "generated_tokens": 0,
-                "tokens_per_sec": 0,
+                "estimated_tokens": 0,
+                "estimated_tokens_per_sec": 0,
+                "token_count_method": "response_characters_divided_by_3.8",
                 "score": 0,
                 "pass_fail": "NOT_EVALUATED",
                 "format_status": "NOT_EVALUATED",
@@ -171,7 +173,7 @@ def generate_summary_sheet(results):
     latencies = [float(r.get("latency_s", 0) or 0) for r in successful]
     avg_latency = round(statistics.mean(latencies), 2) if latencies else 0
     median_latency = round(statistics.median(latencies), 2) if latencies else 0
-    total_tokens = sum(int(r.get("generated_tokens", 0) or 0) for r in successful)
+    total_tokens = sum(int(r.get("estimated_tokens", r.get("generated_tokens", 0)) or 0) for r in successful)
     total_time = sum(latencies)
     avg_tps = round(total_tokens / total_time, 1) if total_time > 0 else 0
     scores = [float(r.get("score", 0) or 0) for r in successful if r.get("score") is not None]
@@ -238,7 +240,7 @@ def generate_summary_sheet(results):
         c_score = f"{statistics.mean(valid_scores):.2f}" if valid_scores else "N/A"
         c_latencies = [float(x.get("latency_s", 0) or 0) for x in s_items]
         c_lat = f"{statistics.mean(c_latencies):.1f}s" if c_latencies else "N/A"
-        c_tokens = [int(x.get("generated_tokens", 0) or 0) for x in s_items]
+        c_tokens = [int(x.get("estimated_tokens", x.get("generated_tokens", 0)) or 0) for x in s_items]
         c_tok = f"{int(statistics.mean(c_tokens))}" if c_tokens else "N/A"
         md += f"| {c} | {len(s_items)}/{len(items)} | {c_rate} | {c_score}/10 | {c_lat} | {c_tok} |\n"
 
