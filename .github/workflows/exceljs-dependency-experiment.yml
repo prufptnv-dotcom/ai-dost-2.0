@@ -38,7 +38,21 @@ jobs:
       # the ephemeral runner. No package/lockfile changes are committed by this workflow.
       - name: Apply scoped compatibility overrides
         run: |
-          npm pkg set 'overrides.exceljs.archiver=^7.0.0' 'overrides.exceljs.unzipper=^0.12.5'
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          pkg.overrides = pkg.overrides || {};
+          pkg.overrides.exceljs = {
+            ...(pkg.overrides.exceljs || {}),
+            archiver: '^7.0.0',
+            unzipper: '^0.12.5'
+          };
+          pkg.overrides['archiver-utils'] = {
+            ...(pkg.overrides['archiver-utils'] || {}),
+            glob: '^11.0.0'
+          };
+          fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          NODE
           npm install --package-lock-only --ignore-scripts --no-audit
           npm ci --ignore-scripts
 
@@ -56,6 +70,18 @@ jobs:
           assert.match(archiver.version, /^7\./, `Expected nested archiver 7.x, got ${archiver.version}`);
           assert.match(unzipper.version, /^0\.12\./, `Expected nested unzipper 0.12.x, got ${unzipper.version}`);
           console.log(`ExcelJS ${root.version}; nested archiver ${archiver.version}; nested unzipper ${unzipper.version}`);
+          NODE
+
+      - name: Verify archiver-utils resolves maintained glob 11
+        run: |
+          npm ls archiver-utils glob --all
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const path = require('node:path');
+          const archiverUtils = path.dirname(require.resolve('archiver-utils/package.json'));
+          const glob = require(require.resolve('glob/package.json', { paths: [archiverUtils] }));
+          assert.match(glob.version, /^(11|12|13)\\./, `Expected glob 11+, got ${glob.version}`);
+          console.log(`archiver-utils glob resolved to ${glob.version}`);
           NODE
 
       - name: XLSX read/write and CSV round-trip smoke test
