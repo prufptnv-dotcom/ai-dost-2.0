@@ -223,4 +223,19 @@ test('Phase 2F.5 - Context Budget Manager', async (t) => {
       /items must be an array/
     );
   });
+
+  await t.test('24. unscoped items are rejected except the canonical core system item', () => {
+    const budgetMgr = new ContextBudgetManager({ totalBudget: 500 });
+    const res = budgetMgr.packageContext({
+      projectId,
+      items: [
+        { source_id: 'sys_core', category: 'SYSTEM', is_mandatory: true, content: 'Available tools' },
+        { source_id: 'unscoped-secret', category: 'RETRIEVAL', content: 'must not enter another project context' }
+      ]
+    });
+
+    assert.strictEqual(res.package.system.length, 1);
+    assert.strictEqual(res.package.retrieval.length, 0);
+    assert.strictEqual(res.metadata.selected_items_count, 1);
+  });
 });
