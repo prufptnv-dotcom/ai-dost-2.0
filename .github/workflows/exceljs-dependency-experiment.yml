@@ -126,20 +126,9 @@ jobs:
       - name: Commit tested dependency manifest and lockfile on isolated experiment branch
         if: success() && github.event_name == 'push' && github.ref_name == 'experiment/exceljs-compatibility-2026-10'
         run: |
-          node - <<'NODE'
-          const fs = require('node:fs');
-          const path = '../.github/workflows/exceljs-dependency-experiment.yml';
-          let workflow = fs.readFileSync(path, 'utf8');
-          workflow = workflow.replace('permissions:\n  contents: write', 'permissions:\n  contents: read');
-          const start = workflow.indexOf('      - name: Commit tested dependency manifest and lockfile on isolated experiment branch\n');
-          const end = workflow.indexOf('      - name: Upload generated lockfile for review\n', start);
-          if (start < 0 || end < 0) throw new Error('Could not safely remove one-time commit step from workflow');
-          workflow = workflow.slice(0, start) + workflow.slice(end);
-          fs.writeFileSync(path, workflow);
-          NODE
           git -C .. config user.name "github-actions[bot]"
           git -C .. config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C .. add backend/package.json backend/package-lock.json .github/workflows/exceljs-dependency-experiment.yml
+          git -C .. add backend/package.json backend/package-lock.json
           git -C .. commit -m "fix: refresh ExcelJS dependency chain with glob 13"
           git -C .. push origin "HEAD:${GITHUB_REF_NAME}"
 
