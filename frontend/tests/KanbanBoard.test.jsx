@@ -1,6 +1,14 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import KanbanBoard from '../components/agent/KanbanBoard';
+
+const flushKanbanInitialLoad = async () => {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+};
 
 describe('KanbanBoard', () => {
   const TASK_TITLES = [
@@ -13,6 +21,7 @@ describe('KanbanBoard', () => {
 
   it('renders 5 status columns with counts', async () => {
     render(<KanbanBoard agentId="a1" onTaskUpdate={() => {}} />);
+    await flushKanbanInitialLoad();
     await waitFor(() => {
       expect(screen.getByText('Backlog')).toBeInTheDocument();
       expect(screen.getByText('Planned')).toBeInTheDocument();
@@ -25,6 +34,7 @@ describe('KanbanBoard', () => {
 
   it('renders the mock task titles', async () => {
     render(<KanbanBoard agentId="a1" onTaskUpdate={() => {}} />);
+    await flushKanbanInitialLoad();
     await waitFor(() => {
       for (const title of TASK_TITLES) {
         expect(screen.getByText(title)).toBeInTheDocument();
@@ -35,6 +45,7 @@ describe('KanbanBoard', () => {
   it('adds a task from the New Task input and notifies parent', async () => {
     const onTaskUpdate = jest.fn();
     render(<KanbanBoard agentId="a1" onTaskUpdate={onTaskUpdate} />);
+    await flushKanbanInitialLoad();
     const input = screen.getByPlaceholderText('Describe a new task...');
     fireEvent.change(input, { target: { value: 'Write test suite' } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -49,6 +60,7 @@ describe('KanbanBoard', () => {
   it('ignores empty task input', async () => {
     const onTaskUpdate = jest.fn();
     render(<KanbanBoard agentId="a1" onTaskUpdate={onTaskUpdate} />);
+    await flushKanbanInitialLoad();
     const input = screen.getByPlaceholderText('Describe a new task...');
     fireEvent.change(input, { target: { value: '   ' } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -58,6 +70,7 @@ describe('KanbanBoard', () => {
 
   it('renders without crashing even when onTaskUpdate is missing', async () => {
     render(<KanbanBoard agentId="a1" />);
+    await flushKanbanInitialLoad();
     await waitFor(() => {
       expect(screen.getByText('Agent Tasks')).toBeInTheDocument();
     });
