@@ -12,6 +12,7 @@ export default function TaskStepItem({ step, index }) {
   const isRunning = step.status === 'in_progress';
   const isPending = step.status === 'pending';
   const isError = step.status === 'error';
+  const isUnverified = step.status === 'unverified';
 
   return (
     <div
@@ -22,6 +23,8 @@ export default function TaskStepItem({ step, index }) {
           ? 'bg-accent/[0.07]'
           : isError
           ? 'bg-red-500/[0.06]'
+          : isUnverified
+          ? 'bg-amber-500/[0.06]'
           : 'hover:bg-canvas-subtle'
       }`}
       aria-label={`Plan step ${index + 1}: ${step.title}`}
@@ -44,6 +47,11 @@ export default function TaskStepItem({ step, index }) {
             <AlertTriangle className="w-3 h-3 text-white" strokeWidth={2.5} />
           </span>
         )}
+        {isUnverified && (
+          <span className="w-4 h-4 -m-px rounded-[4px] bg-amber-500/90 flex items-center justify-center" title="Not verified against requirement-level evidence">
+            <AlertTriangle className="w-3 h-3 text-white" strokeWidth={2.5} />
+          </span>
+        )}
       </div>
 
       {/* Title + supporting lines */}
@@ -56,6 +64,8 @@ export default function TaskStepItem({ step, index }) {
               ? 'text-paper-100 font-medium'
               : isError
               ? 'text-red-300'
+              : isUnverified
+              ? 'text-amber-300'
               : 'text-paper-300'
           }`}
         >
