@@ -49,7 +49,7 @@ describe('AppSpecificationService', () => {
       {
         path: 'src/App.jsx',
         content: [
-          'function searchTransactions(query) { return transactions.filter((item) => item.name.includes(query)); }',
+          'function search(query) { return transactions.filter((item) => item.name.includes(query)); }',
           'function renderChart(data) { return <Chart data={data} />; }',
           'function exportCsv(rows) { return new Blob([rows.map((row) => row.join(",")).join("\\n")], { type: "text/csv" }); }',
         ].join('\n'),
