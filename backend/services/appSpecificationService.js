@@ -90,7 +90,7 @@ function featureSignalIsRequested(prompt, pattern) {
       .trim();
     const after = source.slice(matcher.lastIndex, clauseEnd).replace(/^[\s,]+/g, '');
     const negatedPrefix = /\b(?:no|without|exclude|excluding|omit|omitting|avoid|avoiding|remove|removing|don't|do not|shouldn't|should not|must not|never|not(?!\s+only)|nahi|mat)\b(?:\s+[\w'-]+){0,24}\s*$/i;
-    const negatedSuffix = /^(?:(?:is|are|was|were|should be|must be|isn't|aren't|wasn't|weren't)\s+)?(?:not\s+(?:needed|required|necessary|wanted)|unnecessary|unwanted|nahi|na|mat)\b/i;
+    const negatedSuffix = /^(?:(?:is|are|was|were|should be|must be)\s+)?(?:not\s+(?:needed|required|necessary|wanted)|(?:isn't|aren't|wasn't|weren't)\s+(?:needed|required|necessary|wanted)|unnecessary|unwanted|nahi|na|mat)\b/i;
     if (negatedPrefix.test(before) || negatedSuffix.test(after)) continue;
     return true;
   }
