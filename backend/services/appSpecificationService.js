@@ -286,13 +286,13 @@ function buildAppSpecification(prompt, options = {}) {
     !explicitFeaturePatterns.some((pattern) => pattern.test(clause))
   );
   const featureRequirements = matchedFeatures.map((feature, index) => {
-    const sourceClause = explicitClauses.find((clause) => feature.pattern.test(clause));
+    const sourceClauses = explicitClauses.filter((clause) => feature.pattern.test(clause));
     return {
       id: 'REQ-' + String(index + 2).padStart(3, '0'),
       name: feature.name,
       source: 'explicit-feature-signal',
       featureKey: feature.id,
-      sourceText: (sourceClause || request).slice(0, 600),
+      sourceText: (sourceClauses.length ? sourceClauses.join(' | ') : request).slice(0, MAX_PROMPT_LENGTH),
       acceptance: [feature.acceptance],
     };
   });
