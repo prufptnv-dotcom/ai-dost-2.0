@@ -358,3 +358,49 @@ test('run treats TASK_CANCELED worker errors as cancellation without retrying or
   assert.equal(attempts, 1, 'a cancellation should not consume a retry');
   assertCancelledPersistence(director);
 });
+
+
+test('run fails closed when a required planned task is skipped after delegation failure', async () => {
+  const plan = {
+    summary: 'required task cannot be delegated',
+    tasks: [
+      { id: 'required', specialty: 'frontend', role: 'CODER', objective: 'required implementation', dependsOn: [], expectedOutput: 'working implementation' },
+      { id: 'independent', specialty: 'backend', role: 'CODER', objective: 'independent task', dependsOn: [], expectedOutput: 'working backend' }
+    ]
+  };
+  const director = createExecutionHarness({ plan });
+  const originalDelegate = director.coordinator.delegate.bind(director.coordinator);
+  director.coordinator.delegate = async (input) => {
+    if (input.objective === 'required implementation') {
+      throw new Error('worker capacity reached');
+    }
+    return originalDelegate(input);
+  };
+  const streamEvents = [];
+
+  await assert.rejects(
+    director.run({
+      userId: 'user-1',
+      projectId: 'project-1',
+      request: 'complete both tasks',
+      onEvent: (event) => streamEvents.push(event)
+    }),
+    /1 planned task\(s\) did not succeed: required \(SKIPPED\)/
+  );
+
+  assert.equal(
+    streamEvents.some((event) => event.type === 'director_task' && event.status === 'SKIPPED' && event.taskId === 'required'),
+    true,
+    'the skipped required task must be visible in the event stream'
+  );
+  assert.equal(
+    streamEvents.some((event) => event.type === 'director_complete' && event.status === 'SUCCEEDED'),
+    false,
+    'a partially executed plan must never emit a success terminal event'
+  );
+  assert.equal(
+    director._testEvents.some((event) => event[0] === 'taskStatus' && event[2] === 'FAILED'),
+    true,
+    'the supervisor task must be persisted as FAILED when the plan is incomplete'
+  );
+});
