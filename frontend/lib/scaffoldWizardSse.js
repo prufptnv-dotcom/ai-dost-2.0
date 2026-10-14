@@ -24,6 +24,7 @@ function parseScaffoldWizardSse(raw) {
     events,
     done: events.filter((event) => event?.type === 'done').at(-1) || null,
     error: events.find((event) => event?.type === 'error') || null,
+    outputQuality: events.filter((event) => event?.type === 'output_quality').at(-1) || null,
   };
 }
 
