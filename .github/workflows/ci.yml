@@ -264,6 +264,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+      - name: Syntax-check benchmark tools
+        run: python -m py_compile ai-engine/run_300_benchmark.py ai-engine/benchmark_scoring.py ai-engine/test_benchmark_scoring.py
       - name: Test benchmark format-scoring semantics
         run: python ai-engine/test_benchmark_scoring.py -v
 
