@@ -53,8 +53,9 @@ function parseSseFrame(frame) {
 
 async function collectSse(response, onEvent) {
   let pending = '';
+  const decoder = new TextDecoder();
   for await (const chunk of response.body) {
-    pending += Buffer.from(chunk).toString('utf8');
+    pending += decoder.decode(chunk, { stream: true });
     let boundary;
     while ((boundary = pending.search(/\r?\n\r?\n/)) !== -1) {
       const frame = pending.slice(0, boundary);
@@ -64,6 +65,7 @@ async function collectSse(response, onEvent) {
       if (event) onEvent(event);
     }
   }
+  pending += decoder.decode();
   if (pending.trim()) {
     const event = parseSseFrame(pending);
     if (event) onEvent(event);
