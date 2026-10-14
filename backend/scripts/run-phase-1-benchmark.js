@@ -83,6 +83,20 @@ function assertOutsideRepo(dir) {
   }
 }
 
+function deriveGenerationCompletion({ requestError, terminalError, directorPathObserved, terminalEventCount, fileCount, captureErrorCount }) {
+  let reason = 'director-terminal-event-and-generated-files-observed';
+  if (requestError) reason = 'request-failed';
+  else if (terminalError) reason = 'generation-emitted-error';
+  else if (!directorPathObserved) reason = 'director-path-not-observed';
+  else if (terminalEventCount === 0) reason = 'no-terminal-event';
+  else if (captureErrorCount > 0) reason = 'generated-file-capture-errors';
+  else if (fileCount === 0) reason = 'terminal-event-without-generated-files';
+  return {
+    generationCompleted: reason === 'director-terminal-event-and-generated-files-observed',
+    generationCompletionReason: reason,
+  };
+}
+
 async function runOne(config) {
   const phase = config.phase;
   const revision = config.revision;
@@ -188,20 +202,6 @@ async function runOne(config) {
     SCORER_PATH, '--case', testCase.id, '--project-dir', projectPath,
     '--out', path.join(runDir, 'static-diagnostic.json'),
   ], { encoding: 'utf8', timeout: 30000 });
-
-function deriveGenerationCompletion({ requestError, terminalError, directorPathObserved, terminalEventCount, fileCount, captureErrorCount }) {
-  let reason = 'director-terminal-event-and-generated-files-observed';
-  if (requestError) reason = 'request-failed';
-  else if (terminalError) reason = 'generation-emitted-error';
-  else if (!directorPathObserved) reason = 'director-path-not-observed';
-  else if (terminalEventCount === 0) reason = 'no-terminal-event';
-  else if (captureErrorCount > 0) reason = 'generated-file-capture-errors';
-  else if (fileCount === 0) reason = 'terminal-event-without-generated-files';
-  return {
-    generationCompleted: reason === 'director-terminal-event-and-generated-files-observed',
-    generationCompletionReason: reason,
-  };
-}
 
   const metadata = {
     schemaVersion: '1.0',
