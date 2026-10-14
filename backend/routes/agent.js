@@ -771,6 +771,7 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
           const systemPrompt = [buildFullstackSystemPrompt(prompt, category), specificationContext].filter(Boolean).join('\n\n');
           
           let parsedData = null;
+          let generationSource = 'llm-output-pending';
           try {
             const scaffoldResult = await callScaffoldLLM(systemPrompt, null, parameters?.headers || {});
             if (scaffoldResult && Array.isArray(scaffoldResult.files) && scaffoldResult.files.length >= 2) {
@@ -786,9 +787,11 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
           // ── Guaranteed Base Template Initialization (Vite + React + Express) ──
           const goldenFiles = generateGoldenScaffold(prompt, category);
           if (!parsedData || !Array.isArray(parsedData.files) || parsedData.files.length < 2) {
+            generationSource = 'golden-scaffold-fallback';
             logger.info(`[Agent] Hydrating verified golden archetype for category: ${category}`);
             parsedData = { files: goldenFiles };
           } else {
+            generationSource = 'llm-output+verified-golden-base';
             // Merge custom LLM files on top of essential base boilerplate
             const fileMap = new Map();
             goldenFiles.forEach(f => fileMap.set(f.path, f.content));
@@ -1117,6 +1120,9 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
 
           const projectTitle = String(appSpecification?.archetype?.label || category || 'Generated project')
             .replace(/(^\w|\s\w)/g, (match) => match.toUpperCase());
+          const generationModeReport = generationSource === 'golden-scaffold-fallback'
+            ? '**Generation mode: GOLDEN SCAFFOLD FALLBACK.** This is a starter baseline, not proof that the user request has been fully implemented.'
+            : '**Generation mode: LLM output merged with the verified base template.** Build/render checks still do not prove every requested feature works.';
           const specificationRequirements = appSpecification?.requirements || [];
           const requirementsReport = specificationRequirements.length
             ? specificationRequirements.map((requirement) =>
@@ -1133,6 +1139,9 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
           const finalReport = `### 🚀 Project Generation Report: **${projectTitle}**
 
 **Original prompt:** "${prompt}"
+
+#### 🧰 Generation Mode
+${generationModeReport}
 
 #### 📋 Requirements Tracked (not proof of implementation)
 ${requirementsReport}
@@ -1171,6 +1180,7 @@ ${verification?.ok
           return {
             success: true,
             verified: Boolean(verification?.ok),
+            generationSource,
             verification,
             install: installResult,
             repair: repairSummary
