@@ -3231,6 +3231,14 @@ router.post('/scaffold-wizard', async (req, res) => {
 
   const activeFeatures = (wizardConfig.features || []).filter(f => f.enabled !== false).map(f => `${f.name}: ${f.desc || ''}`).join('\n- ');
   const stackInfo = wizardConfig.stack ? JSON.stringify(wizardConfig.stack) : 'React + Vite + Tailwind CSS';
+  const specificationRequest = [
+    wizardConfig.description || userPrompt || wizardConfig.projectTitle || wizardConfig.projectName || 'Build the configured application',
+    activeFeatures ? 'Wizard-selected features:\\n- ' + activeFeatures : '',
+    'Selected stack: ' + stackInfo,
+    'Selected theme: ' + (wizardConfig.theme || 'domain-appropriate theme'),
+  ].filter(Boolean).join('\\n\\n');
+  const appSpecification = buildAppSpecification(specificationRequest, { force: true });
+  const specificationContext = appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '';
 
   const scaffoldPrompt = `You are an expert full-stack engineer. Build a COMPLETE, production-ready, beautiful web application based on this interactive specification:
 
@@ -3249,7 +3257,10 @@ ${wizardConfig.customNotes || 'None'}
 REQUIREMENTS:
 1. Write 100% COMPLETE, WORKING code with NO placeholders, NO "TODO" comments, NO truncated sections.
 2. Include all necessary HTML, CSS, JavaScript/React components, and package.json so the app can run immediately.
-3. Apply modern, responsive styling with clean UI components, cards, buttons, and state management.`;
+3. Apply modern, responsive styling with clean UI components, cards, buttons, and state management.
+
+STRUCTURED APP SPECIFICATION AND ACCEPTANCE CHECKS:
+\${specificationContext}`;
 
   send({ type: 'wizard_status', step: 'generating', message: '⚡ Generating production-grade code across components...' });
 
