@@ -52,7 +52,7 @@ const codeContext      = require('../services/codeContext');
 const fixMemory        = require('../services/fixMemory');
 const deterministicCodeGuard = require('../services/DeterministicCodeGuard');
 const { detectCategory, buildFullstackSystemPrompt, generateGoldenScaffold } = require('../agent/fullstackTrainer');
-const { buildAppSpecification, formatAppSpecificationForPrompt } = require('../services/appSpecificationService');
+const { buildAppSpecification, formatAppSpecificationForPrompt, findMissingFeatureSignals } = require('../services/appSpecificationService');
 const { saveProjectFile, deleteProjectFile, getProjectFiles, onWorkspaceChange } = require('../projectStore');
 const { learnNotes, retrieveNotes, formatNotes, extractRunNotes } = require('../services/copilotMemory');
 const backgroundRuns = require('../services/backgroundRuns'); // P9 background runs
@@ -772,6 +772,7 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
           
           let parsedData = null;
           let generationSource = 'llm-output-pending';
+          const featurePreflight = { attempted: false, missingBefore: [], missingAfter: [], repairApplied: false, skippedReason: null };
           try {
             const scaffoldResult = await callScaffoldLLM(systemPrompt, null, parameters?.headers || {});
             if (scaffoldResult && Array.isArray(scaffoldResult.files) && scaffoldResult.files.length >= 2) {
@@ -784,6 +785,79 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
             logger.info(`[Agent] Scaffold LLM unavailable (${llmErr.message}), activating instant Golden Scaffold`);
           }
 
+          // Phase 1 quality preflight: if explicit known features have no recognizable
+          // source signal, make one bounded, targeted completion attempt before the
+          // generic scaffold is merged. This is a repair trigger, never a correctness pass.
+          if (parsedData && Array.isArray(parsedData.files) && appSpecification) {
+            featurePreflight.missingBefore = findMissingFeatureSignals(appSpecification, parsedData.files);
+            featurePreflight.missingAfter = featurePreflight.missingBefore.slice();
+            if (featurePreflight.missingBefore.length > 0) {
+              featurePreflight.attempted = true;
+              const maxContextChars = 80000;
+              const orderedFiles = parsedData.files.slice().sort((a, b) => {
+                const rank = (file) => /(?:^|\\/)App\\.[jt]sx?$|(?:^|\\/)page\\.[jt]sx?$/i.test(file.path || '') ? 0 : 1;
+                return rank(a) - rank(b);
+              });
+              const repairFiles = [];
+              let contextChars = 0;
+              for (const file of orderedFiles) {
+                if (!file || typeof file.path !== 'string' || typeof file.content !== 'string') continue;
+                const nextChars = file.path.length + file.content.length;
+                if (contextChars + nextChars > maxContextChars) continue;
+                repairFiles.push({ path: file.path, content: file.content });
+                contextChars += nextChars;
+              }
+
+              if (repairFiles.length === 0) {
+                featurePreflight.skippedReason = 'No bounded source context could be assembled for targeted completion.';
+              } else {
+                const missingList = featurePreflight.missingBefore.map((item) =>
+                  `- ${item.requirementId} (${item.featureKey}): ${item.name}. User clause: ${item.sourceText || '(see original request)'}`
+                ).join('\\n');
+                const completionPrompt = [
+                  systemPrompt,
+                  '=== FIRST-PASS GENERATED FILES (inspect and preserve valid work) ===',
+                  JSON.stringify(repairFiles, null, 2),
+                  '=== TARGETED REQUIREMENT COMPLETION ===',
+                  'A deterministic source-text preflight found no recognizable implementation signal for these explicitly requested features:',
+                  missingList,
+                  'This diagnostic can be wrong, so inspect the files before changing them. If a feature is already implemented under different names, preserve it and explain that in a concise file comment only if useful. Otherwise implement the missing behavior end-to-end: real state/data flow, event handlers, validation, visible outcomes, and appropriate empty/error states. Do not satisfy this check by adding comments, labels, placeholder functions, or dead code. Preserve the existing stack and unrelated working behavior. Return complete contents for every file you change using the normal FILE/code-block format; do not return a plan or a summary instead of code.',
+                ].join('\\n\\n');
+
+                try {
+                  const completionResult = await callScaffoldLLM(completionPrompt, null, parameters?.headers || {});
+                  let completionFiles = null;
+                  if (completionResult && Array.isArray(completionResult.files)) {
+                    completionFiles = completionResult.files;
+                  } else if (typeof completionResult === 'string') {
+                    completionFiles = extractFiles(completionResult);
+                  }
+                  const usableFiles = Array.isArray(completionFiles)
+                    ? completionFiles.filter((file) => file && typeof file.path === 'string' && typeof file.content === 'string' && file.path.trim())
+                    : [];
+                  if (usableFiles.length > 0) {
+                    const fileMap = new Map(parsedData.files
+                      .filter((file) => file && typeof file.path === 'string' && typeof file.content === 'string')
+                      .map((file) => [file.path, file.content]));
+                    usableFiles.forEach((file) => fileMap.set(file.path, file.content));
+                    parsedData = {
+                      ...parsedData,
+                      files: Array.from(fileMap.entries()).map(([filePath, fileContent]) => ({ path: filePath, content: fileContent })),
+                    };
+                    featurePreflight.repairApplied = true;
+                    logger.info(`[Agent] Targeted completion updated ${usableFiles.length} file(s) after feature-signal preflight.`);
+                  } else {
+                    featurePreflight.skippedReason = 'Targeted completion returned no usable files.';
+                  }
+                } catch (completionErr) {
+                  featurePreflight.skippedReason = `Targeted completion failed: ${completionErr.message}`;
+                  logger.warn('[Agent] Targeted feature completion failed:', completionErr.message);
+                }
+                featurePreflight.missingAfter = findMissingFeatureSignals(appSpecification, parsedData.files);
+              }
+            }
+          }
+
           // ── Guaranteed Base Template Initialization (Vite + React + Express) ──
           const goldenFiles = generateGoldenScaffold(prompt, category);
           if (!parsedData || !Array.isArray(parsedData.files) || parsedData.files.length < 2) {
@@ -791,7 +865,9 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
             logger.info(`[Agent] Hydrating verified golden archetype for category: ${category}`);
             parsedData = { files: goldenFiles };
           } else {
-            generationSource = 'llm-output+verified-golden-base';
+            generationSource = featurePreflight.repairApplied
+              ? 'llm-output+targeted-completion+verified-golden-base'
+              : 'llm-output+verified-golden-base';
             // Merge custom LLM files on top of essential base boilerplate
             const fileMap = new Map();
             goldenFiles.forEach(f => fileMap.set(f.path, f.content));
