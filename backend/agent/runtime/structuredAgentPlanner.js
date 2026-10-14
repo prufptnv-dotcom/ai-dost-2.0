@@ -263,10 +263,12 @@ function createStructuredAgentPlanner({ toolRegistry, openai = AgentCascadeAiSer
   // would not help. Between attempts wait out the provider's per-minute rate
   // window (E2E run #6/#7: three instant retries burned Groq's TPM budget and
   // killed the whole cascade) — `retryDelayMs` keeps tests fast.
-  const complete = async (prompt) => {
+  const complete = async (prompt, preferredModel = 'auto') => {
     let lastErr = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
-      const response = await openai.chat(prompt, [], 'planner', customApiKey);
+      const response = preferredModel && preferredModel !== 'auto'
+        ? await openai.chat(prompt, [], 'planner', customApiKey, preferredModel)
+        : await openai.chat(prompt, [], 'planner', customApiKey);
       try {
         return extractJson(response);
       } catch (err) {
@@ -289,7 +291,7 @@ function createStructuredAgentPlanner({ toolRegistry, openai = AgentCascadeAiSer
     // objective) or surface an honest error.
     async generateStructuredPlan(intent, context) {
       try {
-        return await complete(plannerPrompt('execution', intent, context, toolCatalog(toolRegistry)));
+        return await complete(plannerPrompt('execution', intent, context, toolCatalog(toolRegistry)), context?.preferredModel);
       } catch (err) {
         const rawIntent = String(intent || '').toLowerCase();
         const isThemeIntent = /(theme|color|dark mode|light mode|palette|style|css|styling|design)/i.test(rawIntent);
@@ -335,12 +337,12 @@ function createStructuredAgentPlanner({ toolRegistry, openai = AgentCascadeAiSer
         context,
         toolCatalog(toolRegistry),
         `FAILED STEP:\n${JSON.stringify(failedStep || {})}\nERROR:\n${String(errorInfo || '')}\nRepair must avoid repeating irreversible side effects unless the tool explicitly requires it.`,
-      ));
+      ), context?.preferredModel);
     },
 
     async generateVerificationPlan(goal, context) {
       try {
-        return await complete(plannerPrompt('verification', goal, context, toolCatalog(toolRegistry)));
+        return await complete(plannerPrompt('verification', goal, context, toolCatalog(toolRegistry)), context?.preferredModel);
       } catch (err) {
         logger.warn(`[structuredAgentPlanner] Verification plan AI failed: ${err.message}. Providing read-only inspection.`);
         const tools = new Set(toolCatalog(toolRegistry).map((t) => t.name));
