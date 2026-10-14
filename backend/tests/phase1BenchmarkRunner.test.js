@@ -55,6 +55,7 @@ describe('Phase 1 live benchmark capture runner', () => {
       '--case', 'dashboard-search-charts-csv',
       '--runs', '1',
       '--preferred-model', 'gemini',
+      '--revision', 'test-baseline-sha',
       '--base-url', 'http://127.0.0.1:' + address.port,
       '--artifacts-dir', artifactsDir,
     ], { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'pipe'] });
@@ -73,6 +74,7 @@ describe('Phase 1 live benchmark capture runner', () => {
     const summary = JSON.parse(fs.readFileSync(path.join(artifactsDir, 'candidate-summary.json'), 'utf8'));
     const events = fs.readFileSync(path.join(runDir, 'events.ndjson'), 'utf8').trim().split('\n');
     assert.equal(metadata.generationCompleted, true);
+    assert.equal(metadata.revision, 'test-baseline-sha');
     assert.equal(metadata.outputQuality.status, 'UNVERIFIED');
     assert.equal(metadata.acceptanceStatus, 'NOT_EVALUATED');
     assert.equal(metadata.project.fileCount, 1);
