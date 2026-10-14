@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
-const { parseSseFrame, collectSse, ensureLocalUrl } = require('../scripts/run-phase-1-benchmark');
+const { parseSseFrame, collectSse, ensureLocalUrl, deriveGenerationCompletion } = require('../scripts/run-phase-1-benchmark');
 
 describe('Phase 1 live benchmark capture runner', () => {
   test('parses SSE JSON frames and event-name fallback', () => {
@@ -42,6 +42,21 @@ describe('Phase 1 live benchmark capture runner', () => {
   test('rejects remote hosts because the generated workspace must be locally capturable', () => {
     assert.throws(() => ensureLocalUrl('https://example.com'), /loopback/);
     assert.match(ensureLocalUrl('http://127.0.0.1:3000'), /^http:\/\/127\.0\.0\.1:3000\/?$/);
+  });
+
+  test('does not count a run complete when any generated file could not be captured', () => {
+    const result = deriveGenerationCompletion({
+      requestError: null,
+      terminalError: null,
+      directorPathObserved: true,
+      terminalEventCount: 1,
+      fileCount: 1,
+      captureErrorCount: 1,
+    });
+    assert.deepEqual(result, {
+      generationCompleted: false,
+      generationCompletionReason: 'generated-file-capture-errors',
+    });
   });
 
   test('captures generated files, SSE events, metadata, and diagnostic without claiming acceptance', async (t) => {
