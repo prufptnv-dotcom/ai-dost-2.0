@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { safeEvidenceFile, validateRun, validateEvidence, REVIEW_DIMENSIONS } = require('../scripts/validate-phase-1-evidence');
+const { safeEvidenceFile, isPngScreenshot, validateRun, validateEvidence, REVIEW_DIMENSIONS } = require('../scripts/validate-phase-1-evidence');
 
 const cases = require('../quality-evaluation/phase-1-cases.json').cases;
 
@@ -21,6 +21,16 @@ function makeRunFixture(t, testCase = cases[0]) {
     return relative;
   };
   return { root, runDir, write, testCase };
+}
+
+function minimalPngHeader(width, height) {
+  const header = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(header, 0);
+  header.writeUInt32BE(13, 8);
+  header.write('IHDR', 12, 4, 'ascii');
+  header.writeUInt32BE(width, 16);
+  header.writeUInt32BE(height, 20);
+  return header;
 }
 
 function validManifest(fixture, phase = 'candidate', runNumber = 1) {
@@ -43,9 +53,9 @@ function validManifest(fixture, phase = 'candidate', runNumber = 1) {
     tests: { status: 'PASS', logPath: write('logs/tests.log') },
     browserFlows: { status: 'PASS', logPath: write('logs/browser.log') },
     screenshots: {
-      '360': write('screenshots/360.png'),
-      '768': write('screenshots/768.png'),
-      '1280': write('screenshots/1280.png'),
+      '360': write('screenshots/360.png', minimalPngHeader(360, 800)),
+      '768': write('screenshots/768.png', minimalPngHeader(768, 900)),
+      '1280': write('screenshots/1280.png', minimalPngHeader(1280, 900)),
     },
     requirements,
     humanReview: { blindReview: true, dimensions },
@@ -60,6 +70,16 @@ describe('Phase 1 runtime evidence package validator', () => {
     assert.equal(safeEvidenceFile(fixture.runDir, '../../outside.log'), false);
     assert.equal(safeEvidenceFile(fixture.runDir, path.join(os.tmpdir(), 'outside.log')), false);
     assert.equal(safeEvidenceFile(fixture.runDir, 'missing.log'), false);
+  });
+
+  test('rejects text files and invalid PNG headers as screenshots', (t) => {
+    const fixture = makeRunFixture(t);
+    fixture.write('screenshots/fake.png', 'not a PNG');
+    fixture.write('screenshots/bad.png', Buffer.alloc(24));
+    fixture.write('screenshots/valid.png', minimalPngHeader(360, 800));
+    assert.equal(isPngScreenshot(fixture.runDir, 'screenshots/fake.png'), false);
+    assert.equal(isPngScreenshot(fixture.runDir, 'screenshots/bad.png'), false);
+    assert.equal(isPngScreenshot(fixture.runDir, 'screenshots/valid.png'), true);
   });
 
   test('rejects symlinks that escape the run directory', (t) => {
@@ -90,7 +110,7 @@ describe('Phase 1 runtime evidence package validator', () => {
   test('rejects incomplete screenshots, criterion evidence, or unblinded review', (t) => {
     const fixture = makeRunFixture(t);
     const manifest = validManifest(fixture);
-    manifest.screenshots['768'] = 'screenshots/not-present.png';
+    manifest.screenshots['768'] = write('screenshots/not-a-real-image.png', 'not a PNG');
     manifest.requirements[0].evidencePaths = ['../../outside.txt'];
     manifest.humanReview.blindReview = false;
     fs.writeFileSync(path.join(fixture.runDir, 'runtime-evidence.json'), JSON.stringify(manifest));
