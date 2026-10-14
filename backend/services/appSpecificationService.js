@@ -305,6 +305,33 @@ function buildAcceptanceCriteria(isUi, requirements) {
   return criteria.slice(0, MAX_ACCEPTANCE_CRITERIA);
 }
 
+/**
+ * Find missing source-text signals for explicit, known feature requirements.
+ * This is a preflight diagnostic used to trigger a bounded completion pass;
+ * it is not proof that a feature is implemented or works at runtime.
+ */
+function findMissingFeatureSignals(spec, files) {
+  if (!spec || !Array.isArray(spec.requirements) || !Array.isArray(files)) return [];
+  const source = files
+    .filter((file) => file && typeof file.path === 'string' && typeof file.content === 'string')
+    .map((file) => '\n/* FILE: ' + file.path + ' */\n' + file.content)
+    .join('\n');
+  return spec.requirements
+    .filter((requirement) => requirement && requirement.featureKey)
+    .map((requirement) => ({
+      requirement,
+      rule: FEATURE_RULES.find((feature) => feature.id === requirement.featureKey),
+    }))
+    .filter(({ rule }) => rule && !rule.pattern.test(source))
+    .map(({ requirement, rule }) => ({
+      requirementId: requirement.id,
+      featureKey: requirement.featureKey,
+      name: requirement.name || rule.name,
+      sourceText: requirement.sourceText || '',
+      diagnostic: 'No recognizable source-text signal found; inspect implementation and test behavior manually.',
+    }));
+}
+
 function buildAppSpecification(prompt, options = {}) {
   const request = cleanPrompt(prompt);
   if (!request || (!options.force && !shouldCreateAppSpecification(request))) return null;
@@ -515,4 +542,5 @@ module.exports = {
   formatAppSpecificationForPrompt,
   shouldCreateAppSpecification,
   validateAppSpecification,
+  findMissingFeatureSignals,
 };
