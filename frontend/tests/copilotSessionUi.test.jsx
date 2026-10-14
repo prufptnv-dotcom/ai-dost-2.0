@@ -6,7 +6,36 @@ import CopilotStatusBar, { stripEmoji, formatElapsed } from '../components/ide/C
 import IdeFooter from '../components/ide/IdeFooter';
 import { PreviewPane } from '../components/ide/PreviewPane';
 import { ToastProvider } from '../context/ToastContext';
+import { extractOutputQualityStatus, settlePlanTasks } from '../lib/outputQualityStatus';
 import CopilotMarkdown, { wrapCodeBlocks, renderCopilotMarkdown } from '../components/ide/CopilotMarkdown';
+
+describe('output quality status contract', () => {
+  const tasks = [
+    { id: 'generate', title: 'Generate files', status: 'completed' },
+    { id: 'verify', title: 'Verify requested behavior', status: 'in_progress' },
+  ];
+
+  test.each([
+    ['**SUCCEEDED** — all acceptance checks passed', 'SUCCEEDED'],
+    ['**PARTIAL** — fallback scaffold was used', 'PARTIAL'],
+    ['**UNVERIFIED** — interactions were not executed', 'UNVERIFIED'],
+    ['**FAILED** — runtime verification failed', 'FAILED'],
+    ['generic completion text', null],
+  ])('extracts explicit quality status from report: %s', (message, expected) => {
+    expect(extractOutputQualityStatus(message)).toBe(expected);
+  });
+
+  test('does not mark an unverified acceptance task complete', () => {
+    expect(settlePlanTasks(tasks, '**UNVERIFIED** — no requirement-level checks')).toEqual([
+      { ...tasks[0], status: 'completed' },
+      { ...tasks[1], status: 'unverified' },
+    ]);
+  });
+
+  test('keeps failed QA visible instead of converting it to success', () => {
+    expect(settlePlanTasks(tasks, '**FAILED** — build failed')[1].status).toBe('error');
+  });
+});
 
 describe('CopilotDevinUI — TaskStepItem (checklist row)', () => {
   const base = { id: 't1', title: 'Scaffold Vite app' };
