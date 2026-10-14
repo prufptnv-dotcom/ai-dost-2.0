@@ -3282,25 +3282,10 @@ ${specificationContext}`;
         120000,
         'LLM generation timed out'
       );
-      const stripped = String(rawResponse || '').replace(/```(?:json)?\s*/gi, '').trim();
-      const jsonBlock = stripped.match(/\{[\s\S]*\}/);
-      if (jsonBlock) {
-        try {
-          const parsed = JSON.parse(jsonBlock[0]);
-          if (parsed && Array.isArray(parsed.files) && parsed.files.length > 0) {
-            files = parsed.files;
-            generationSource = 'llm-output';
-          }
-        } catch (err) {
-          try {
-            const repaired = jsonBlock[0].replace(/(?<=:\s*"[\s\S]*?)\r?\n(?=[\s\S]*?")/g, '\\n');
-            const parsed = JSON.parse(repaired);
-            if (parsed && Array.isArray(parsed.files) && parsed.files.length > 0) {
-              files = parsed.files;
-              generationSource = 'llm-output';
-            }
-          } catch (_) {}
-        }
+      const parsedFiles = extractFiles(rawResponse);
+      if (Array.isArray(parsedFiles) && parsedFiles.length > 0) {
+        files = parsedFiles;
+        generationSource = 'llm-output';
       }
     } catch (llmErr) {
       logger.info('[Wizard] LLM timed out or failed, using autonomous smart generator:', llmErr.message);
