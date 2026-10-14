@@ -63,6 +63,10 @@ jobs:
           retention-days: 14
       - run: npm run lint
       - run: npm test -- --coverage
+      - name: Build production frontend
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
 
   backend:
     name: Backend (unit + integration + security + chat-runtime)
@@ -254,7 +258,7 @@ jobs:
 
   deploy:
     name: Deploy (main push only)
-    needs: [frontend, backend, e2e, docker]
+    needs: [frontend, frontend-browser, backend, e2e, docker]
     # Per project workflow preference, PRs are reviewed via GitHub checks and are not deployed to Vercel.
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -296,7 +300,7 @@ jobs:
 
   deployment-status:
     name: Deployment policy (PRs are not deployed)
-    needs: [frontend, backend, e2e, docker]
+    needs: [frontend, frontend-browser, backend, e2e, docker]
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
