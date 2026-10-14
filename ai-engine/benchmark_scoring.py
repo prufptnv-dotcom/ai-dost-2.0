@@ -18,6 +18,53 @@ _REFUSAL_PATTERNS = (
 )
 
 
+def normalize_result_record(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Migrate saved legacy rows so old heuristic PASS values never imply correctness."""
+    normalized = dict(record)
+    normalized["correctness_evaluated"] = False
+    normalized["is_accuracy_metric"] = False
+
+    if not normalized.get("success"):
+        normalized["pass_fail"] = "NOT_EVALUATED"
+        normalized["format_status"] = "NOT_EVALUATED"
+        normalized["evaluation_type"] = EVALUATION_TYPE
+        normalized["evaluator_note"] = (
+            "Request failed before a model response could be evaluated; "
+            "this is not a model-correctness failure."
+        )
+        return normalized
+
+    answer = normalized.get("model_answer")
+    if answer is None:
+        # A success marker without an answer is corrupt/incomplete evidence.
+        normalized["success"] = False
+        normalized["pass_fail"] = "NOT_EVALUATED"
+        normalized["format_status"] = "NOT_EVALUATED"
+        normalized["evaluation_type"] = EVALUATION_TYPE
+        normalized["evaluator_note"] = "Saved result had no model answer; marked as incomplete."
+        return normalized
+
+    evaluation = evaluate_response(
+        normalized,
+        str(answer),
+        float(normalized.get("latency_s", 0) or 0),
+    )
+    normalized.update({
+        "score": evaluation["score"],
+        "pass_fail": "NOT_EVALUATED",
+        "format_status": evaluation["format_status"],
+        "evaluation_type": evaluation["evaluation_type"],
+        "correctness_evaluated": False,
+        "is_accuracy_metric": False,
+        "evaluator_note": evaluation["eval_note"],
+        "estimated_tokens": evaluation["tokens_est"],
+        "estimated_tokens_per_sec": round(
+            evaluation["tokens_est"] / float(normalized.get("latency_s", 0) or 1), 1
+        ),
+        "token_count_method": "response_characters_divided_by_3.8",
+    })
+    return normalized
+
 def evaluate_response(item: Mapping[str, Any], reply: str, latency: float = 0.0) -> dict[str, Any]:
     """Return a format-only score; never present this result as accuracy."""
     del latency  # Reserved for future instrumentation; not part of the score.
