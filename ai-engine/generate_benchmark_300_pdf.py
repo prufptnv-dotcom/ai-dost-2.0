@@ -51,6 +51,21 @@ def clean_for_xml(text):
     text = text.replace('\n', '<br/>')
     return text
 
+def format_status_for(record):
+    """Map historical statuses to response-format status, never task correctness."""
+    if not record.get("success"):
+        return "NOT_EVALUATED"
+    status = record.get("format_status")
+    if status in {"FORMAT_PASS", "FORMAT_FAIL"}:
+        return status
+    # Older saved results came from the former format heuristic.
+    if record.get("pass_fail") == "PASS":
+        return "FORMAT_PASS"
+    if record.get("pass_fail") == "FAIL":
+        return "FORMAT_FAIL"
+    return "NOT_EVALUATED"
+
+
 class NumberedCanvas(canvas.Canvas):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -75,8 +90,8 @@ class NumberedCanvas(canvas.Canvas):
 
         # Header (pages > 1)
         if self._pageNumber > 1:
-            self.drawString(54, 750, "VKP-Omni-2B: Real Benchmark Test Set (300 Questions Report)")
-            self.drawRightString(558, 750, "IIT Patna / Nandi AI")
+            self.drawString(54, 750, "AI Dost: Response-Format Heuristic Report")
+            self.drawRightString(558, 750, "AI Dost / developer-generated")
             self.setStrokeColor(colors.HexColor("#E2E8F0"))
             self.setLineWidth(0.5)
             self.line(54, 744, 558, 744)
@@ -84,7 +99,7 @@ class NumberedCanvas(canvas.Canvas):
         # Footer
         footer_text = f"Page {self._pageNumber} of {total_pages}"
         self.drawRightString(558, 36, footer_text)
-        self.drawString(54, 36, "Confidential - Official Benchmark Evaluation Report")
+        self.drawString(54, 36, "Developer-generated heuristic report — not an accuracy benchmark")
         self.setStrokeColor(colors.HexColor("#E2E8F0"))
         self.setLineWidth(0.5)
         self.line(54, 46, 558, 46)
@@ -200,8 +215,9 @@ def build_pdf(results_file, output_pdf_path):
     story = []
 
     # ── Cover Header ──
-    story.append(Paragraph("VKP-Omni-2B: Real Benchmark Test Set Report", title_style))
-    story.append(Paragraph("300 Blind Evaluation Questions | Full Model Answers & Quantitative Scorecard", subtitle_style))
+    story.append(Paragraph("AI Dost: Response-Format Heuristic Report", title_style))
+    story.append(Paragraph("Historical 300-prompt run | Format-only scores — not an accuracy benchmark", subtitle_style))
+    story.append(Paragraph("<b>Validity warning:</b> The score checks response shape only. It does not establish truth, code correctness, or task completion; prompts are repository-stored rather than a blind holdout.", body_style))
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#2563EB'), spaceAfter=15))
 
     # ── Page 14 Summary Sheet ──
@@ -212,31 +228,42 @@ def build_pdf(results_file, output_pdf_path):
     latencies = [r["latency_s"] for r in successful]
     avg_latency = round(statistics.mean(latencies), 2) if latencies else 0
     median_latency = round(statistics.median(latencies), 2) if latencies else 0
-    total_tokens = sum(r["generated_tokens"] for r in successful)
+    total_tokens = sum(int(r.get("estimated_tokens", r.get("generated_tokens", 0)) or 0) for r in successful)
     total_time = sum(latencies)
     avg_tps = round(total_tokens / total_time, 1) if total_time > 0 else 0
     overall_score = round(sum(r["score"] for r in successful) / len(successful), 2) if successful else 0
-    pass_count = sum(1 for r in successful if r.get("pass_fail") == "PASS")
-    pass_rate = round((pass_count / total_q) * 100, 1)
+    format_evaluated = [r for r in successful if format_status_for(r) in {"FORMAT_PASS", "FORMAT_FAIL"}]
+    pass_count = sum(1 for r in format_evaluated if format_status_for(r) == "FORMAT_PASS")
+    pass_rate = round((pass_count / len(format_evaluated)) * 100, 1) if format_evaluated else None
+    pass_rate_label = f"{pass_rate}% ({pass_count}/{len(format_evaluated)})" if pass_rate is not None else "N/A (no responses evaluated)"
 
-    story.append(Paragraph("1. Benchmark Run Summary Sheet (Official Specification)", h1_style))
+    model_label = html.escape(os.getenv("AI_DOST_BENCHMARK_MODEL", "Not recorded"))
+    checkpoint_label = html.escape(os.getenv("AI_DOST_BENCHMARK_CHECKPOINT", "Not recorded"))
+    training_label = html.escape(os.getenv("AI_DOST_BENCHMARK_TRAINING", "Not recorded"))
+    hardware_label = html.escape(os.getenv("AI_DOST_BENCHMARK_HARDWARE", "Not recorded; not measured by this script"))
+    precision_label = html.escape(os.getenv("AI_DOST_BENCHMARK_PRECISION", "Not recorded"))
+    peak_vram_label = html.escape(os.getenv("AI_DOST_BENCHMARK_PEAK_VRAM", "Not measured by this script"))
+    completion_rate = (completed / total_q * 100) if total_q else 0
+
+    story.append(Paragraph("1. Run summary (response-format heuristics only)", h1_style))
 
     summary_data = [
         [Paragraph("<b>Metric</b>", body_style), Paragraph("<b>Value</b>", body_style)],
-        [Paragraph("Model Checkpoint", body_style), Paragraph("<b>NandiAi/VKP-Omni-2B</b> (snapshot <code>b8473449...</code>)", body_style)],
-        [Paragraph("Base Model / Training Method", body_style), Paragraph("Qwen2-VL-2B-Instruct / Fine-tuned at IIT Patna by Vikash Kumar Pandit", body_style)],
-        [Paragraph("Hardware Execution", body_style), Paragraph("NVIDIA GPU (<code>cuda:0</code>), 8GB+ VRAM (Offline Neural Mode)", body_style)],
-        [Paragraph("Precision / Quantization", body_style), Paragraph("float16 (Full Precision / Zero Quantization degradation)", body_style)],
-        [Paragraph("Total Questions Evaluated", body_style), Paragraph(f"<b>{total_q}</b>", body_style)],
-        [Paragraph("Completed Successfully", body_style), Paragraph(f"<b>{completed} (100.0%)</b>", body_style)],
-        [Paragraph("Failed / Timeout", body_style), Paragraph(f"<b>{failed}</b>", body_style)],
-        [Paragraph("Average Latency", body_style), Paragraph(f"{avg_latency} seconds", body_style)],
-        [Paragraph("Median Latency", body_style), Paragraph(f"<b>{median_latency} seconds</b>", body_style)],
-        [Paragraph("Average Generation Speed", body_style), Paragraph(f"<b>{avg_tps} tok/sec</b> (Peak: 41.8 tok/s)", body_style)],
-        [Paragraph("Peak VRAM Utilization", body_style), Paragraph("~4.8 GB", body_style)],
-        [Paragraph("Overall Quality Score", body_style), Paragraph(f"<b><font color='#16A34A'>{overall_score} / 10</font></b>", body_style)],
-        [Paragraph("Official Pass Rate", body_style), Paragraph(f"<b><font color='#16A34A'>{pass_rate}% ({pass_count}/{total_q})</font></b>", body_style)],
-        [Paragraph("Protocol Adherence & Notes", body_style), Paragraph("100% blind evaluation; no external retrieval/tools; 0 false refusals.", body_style)],
+        [Paragraph("Model identifier", body_style), Paragraph(model_label, body_style)],
+        [Paragraph("Checkpoint / snapshot", body_style), Paragraph(checkpoint_label, body_style)],
+        [Paragraph("Reported base model / training", body_style), Paragraph(training_label, body_style)],
+        [Paragraph("Hardware", body_style), Paragraph(hardware_label, body_style)],
+        [Paragraph("Precision / quantization", body_style), Paragraph(precision_label, body_style)],
+        [Paragraph("Prompts in results", body_style), Paragraph(f"<b>{total_q}</b> (not a blind holdout)", body_style)],
+        [Paragraph("Responses received", body_style), Paragraph(f"<b>{completed} ({completion_rate:.1f}%)</b>", body_style)],
+        [Paragraph("Request failures / timeouts", body_style), Paragraph(f"<b>{failed}</b>", body_style)],
+        [Paragraph("Average response latency", body_style), Paragraph(f"{avg_latency} seconds", body_style)],
+        [Paragraph("Median response latency", body_style), Paragraph(f"<b>{median_latency} seconds</b>", body_style)],
+        [Paragraph("Estimated response token rate", body_style), Paragraph(f"~{avg_tps} char-estimated tok/s; not provider telemetry", body_style)],
+        [Paragraph("Peak VRAM", body_style), Paragraph(peak_vram_label, body_style)],
+        [Paragraph("Mean heuristic format score", body_style), Paragraph(f"<b>{overall_score} / 10 (not accuracy)</b>", body_style)],
+        [Paragraph("Format-threshold rate", body_style), Paragraph(f"<b>{pass_rate_label} (not correctness)</b>", body_style)],
+        [Paragraph("Evaluation limitations", body_style), Paragraph("Shallow response-format checks only; no independent truth grading or generated-code execution.", body_style)],
     ]
 
     t_summary = Table(summary_data, colWidths=[200, 304])
@@ -252,14 +279,14 @@ def build_pdf(results_file, output_pdf_path):
     story.append(Spacer(1, 15))
 
     # ── Category Breakdown Table ──
-    story.append(Paragraph("2. Category-Wise Performance Summary", h1_style))
+    story.append(Paragraph("2. Category-wise format-check summary", h1_style))
 
     cat_table_data = [
         [
             Paragraph("<b>Category</b>", body_style),
-            Paragraph("<b>Done</b>", body_style),
-            Paragraph("<b>Pass Rate</b>", body_style),
-            Paragraph("<b>Score</b>", body_style),
+            Paragraph("<b>Responses</b>", body_style),
+            Paragraph("<b>Format rate*</b>", body_style),
+            Paragraph("<b>Heuristic score</b>", body_style),
             Paragraph("<b>Median Lat</b>", body_style),
             Paragraph("<b>Avg Tokens</b>", body_style)
         ]
@@ -274,15 +301,17 @@ def build_pdf(results_file, output_pdf_path):
 
     for c_name, items in cats.items():
         s_items = [x for x in items if x.get("success")]
-        p_cnt = sum(1 for x in s_items if x.get("pass_fail") == "PASS")
-        p_rate = f"{(p_cnt / len(items)) * 100:.1f}%"
-        avg_sc = f"{sum(x['score'] for x in s_items) / len(s_items):.2f}" if s_items else "0"
-        med_lat = f"{statistics.median([x['latency_s'] for x in s_items]):.1f}s" if s_items else "0s"
-        avg_tok = f"{int(statistics.mean([x['generated_tokens'] for x in s_items]))}" if s_items else "0"
+        format_items = [x for x in s_items if format_status_for(x) in {"FORMAT_PASS", "FORMAT_FAIL"}]
+        p_cnt = sum(1 for x in format_items if format_status_for(x) == "FORMAT_PASS")
+        p_rate = f"{(p_cnt / len(format_items)) * 100:.1f}%" if format_items else "N/A"
+        avg_sc = f"{sum(x['score'] for x in s_items) / len(s_items):.2f}" if s_items else "N/A"
+        med_lat = f"{statistics.median([x['latency_s'] for x in s_items]):.1f}s" if s_items else "N/A"
+        token_values = [int(x.get("estimated_tokens", x.get("generated_tokens", 0)) or 0) for x in s_items]
+        avg_tok = f"{int(statistics.mean(token_values))}" if token_values else "N/A"
 
         cat_table_data.append([
             Paragraph(c_name, body_style),
-            Paragraph(f"{len(s_items)}/30", body_style),
+            Paragraph(f"{len(s_items)}/{len(items)}", body_style),
             Paragraph(f"<b>{p_rate}</b>", body_style),
             Paragraph(f"<b>{avg_sc}/10</b>", body_style),
             Paragraph(med_lat, body_style),
@@ -302,8 +331,8 @@ def build_pdf(results_file, output_pdf_path):
     story.append(PageBreak())
 
     # ── Detailed Question & Answer Section (All 300 Questions) ──
-    story.append(Paragraph("3. Full Question-by-Question Evaluation & Model Answers", h1_style))
-    story.append(Paragraph("Preserved raw model responses for all 300 questions across 10 categories, evaluated on local GPU.", subtitle_style))
+    story.append(Paragraph("3. Prompt-by-prompt answers (not independently correctness-graded)", h1_style))
+    story.append(Paragraph("Responses loaded from the selected results file. This report does not independently check factual correctness or execute generated code; hardware telemetry is not collected by this script.", subtitle_style))
 
     current_cat = None
 
@@ -314,10 +343,10 @@ def build_pdf(results_file, output_pdf_path):
         prompt = item["prompt"]
         answer = item["model_answer"]
         score = item["score"]
-        pf = item["pass_fail"]
-        lat = item["latency_s"]
-        tok = item["generated_tokens"]
-        tps = item["tokens_per_sec"]
+        pf = format_status_for(item)
+        lat = item.get("latency_s", 0)
+        tok = item.get("estimated_tokens", item.get("generated_tokens", 0))
+        tps = item.get("estimated_tokens_per_sec", item.get("tokens_per_sec", 0))
         note = item["evaluator_note"]
 
         if cat != current_cat:
@@ -332,11 +361,11 @@ def build_pdf(results_file, output_pdf_path):
 
         # Question Card Header
         q_elements = []
-        badge_color = "#16A34A" if pf == "PASS" else "#DC2626"
+        badge_color = "#16A34A" if pf == "FORMAT_PASS" else "#DC2626" if pf == "FORMAT_FAIL" else "#64748B"
         header_text = (
             f"<b>{qid}</b> [{diff}] &nbsp;|&nbsp; "
-            f"<b><font color='{badge_color}'>{pf} ({score}/10)</font></b> &nbsp;|&nbsp; "
-            f"Latency: {lat}s &nbsp;|&nbsp; Tokens: {tok} ({tps} tok/s)"
+            f"<b><font color='{badge_color}'>{pf} (heuristic {score}/10)</font></b> &nbsp;|&nbsp; "
+            f"Latency: {lat}s &nbsp;|&nbsp; Estimated tokens: {tok} (~{tps} tok/s)"
         )
         q_elements.append(Paragraph(header_text, h2_style))
 
@@ -348,7 +377,7 @@ def build_pdf(results_file, output_pdf_path):
         # Answer Box
         # Limit very long answers for formatting sanity in report
         clean_ans = clean_for_xml(answer)
-        q_elements.append(Paragraph(f"<b>VKP-Omni-2B Response:</b><br/>{clean_ans}", ans_style))
+        q_elements.append(Paragraph(f"<b>Model response:</b><br/>{clean_ans}", ans_style))
         q_elements.append(Spacer(1, 3))
 
         # Evaluator Note
@@ -364,5 +393,5 @@ def build_pdf(results_file, output_pdf_path):
 
 if __name__ == "__main__":
     results_json = "benchmark_300_results.json"
-    dest_pdf = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "public", "downloads", "VKP_Omni_2B_300_Benchmark_Report.pdf"))
+    dest_pdf = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "public", "downloads", "AI_Dost_300_Response_Format_Heuristic_Report.pdf"))
     build_pdf(results_json, dest_pdf)

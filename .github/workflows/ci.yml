@@ -1,13 +1,14 @@
 name: CI
 
+# Push builds run only on protected integration branches. Feature/fix branches
+# are validated by pull_request, avoiding a full duplicate suite on every commit.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
-    branches:
-      - main
-      - master
-      - 'audit/**'
-      - 'feature/**'
-      - 'fix/**'
+    branches: [main, master]
   pull_request:
     branches: [main, master]
 
@@ -256,9 +257,22 @@ jobs:
             exit 1
           fi
 
+  benchmark-validation:
+    name: Benchmark tooling (Python unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Syntax-check benchmark tools
+        run: python -m py_compile ai-engine/run_300_benchmark.py ai-engine/benchmark_scoring.py ai-engine/test_benchmark_scoring.py ai-engine/generate_benchmark_300_pdf.py ai-engine/generate_eval_summary.py
+      - name: Test benchmark format-scoring semantics
+        run: python ai-engine/test_benchmark_scoring.py -v
+
   deploy:
     name: Deploy (main push only)
-    needs: [frontend, frontend-browser, backend, e2e, docker]
+    needs: [frontend, frontend-browser, backend, e2e, docker, benchmark-validation]
     # Per project workflow preference, PRs are reviewed via GitHub checks and are not deployed to Vercel.
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -300,7 +314,7 @@ jobs:
 
   deployment-status:
     name: Deployment policy (PRs are not deployed)
-    needs: [frontend, frontend-browser, backend, e2e, docker]
+    needs: [frontend, frontend-browser, backend, e2e, docker, benchmark-validation]
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:

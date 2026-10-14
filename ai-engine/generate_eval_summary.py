@@ -10,7 +10,8 @@ for item in data:
         cats[c] = []
     cats[c].append(item)
 
-print(f"{'Category':<25} | {'Questions':<9} | {'Avg Score':<9} | {'Avg Time':<8} | {'Avg Chars':<9}")
+print("WARNING: Legacy heuristic scores do not grade factual correctness or task success.")
+print(f"{'Category':<25} | {'Questions':<9} | {'Mean heuristic score':<20} | {'Avg Time':<8} | {'Avg Chars':<9}")
 print("-" * 75)
 
 for c, items in cats.items():
@@ -23,4 +24,4 @@ print("-" * 75)
 total_avg_sc = sum(x["score"] for x in data) / len(data)
 total_avg_tm = sum(x["latency_s"] for x in data) / len(data)
 total_avg_ch = sum(x["length"] for x in data) / len(data)
-print(f"{'OVERALL':<25} | {len(data):<9} | {total_avg_sc:<9.2f} | {total_avg_tm:<7.1f}s | {total_avg_ch:<9.0f}")
+print(f"{'OVERALL (heuristic)':<25} | {len(data):<9} | {total_avg_sc:<20.2f} | {total_avg_tm:<7.1f}s | {total_avg_ch:<9.0f}")
