@@ -83,7 +83,11 @@ function featureSignalIsRequested(prompt, pattern) {
     }
     const before = source.slice(clauseStart + 1, match.index)
       .split(/\b(?:but|however|except|instead|rather)\b/i).pop()
-      .replace(/[\s,]+$/g, '');
+      // Normalize comma-separated exclusions ("no search, charts, or login")
+      // before testing the negation scope.
+      .replace(/,/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     const after = source.slice(matcher.lastIndex, clauseEnd).replace(/^[\s,]+/g, '');
     const negatedPrefix = /\b(?:no|without|exclude|excluding|omit|omitting|avoid|avoiding|remove|removing|don't|do not|shouldn't|should not|must not|never|not(?!\s+only)|nahi|mat)\b(?:\s+[\w'-]+){0,4}\s*$/i;
     const negatedSuffix = /^(?:(?:is|are|was|were|should be|must be|isn't|aren't)\s+)?(?:not needed|not required|unnecessary|unwanted|nahi|na|mat)\b/i;
