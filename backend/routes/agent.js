@@ -795,7 +795,7 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
               featurePreflight.attempted = true;
               const maxContextChars = 80000;
               const orderedFiles = parsedData.files.slice().sort((a, b) => {
-                const rank = (file) => /(?:^|\\/)App\\.[jt]sx?$|(?:^|\\/)page\\.[jt]sx?$/i.test(file?.path || '') ? 0 : 1;
+                const rank = (file) => /(?:^|\/)App\.[jt]sx?$|(?:^|\/)page\.[jt]sx?$/i.test(file?.path || '') ? 0 : 1;
                 return rank(a) - rank(b);
               });
               const repairFiles = [];
@@ -813,7 +813,7 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
               } else {
                 const missingList = featurePreflight.missingBefore.map((item) =>
                   `- ${item.requirementId} (${item.featureKey}): ${item.name}. User clause: ${item.sourceText || '(see original request)'}`
-                ).join('\\n');
+                ).join('\n');
                 const completionPrompt = [
                   systemPrompt,
                   '=== FIRST-PASS GENERATED FILES (inspect and preserve valid work) ===',
@@ -822,7 +822,7 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
                   'A deterministic source-text preflight found no recognizable implementation signal for these explicitly requested features:',
                   missingList,
                   'This diagnostic can be wrong, so inspect the files before changing them. If a feature is already implemented under different names, preserve it and explain that in a concise file comment only if useful. Otherwise implement the missing behavior end-to-end: real state/data flow, event handlers, validation, visible outcomes, and appropriate empty/error states. Do not satisfy this check by adding comments, labels, placeholder functions, or dead code. Preserve the existing stack and unrelated working behavior. Return complete contents for every file you change using the normal FILE/code-block format; do not return a plan or a summary instead of code.',
-                ].join('\\n\\n');
+                ].join('\n\n');
 
                 try {
                   const completionResult = await callScaffoldLLM(completionPrompt, null, parameters?.headers || {});
