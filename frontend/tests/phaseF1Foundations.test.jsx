@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { AppShell } from '../components/layout/AppShell';
 import HistoryView from '../components/views/HistoryView';
 import SettingsView from '../components/views/SettingsView';
@@ -14,6 +14,14 @@ jest.mock('../services/api', () => ({
     delete: jest.fn(),
   },
 }));
+
+const flushSettingsInitialEffects = async () => {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+};
 
 describe('Phase F1 — Interaction Foundations Behavioral Tests', () => {
   beforeEach(() => {
@@ -78,8 +86,9 @@ describe('Phase F1 — Interaction Foundations Behavioral Tests', () => {
       });
     });
 
-    it('SettingsView replaces window.confirm with accessible reset modal', () => {
+    it('SettingsView replaces window.confirm with accessible reset modal', async () => {
       render(<SettingsView onToast={() => {}} />);
+      await flushSettingsInitialEffects();
 
       const resetBtn = screen.getByRole('button', { name: 'Reset' });
       fireEvent.click(resetBtn);
