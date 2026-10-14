@@ -87,6 +87,8 @@ describe('Phase F1 — Interaction Foundations Behavioral Tests', () => {
     });
 
     it('SettingsView replaces window.confirm with accessible reset modal', async () => {
+      api.get.mockResolvedValue({ data: { keys: {} } });
+      api.delete.mockResolvedValue({ data: { keys: {} } });
       render(<SettingsView onToast={() => {}} />);
       await flushSettingsInitialEffects();
 
