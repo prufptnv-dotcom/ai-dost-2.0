@@ -57,6 +57,15 @@ describe('AppSpecificationService', () => {
     assert.equal(spec.explicitCoverage.unrepresentedClauses.length, 0);
   });
 
+  test('does not turn explicitly excluded features into implementation requirements', () => {
+    const spec = buildAppSpecification('Create a dashboard without search, charts, or login; include CSV export.');
+    assert.equal(spec.requirements.some((item) => item.featureKey === 'search-filter'), false);
+    assert.equal(spec.requirements.some((item) => item.featureKey === 'charts-analytics'), false);
+    assert.equal(spec.requirements.some((item) => item.featureKey === 'authentication'), false);
+    assert.ok(spec.requirements.some((item) => item.featureKey === 'csv-export'));
+    assert.ok(spec.requirements.some((item) => item.source === 'explicit-clause' && /without search/i.test(item.sourceText)));
+  });
+
   test('respects explicit framework choices without inventing a stack when omitted', () => {
     const explicit = buildAppSpecification('Create a Next.js education platform with quizzes');
     assert.equal(explicit.stack.requested, 'Next.js');
