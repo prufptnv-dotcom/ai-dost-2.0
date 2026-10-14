@@ -3233,10 +3233,10 @@ router.post('/scaffold-wizard', async (req, res) => {
   const stackInfo = wizardConfig.stack ? JSON.stringify(wizardConfig.stack) : 'React + Vite + Tailwind CSS';
   const specificationRequest = [
     wizardConfig.description || userPrompt || wizardConfig.projectTitle || wizardConfig.projectName || 'Build the configured application',
-    activeFeatures ? 'Wizard-selected features:\\n- ' + activeFeatures : '',
+    activeFeatures ? 'Wizard-selected features:\n- ' + activeFeatures : '',
     'Selected stack: ' + stackInfo,
     'Selected theme: ' + (wizardConfig.theme || 'domain-appropriate theme'),
-  ].filter(Boolean).join('\\n\\n');
+  ].filter(Boolean).join('\n\n');
   const appSpecification = buildAppSpecification(specificationRequest, { force: true });
   const specificationContext = appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '';
 
