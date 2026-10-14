@@ -41,10 +41,10 @@ These are hypotheses to re-confirm on the current default/active branch, not cla
 ## 4. Phase sequence and exit criteria
 
 ### Phase 0 — Establish the real execution path and baseline
-**Status: NOT STARTED**
+**Status: IN PROGRESS**
 
-- [ ] Trace the Forge Studio UI action through frontend state, API route, service, orchestrator, provider/model, tools, workspace writes, and final response.
-- [ ] Map overlapping paths (agent route, Copilot Director, full-stack/software-factory orchestrators, and template planner where present).
+- [x] Trace the primary Forge Studio Copilot UI action through the frontend request, route bridge, `copilotDirectorHandler`, `CopilotDirector`, task planner/execution loop, workspace tools, and final SSE response.
+- [x] Identify overlapping paths: legacy `generate_project_from_prompt` (full-stack prompt + golden-scaffold fallback), plus the planner service's framework-template route. A complete per-request-type canonical-path map remains open.
 - [ ] Document the canonical path for each supported request type, including legacy paths and compatibility constraints.
 - [ ] Create a repeatable request set: landing page, SaaS dashboard, e-commerce flow, educational app, API-backed CRUD app, and multi-step repair task.
 - [ ] Save baseline prompts/specifications, generated files, logs, build/test results, user-flow evidence, and elapsed time/cost where available.
@@ -53,11 +53,11 @@ These are hypotheses to re-confirm on the current default/active branch, not cla
 **Exit gate:** We can identify the exact code path responsible for the poor output and reproduce the baseline.
 
 ### Phase 1 — Structured specification and high-quality output engine
-**Status: NOT STARTED**
+**Status: IN PROGRESS**
 
-- [ ] Define a validated AppSpecification contract: target users, stack, pages/routes, requirement IDs, components, data entities, interactions/state transitions, responsiveness, accessibility, security/non-functional constraints, and acceptance criteria.
-- [ ] Convert the request into the specification before code generation. Ask only when a genuinely blocking requirement is missing; otherwise document reversible assumptions.
-- [ ] Add archetype guidance (SaaS dashboard, commerce, education, portfolio, admin/CRUD) without forcing every request into a fixed template.
+- [x] Define a validated AppSpecification contract with requirement IDs, target audience guidance, stack, page/archetype guidance, component boundaries, data entities, interactions/state transitions, responsive/accessibility guidance, security/non-functional constraints, and linked acceptance criteria.
+- [x] Inject the spec before generation/planning in the primary Copilot Director flow and legacy full-project prompt; general tool paths still need end-to-end confirmation.
+- [x] Add non-binding archetype guidance (SaaS dashboard, commerce, education, booking, portfolio/marketing, content, collaboration) without making it a hard-coded page template.
 - [ ] Build reusable design-system foundations: spacing/typography/color tokens, hierarchy, responsive layouts, consistent components, loading/error/empty/success states, and accessible controls.
 - [ ] Generate request-specific pages and real interactions from the specification. Templates can seed the design system but must not be treated as the finished answer for a non-trivial request.
 - [ ] Preserve requirement IDs through implementation and verification so omissions are detectable.
@@ -169,8 +169,9 @@ These are targets only. Record actual values and sample sizes; do not present th
 
 | Date | Phase/item | Change or evidence | PR/commit | Status |
 |---|---|---|---|---|
-| 2026-10-14 | Roadmap | Phases, order, constraints, and exit gates documented. Implementation phases deliberately remain NOT STARTED until verified. | Roadmap PR | DOCUMENTED |
+| 2026-10-14 | Roadmap | Phases, order, constraints, and exit gates documented. | PR #15 | DOCUMENTED |
+| 2026-10-14 | Phase 0 / Phase 1 | Primary Copilot path traced; structured AppSpecification wired into Director and legacy full-project flows; full-stack prompt no longer forces dark theme or one icon library; fabricated feature-claim list replaced with requirement/evidence report. Generated output quality is not yet benchmarked; baseline corpus and full request-path map remain open. | [PR #16](https://github.com/prufptnv-dotcom/ai-dost-2.0/pull/16), current head CI pending | IN PROGRESS |
 
 ## 9. Next concrete action
 
-Start with **Phase 0**: inspect the current default branch and trace the actual Forge Studio request-to-output path end to end. Document the canonical generation path and save one reproducible basic-output failure. Use that evidence to implement Phase 1 and Phase 2 in small, reviewable changes.
+Continue **Phase 1** after current-head CI passes: run representative generation requests, preserve the generated files and build/runtime evidence, and compare output against the new AppSpecification. Complete the remaining Phase 0 baseline corpus in parallel before claiming measurable quality improvement.
