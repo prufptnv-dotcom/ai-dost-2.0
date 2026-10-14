@@ -127,10 +127,30 @@ class DevServerManager extends EventEmitter {
   // Reject absolute / traversal projectPath (was joined raw → path escape)
   _safeProjectPath(projectPath) {
     const raw = String(projectPath || '.').trim();
-    if (!raw || raw.includes('\0')) return null;
+    if (!raw || raw.includes('\\0')) return null;
     if (path.isAbsolute(raw) || /^[a-zA-Z]:[\\/]/.test(raw)) return null;
     if (raw.split(/[\\/]/).some(seg => seg === '..')) return null;
     return raw;
+  }
+
+  // Resolve an existing workspace path canonically and reject symlinks that
+  // point outside the project's workspace. Lexical checks alone are not enough
+  // for filesystem operations or commands that follow symlinks.
+  async _resolveWorkspacePath(targetId, projectPath = '.') {
+    const safeRel = this._safeProjectPath(projectPath);
+    if (safeRel === null) return null;
+    try {
+      const realRoot = await fs.realpath(this._workspaceDir(targetId));
+      const realCandidate = await fs.realpath(path.resolve(realRoot, safeRel));
+      const relative = path.relative(realRoot, realCandidate);
+      if (
+        relative !== '' &&
+        (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative))
+      ) return null;
+      return realCandidate;
+    } catch (_) {
+      return null;
+    }
   }
 
   // Reject shell metacharacters in user-supplied customCommand
@@ -141,6 +161,10 @@ class DevServerManager extends EventEmitter {
   }
 
   async detectFramework(targetId, projectPath = '.') {
+    const safeRel = this._safeProjectPath(projectPath);
+    if (safeRel === null) throw new Error('Invalid projectPath (absolute/.. blocked)');
+    projectPath = safeRel;
+
     const sandbox = sandboxManager.getSandbox(targetId);
     if (sandbox) {
       const files = await sandboxManager.listFiles(targetId, projectPath);
@@ -171,10 +195,12 @@ class DevServerManager extends EventEmitter {
       return { framework: 'static', config: null, projectPath };
     }
 
-    // Host workspace detection fallback
-    const wsDir = this._workspaceDir(targetId);
+    // Host workspace detection fallback: canonical path must remain within the
+    // workspace root, including after resolving symlinks.
+    const wsDir = await this._resolveWorkspacePath(targetId, projectPath);
+    if (!wsDir) throw new Error('Invalid projectPath (workspace path escapes root or does not exist)');
     try {
-      const entries = await fs.readdir(path.join(wsDir, projectPath));
+      const entries = await fs.readdir(wsDir);
       for (const [key, config] of Object.entries(FRAMEWORK_CONFIGS)) {
         for (const detectFile of config.detect) {
           if (entries.includes(detectFile)) {
@@ -182,28 +208,30 @@ class DevServerManager extends EventEmitter {
           }
         }
       }
-      try {
-        const pkgContent = await fs.readFile(path.join(wsDir, projectPath, 'package.json'), 'utf8');
-        const pkg = JSON.parse(pkgContent);
-        if (pkg?.scripts?.dev) {
-          return {
-            framework: 'custom',
-            config: {
-              devCommand: 'npm run dev',
-              buildCommand: pkg.scripts.build || 'npm run build',
-              port: 3000,
-              framework: 'Custom (npm dev)'
-            },
-            projectPath
-          };
-        }
-      } catch (_) {}
-    } catch (_) {}
+      const pkg = await this.readPackageJson(targetId, projectPath);
+      if (pkg?.scripts?.dev) {
+        return {
+          framework: 'custom',
+          config: {
+            devCommand: 'npm run dev',
+            buildCommand: pkg.scripts.build || 'npm run build',
+            port: 3000,
+            framework: 'Custom (npm dev)'
+          },
+          projectPath
+        };
+      }
+    } catch (err) {
+      if (/Invalid projectPath/.test(err.message)) throw err;
+    }
 
     return { framework: 'static', config: null, projectPath };
   }
 
   async readPackageJson(targetId, projectPath) {
+    const safeRel = this._safeProjectPath(projectPath);
+    if (safeRel === null) return null;
+    projectPath = safeRel;
     const sandbox = sandboxManager.getSandbox(targetId);
     if (sandbox) {
       try {
@@ -214,8 +242,9 @@ class DevServerManager extends EventEmitter {
       }
     }
     try {
-      const wsDir = this._workspaceDir(targetId);
-      const content = await fs.readFile(path.join(wsDir, projectPath, 'package.json'), 'utf8');
+      const packagePath = await this._resolveWorkspacePath(targetId, path.join(projectPath, 'package.json'));
+      if (!packagePath) return null;
+      const content = await fs.readFile(packagePath, 'utf8');
       return JSON.parse(content);
     } catch {
       return null;
@@ -235,10 +264,9 @@ class DevServerManager extends EventEmitter {
       if (sandbox) {
         await sandboxManager.writeFile(targetId, path.join(projectPath, 'package.json').replace(/\\/g, '/'), content);
       } else {
-        const wsRoot = path.resolve(this._workspaceDir(targetId));
-        const wsDir = path.resolve(wsRoot, projectPath);
-        if (wsDir !== wsRoot && !wsDir.startsWith(wsRoot + path.sep)) return;
-        await fs.writeFile(path.join(wsDir, 'package.json'), content);
+        const packagePath = await this._resolveWorkspacePath(targetId, path.join(projectPath, 'package.json'));
+        if (!packagePath) return;
+        await fs.writeFile(packagePath, content);
       }
       this.emitLog(targetId, `🔧 package.json normalized (host binding): ${updated.join(', ')} → added --host 0.0.0.0`, 'info');
     } catch (err) {
@@ -273,11 +301,11 @@ class DevServerManager extends EventEmitter {
       return { success: true };
     }
 
-    // Host execution fallback — path.join with validated relative projectPath only
-    const wsRoot = path.resolve(this._workspaceDir(targetId));
-    const wsDir = path.resolve(wsRoot, projectPath);
-    if (wsDir !== wsRoot && !wsDir.startsWith(wsRoot + path.sep)) {
-      return { success: false, error: 'projectPath escapes workspace root' };
+    // Host execution fallback — use a canonical in-workspace cwd so npm
+    // cannot follow a project symlink into another directory on the host.
+    const wsDir = await this._resolveWorkspacePath(targetId, projectPath);
+    if (!wsDir) {
+      return { success: false, error: 'projectPath escapes workspace root or does not exist' };
     }
     try {
       if (require('fs').existsSync(path.join(wsDir, 'node_modules'))) {
@@ -456,26 +484,17 @@ class DevServerManager extends EventEmitter {
       serverInfo.hostPort = hostPort;
       serverInfo.url = `http://127.0.0.1:${hostPort}`;
 
-      const rawWsDir = path.resolve(this._workspaceDir(projectId), projectPath);
-      const wsRoot = path.resolve(this._workspaceDir(projectId));
-      if (rawWsDir !== wsRoot && !rawWsDir.startsWith(wsRoot + path.sep)) {
-        this.emitState(serverInfo, 'FAILED', 'projectPath escapes workspace');
-        return { success: false, error: 'projectPath escapes workspace root' };
+      const rawWsDir = await this._resolveWorkspacePath(projectId, projectPath);
+      if (!rawWsDir) {
+        this.emitState(serverInfo, 'FAILED', 'projectPath escapes workspace or does not exist');
+        return { success: false, error: 'projectPath escapes workspace root or does not exist' };
       }
       let wsDir = rawWsDir;
       try {
-        // IMPORTANT: use the NATIVE realpath. On Windows, `os.tmpdir()` can be
-        // the 8.3 short form (`C:\Users\VIKASH~1\...`) while `process.cwd()`
-        // inside the spawned child comes back in LONG form (`...\vikash kumar\...`).
-        // Vite then computes its `fs.allow` list from the SHORT root but resolves
-        // module ids to LONG paths — `startsWith` fails, the file load is denied
-        // and Vite reports "Does the file exist?" for files that are right there.
-        // The result: no JSX transform at all, and the browser receives raw
-        // source (`Unexpected token '<'`). The pure-JS realpathSync does NOT
-        // expand 8.3 names; realpathSync.native does.
+        // Preserve native canonicalization for Windows 8.3-vs-long-path parity
+        // with Vite's module resolution, while never leaving the validated root.
         wsDir = require('fs').realpathSync.native(rawWsDir);
       } catch (_) {}
-
       const isWin = process.platform === 'win32';
       const viteBin = path.join(wsDir, 'node_modules', 'vite', 'bin', 'vite.js');
       const hasVite = require('fs').existsSync(viteBin);

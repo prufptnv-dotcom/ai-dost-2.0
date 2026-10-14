@@ -1067,3 +1067,35 @@ test('sandbox workdir resolver rejects symlink escapes outside os.tmpdir', async
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+
+test('dev-server workspace resolver rejects traversal and symlink escapes', async (t) => {
+  const fs = require('node:fs/promises');
+  const path = require('node:path');
+  const os = require('node:os');
+  const devServerManager = require('../sandbox/devServerManager');
+  const originalWorkspaceDir = devServerManager._workspaceDir;
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-dost-workspace-path-test-'));
+  try {
+    const safeDir = path.join(root, 'safe-project');
+    await fs.mkdir(safeDir);
+    devServerManager._workspaceDir = () => root;
+    assert.equal(await devServerManager._resolveWorkspacePath('test-project', 'safe-project'), await fs.realpath(safeDir));
+    assert.equal(await devServerManager._resolveWorkspacePath('test-project', '../../'), null);
+
+    const escapeLink = path.join(root, 'external-link');
+    try {
+      await fs.symlink(await fs.realpath(os.homedir()), escapeLink, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch (err) {
+      if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes(err.code)) {
+        t.skip('symlink creation is not permitted in this Windows environment');
+        return;
+      }
+      throw err;
+    }
+    assert.equal(await devServerManager._resolveWorkspacePath('test-project', 'external-link'), null);
+  } finally {
+    devServerManager._workspaceDir = originalWorkspaceDir;
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
