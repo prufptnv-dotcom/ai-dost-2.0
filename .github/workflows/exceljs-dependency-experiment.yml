@@ -91,7 +91,7 @@ jobs:
           node - <<'NODE'
           const assert = require('node:assert/strict');
           const formatter = require('@fast-csv/format/package.json');
-          assert.match(formatter.version, /^5\\./, `Expected @fast-csv/format 5.x, got ${formatter.version}`);
+          assert.match(formatter.version, /^5\./, `Expected @fast-csv/format 5.x, got ${formatter.version}`);
           console.log(`@fast-csv/format resolved to ${formatter.version}`);
           NODE
 
