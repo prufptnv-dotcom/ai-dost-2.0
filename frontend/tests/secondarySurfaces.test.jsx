@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import ArtifactsView from '../components/views/ArtifactsView';
 import HistoryView from '../components/views/HistoryView';
 import SettingsView from '../components/views/SettingsView';
@@ -8,6 +8,14 @@ import McpPanel from '../components/McpPanel';
 import api from '../services/api';
 
 jest.mock('../services/api');
+
+const flushSettingsInitialEffects = async () => {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+};
 
 describe('Phase 3.7 — Secondary Product Surfaces Rebuild', () => {
   beforeEach(() => {
@@ -52,11 +60,12 @@ describe('Phase 3.7 — Secondary Product Surfaces Rebuild', () => {
   });
 
   describe('SettingsView', () => {
-    it('renders model options, API key fields, and saves preferences', () => {
+    it('renders model options, API key fields, and saves preferences', async () => {
       const onToast = jest.fn();
       const onModelChange = jest.fn();
 
       render(<SettingsView onToast={onToast} onModelChange={onModelChange} />);
+      await flushSettingsInitialEffects();
       expect(screen.getByText(/Workspace Settings/i)).toBeInTheDocument();
       expect(screen.getByText(/AI Model Cascade/i)).toBeInTheDocument();
       expect(screen.getByText(/API Keys & Providers/i)).toBeInTheDocument();
@@ -92,6 +101,7 @@ describe('Phase 3.7 — Secondary Product Surfaces Rebuild', () => {
 
       const onToast = jest.fn();
       render(<SettingsView onToast={onToast} />);
+      await flushSettingsInitialEffects();
 
       expect(screen.getByText(/Sandbox & Security Isolation/i)).toBeInTheDocument();
       expect(screen.getByText(/Memory Cap/i)).toBeInTheDocument();
