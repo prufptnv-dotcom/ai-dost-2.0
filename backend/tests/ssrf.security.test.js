@@ -45,7 +45,11 @@ describe('SSRF guard — deterministic policy', () => {
     }
   });
 
-  test('blocks IPv4-mapped IPv6 loopback', async () => {
+  test('blocks IPv4-mapped IPv6 loopback before and after WHATWG URL normalization', async () => {
+    for (const ip of ['::ffff:127.0.0.1', '::ffff:7f00:1', '0:0:0:0:0:ffff:7f00:1']) {
+      assert.equal(isPrivateOrReservedIp(ip), true, `expected mapped loopback ${ip} to be blocked`);
+    }
+    assert.equal(isPrivateOrReservedIp('::ffff:808:808'), false, 'a public mapped IPv4 address should remain allowed');
     const result = await validateUrlForSsrf('http://[::ffff:127.0.0.1]/secret');
     assert.equal(result.valid, false);
   });
