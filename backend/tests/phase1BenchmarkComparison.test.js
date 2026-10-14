@@ -84,8 +84,8 @@ describe('compare-phase-1-benchmark', () => {
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     const baselineRun = writeRun(path.join(root, 'baseline', 'case-a', 'run-1'), 'baseline-sha', 1000, 1, 100, 2, 0, null);
     const candidateRun = writeRun(path.join(root, 'candidate', 'case-a', 'run-1'), 'candidate-sha', 1100, 1, 100, 2, 0, null);
-    const baseline = { phase: 'baseline', runsPerCase: 1, caseCount: 1, preferredModel: 'gemini', results: [baselineRun] };
-    const candidate = { phase: 'candidate', runsPerCase: 1, caseCount: 1, preferredModel: 'gemini', results: [candidateRun] };
+    const baseline = { phase: 'baseline', revision: 'baseline-sha', runsPerCase: 1, caseCount: 1, preferredModel: 'gemini', results: [baselineRun] };
+    const candidate = { phase: 'candidate', revision: 'candidate-sha', runsPerCase: 1, caseCount: 1, preferredModel: 'gemini', results: [candidateRun] };
 
     const report = compareSummaries(baseline, candidate);
     assert.equal(report.pairedRuns[0].providerParity, null);
