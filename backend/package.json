@@ -58,6 +58,7 @@
     "image-size": "^2.0.4",
     "archiver-utils": {
       "glob": "^13.0.0"
-    }
+    },
+    "@fast-csv/format": "^5.0.8"
   }
 }
