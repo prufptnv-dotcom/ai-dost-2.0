@@ -1,0 +1,28 @@
+name: Sandbox Exec Regression
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sandbox-exec:
+    name: Focused sandbox exec output test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Run sandbox exec stdout regression
+        run: node --test --test-name-pattern="POST /api/sandbox/create with local fallback" tests/integration.test.js
