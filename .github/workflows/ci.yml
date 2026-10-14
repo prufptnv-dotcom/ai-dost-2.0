@@ -118,6 +118,9 @@ jobs:
       - name: Run backend test suite
         timeout-minutes: 15
         run: node --test --test-force-exit tests/unit.test.js tests/integration.test.js tests/mcpClientManager.test.js tests/security-hardening.test.js tests/projectAuthorization.security.test.js tests/ssrf.security.test.js tests/chatTaskEvents.test.js tests/taskCancellation.test.js tests/chatTaskAdapter.test.js tests/chatTaskGateway.identity.test.js tests/chatTaskGateway.idempotency.test.js tests/durableTaskIdempotencyStore.test.js tests/startupParity.test.js tests/codeDiffHardening.test.js
+      - name: Run context and dependency algorithm regressions
+        run: node --test --test-force-exit tests/contextBudgetManager.test.js tests/contextAssembler.test.js tests/contextCompression.test.js tests/contextIntegration.test.js tests/dependencyGraph.test.js tests/plannerExecutionLoop.test.js
+
       - name: Run Copilot Director runtime tests
         run: node --test agent/runtime/CopilotDirector.test.js
       - name: Run ChatTaskGateway replay tests
