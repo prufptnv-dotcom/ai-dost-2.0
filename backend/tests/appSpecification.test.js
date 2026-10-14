@@ -113,20 +113,23 @@ describe('AppSpecificationService', () => {
       { term: 'file upload', key: 'file-upload' },
     ];
 
-    // Deterministic combination coverage: each list length and each position
-    // is tested, rather than relying on one hand-picked sentence.
-    for (let length = 1; length <= featureTerms.length; length += 1) {
-      const selected = featureTerms.slice(0, length);
-      const list = selected.map((item) => item.term);
-      const prompt = 'Create a dashboard without ' + list.slice(0, -1).join(', ') +
-        (list.length > 1 ? ' or ' : '') + list[list.length - 1] + '.';
-      const spec = buildAppSpecification(prompt);
-      for (const feature of selected) {
-        assert.equal(
-          spec.requirements.some((item) => item.featureKey === feature.key),
-          false,
-          prompt + ' should exclude ' + feature.key
-        );
+    // Deterministic property-style coverage: rotate the list so every feature
+    // appears in every position, then test each prefix length (1..7).
+    for (let offset = 0; offset < featureTerms.length; offset += 1) {
+      const rotated = featureTerms.slice(offset).concat(featureTerms.slice(0, offset));
+      for (let length = 1; length <= rotated.length; length += 1) {
+        const selected = rotated.slice(0, length);
+        const list = selected.map((item) => item.term);
+        const prompt = 'Create a dashboard without ' + list.slice(0, -1).join(', ') +
+          (list.length > 1 ? ' or ' : '') + list[list.length - 1] + '.';
+        const spec = buildAppSpecification(prompt);
+        for (const feature of selected) {
+          assert.equal(
+            spec.requirements.some((item) => item.featureKey === feature.key),
+            false,
+            prompt + ' should exclude ' + feature.key
+          );
+        }
       }
     }
   });
