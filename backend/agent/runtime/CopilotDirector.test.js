@@ -270,3 +270,144 @@ test('successful completion preserves final verification evidence in terminal ev
   assert.equal(verification.summary, 'Build and smoke test passed');
   assert.ok(result.artifact_refs.includes('verification:build-pass'));
 });
+
+
+function assertCancelledPersistence(director) {
+  assert.equal(
+    director._testEvents.some((event) => event[0] === 'taskStatus' && event[2] === 'CANCELLED'),
+    true,
+    'the supervisor task must be persisted as CANCELLED'
+  );
+  assert.equal(
+    director._testEvents.some((event) =>
+      event[0] === 'runStatus' &&
+      event[2] === 'CANCELLED' &&
+      typeof event[5] === 'string' &&
+      !Number.isNaN(Date.parse(event[5]))
+    ),
+    true,
+    'the supervisor run must be persisted as CANCELLED with a completion timestamp'
+  );
+  assert.equal(
+    director._testEvents.some((event) => event[0] === 'taskStatus' && event[2] === 'FAILED'),
+    false,
+    'cancellation must not be persisted as failure'
+  );
+}
+
+test('run persists cancellation when the signal is already aborted before execution', async () => {
+  const plan = {
+    summary: 'cancel before execution',
+    tasks: [{ id: 'change', specialty: 'frontend', role: 'CODER', objective: 'change UI', dependsOn: [], expectedOutput: 'change' }]
+  };
+  const director = createExecutionHarness({ plan });
+  const controller = new AbortController();
+  controller.abort();
+  const streamEvents = [];
+
+  const result = await director.run({
+    userId: 'user-1',
+    projectId: 'project-1',
+    request: 'change UI',
+    signal: controller.signal,
+    onEvent: (event) => streamEvents.push(event)
+  });
+
+  assert.equal(result.status, 'CANCELLED');
+  assertCancelledPersistence(director);
+  assert.equal(streamEvents.some((event) => event.type === 'director_complete'), false);
+});
+
+test('run persists cancellation when a worker returns CANCELLED', async () => {
+  const plan = {
+    summary: 'cancel in worker',
+    tasks: [{ id: 'change', specialty: 'frontend', role: 'CODER', objective: 'change UI', dependsOn: [], expectedOutput: 'change' }]
+  };
+  const director = createExecutionHarness({ plan });
+  director.executeWorker = async () => ({ status: 'CANCELLED' });
+
+  const result = await director.run({
+    userId: 'user-1',
+    projectId: 'project-1',
+    request: 'change UI'
+  });
+
+  assert.equal(result.status, 'CANCELLED');
+  assertCancelledPersistence(director);
+});
+
+test('run treats TASK_CANCELED worker errors as cancellation without retrying or marking failure', async () => {
+  const plan = {
+    summary: 'cancel via worker error',
+    tasks: [{ id: 'change', specialty: 'frontend', role: 'CODER', objective: 'change UI', dependsOn: [], expectedOutput: 'change' }]
+  };
+  const director = createExecutionHarness({ plan });
+  let attempts = 0;
+  director.executeWorker = async () => {
+    attempts += 1;
+    throw Object.assign(new Error('Task canceled by user'), { code: 'TASK_CANCELED' });
+  };
+
+  const result = await director.run({
+    userId: 'user-1',
+    projectId: 'project-1',
+    request: 'change UI'
+  });
+
+  assert.equal(result.status, 'CANCELLED');
+  assert.equal(attempts, 1, 'a cancellation should not consume a retry');
+  assertCancelledPersistence(director);
+});
+
+
+test('run fails closed when a required planned task is skipped after delegation failure', async () => {
+  const plan = {
+    summary: 'required task cannot be delegated',
+    tasks: [
+      { id: 'required', specialty: 'frontend', role: 'CODER', objective: 'required implementation', dependsOn: [], expectedOutput: 'working implementation' },
+      { id: 'independent', specialty: 'backend', role: 'CODER', objective: 'independent task', dependsOn: [], expectedOutput: 'working backend' }
+    ]
+  };
+  const director = createExecutionHarness({ plan });
+  const originalDelegate = director.coordinator.delegate.bind(director.coordinator);
+  director.coordinator.delegate = async (input) => {
+    if (input.objective === 'required implementation') {
+      throw new Error('worker capacity reached');
+    }
+    return originalDelegate(input);
+  };
+  const streamEvents = [];
+
+  const result = await director.run({
+    userId: 'user-1',
+    projectId: 'project-1',
+    request: 'complete both tasks',
+    onEvent: (event) => streamEvents.push(event)
+  });
+
+  assert.equal(result.status, 'FAILED');
+  assert.equal(result.verification_status, 'PASSED');
+  assert.match(result.summary, /1 planned task\(s\) did not succeed: required \(SKIPPED\)/);
+  assert.equal(result.errors[0].code, 'INCOMPLETE_PLAN');
+
+  assert.equal(
+    streamEvents.some((event) => event.type === 'director_task' && event.status === 'SKIPPED' && event.taskId === 'required'),
+    true,
+    'the skipped required task must be visible in the event stream'
+  );
+  assert.equal(
+    streamEvents.some((event) => event.type === 'director_complete' && event.status === 'SUCCEEDED'),
+    false,
+    'a partially executed plan must never emit a success terminal event'
+  );
+  assert.equal(
+    streamEvents.some((event) => event.type === 'director_complete' && event.status === 'FAILED'),
+    true,
+    'verification may finish, but overall completion must report the incomplete plan as failed'
+  );
+  assert.equal(
+    director._testEvents.some((event) => event[0] === 'taskStatus' && event[2] === 'FAILED'),
+    true,
+    'the supervisor task must be persisted as FAILED when the plan is incomplete'
+  );
+});

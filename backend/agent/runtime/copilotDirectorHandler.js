@@ -251,6 +251,12 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
     let message;
     if (canceled) {
       message = `⏹️ Director run canceled — ${taskCount} task(s) processed, ${filesWritten} file(s) had changed before the stop.`;
+    } else if (result?.status === 'FAILED') {
+      const failureSummary = String(result.summary || result.message || 'The requested plan did not complete successfully.').trim();
+      message = `⚠️ Copilot Director did not complete the full plan — ${failureSummary}`;
+      if (filesWritten > 0) {
+        message += ` ${filesWritten} file(s) changed before completion was marked failed.`;
+      }
     } else if (filesWritten > 0) {
       const shown = changedPaths.slice(0, 6).join(', ');
       const more = filesWritten > 6 ? ` +${filesWritten - 6} more` : '';

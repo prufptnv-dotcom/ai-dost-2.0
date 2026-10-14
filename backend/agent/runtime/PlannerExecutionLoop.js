@@ -1,3 +1,15 @@
+function assertToolOutputSucceeded(toolName, output) {
+  if (!output || typeof output !== 'object' || output.success !== false) return output;
+
+  const rawDetail = output.error || output.message || 'tool returned success:false';
+  const code = typeof output.code === 'string' ? output.code.trim() : '';
+  const detail = code && !String(rawDetail).includes(code) ? `${code}: ${rawDetail}` : rawDetail;
+  const error = new Error(`${toolName} reported failure: ${String(detail).slice(0, 1000)}`);
+  if (code) error.code = code;
+  error.toolOutputFailure = true;
+  throw error;
+}
+
 class PlannerExecutionLoop {
   constructor({ contextAssembler, taskPlanner, executionController, toolRegistry, agentTaskDao, agentRunDao }) {
     this.contextAssembler = contextAssembler;
@@ -138,7 +150,8 @@ class PlannerExecutionLoop {
             step.id, stepDef.tool, stepDef.input, context, this.toolRegistry
           );
           cancelGuard();
-          await this.executionController.recordObservation(step.id, 'TOOL_OUTPUT', output);
+          assertToolOutputSucceeded(stepDef.tool, output);
+await this.executionController.recordObservation(step.id, 'TOOL_OUTPUT', output);
           await this.executionController.completeStep(step.id, 'SUCCEEDED', output);
           if (context && typeof context.onEvent === 'function') {
             context.onEvent({
@@ -192,9 +205,10 @@ class PlannerExecutionLoop {
             };
           }
           if (repairAttempts >= maxRepairs) {
-            await this.executionController.completeRun(runId, 'FAILED', `Step ${step.id} failed: max repairs reached.`);
+            const failureReason = `Max repairs reached for ${stepDef.tool}: ${err.message}`;
+            await this.executionController.completeRun(runId, 'FAILED', `Step ${step.id} failed: ${failureReason}`);
             this.agentTaskDao.updateStatus(taskId, 'FAILED');
-            return { status: 'FAILED', reason: 'Max repairs reached' };
+            return { status: 'FAILED', reason: failureReason };
           }
           repairAttempts++;
           const repairPlan = await this.taskPlanner.generateRepairPlan(stepDef, err.message, context);
@@ -327,16 +341,18 @@ class PlannerExecutionLoop {
               step.id, stepDef.tool, stepDef.input, context, this.toolRegistry
             );
             
-            await this.executionController.recordObservation(step.id, 'TOOL_OUTPUT', output);
+            assertToolOutputSucceeded(stepDef.tool, output);
+await this.executionController.recordObservation(step.id, 'TOOL_OUTPUT', output);
             await this.executionController.completeStep(step.id, 'SUCCEEDED', output);
           } catch (err) {
             await this.executionController.recordObservation(step.id, 'TOOL_ERROR', err.message);
             await this.executionController.completeStep(step.id, 'FAILED', null, err.message);
             
             if (repairAttempts >= maxRepairs) {
-              await this.executionController.completeRun(runId, 'FAILED', `Step ${step.id} failed: max repairs reached.`);
+              const failureReason = `Max repairs reached for ${stepDef.tool}: ${err.message}`;
+              await this.executionController.completeRun(runId, 'FAILED', `Step ${step.id} failed: ${failureReason}`);
               this.agentTaskDao.updateStatus(taskId, 'FAILED');
-              return { runId, status: 'FAILED', reason: 'Max repairs reached' };
+              return { runId, status: 'FAILED', reason: failureReason };
             }
             
             repairAttempts++;
