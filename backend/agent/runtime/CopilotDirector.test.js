@@ -181,6 +181,41 @@ test('createPlan preserves the existing cascade call when preferred model is aut
   assert.equal(callArgs.length, 3);
 });
 
+test('run propagates explicit preferred model to plan creation and worker execution', async () => {
+  const plan = {
+    summary: 'model propagation',
+    tasks: [{
+      id: 'frontend',
+      specialty: 'frontend',
+      role: 'CODER',
+      objective: 'Build UI',
+      dependsOn: [],
+      expectedOutput: 'Working UI',
+    }],
+  };
+  const director = createExecutionHarness({ plan });
+  let planArgs = null;
+  let workerPreferredModel = null;
+  director.createPlan = async (...args) => {
+    planArgs = args;
+    return plan;
+  };
+  director.executeWorker = async (args) => {
+    workerPreferredModel = args.preferredModel;
+    return { status: 'SUCCEEDED', result: { artifact_refs: [] } };
+  };
+
+  const result = await director.run({
+    userId: 'user-1',
+    projectId: 'project-1',
+    request: 'Build a dashboard',
+    preferredModel: 'groq',
+  });
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(planArgs[2], 'groq');
+  assert.equal(workerPreferredModel, 'groq');
+});
+
 test('run executes dependency-ordered tasks and emits completion events', async () => {
   const order = [];
   const plan = {
