@@ -28,12 +28,13 @@ class ContextBudgetManager {
     // Sanitize allocation overrides and normalize them when their total exceeds
     // 100%; malformed configuration must never let optional context exceed budget.
     const defaultAllocation = {
-      workspace: 0.30,
-      conversation: 0.20,
-      memory: 0.15,
-      retrieval: 0.15,
-      artifact: 0.10,
-      execution_history: 0.10
+      workspace: 0.28,
+      conversation: 0.18,
+      memory: 0.14,
+      retrieval: 0.14,
+      artifact: 0.08,
+      execution_history: 0.08,
+      verification: 0.10
     };
     const configuredAllocation = config.allocation && typeof config.allocation === 'object' && !Array.isArray(config.allocation)
       ? config.allocation
@@ -238,7 +239,8 @@ class ContextBudgetManager {
       MEMORY: [],
       RETRIEVAL: [],
       ARTIFACT: [],
-      EXECUTION_HISTORY: []
+      EXECUTION_HISTORY: [],
+      VERIFICATION: []
     };
     const otherOptional = [];
 
