@@ -265,6 +265,26 @@ describe('sandboxManager path safety', () => {
     assert.ok(out.endsWith('sub\\dir\\file.txt'));
   });
 
+  if (process.platform !== 'win32') {
+    test('preserves symlink escape checks for POSIX double-slash roots', () => {
+      const fs = require('node:fs');
+      const os = require('node:os');
+      const path = require('node:path');
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-dost-sandbox-root-'));
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-dost-sandbox-outside-'));
+      try {
+        fs.symlinkSync(outside, path.join(root, 'escape'), 'dir');
+        assert.throws(
+          () => sandboxManager._resolveSafe(`/${root}`, 'escape/secret.txt'),
+          /symlink escape blocked/i
+        );
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+        fs.rmSync(outside, { recursive: true, force: true });
+      }
+    });
+  }
+
   test('parseMemory caps memory at 2GB and computes units', () => {
     assert.equal(sandboxManager.parseMemory('512m'), 512 * 1024 * 1024);
     assert.equal(sandboxManager.parseMemory('1g'), 1024 * 1024 * 1024);
