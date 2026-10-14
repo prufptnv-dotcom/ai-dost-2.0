@@ -62,6 +62,7 @@ jobs:
           node - <<'NODE'
           const assert = require('node:assert/strict');
           const ExcelJS = require('exceljs');
+          const { Readable } = require('node:stream');
           (async () => {
             const workbook = new ExcelJS.Workbook();
             const sheet = workbook.addWorksheet('Compatibility');
@@ -74,7 +75,7 @@ jobs:
             assert.equal(parsed.getWorksheet('Compatibility').getCell('B2').value, 3);
             const csv = await parsed.csv.writeBuffer({ sheetName: 'Compatibility' });
             const csvWorkbook = new ExcelJS.Workbook();
-            await csvWorkbook.csv.read(Buffer.from(csv));
+            await csvWorkbook.csv.read(Readable.from([Buffer.from(csv)]));
             assert.equal(csvWorkbook.worksheets[0].getCell('A2').value, 'alpha');
             assert.equal(Number(csvWorkbook.worksheets[0].getCell('B2').value), 3);
             console.log('XLSX write/read and CSV write/read round trips passed.');
