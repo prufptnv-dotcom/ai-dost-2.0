@@ -369,7 +369,7 @@ class CopilotDirector {
     const results = [];
     const markCancelled = (reason = 'Task canceled by user') => {
       this.agentTaskDao.updateStatus(supervisorTaskId, 'CANCELLED');
-      this.agentRunDao.updateStatus(supervisorRunId, 'CANCELLED', reason);
+      this.agentRunDao.updateStatus(supervisorRunId, 'CANCELLED', reason, null, new Date().toISOString());
       return { status: 'CANCELLED', taskId: supervisorTaskId, runId: supervisorRunId, plan, results };
     };
     onEvent({ type: 'director_plan', status: 'PLANNED', summary: plan.summary, taskCount: plan.tasks.length, tasks: plan.tasks.map(({ id, specialty, role, dependsOn }) => ({ id, specialty, role, dependsOn })) });
