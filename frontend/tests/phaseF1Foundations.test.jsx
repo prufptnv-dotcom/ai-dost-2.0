@@ -98,6 +98,7 @@ describe('Phase F1 — Interaction Foundations Behavioral Tests', () => {
 
       const confirmBtn = screen.getByRole('button', { name: 'Reset to Defaults' });
       fireEvent.click(confirmBtn);
+      await flushSettingsInitialEffects();
 
       expect(screen.queryByText('Reset All Settings')).not.toBeInTheDocument();
     });
