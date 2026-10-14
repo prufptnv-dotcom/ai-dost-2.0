@@ -161,7 +161,8 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
       expect(await screen.findByText('Run stopped by test harness')).toBeInTheDocument();
-      await waitFor(() => expect(submitBtn).toBeEnabled());
+      await waitFor(() => expect(screen.queryByTitle('Stop agent run')).not.toBeInTheDocument());
+      expect(screen.getByLabelText(/send message/i)).toBeDisabled();
       expect(screen.queryByText(/Working through your request/i)).not.toBeInTheDocument();
     } finally {
       global.fetch = previousFetch;
