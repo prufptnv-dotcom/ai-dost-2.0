@@ -51,6 +51,7 @@ jobs:
             ...(pkg.overrides['archiver-utils'] || {}),
             glob: '^13.0.0'
           };
+          pkg.overrides['@fast-csv/format'] = '^5.0.8';
           fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           NODE
           npm install --package-lock-only --ignore-scripts --no-audit
@@ -82,6 +83,16 @@ jobs:
           const glob = require(require.resolve('glob/package.json', { paths: [archiverUtils] }));
           assert.match(glob.version, /^13\./, `Expected glob 13.x, got ${glob.version}`);
           console.log(`archiver-utils glob resolved to ${glob.version}`);
+          NODE
+
+      - name: Verify fast-csv formatter v5 removes lodash.isequal dependency
+        run: |
+          npm ls @fast-csv/format lodash.isequal --all || true
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const formatter = require('@fast-csv/format/package.json');
+          assert.match(formatter.version, /^5\\./, `Expected @fast-csv/format 5.x, got ${formatter.version}`);
+          console.log(`@fast-csv/format resolved to ${formatter.version}`);
           NODE
 
       - name: XLSX read/write and CSV round-trip smoke test
