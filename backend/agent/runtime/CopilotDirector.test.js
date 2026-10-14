@@ -126,6 +126,61 @@ function createExecutionHarness({ plan, workerStatuses = ['SUCCEEDED'], verifica
   return director;
 }
 
+test('createPlan forwards an explicit preferred model to the planner cascade', async () => {
+  let callArgs = null;
+  const director = new CopilotDirector({
+    aiService: {
+      chat: async (...args) => {
+        callArgs = args;
+        return JSON.stringify({
+          summary: 'model preference plan',
+          tasks: [{
+            id: 'build-ui',
+            specialty: 'frontend',
+            role: 'CODER',
+            objective: 'Build the requested UI',
+            dependsOn: [],
+            expectedOutput: 'Working UI',
+          }],
+        });
+      },
+    },
+    coordinator: {},
+  });
+
+  const plan = await director.createPlan('Build a dashboard', { projectId: 'project-1' }, 'gemini');
+  assert.equal(callArgs[2], 'planner');
+  assert.equal(callArgs[4], 'gemini');
+  assert.equal(plan.tasks.length, 1);
+});
+
+test('createPlan preserves the existing cascade call when preferred model is auto', async () => {
+  let callArgs = null;
+  const director = new CopilotDirector({
+    aiService: {
+      chat: async (...args) => {
+        callArgs = args;
+        return JSON.stringify({
+          summary: 'auto plan',
+          tasks: [{
+            id: 'build-ui',
+            specialty: 'frontend',
+            role: 'CODER',
+            objective: 'Build the requested UI',
+            dependsOn: [],
+            expectedOutput: 'Working UI',
+          }],
+        });
+      },
+    },
+    coordinator: {},
+  });
+
+  await director.createPlan('Build a dashboard', { projectId: 'project-1' }, 'auto');
+  assert.equal(callArgs[2], 'planner');
+  assert.equal(callArgs.length, 3);
+});
+
 test('run executes dependency-ordered tasks and emits completion events', async () => {
   const order = [];
   const plan = {
