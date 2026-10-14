@@ -141,7 +141,7 @@ async function runOne(config) {
   const terminalEvents = events.filter((event) => ['done', 'director_complete'].includes(event.type));
   const providerModelObservations = events
     .filter((event) => event && (event.provider || event.model))
-    .map((event) => ({ provider: event.provider || null, model: event.model || null, type: event.type || null }));
+    .map((event) => ({ provider: event.provider || null, providerName: event.providerName || null, model: event.model || null, type: event.type || null }));
   const projectFiles = [];
   const walk = (current, relative) => {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
@@ -174,7 +174,8 @@ async function runOne(config) {
       requestedCopilotDirector: true,
       permissionLevel: 'auto',
       actualProviderModelObservations: providerModelObservations,
-      note: 'Preferred model is a provider preference, not proof of actual model. Inspect events.ndjson for fallback details.',
+      actualModelIdentityStatus: providerModelObservations.some((item) => item.model) ? 'OBSERVED' : 'NOT_EXPOSED_BY_GENERATION_EVENT',
+      note: 'The generation_provider event identifies the successful scaffold provider. Exact model identity and failed fallback attempts may require backend logs; do not infer them from preferredModel.',
     },
     startedAt,
     finishedAt,
