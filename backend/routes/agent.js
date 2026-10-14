@@ -1190,8 +1190,52 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
             onProgress({ type: 'agent_status', agent: 'Vision QA', message: verdict });
           }
 
-          // All tasks completed
-          todoList.forEach(t => { t.status = 'completed'; });
+          // Build/render smoke is not the same as requirement-level acceptance.
+          // Keep quality status conservative until every AC has real passing evidence.
+          const runtimeSmokePassed = verification?.ok === true
+            && rt.ok === true
+            && !rt.unverified
+            && !rt.unavailable;
+          const acceptanceVerification = (appSpecification?.acceptanceCriteria || []).map((criterion) => ({
+            id: criterion.id,
+            title: criterion.title,
+            requirementIds: Array.isArray(criterion.requirementIds) ? criterion.requirementIds : [],
+            check: criterion.check,
+            status: 'NOT_EVALUATED',
+            evidence: null,
+            note: 'No requirement-specific functional/browser evidence was collected by this generation flow.',
+          }));
+          let qualityStatus;
+          let qualityStatusReason;
+          if (!runtimeSmokePassed) {
+            qualityStatus = rt.unverified || rt.unavailable || !verification ? 'UNVERIFIED' : 'FAILED';
+            qualityStatusReason = qualityStatus === 'UNVERIFIED'
+              ? 'The build/runtime gate did not produce enough evidence to determine application behavior.'
+              : 'The build/runtime gate failed; inspect the captured command and browser evidence.';
+          } else if (generationSource === 'golden-scaffold-fallback') {
+            qualityStatus = 'PARTIAL';
+            qualityStatusReason = 'The fallback scaffold rendered, but it is not proof that the requested application was implemented.';
+          } else if (featurePreflight.missingAfter.length > 0) {
+            qualityStatus = 'PARTIAL';
+            qualityStatusReason = 'The bounded completion pass ran, but recognizable source signals remain missing for explicit feature requirements. These are diagnostic warnings, not proof of behavior.';
+          } else {
+            qualityStatus = 'UNVERIFIED';
+            qualityStatusReason = 'Build/render smoke passed and no missing source signals were detected, but requirement-level interactions were not executed.';
+          }
+
+          // Generation tasks may be complete; the final QA task must not be
+          // marked complete when requirement acceptance remains unverified.
+          todoList.forEach((task, index) => {
+            if (index < todoList.length - 1) {
+              task.status = 'completed';
+            } else if (qualityStatus === 'SUCCEEDED') {
+              task.status = 'completed';
+            } else if (qualityStatus === 'FAILED') {
+              task.status = 'error';
+            } else {
+              task.status = 'unverified';
+            }
+          });
           if (onProgress) onProgress({ type: 'plan_tasks', tasks: [...todoList] });
 
           const projectTitle = String(appSpecification?.archetype?.label || category || 'Generated project')
@@ -1205,9 +1249,17 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
                 `- **${requirement.id} — ${requirement.name}**${requirement.sourceText && requirement.id !== 'REQ-001' ? `: ${requirement.sourceText}` : ''}`
               ).join('\n')
             : '- Specification extraction was unavailable; the original prompt remains the source of truth.';
-          const acceptanceReport = (appSpecification?.acceptanceCriteria || []).map((criterion) =>
-            `- **${criterion.id} — ${criterion.title}:** ${criterion.check}`
+          const acceptanceReport = acceptanceVerification.map((criterion) =>
+            `- **${criterion.id} — ${criterion.title} [${criterion.status}]:** ${criterion.check}`
           ).join('\n');
+          const featurePreflightReport = [
+            `- Targeted completion attempted: **${featurePreflight.attempted ? 'YES' : 'NO'}**`,
+            `- Missing feature signals before pass: **${featurePreflight.missingBefore.length}**`,
+            `- Missing feature signals after pass: **${featurePreflight.missingAfter.length}**`,
+            ...(featurePreflight.missingAfter.length ? featurePreflight.missingAfter.map((item) => `  - ${item.requirementId} — ${item.name}: source signal not found`) : []),
+            ...(featurePreflight.skippedReason ? [`- Completion-pass note: ${featurePreflight.skippedReason}`] : []),
+            '- This is a static source-text diagnostic only; it does not prove a feature works.',
+          ].join('\n');
           const clauseCoverageNote = appSpecification?.explicitCoverage?.unrepresentedClauses?.length
             ? `\n\n**⚠️ Explicit prompt clauses need follow-up:**\n${appSpecification.explicitCoverage.unrepresentedClauses.map((clause) => `- ${clause}`).join('\n')}`
             : '';
@@ -1218,6 +1270,16 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
 
 #### 🧰 Generation Mode
 ${generationModeReport}
+
+#### 📊 Output Quality Status
+**${qualityStatus}** — ${qualityStatusReason}
+
+- Build/runtime smoke: **${runtimeSmokePassed ? 'PASS' : (rt.unverified || rt.unavailable ? 'UNVERIFIED' : 'FAIL')}**
+- Requirement-level acceptance: **NOT_EVALUATED** until real user-flow checks produce evidence.
+- `verified` remains the runtime-smoke compatibility field; it must not be interpreted as proof of full feature correctness.
+
+#### 🔎 Feature Completeness Preflight (diagnostic only)
+${featurePreflightReport}
 
 #### 📋 Requirements Tracked (not proof of implementation)
 ${requirementsReport}
@@ -1255,7 +1317,12 @@ ${verification?.ok
           // optimistic "done".
           return {
             success: true,
-            verified: Boolean(verification?.ok),
+            verified: runtimeSmokePassed,
+            runtimeVerified: runtimeSmokePassed,
+            qualityStatus,
+            qualityStatusReason,
+            acceptanceVerification,
+            featurePreflight,
             generationSource,
             verification,
             install: installResult,
