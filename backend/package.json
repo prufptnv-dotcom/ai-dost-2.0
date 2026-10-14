@@ -55,6 +55,9 @@
       "archiver": "^7.0.0",
       "unzipper": "^0.12.5"
     },
-    "image-size": "^2.0.4"
+    "image-size": "^2.0.4",
+    "archiver-utils": {
+      "glob": "^13.0.0"
+    }
   }
 }
