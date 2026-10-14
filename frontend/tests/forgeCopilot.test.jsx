@@ -152,8 +152,14 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
       expect(screen.getByText('Add hero glow animation')).toBeInTheDocument();
       expect(screen.getByText(/Working through your request/i)).toBeInTheDocument();
 
-      // Release the stream only after asserting the intermediate working state.
-      resolveStreamRead({ done: false, value: Buffer.from(payload) });
+      // Release the stream in act and allow the async project refresh and
+      // submitPrompt finally block to settle before assertions/teardown.
+      await act(async () => {
+        resolveStreamRead({ done: false, value: Buffer.from(payload) });
+        await Promise.resolve();
+        await Promise.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
       expect(await screen.findByText('Run stopped by test harness')).toBeInTheDocument();
       await waitFor(() => expect(submitBtn).toBeEnabled());
       expect(screen.queryByText(/Working through your request/i)).not.toBeInTheDocument();
