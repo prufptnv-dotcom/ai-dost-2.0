@@ -25,16 +25,30 @@ class ContextBudgetManager {
       ? Math.floor(requestedCharLimit)
       : 240;
 
-    // Default configurable allocations
-    this.allocation = {
+    // Sanitize allocation overrides and normalize them when their total exceeds
+    // 100%; malformed configuration must never let optional context exceed budget.
+    const defaultAllocation = {
       workspace: 0.30,
       conversation: 0.20,
       memory: 0.15,
       retrieval: 0.15,
       artifact: 0.10,
-      execution_history: 0.10,
-      ...config.allocation
+      execution_history: 0.10
     };
+    const configuredAllocation = config.allocation && typeof config.allocation === 'object' && !Array.isArray(config.allocation)
+      ? config.allocation
+      : {};
+    this.allocation = Object.fromEntries(Object.entries(defaultAllocation).map(([category, fallback]) => {
+      const supplied = configuredAllocation[category];
+      const numeric = supplied == null ? NaN : Number(supplied);
+      return [category, Number.isFinite(numeric) ? Math.max(0, numeric) : fallback];
+    }));
+    const allocationTotal = Object.values(this.allocation).reduce((sum, value) => sum + value, 0);
+    if (allocationTotal > 1) {
+      for (const category of Object.keys(this.allocation)) {
+        this.allocation[category] /= allocationTotal;
+      }
+    }
 
     // Priority multipliers for scoring Optional context
     this.PRIORITY = {
@@ -106,7 +120,9 @@ class ContextBudgetManager {
     // The previous fallback was always 10, disabling relevance-based pruning.
     const score = Number(finalScore);
     if (!Number.isFinite(score)) return 1;
-    return Math.max(1, Math.min(10, 1 + Math.round(Math.max(0, Math.min(1, score)) * 9)));
+    // Authority defaults to 0.5 for canonical context sources; map that
+    // midpoint to full importance when all other factors are strong.
+    return Math.max(1, Math.min(10, 1 + Math.round(Math.max(0, Math.min(1, score)) * 18)));
   }
 
   summarize(content) {
@@ -265,7 +281,10 @@ class ContextBudgetManager {
     const pickForCategory = (catItems, allocatedBudget) => {
       let catTokens = 0;
       for (const item of catItems) {
-        if (catTokens + item.estimated_tokens <= allocatedBudget) {
+        if (
+          catTokens + item.estimated_tokens <= allocatedBudget &&
+          item.estimated_tokens <= remainingBudget
+        ) {
           selectedOptional.push(item);
           catTokens += item.estimated_tokens;
           remainingBudget -= item.estimated_tokens;
