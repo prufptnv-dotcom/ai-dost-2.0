@@ -2175,12 +2175,14 @@ function SkillsPage({ onToast }) {
   const [loading, setLoading] = useState(false);
 
   // Fetch real skills from backend
-  const fetchBackendSkills = useCallback(async () => {
+  const fetchBackendSkills = useCallback(async (isActive = () => true) => {
     try {
-      setLoading(true);
+      if (isActive()) setLoading(true);
       const res = await fetch(`${BACKEND}/api/skills`);
+      if (!isActive()) return;
       if (res.ok) {
         const data = await res.json();
+        if (!isActive()) return;
         if (data?.skills && Array.isArray(data.skills) && data.skills.length > 0) {
           const mapped = data.skills.map((s) => ({
             id: s.id,
@@ -2199,13 +2201,17 @@ function SkillsPage({ onToast }) {
           });
         }
       }
-    } catch (_) {} finally {
-      setLoading(false);
+    } catch (_) {
+      /* Skills remain available from the local manifest when offline. */
+    } finally {
+      if (isActive()) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchBackendSkills();
+    let active = true;
+    fetchBackendSkills(() => active);
+    return () => { active = false; };
   }, [fetchBackendSkills]);
 
   const toggleSkill = (id) => {
@@ -2561,17 +2567,21 @@ export default function ForgeCopilot({
   }, []);
 
   // Load real project list
-  const loadProjects = useCallback(async () => {
+  const loadProjects = useCallback(async (isActive = () => true) => {
     try {
       const list = await fetchProjects('default');
-      if (Array.isArray(list)) {
+      // Async requests can outlive a closed Forge view. Avoid scheduling React
+      // updates after its effect has been cleaned up.
+      if (isActive() && Array.isArray(list)) {
         setProjectList(list);
       }
     } catch (_) {}
   }, []);
 
   useEffect(() => {
-    loadProjects();
+    let active = true;
+    loadProjects(() => active);
+    return () => { active = false; };
   }, [loadProjects]);
 
   // Load theme preferences
@@ -2592,9 +2602,10 @@ export default function ForgeCopilot({
   }, [theme, customColor]);
 
   // Load real project data & files from backend
-  const loadProjectData = useCallback(async () => {
+  const loadProjectData = useCallback(async (isActive = () => true) => {
     try {
       const data = await fetchProject(currentProjectId);
+      if (!isActive()) return [];
       if (!data) return [];
       if (data.name || data.project_name) {
         setProjectName(displayProjectName(data.name || data.project_name, currentProjectId));
@@ -2613,13 +2624,17 @@ export default function ForgeCopilot({
       }
       return fileList;
     } catch (err) {
-      console.warn('Could not load project files from backend:', err?.message);
+      if (isActive()) {
+        console.warn('Could not load project files from backend:', err?.message);
+      }
       return null;
     }
   }, [currentProjectId, activeFile]);
 
   useEffect(() => {
-    loadProjectData();
+    let active = true;
+    loadProjectData(() => active);
+    return () => { active = false; };
   }, [loadProjectData]);
 
   // Check Dev Server status

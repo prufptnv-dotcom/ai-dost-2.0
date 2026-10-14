@@ -49,10 +49,17 @@ function fmt(totalSeconds) {
   return `${m}:${sec}`;
 }
 
+function reloadCurrentPage() {
+  if (typeof window !== 'undefined' && typeof window.location?.reload === 'function') {
+    window.location.reload();
+  }
+}
+
 export default function CopilotAurora({
   projectId = 'default',
   projectName = 'Untitled project',
   onToast,
+  reloadPage = reloadCurrentPage,
 }) {
   const run = useAuroraRun({ projectId, onToast });
   const [input, setInput] = useState('');
@@ -149,14 +156,14 @@ export default function CopilotAurora({
     } catch (_) {
       /* private mode: flag just won't persist */
     }
-    if (typeof window !== 'undefined' && typeof window.location?.reload === 'function') {
-      try {
-        window.location.reload();
-      } catch (_) {
-        /* jsdom: reload is not implemented — flag write above is the contract */
-      }
+    // Keep navigation injectable: production reloads the page, while jsdom
+    // tests can assert preference persistence without invoking unsupported navigation.
+    try {
+      if (typeof reloadPage === 'function') reloadPage();
+    } catch (_) {
+      /* The UI flag has already been persisted; navigation can be retried by the host. */
     }
-  }, []);
+  }, [reloadPage]);
 
   // A5: @file mention suggestions (lib/copilotMentions — shared with classic).
   const mentionMatches = useMemo(() => {

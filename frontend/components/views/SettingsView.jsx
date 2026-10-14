@@ -53,12 +53,13 @@ export default function SettingsView({ onToast, onModelChange }) {
   const [testingSandbox, setTestingSandbox] = useState(false);
   const [testResult, setTestResult] = useState(null);
 
-  const fetchSandboxStatus = async () => {
+  const fetchSandboxStatus = async (isActive = () => true) => {
     try {
       const res = await api.get('/sandbox/health');
-      if (res.data) setSandboxStatus(res.data);
+      if (isActive() && res.data) setSandboxStatus(res.data);
     } catch {
-      // Fallback display if offline
+      // Fallback display if offline; avoid updating a closed settings view.
+      if (!isActive()) return;
       setSandboxStatus({
         engine: 'local-hardened-fallback',
         dockerAvailable: false,
@@ -74,7 +75,8 @@ export default function SettingsView({ onToast, onModelChange }) {
   };
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined') return undefined;
+    let active = true;
     // #102: API keys live server-side now — legacy plaintext is migrated +
     // purged from localStorage; inputs start empty and show masked placeholders.
     setKeys((prev) => ({
@@ -84,10 +86,13 @@ export default function SettingsView({ onToast, onModelChange }) {
     setModel(localStorage.getItem('ai_dost_model') || 'auto');
     setAutosave(localStorage.getItem('ai_dost_autosave') !== 'false');
     migrateLegacySecrets().then((status) => {
-      if (status) setSecretStatus(status);
+      if (active && status) setSecretStatus(status);
+    }).catch(() => {
+      /* Secret migration is best-effort; the server remains authoritative. */
     });
 
-    fetchSandboxStatus();
+    fetchSandboxStatus(() => active);
+    return () => { active = false; };
   }, []);
 
   const saveSettings = async () => {

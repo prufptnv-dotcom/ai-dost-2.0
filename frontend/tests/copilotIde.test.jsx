@@ -10,6 +10,21 @@ import { PackagesModal } from '../components/ide/PackagesModal';
 import { SecretsModal } from '../components/ide/SecretsModal';
 import CopilotHistoryModal from '../components/views/CopilotHistoryModal';
 
+// Keep the AI inspector deterministic and offline in this UI suite. The
+// component's verification request is tested as a UI state transition here;
+// backend behavior belongs in API integration tests.
+jest.mock('../services/api', () => ({
+  __esModule: true,
+  default: {
+    post: jest.fn().mockResolvedValue({
+      data: {
+        success: true,
+        report: { verified: true, score: 100, checks: [], diagnostics: [] }
+      }
+    })
+  }
+}));
+
 describe('Phase 3.6 — Copilot IDE & Monaco Editor Chrome Rebuild', () => {
   describe('FileExplorer', () => {
     const mockFiles = [
@@ -166,9 +181,9 @@ describe('Phase 3.6 — Copilot IDE & Monaco Editor Chrome Rebuild', () => {
       expect(screen.getByText('Quality & Verification')).toBeInTheDocument();
       expect(screen.getByText(/Syntax Parser/i)).toBeInTheDocument();
       expect(screen.getByText('Secret Shield')).toBeInTheDocument();
-      await waitFor(() => {
-        expect(screen.getByText(/Verify Code Quality|Verifying/i)).toBeInTheDocument();
-      });
+      // Wait for the async verification request to settle so its state
+      // updates stay inside the test's awaited React work.
+      await screen.findByText('Verify Code Quality');
     });
   });
 

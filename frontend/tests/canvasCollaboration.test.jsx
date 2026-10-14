@@ -108,6 +108,7 @@ describe('Pillar 3: Real-Time Collaborative Canvas Components', () => {
 
       const copyBtn = screen.getByRole('button', { name: /Copy/i });
       fireEvent.click(copyBtn);
+      await screen.findByText('Copied!');
       expect(navigator.clipboard.writeText).toHaveBeenCalled();
     });
 
