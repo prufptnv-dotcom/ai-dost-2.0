@@ -59,3 +59,24 @@ Report per-case and aggregate results, with run count and failures:
 - Cost/latency and actual model/provider settings, when available.
 
 Do not claim improvement if the evidence is missing, test conditions differ without disclosure, or only the static diagnostic changes. Phase 1 remains **IN PROGRESS** until representative baseline/candidate outputs and runtime evidence are reviewed. Passing repository CI is necessary but does not satisfy this exit gate.
+
+
+## Generation-time feature preflight (diagnostic, not a pass)
+
+The full-stack generation route now audits generated source for recognizable signals corresponding to known, explicitly requested feature requirements. If one or more signals are missing, it makes **one bounded targeted completion attempt** using the original specification and the first-pass files, then records the remaining signals. This is a repair trigger only: source text can occur in comments/dead code, and different valid implementations can use different names.
+
+Every generated result now carries an explicit output-quality status:
+
+- `SUCCEEDED`: reserved for evidence-backed requirement acceptance checks; a build/render smoke alone cannot produce this status.
+- `PARTIAL`: the fallback scaffold was used or the preflight still found likely missing feature signals.
+- `UNVERIFIED`: build/render may have passed, but request-specific interactions have not been exercised with evidence.
+- `FAILED`: the real build/runtime verification failed.
+
+The generated report keeps each acceptance criterion at `NOT_EVALUATED` until a requirement-specific check and its evidence are actually recorded. The Copilot plan UI must preserve `PARTIAL` / `UNVERIFIED` rather than turning the final QA step green simply because the generation process ended.
+
+## Remaining Phase 1 exit blockers
+
+- Run all four canonical cases against the same baseline and candidate configuration at least three times per case.
+- Preserve complete generated projects, actual provider/model settings, build and browser logs, screenshots at 360/768/1280px, and cost/latency where available.
+- Execute requirement-specific user flows; the source-signal preflight and repository CI do not count as behavior evidence.
+- Compare baseline/candidate artifacts and complete the blind human UX review. Until this is done, Phase 1 remains **IN PROGRESS**.
