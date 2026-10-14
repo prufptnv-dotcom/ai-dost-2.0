@@ -74,6 +74,9 @@ class DependencyGraph {
         if (!normalizedPath) return [];
 
         const affected = new Set();
+        // Mark the start node visited up front so a dependency cycle never
+        // reports the changed file as its own affected dependent.
+        const visited = new Set([normalizedPath]);
         const queue = [normalizedPath];
         // An index avoids Array.shift(), whose repeated reindexing becomes quadratic
         // for large dependency graphs.
@@ -83,7 +86,8 @@ class DependencyGraph {
             if (!node) continue;
 
             for (const dependent of node.dependents) {
-                if (!affected.has(dependent)) {
+                if (!visited.has(dependent)) {
+                    visited.add(dependent);
                     affected.add(dependent);
                     queue.push(dependent);
                 }
