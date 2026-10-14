@@ -378,15 +378,17 @@ test('run fails closed when a required planned task is skipped after delegation 
   };
   const streamEvents = [];
 
-  await assert.rejects(
-    director.run({
-      userId: 'user-1',
-      projectId: 'project-1',
-      request: 'complete both tasks',
-      onEvent: (event) => streamEvents.push(event)
-    }),
-    /1 planned task\(s\) did not succeed: required \(SKIPPED\)/
-  );
+  const result = await director.run({
+    userId: 'user-1',
+    projectId: 'project-1',
+    request: 'complete both tasks',
+    onEvent: (event) => streamEvents.push(event)
+  });
+
+  assert.equal(result.status, 'FAILED');
+  assert.equal(result.verification_status, 'PASSED');
+  assert.match(result.summary, /1 planned task\\(s\\) did not succeed: required \\(SKIPPED\\)/);
+  assert.equal(result.errors[0].code, 'INCOMPLETE_PLAN');
 
   assert.equal(
     streamEvents.some((event) => event.type === 'director_task' && event.status === 'SKIPPED' && event.taskId === 'required'),
@@ -397,6 +399,11 @@ test('run fails closed when a required planned task is skipped after delegation 
     streamEvents.some((event) => event.type === 'director_complete' && event.status === 'SUCCEEDED'),
     false,
     'a partially executed plan must never emit a success terminal event'
+  );
+  assert.equal(
+    streamEvents.some((event) => event.type === 'director_complete' && event.status === 'FAILED'),
+    true,
+    'verification may finish, but overall completion must report the incomplete plan as failed'
   );
   assert.equal(
     director._testEvents.some((event) => event[0] === 'taskStatus' && event[2] === 'FAILED'),
