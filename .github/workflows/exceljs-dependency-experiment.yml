@@ -1,0 +1,104 @@
+name: ExcelJS dependency compatibility experiment
+
+on:
+  push:
+    branches:
+      - 'experiment/**'
+    paths:
+      - '.github/workflows/exceljs-dependency-experiment.yml'
+      - 'backend/**'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - '.github/workflows/exceljs-dependency-experiment.yml'
+      - 'backend/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exceljs-compatibility:
+    name: ExcelJS scoped override compatibility (Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      # Experiment only: mutate package.json and regenerate the lockfile inside
+      # the ephemeral runner. No package/lockfile changes are committed by this workflow.
+      - name: Apply scoped compatibility overrides
+        run: |
+          npm pkg set 'overrides.exceljs.archiver=^7.0.0' 'overrides.exceljs.unzipper=^0.12.5'
+          npm install --package-lock-only --ignore-scripts --no-audit
+          npm ci --ignore-scripts
+
+      - name: Verify resolved ExcelJS dependency versions
+        run: |
+          npm ls exceljs archiver unzipper --all
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const path = require('node:path');
+          const root = require('./node_modules/exceljs/package.json');
+          const exceljsRoot = path.dirname(require.resolve('exceljs/package.json'));
+          const archiver = require(require.resolve('archiver/package.json', { paths: [exceljsRoot] }));
+          const unzipper = require(require.resolve('unzipper/package.json', { paths: [exceljsRoot] }));
+          assert.equal(root.version, '4.4.0');
+          assert.match(archiver.version, /^7\./, `Expected nested archiver 7.x, got ${archiver.version}`);
+          assert.match(unzipper.version, /^0\.12\./, `Expected nested unzipper 0.12.x, got ${unzipper.version}`);
+          console.log(`ExcelJS ${root.version}; nested archiver ${archiver.version}; nested unzipper ${unzipper.version}`);
+          NODE
+
+      - name: XLSX read/write and CSV round-trip smoke test
+        run: |
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const ExcelJS = require('exceljs');
+          (async () => {
+            const workbook = new ExcelJS.Workbook();
+            const sheet = workbook.addWorksheet('Compatibility');
+            sheet.addRow(['name', 'count']);
+            sheet.addRow(['alpha', 3]);
+            const xlsx = await workbook.xlsx.writeBuffer();
+            const parsed = new ExcelJS.Workbook();
+            await parsed.xlsx.load(xlsx);
+            assert.equal(parsed.getWorksheet('Compatibility').getCell('A2').value, 'alpha');
+            assert.equal(parsed.getWorksheet('Compatibility').getCell('B2').value, 3);
+            const csv = await parsed.csv.writeBuffer({ sheetName: 'Compatibility' });
+            const csvWorkbook = new ExcelJS.Workbook();
+            await csvWorkbook.csv.read(Buffer.from(csv));
+            assert.equal(csvWorkbook.worksheets[0].getCell('A2').value, 'alpha');
+            assert.equal(Number(csvWorkbook.worksheets[0].getCell('B2').value), 3);
+            console.log('XLSX write/read and CSV write/read round trips passed.');
+          })().catch((error) => { console.error(error); process.exitCode = 1; });
+          NODE
+
+      - name: File analysis regression tests
+        run: node --test tests/fileAnalysisEngine.test.js
+
+      - name: Backend unit, integration, security, and runtime tests
+        run: |
+          node --check server.js
+          node --test --test-force-exit tests/unit.test.js tests/integration.test.js tests/mcpClientManager.test.js tests/security-hardening.test.js tests/projectAuthorization.security.test.js tests/ssrf.security.test.js tests/chatTaskEvents.test.js tests/taskCancellation.test.js tests/chatTaskAdapter.test.js tests/chatTaskGateway.identity.test.js tests/chatTaskGateway.idempotency.test.js tests/durableTaskIdempotencyStore.test.js tests/startupParity.test.js tests/codeDiffHardening.test.js
+          node --test agent/runtime/CopilotDirector.test.js agent/runtime/ChatTaskGateway.test.js agent/runtime/ExecutionController.test.js agent/runtime/DurableTaskStore.test.js
+          node --test agent/security/ProductionExecutionGuard.test.js agent/security/ProductionHardeningRuntime.test.js agent/security/ProductionRuntimeIntegration.test.js agent/security/ResourceGuard.test.js tests/orchestratorSecurityBoundary.test.js
+
+      - name: Production dependency audit
+        run: npm audit --omit=dev
+
+      - name: Upload generated lockfile for review
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: exceljs-experiment-generated-lockfile
+          path: backend/package-lock.json
+          if-no-files-found: error
+          retention-days: 7
