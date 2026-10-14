@@ -371,6 +371,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     return () => clearInterval(id);
   }, [running]);
   const [planTasks, setPlanTasks] = useState([]);
+  const outputQualityStatusRef = useRef(null);
   // Devin-style agent mode: ask = answer only (no files), plan = review & edit
   // the plan before building, code = autonomous execution (default).
   const [agentMode, setAgentMode] = useState('code');
@@ -2165,6 +2166,21 @@ const animate = () => {
                 });
               }
             }
+            else if (data.type === 'output_quality') {
+              const status = String(data.status || 'UNVERIFIED').toUpperCase();
+              outputQualityStatusRef.current = status;
+              const detail = data.reason || 'Requirement-level acceptance evidence was not collected.';
+              setPlanTasks(prev => settlePlanTasks(prev, `**${status}** — ${detail}`));
+              setCopilotStatus({
+                label: `⚠️ Output quality: ${status}`,
+                tone: status === 'FAILED' ? 'error' : status === 'SUCCEEDED' ? 'success' : 'work',
+              });
+              setCopilotMessages(prev => [...prev, {
+                role: 'assistant',
+                kind: 'thought',
+                content: `Output quality gate: ${status} — ${detail}`,
+              }]);
+            }
             // ── Director Verification: Show verification gate status ──
             else if (data.type === 'director_verification') {
               const vStatus = data.status || 'running';
@@ -2176,8 +2192,8 @@ const animate = () => {
             // ── Director Complete: CRITICAL — Map to done, reset running state ──
             else if (data.type === 'director_complete') {
               const taskCount = data.taskCount || '?';
-              const qualityStatus = extractOutputQualityStatus(data.message);
-              setPlanTasks(prev => settlePlanTasks(prev, data.message));
+              const qualityStatus = extractOutputQualityStatus(data.message) || outputQualityStatusRef.current;
+              setPlanTasks(prev => settlePlanTasks(prev, data.message || (qualityStatus ? `**${qualityStatus}** — output quality gate` : '')));
               setCopilotStatus({
                 label: qualityStatus && qualityStatus !== 'SUCCEEDED'
                   ? `⚠️ Director finished; output quality ${qualityStatus}`
@@ -2413,6 +2429,7 @@ const animate = () => {
             }
             // ── ReAct-loop events (defensive: non-director run shapes must stay visible) ──
             else if (data.type === 'start') {
+              outputQualityStatusRef.current = null;
               const msg = data.message || 'Analyzing prompt & generating dynamic task plan...';
               setCopilotStatus({ label: `🚀 ${msg}`, tone: 'work' });
               setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: `🚀 ${msg}` }]);
