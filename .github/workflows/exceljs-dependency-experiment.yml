@@ -49,7 +49,7 @@ jobs:
           };
           pkg.overrides['archiver-utils'] = {
             ...(pkg.overrides['archiver-utils'] || {}),
-            glob: '^11.0.0'
+            glob: '^13.0.0'
           };
           fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           NODE
@@ -72,7 +72,7 @@ jobs:
           console.log(`ExcelJS ${root.version}; nested archiver ${archiver.version}; nested unzipper ${unzipper.version}`);
           NODE
 
-      - name: Verify archiver-utils resolves maintained glob 11
+      - name: Verify archiver-utils resolves maintained glob 13
         run: |
           npm ls archiver-utils glob --all
           node - <<'NODE'
@@ -80,7 +80,7 @@ jobs:
           const path = require('node:path');
           const archiverUtils = path.dirname(require.resolve('archiver-utils/package.json'));
           const glob = require(require.resolve('glob/package.json', { paths: [archiverUtils] }));
-          assert.match(glob.version, /^(11|12|13)\\./, `Expected glob 11+, got ${glob.version}`);
+          assert.match(glob.version, /^(11|12|13)\\./, `Expected glob 13.x, got ${glob.version}`);
           console.log(`archiver-utils glob resolved to ${glob.version}`);
           NODE
 
