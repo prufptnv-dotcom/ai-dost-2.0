@@ -116,13 +116,22 @@ def run_benchmark():
                 "generated_tokens": 0,
                 "tokens_per_sec": 0,
                 "score": 0,
-                "pass_fail": "FAIL",
-                "evaluator_note": f"Error: {last_err}",
+                "pass_fail": "NOT_EVALUATED",
+                "format_status": "NOT_EVALUATED",
+                "evaluation_type": "response_format_heuristic_v1",
+                "correctness_evaluated": False,
+                "is_accuracy_metric": False,
+                "evaluator_note": f"Request failed before response evaluation: {last_err}",
                 "success": False
             }
             print(f"-> FAIL ({last_err})", flush=True)
 
-        results.append(record)
+        # Replace a prior failed attempt for this question instead of double-counting it.
+        previous_index = next((i for i, row in enumerate(results) if row.get("qid") == qid), None)
+        if previous_index is None:
+            results.append(record)
+        else:
+            results[previous_index] = record
         done_qids.add(qid)
 
         # Save incrementally
@@ -133,7 +142,7 @@ def run_benchmark():
 
     total_time = round(time.time() - t_start, 1)
     print("\n" + "=" * 75)
-    print(f"Completed 300-Question Evaluation in {total_time}s!")
+    print(f"Finished response-format heuristic run in {total_time}s.")
     print("=" * 75)
 
     generate_summary_sheet(results)
@@ -150,6 +159,8 @@ def generate_summary_sheet(results):
             return status
         # Interpret older PASS/FAIL values as the former heuristic threshold,
         # never as evidence that the answer or generated code was correct.
+        if not record.get("success"):
+            return "NOT_EVALUATED"
         legacy_status = record.get("pass_fail")
         if legacy_status == "PASS":
             return "FORMAT_PASS"
@@ -165,8 +176,13 @@ def generate_summary_sheet(results):
     avg_tps = round(total_tokens / total_time, 1) if total_time > 0 else 0
     scores = [float(r.get("score", 0) or 0) for r in successful if r.get("score") is not None]
     overall_score = round(statistics.mean(scores), 2) if scores else 0
-    format_passes = sum(1 for r in results if format_status(r) == "FORMAT_PASS")
-    format_rate = round((format_passes / total_q) * 100, 1) if total_q else 0
+    format_evaluated = [
+        r for r in successful
+        if format_status(r) in {"FORMAT_PASS", "FORMAT_FAIL"}
+    ]
+    format_passes = sum(1 for r in format_evaluated if format_status(r) == "FORMAT_PASS")
+    format_rate = round((format_passes / len(format_evaluated)) * 100, 1) if format_evaluated else None
+    format_rate_display = f"{format_rate}%" if format_rate is not None else "N/A"
 
     cats = {}
     for r in results:
@@ -200,7 +216,7 @@ def generate_summary_sheet(results):
 | **Median response latency** | {median_latency}s |
 | **Estimated tokens/sec** | {avg_tps} (character-based token estimate; not provider telemetry) |
 | **Mean heuristic format score** | **{overall_score} / 10** |
-| **Format-threshold pass rate** | **{format_rate}%** (not correctness/accuracy) |
+| **Format-threshold pass rate** | **{format_rate_display}** across {len(format_evaluated)} evaluated responses (not correctness/accuracy) |
 | **Peak VRAM** | Not measured by this runner |
 
 ---
@@ -212,8 +228,12 @@ def generate_summary_sheet(results):
 """
     for c, items in cats.items():
         s_items = [x for x in items if x.get("success")]
-        pass_cnt = sum(1 for x in items if format_status(x) == "FORMAT_PASS")
-        c_rate = f"{(pass_cnt / len(items)) * 100:.1f}%" if items else "0.0%"
+        format_items = [
+            x for x in s_items
+            if format_status(x) in {"FORMAT_PASS", "FORMAT_FAIL"}
+        ]
+        pass_cnt = sum(1 for x in format_items if format_status(x) == "FORMAT_PASS")
+        c_rate = f"{(pass_cnt / len(format_items)) * 100:.1f}%" if format_items else "N/A"
         valid_scores = [float(x.get("score", 0) or 0) for x in s_items if x.get("score") is not None]
         c_score = f"{statistics.mean(valid_scores):.2f}" if valid_scores else "N/A"
         c_latencies = [float(x.get("latency_s", 0) or 0) for x in s_items]
