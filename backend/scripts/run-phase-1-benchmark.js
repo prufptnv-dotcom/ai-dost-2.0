@@ -83,6 +83,7 @@ function assertOutsideRepo(dir) {
 
 async function runOne(config) {
   const phase = config.phase;
+  const revision = config.revision;
   const testCase = config.testCase;
   const runNumber = config.runNumber;
   const runDir = path.join(config.artifactsDir, phase, testCase.id, 'run-' + runNumber);
@@ -163,6 +164,7 @@ async function runOne(config) {
     schemaVersion: '1.0',
     evaluator: 'phase-1-live-generation-capture',
     phase,
+    revision,
     caseId: testCase.id,
     runNumber,
     prompt: testCase.prompt,
@@ -205,6 +207,8 @@ async function main() {
   const baseUrl = ensureLocalUrl(args['base-url'] || process.env.AI_DOST_BASE_URL || '');
   const preferredModel = args['preferred-model'] || process.env.AI_DOST_BENCHMARK_MODEL;
   if (!preferredModel) throw new Error('Set --preferred-model or AI_DOST_BENCHMARK_MODEL to keep model preference explicit and comparable.');
+  const revision = args.revision || process.env.AI_DOST_BENCHMARK_REVISION;
+  if (!revision) throw new Error('Set --revision or AI_DOST_BENCHMARK_REVISION to record the exact backend code revision.');
   const runs = Number(args.runs || 3);
   if (!Number.isInteger(runs) || runs < 1 || runs > 10) throw new Error('--runs must be an integer from 1 to 10.');
   const timeoutMs = Number(args['timeout-ms'] || 12 * 60 * 1000);
@@ -223,7 +227,7 @@ async function main() {
   for (const testCase of selectedCases) {
     for (let runNumber = 1; runNumber <= runs; runNumber += 1) {
       console.log('[' + phase + '] ' + testCase.id + ' run ' + runNumber + '/' + runs);
-      const result = await runOne({ baseUrl, preferredModel, phase, testCase, runNumber, artifactsDir, timeoutMs });
+      const result = await runOne({ baseUrl, preferredModel, revision, phase, testCase, runNumber, artifactsDir, timeoutMs });
       results.push(result);
       console.log('  generationCompleted=' + result.generationCompleted + '; files=' + result.project.fileCount +
         '; outputQuality=' + (result.outputQuality?.status || 'NOT_REPORTED') + '; elapsedMs=' + result.elapsedMs);
@@ -234,6 +238,7 @@ async function main() {
     schemaVersion: '1.0',
     evaluator: 'phase-1-live-generation-capture',
     phase,
+    revision,
     baseUrl,
     preferredModel,
     runsPerCase: runs,
