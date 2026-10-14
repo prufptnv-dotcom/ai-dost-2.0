@@ -96,6 +96,25 @@ For the candidate checkout, set `AI_DOST_BENCHMARK_REVISION` to that checkout's 
 
 Run the preflight separately against both baseline and candidate backend checkouts, using the same intended provider configuration. Do not run the full 12-generation phase until both are healthy.
 
+## Runtime evidence package gate
+
+After each generated run has been built/tested and exercised in an isolated browser, create \`runtime-evidence.json\` inside that run's directory. The manifest records:
+
+- Build, test, and browser-flow statuses and log paths.
+- Screenshots at 360px, 768px, and 1280px.
+- One status and evidence-file reference for every exact \`requiredBehaviors\` string in the canonical case.
+- A blind human review with a 0–5 score, notes, and an evidence-file reference for each rubric dimension.
+
+All referenced files must exist inside the same run directory. Do not place credentials or real user data in the artifacts. The validator does not execute generated code and does not prove that the evidence is truthful; reviewers must inspect the referenced files.
+
+Run from \`backend/\` after both phases' artifacts are collected:
+
+\`\`\`bash
+npm run quality:evidence:validate -- --artifacts-dir /tmp/ai-dost-phase1-comparison --runs 3
+\`\`\`
+
+The report is written to \`evidence-validation-report.json\`. A non-zero exit means at least one run's evidence package is missing or invalid. \`COMPLETE_FOR_HUMAN_QUALITY_REVIEW\` means the packages are complete enough to review, **not** that the apps passed. \`qualityAcceptanceStatus\` remains \`NOT_EVALUATED\`; only human review of the actual evidence can determine product quality.
+
 ## Automated live-generation capture
 
 ```bash
