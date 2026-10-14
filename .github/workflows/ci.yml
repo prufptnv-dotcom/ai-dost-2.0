@@ -311,7 +311,7 @@ jobs:
 
   deployment-status:
     name: Deployment policy (PRs are not deployed)
-    needs: [frontend, frontend-browser, backend, e2e, docker]
+    needs: [frontend, frontend-browser, backend, e2e, docker, benchmark-validation]
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
