@@ -269,4 +269,22 @@ test('Phase 2F.5 - Context Budget Manager', async (t) => {
     });
     assert.strictEqual(res.package.workspace[0].representation, 'full');
   });
+
+  await t.test('27. verification evidence has an explicit budget allocation', () => {
+    const budgetMgr = new ContextBudgetManager({ totalBudget: 100 });
+    assert.strictEqual(budgetMgr.allocation.verification, 0.1);
+    assert.ok(Math.abs(Object.values(budgetMgr.allocation).reduce((sum, value) => sum + value, 0) - 1) < 1e-9);
+
+    const res = budgetMgr.packageContext({
+      projectId,
+      items: [{
+        source_id: 'verification-evidence',
+        project_id: projectId,
+        category: 'VERIFICATION',
+        importance_score: 8,
+        content: 'build and smoke verification evidence'
+      }]
+    });
+    assert.strictEqual(res.package.verification.length, 1);
+  });
 });
