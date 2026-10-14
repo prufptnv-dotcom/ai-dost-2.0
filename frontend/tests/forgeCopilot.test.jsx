@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import ForgeCopilot, { normalizeWorkspacePath } from '../components/forge/ForgeCopilot';
 
 const flushForgeInitialEffects = async () => {
@@ -106,18 +106,68 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
   });
 
   test('handles assistant prompt submission and displays working state', async () => {
-    render(<ForgeCopilot />);
-    await flushForgeInitialEffects();
+    const previousFetch = global.fetch;
+    const api = require('../services/api');
+    const previousFetchProject = api.fetchProject.getMockImplementation();
+    api.fetchProject.mockResolvedValue({ id: 'test-project', name: 'test-project', files: [] });
 
-    const textarea = screen.getByPlaceholderText(/Ask Forge AI/i);
-    fireEvent.change(textarea, { target: { value: 'Add hero glow animation' } });
+    const terminalEvent = {
+      type: 'director_complete',
+      status: 'FAILED',
+      message: 'Run stopped by test harness',
+      changedPaths: [],
+    };
+    const payload = `data: ${JSON.stringify(terminalEvent)}\n\n`;
+    let resolveStreamRead;
+    let sent = false;
+    const firstRead = new Promise((resolve) => { resolveStreamRead = resolve; });
+    const reader = {
+      read: jest.fn(async () => {
+        if (!sent) {
+          sent = true;
+          return firstRead;
+        }
+        return { done: true, value: undefined };
+      }),
+      cancel: jest.fn(async () => {}),
+    };
+    global.fetch = jest.fn(async (url) => {
+      if (String(url).includes('/api/agent/run')) {
+        return { ok: true, status: 200, body: { getReader: () => reader } };
+      }
+      return { ok: true, json: async () => ({ state: 'STOPPED', projects: [], success: true }) };
+    });
 
-    const submitBtn = screen.getByLabelText(/send message/i);
-    expect(submitBtn).toBeEnabled();
-    fireEvent.click(submitBtn);
+    try {
+      render(<ForgeCopilot projectId="test-project" projectName="test-project" />);
+      await flushForgeInitialEffects();
 
-    expect(screen.getByText('Add hero glow animation')).toBeInTheDocument();
-    expect(screen.getByText(/Working through your request/i)).toBeInTheDocument();
+      const textarea = screen.getByPlaceholderText(/Ask Forge AI/i);
+      fireEvent.change(textarea, { target: { value: 'Add hero glow animation' } });
+
+      const submitBtn = screen.getByLabelText(/send message/i);
+      expect(submitBtn).toBeEnabled();
+      fireEvent.click(submitBtn);
+
+      expect(screen.getByText('Add hero glow animation')).toBeInTheDocument();
+      expect(screen.getByText(/Working through your request/i)).toBeInTheDocument();
+
+      // Release the stream in act and allow the async project refresh and
+      // submitPrompt finally block to settle before assertions/teardown.
+      await act(async () => {
+        resolveStreamRead({ done: false, value: Buffer.from(payload) });
+        await Promise.resolve();
+        await Promise.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(await screen.findByText('Run stopped by test harness')).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByTitle('Stop agent run')).not.toBeInTheDocument());
+      expect(screen.getByLabelText(/send message/i)).toBeDisabled();
+      expect(screen.queryByText(/Working through your request/i)).not.toBeInTheDocument();
+    } finally {
+      global.fetch = previousFetch;
+      api.fetchProject.mockImplementation(previousFetchProject);
+    }
   });
 
   test('navigates to MCP Connect and Skills Library views', async () => {
