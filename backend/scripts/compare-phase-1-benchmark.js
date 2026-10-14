@@ -31,6 +31,49 @@ function average(values) {
   return finite.length ? finite.reduce((sum, value) => sum + value, 0) / finite.length : null;
 }
 
+function validateSummary(summary, expectedPhase) {
+  if (!summary || summary.phase !== expectedPhase) {
+    throw new Error('Expected ' + expectedPhase + '-summary.json with matching phase field.');
+  }
+  if (!Number.isInteger(summary.runsPerCase) || summary.runsPerCase < 1 ||
+      !Number.isInteger(summary.caseCount) || summary.caseCount < 1) {
+    throw new Error(expectedPhase + ' summary must declare positive integer runsPerCase and caseCount.');
+  }
+  if (typeof summary.revision !== 'string' || !summary.revision.trim()) {
+    throw new Error(expectedPhase + ' summary must record the exact backend revision.');
+  }
+  if (typeof summary.preferredModel !== 'string' || !summary.preferredModel.trim()) {
+    throw new Error(expectedPhase + ' summary must record preferredModel.');
+  }
+  const expectedResultCount = summary.runsPerCase * summary.caseCount;
+  if (!Array.isArray(summary.results) || summary.results.length !== expectedResultCount) {
+    throw new Error(expectedPhase + ' summary must contain exactly ' + expectedResultCount + ' results.');
+  }
+  const seen = new Set();
+  const caseIds = new Set();
+  for (const item of summary.results) {
+    if (!item || typeof item.caseId !== 'string' || !item.caseId.trim() ||
+        !Number.isInteger(item.runNumber) || item.runNumber < 1 ||
+        item.runNumber > summary.runsPerCase || typeof item.runDir !== 'string' || !item.runDir.trim()) {
+      throw new Error(expectedPhase + ' summary contains an invalid case/run result.');
+    }
+    const key = resultKey(item);
+    if (seen.has(key)) throw new Error(expectedPhase + ' summary contains duplicate case/run pair: ' + key);
+    seen.add(key);
+    caseIds.add(item.caseId);
+  }
+  if (caseIds.size !== summary.caseCount) {
+    throw new Error(expectedPhase + ' summary caseCount does not match its unique case IDs.');
+  }
+  for (const caseId of caseIds) {
+    for (let runNumber = 1; runNumber <= summary.runsPerCase; runNumber += 1) {
+      if (!seen.has(caseId + '::' + runNumber)) {
+        throw new Error(expectedPhase + ' summary is missing ' + caseId + ' run ' + runNumber + '.');
+      }
+    }
+  }
+}
+
 function loadRunEvidence(result) {
   const runDir = result.runDir;
   const metadataPath = path.join(runDir, 'metadata.json');
@@ -73,8 +116,10 @@ function loadRunEvidence(result) {
 }
 
 function compareSummaries(baseline, candidate) {
-  if (baseline.phase !== 'baseline' || candidate.phase !== 'candidate') {
-    throw new Error('Expected baseline-summary.json and candidate-summary.json with matching phase fields.');
+  validateSummary(baseline, 'baseline');
+  validateSummary(candidate, 'candidate');
+  if (baseline.revision === candidate.revision) {
+    throw new Error('Baseline and candidate revisions are identical; comparison would not measure a code change.');
   }
   if (baseline.runsPerCase !== candidate.runsPerCase || baseline.caseCount !== candidate.caseCount) {
     throw new Error('Baseline and candidate must use the same run count and case count.');
@@ -83,8 +128,8 @@ function compareSummaries(baseline, candidate) {
     throw new Error('Baseline and candidate preferred-model settings differ; the comparison is not controlled.');
   }
 
-  const baselineMap = new Map((baseline.results || []).map((item) => [resultKey(item), item]));
-  const candidateMap = new Map((candidate.results || []).map((item) => [resultKey(item), item]));
+  const baselineMap = new Map(baseline.results.map((item) => [resultKey(item), item]));
+  const candidateMap = new Map(candidate.results.map((item) => [resultKey(item), item]));
   const baselineKeys = [...baselineMap.keys()].sort();
   const candidateKeys = [...candidateMap.keys()].sort();
   if (JSON.stringify(baselineKeys) !== JSON.stringify(candidateKeys)) {
@@ -98,6 +143,21 @@ function compareSummaries(baseline, candidate) {
     const candidateResult = candidateMap.get(key);
     const base = loadRunEvidence(baseResult);
     const next = loadRunEvidence(candidateResult);
+    for (const [label, loaded, summary, result] of [
+      ['baseline', base, baseline, baseResult],
+      ['candidate', next, candidate, candidateResult],
+    ]) {
+      if (loaded.metadata.phase !== label || loaded.metadata.caseId !== result.caseId ||
+          Number(loaded.metadata.runNumber) !== result.runNumber) {
+        throw new Error(label + ' provenance metadata does not match summary pair ' + key + '.');
+      }
+      if (loaded.metadata.revision !== summary.revision) {
+        throw new Error(label + ' run revision does not match summary revision for ' + key + '.');
+      }
+      if (loaded.metadata.settings?.preferredModel !== summary.preferredModel) {
+        throw new Error(label + ' run-level model preference does not match summary for ' + key + '.');
+      }
+    }
     if (base.metadata.prompt !== next.metadata.prompt) {
       throw new Error('Prompt mismatch for ' + key + '; results are not paired.');
     }
