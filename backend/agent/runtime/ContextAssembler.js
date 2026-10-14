@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const ContextCompressionStore = require('../../services/ContextCompressionStore');
+const { ContextBudgetManager } = require('./ContextBudgetManager');
 
 class ContextAssembler {
   /**
@@ -20,7 +21,9 @@ class ContextAssembler {
     this.toolRegistry = deps.toolRegistry;
     this.projectDao = deps.projectDao;
     this.retrievalService = deps.retrievalService;
-    this.contextBudgetManager = deps.contextBudgetManager;
+    // The context budget/security boundary is mandatory. Callers may inject a
+    // tuned manager, but an omitted optional dependency must never bypass it.
+    this.contextBudgetManager = deps.contextBudgetManager || new ContextBudgetManager();
     
     // Fallback/canonical DAOs
     this.contextNodeDao = deps.contextNodeDao;

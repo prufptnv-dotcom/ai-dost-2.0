@@ -30,6 +30,8 @@ test('ContextAssembler', async (t) => {
     assert.ok(context.project);
     assert.ok(context.workspace);
     assert.strictEqual(context.metadata.retrieval_status, 'NOT_CONFIGURED');
+    assert.strictEqual(context.metadata.total_budget, 100000, 'default context budgeting must be active when no manager is injected');
+    assert.ok(Number.isFinite(context.metadata.estimated_total_tokens), 'default packaging should return budget accounting metadata');
   });
 
   await t.test('Rejects cross-user access', async () => {

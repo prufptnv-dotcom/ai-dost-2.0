@@ -59,6 +59,8 @@ test('PlannerExecutionLoop', async (t) => {
   }
 
   toolRegistry.register(new MockTool('success_tool'));
+  // Verification plans must use a tool classified as read-only by TaskPlanner.
+  toolRegistry.register(new MockTool('read_file'));
   toolRegistry.register(new MockTool('fail_tool', true));
 
   const contextAssembler = new ContextAssembler({ projectAuthService, workspaceManager, toolRegistry, projectDao });
@@ -89,7 +91,7 @@ test('PlannerExecutionLoop', async (t) => {
     mockVerifyPlan = {
       goal: 'verify test',
       steps: [
-        { id: 'v1', tool: 'success_tool', description: 'verify', input: {} }
+        { id: 'v1', tool: 'read_file', description: 'verify', input: {} }
       ]
     };
 
@@ -131,7 +133,7 @@ test('PlannerExecutionLoop', async (t) => {
     mockVerifyPlan = {
       goal: 'verify',
       steps: [
-        { id: 'v1', tool: 'success_tool', description: 'verify', input: {} }
+        { id: 'v1', tool: 'read_file', description: 'verify', input: {} }
       ]
     };
 
@@ -192,7 +194,7 @@ test('PlannerExecutionLoop', async (t) => {
     const staleStep = await executionController.recordStep(runId, 'TOOL', {});
     await executionController.startStep(staleStep.id);
     
-    mockVerifyPlan = { goal: 'verify', steps: [{ id: 'v1', tool: 'success_tool', description: 'desc', input: {} }] };
+    mockVerifyPlan = { goal: 'verify', steps: [{ id: 'v1', tool: 'read_file', description: 'desc', input: {} }] };
     
     const res = await loop.resume(runId, 'p1', 'u1', 3);
     
