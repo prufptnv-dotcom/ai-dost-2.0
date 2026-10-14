@@ -39,6 +39,14 @@ describe('CopilotDevinUI — TaskStepItem (checklist row)', () => {
     expect(row).toHaveTextContent('done');
   });
 
+  test('unverified row is visibly distinct from completed and failed', () => {
+    render(<TaskStepItem step={{ ...base, status: 'unverified' }} index={4} />);
+    const row = screen.getByTestId('plan-row');
+    expect(row).toHaveAttribute('data-status', 'unverified');
+    expect(row.querySelector('p')).not.toHaveClass('line-through');
+    expect(row).toHaveClass('bg-amber-500/[0.06]');
+  });
+
   test('error row renders error status', () => {
     render(<TaskStepItem step={{ ...base, status: 'error' }} index={3} />);
     expect(screen.getByTestId('plan-row')).toHaveAttribute('data-status', 'error');
@@ -57,6 +65,21 @@ describe('CopilotDevinUI — CopilotPlanCard', () => {
     expect(screen.getByTestId('copilot-plan-card')).toBeInTheDocument();
     expect(screen.getByTestId('plan-progress')).toHaveTextContent('1/3');
     expect(screen.getAllByTestId('plan-row')).toHaveLength(3);
+  });
+
+  test('unverified acceptance task prevents a completed-plan badge', () => {
+    render(
+      <CopilotPlanCard
+        tasks={[
+          { id: 'a', title: 'Generate files', status: 'completed' },
+          { id: 'b', title: 'Verify requested behavior', status: 'unverified' },
+        ]}
+        expanded
+        onToggle={() => {}}
+      />
+    );
+    expect(screen.getByTestId('copilot-plan-card')).toHaveTextContent('Needs verification');
+    expect(screen.getByTestId('plan-progress')).toHaveTextContent('1/2');
   });
 
   test('toggle collapses rows but keeps header', () => {
