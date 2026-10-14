@@ -58,7 +58,7 @@ function safeEvidenceFile(runDir, relativePath) {
 function isPngScreenshot(runDir, relativePath) {
   if (!safeEvidenceFile(runDir, relativePath)) return false;
   try {
-    const filePath = path.resolve(runDir, relativePath.replace(/\\\\/g, '/'));
+    const filePath = path.resolve(runDir, relativePath.replace(/\\/g, '/'));
     const header = Buffer.alloc(24);
     const fd = fs.openSync(filePath, 'r');
     let bytesRead;
