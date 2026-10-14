@@ -270,3 +270,86 @@ test('successful completion preserves final verification evidence in terminal ev
   assert.equal(verification.summary, 'Build and smoke test passed');
   assert.ok(result.artifact_refs.includes('verification:build-pass'));
 });
+
+
+function assertCancelledPersistence(director) {
+  assert.equal(
+    director._testEvents.some((event) => event[0] === 'taskStatus' && event[2] === 'CANCELLED'),
+    true,
+    'the supervisor task must be persisted as CANCELLED'
+  );
+  assert.equal(
+    director._testEvents.some((event) => event[0] === 'runStatus' && event[2] === 'CANCELLED'),
+    true,
+    'the supervisor run must be persisted as CANCELLED'
+  );
+  assert.equal(
+    director._testEvents.some((event) => event[0] === 'taskStatus' && event[2] === 'FAILED'),
+    false,
+    'cancellation must not be persisted as failure'
+  );
+}
+
+test('run persists cancellation when the signal is already aborted before execution', async () => {
+  const plan = {
+    summary: 'cancel before execution',
+    tasks: [{ id: 'change', specialty: 'frontend', role: 'CODER', objective: 'change UI', dependsOn: [], expectedOutput: 'change' }]
+  };
+  const director = createExecutionHarness({ plan });
+  const controller = new AbortController();
+  controller.abort();
+  const streamEvents = [];
+
+  const result = await director.run({
+    userId: 'user-1',
+    projectId: 'project-1',
+    request: 'change UI',
+    signal: controller.signal,
+    onEvent: (event) => streamEvents.push(event)
+  });
+
+  assert.equal(result.status, 'CANCELLED');
+  assertCancelledPersistence(director);
+  assert.equal(streamEvents.some((event) => event.type === 'director_complete'), false);
+});
+
+test('run persists cancellation when a worker returns CANCELLED', async () => {
+  const plan = {
+    summary: 'cancel in worker',
+    tasks: [{ id: 'change', specialty: 'frontend', role: 'CODER', objective: 'change UI', dependsOn: [], expectedOutput: 'change' }]
+  };
+  const director = createExecutionHarness({ plan });
+  director.executeWorker = async () => ({ status: 'CANCELLED' });
+
+  const result = await director.run({
+    userId: 'user-1',
+    projectId: 'project-1',
+    request: 'change UI'
+  });
+
+  assert.equal(result.status, 'CANCELLED');
+  assertCancelledPersistence(director);
+});
+
+test('run treats TASK_CANCELED worker errors as cancellation without retrying or marking failure', async () => {
+  const plan = {
+    summary: 'cancel via worker error',
+    tasks: [{ id: 'change', specialty: 'frontend', role: 'CODER', objective: 'change UI', dependsOn: [], expectedOutput: 'change' }]
+  };
+  const director = createExecutionHarness({ plan });
+  let attempts = 0;
+  director.executeWorker = async () => {
+    attempts += 1;
+    throw Object.assign(new Error('Task canceled by user'), { code: 'TASK_CANCELED' });
+  };
+
+  const result = await director.run({
+    userId: 'user-1',
+    projectId: 'project-1',
+    request: 'change UI'
+  });
+
+  assert.equal(result.status, 'CANCELLED');
+  assert.equal(attempts, 1, 'a cancellation should not consume a retry');
+  assertCancelledPersistence(director);
+});
