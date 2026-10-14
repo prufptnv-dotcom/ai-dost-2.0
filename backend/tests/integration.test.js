@@ -1027,3 +1027,43 @@ test('P8: client update -> server doc, agent write -> client receives it (real s
     db.prepare("DELETE FROM collab_docs WHERE project_id LIKE 'itest-p8%'").run();
   } catch (_) { /* table missing (old db) — migration creates it on boot */ }
 });
+
+
+// ── Sandbox isolation policy regressions ──────────────────────────────────
+test('sandbox policy rejects host networking, binds dev ports to loopback, and sanitizes project paths', () => {
+  assert.equal(sandboxManager._resolveNetwork('bridge'), 'bridge');
+  assert.equal(sandboxManager._resolveNetwork('none'), 'none');
+  assert.equal(sandboxManager._resolveNetwork('host'), 'bridge');
+  assert.equal(sandboxManager._resolveNetwork('arbitrary-network'), 'bridge');
+
+  assert.deepEqual(sandboxManager._buildPortBindings([5173, '8080', 0, 65536, 'invalid']), {
+    '5173/tcp': [{ HostIp: '127.0.0.1', HostPort: '' }],
+    '8080/tcp': [{ HostIp: '127.0.0.1', HostPort: '' }],
+  });
+
+  const safeSegment = sandboxManager._safeProjectSegment('../../etc/ssh/keys');
+  assert.match(safeSegment, /^[A-Za-z0-9_-]+$/);
+  assert.ok(safeSegment.length <= 64);
+});
+
+test('sandbox workdir resolver rejects symlink escapes outside os.tmpdir', async (t) => {
+  const fs = require('node:fs/promises');
+  const path = require('node:path');
+  const os = require('node:os');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-dost-sandbox-workdir-test-'));
+  const link = path.join(root, 'outside-link');
+  try {
+    try {
+      await fs.symlink(await fs.realpath(os.homedir()), link, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch (err) {
+      if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes(err.code)) {
+        t.skip('symlink creation is not permitted in this Windows environment');
+        return;
+      }
+      throw err;
+    }
+    assert.equal(sandboxManager._resolveWorkdir(link), null);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

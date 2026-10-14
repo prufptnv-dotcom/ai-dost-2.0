@@ -210,10 +210,50 @@ class SandboxManager extends EventEmitter {
     if (!raw || typeof raw !== 'string') return null;
     let resolved;
     try { resolved = path.resolve(raw.trim()); } catch (_) { return null; }
-    const base = path.resolve(os.tmpdir());
-    if (resolved !== base && !resolved.startsWith(base + path.sep)) return null;
-    if (!fsSync.existsSync(resolved)) return null;
-    return resolved;
+
+    // Lexical containment is insufficient: a path inside os.tmpdir() may be a
+    // symlink to a sensitive host directory. Resolve both sides and return the
+    // canonical path so Docker/local execution never follows that escape.
+    try {
+      const realBase = fsSync.realpathSync(os.tmpdir());
+      const realResolved = fsSync.realpathSync(resolved);
+      const relative = path.relative(realBase, realResolved);
+      if (
+        relative !== '' &&
+        (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative))
+      ) return null;
+      if (!fsSync.statSync(realResolved).isDirectory()) return null;
+      return realResolved;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _safeProjectSegment(projectId) {
+    const segment = String(projectId == null ? 'project' : projectId)
+      .replace(/[^A-Za-z0-9_-]/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 64);
+    return segment || 'project';
+  }
+
+  _resolveNetwork(rawNetwork) {
+    // Docker host networking shares the host network namespace and defeats
+    // the expected network boundary for a command-execution sandbox.
+    const network = String(rawNetwork || 'bridge');
+    return network === 'bridge' || network === 'none' ? network : 'bridge';
+  }
+
+  _buildPortBindings(ports) {
+    const bindings = {};
+    for (const candidate of Array.isArray(ports) ? ports : []) {
+      const port = Number(candidate);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) continue;
+      // Preview/dev ports are consumed by the local backend proxy. Do not
+      // publish arbitrary sandbox services on every host network interface.
+      bindings[`${port}/tcp`] = [{ HostIp: '127.0.0.1', HostPort: '' }];
+    }
+    return bindings;
   }
 
   async createSandbox(projectId, options = {}) {
@@ -251,23 +291,20 @@ class SandboxManager extends EventEmitter {
     }
 
     const sandboxId = crypto.randomUUID().substring(0, 8);
-    const sandboxPath = path.join(SANDBOX_DIR, `${projectId}-${sandboxId}`);
+    const sandboxPath = path.join(SANDBOX_DIR, `${this._safeProjectSegment(projectId)}-${sandboxId}`);
     await fs.mkdir(sandboxPath, { recursive: true });
 
     const defaultDevPorts = [3000, 5173, 8080, 8000, 4321, 8081, 1420, 5000, 3001];
-    const portsToExpose = Array.from(new Set([...defaultDevPorts, ...(options.ports || [])]));
-    const portBindings = {};
-    for (const port of portsToExpose) {
-      portBindings[`${port}/tcp`] = [{ HostPort: '' }];
-    }
+    const requestedPorts = Array.isArray(options.ports) ? options.ports : [];
+    const portsToExpose = Array.from(new Set([...defaultDevPorts, ...requestedPorts]));
+    const portBindings = this._buildPortBindings(portsToExpose);
 
-    // Image/network allowlist — never pull arbitrary client-supplied images
-    // or attach to sensitive Docker networks (host, none custom, etc.)
+    // Image/network allowlist — never pull arbitrary client-supplied images.
+    // Host networking bypasses the normal sandbox network boundary.
     const SAFE_IMAGE = /^(node|python|ubuntu|alpine|nginx)(:[A-Za-z0-9._-]+)?$/;
     const requestedImage = String(options.image || 'node:22-alpine');
     const image = SAFE_IMAGE.test(requestedImage) ? requestedImage : 'node:22-alpine';
-    const SAFE_NETWORKS = new Set(['bridge', 'host', 'none']);
-    const network = SAFE_NETWORKS.has(String(options.network || 'bridge')) ? String(options.network || 'bridge') : 'bridge';
+    const network = this._resolveNetwork(options.network);
 
     // Sanitize env: strip secrets / NODE_OPTIONS / PATH overrides from client input
     const SENSITIVE_ENV = new Set(['PATH', 'NODE_OPTIONS', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'HOME', 'SSH_AUTH_SOCK',
@@ -370,7 +407,7 @@ class SandboxManager extends EventEmitter {
   // Creates a hardened local isolated sandbox on disk with path-traversal & command policies
   async createLocalSandbox(projectId, options = {}) {
     const sandboxId = crypto.randomUUID().substring(0, 8);
-    const sandboxPath = path.join(SANDBOX_DIR, `local-${projectId}-${sandboxId}`);
+    const sandboxPath = path.join(SANDBOX_DIR, `local-${this._safeProjectSegment(projectId)}-${sandboxId}`);
     await fs.mkdir(sandboxPath, { recursive: true });
     // P3 #39: run local commands in the caller's real project workspace when
     // it is a safe path under the workspace base (see _resolveWorkdir).
