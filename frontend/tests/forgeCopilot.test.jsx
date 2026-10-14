@@ -106,18 +106,61 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
   });
 
   test('handles assistant prompt submission and displays working state', async () => {
-    render(<ForgeCopilot />);
-    await flushForgeInitialEffects();
+    const previousFetch = global.fetch;
+    const api = require('../services/api');
+    const previousFetchProject = api.fetchProject.getMockImplementation();
+    api.fetchProject.mockResolvedValue({ id: 'test-project', name: 'test-project', files: [] });
 
-    const textarea = screen.getByPlaceholderText(/Ask Forge AI/i);
-    fireEvent.change(textarea, { target: { value: 'Add hero glow animation' } });
+    const terminalEvent = {
+      type: 'director_complete',
+      status: 'FAILED',
+      message: 'Run stopped by test harness',
+      changedPaths: [],
+    };
+    const payload = `data: ${JSON.stringify(terminalEvent)}\\n\\n`;
+    let resolveStreamRead;
+    let sent = false;
+    const firstRead = new Promise((resolve) => { resolveStreamRead = resolve; });
+    const reader = {
+      read: jest.fn(async () => {
+        if (!sent) {
+          sent = true;
+          return firstRead;
+        }
+        return { done: true, value: undefined };
+      }),
+      cancel: jest.fn(async () => {}),
+    };
+    global.fetch = jest.fn(async (url) => {
+      if (String(url).includes('/api/agent/run')) {
+        return { ok: true, status: 200, body: { getReader: () => reader } };
+      }
+      return { ok: true, json: async () => ({ state: 'STOPPED', projects: [], success: true }) };
+    });
 
-    const submitBtn = screen.getByLabelText(/send message/i);
-    expect(submitBtn).toBeEnabled();
-    fireEvent.click(submitBtn);
+    try {
+      render(<ForgeCopilot projectId="test-project" projectName="test-project" />);
+      await flushForgeInitialEffects();
 
-    expect(screen.getByText('Add hero glow animation')).toBeInTheDocument();
-    expect(screen.getByText(/Working through your request/i)).toBeInTheDocument();
+      const textarea = screen.getByPlaceholderText(/Ask Forge AI/i);
+      fireEvent.change(textarea, { target: { value: 'Add hero glow animation' } });
+
+      const submitBtn = screen.getByLabelText(/send message/i);
+      expect(submitBtn).toBeEnabled();
+      fireEvent.click(submitBtn);
+
+      expect(screen.getByText('Add hero glow animation')).toBeInTheDocument();
+      expect(screen.getByText(/Working through your request/i)).toBeInTheDocument();
+
+      // Release the stream only after asserting the intermediate working state.
+      resolveStreamRead({ done: false, value: Buffer.from(payload) });
+      expect(await screen.findByText('Run stopped by test harness')).toBeInTheDocument();
+      await waitFor(() => expect(submitBtn).toBeEnabled());
+      expect(screen.queryByText(/Working through your request/i)).not.toBeInTheDocument();
+    } finally {
+      global.fetch = previousFetch;
+      api.fetchProject.mockImplementation(previousFetchProject);
+    }
   });
 
   test('navigates to MCP Connect and Skills Library views', async () => {
