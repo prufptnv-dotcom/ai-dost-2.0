@@ -109,17 +109,44 @@ describe('Phase 3.7 — Secondary Product Surfaces Rebuild', () => {
 
   describe('VoiceView', () => {
     it('renders flat waveform, status indicators, and handles text input fallback', async () => {
-      api.post.mockResolvedValueOnce({ data: { reply: 'Handshake acknowledged' } });
+      const encoder = new TextEncoder();
+      const originalFetch = global.fetch;
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        body: {
+          getReader() {
+            let sent = false;
+            return {
+              async read() {
+                if (sent) return { done: true, value: undefined };
+                sent = true;
+                return {
+                  done: false,
+                  value: encoder.encode('data: {"chunk":"Handshake acknowledged"}\\n\\n')
+                };
+              },
+              async cancel() {},
+            };
+          },
+        },
+      });
       const onTranscript = jest.fn();
-      render(<VoiceView onTranscript={onTranscript} />);
-      expect(screen.getByText(/Voice Assistant/i)).toBeInTheDocument();
-      expect(screen.getByText(/Microphone Idle/i)).toBeInTheDocument();
+      try {
+        render(<VoiceView onTranscript={onTranscript} />);
+        expect(screen.getByText(/Voice Assistant/i)).toBeInTheDocument();
+        expect(screen.getByText(/Microphone Idle/i)).toBeInTheDocument();
 
-      const input = screen.getByPlaceholderText(/Type your message/i);
-      fireEvent.change(input, { target: { value: 'Explain coordinator handshake' } });
-      const sendBtn = screen.getByText('Send');
-      fireEvent.click(sendBtn);
-      expect(onTranscript).toHaveBeenCalledWith('Explain coordinator handshake');
+        const input = screen.getByPlaceholderText(/Type your message/i);
+        fireEvent.change(input, { target: { value: 'Explain coordinator handshake' } });
+        fireEvent.click(screen.getByText('Send'));
+
+        expect(onTranscript).toHaveBeenCalledWith('Explain coordinator handshake');
+        await screen.findByText('Handshake acknowledged');
+        expect(fetchSpy).toHaveBeenCalledWith('/api/chat/stream', expect.objectContaining({ method: 'POST' }));
+      } finally {
+        fetchSpy.mockRestore();
+        global.fetch = originalFetch;
+      }
     });
   });
 
