@@ -377,7 +377,7 @@ def build_pdf(results_file, output_pdf_path):
         # Answer Box
         # Limit very long answers for formatting sanity in report
         clean_ans = clean_for_xml(answer)
-        q_elements.append(Paragraph(f"<b>VKP-Omni-2B Response:</b><br/>{clean_ans}", ans_style))
+        q_elements.append(Paragraph(f"<b>Model response:</b><br/>{clean_ans}", ans_style))
         q_elements.append(Spacer(1, 3))
 
         # Evaluator Note
