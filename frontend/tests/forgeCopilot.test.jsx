@@ -340,7 +340,7 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
     api.fetchProject.mockResolvedValue({ id: 'test-project', name: 'test-project', files: [] });
 
     const event = { type: 'director_complete', status, message, changedPaths: [] };
-    const payload = `event: director_complete\\ndata: ${JSON.stringify(event)}\\n\\n`;
+    const payload = `event: director_complete\ndata: ${JSON.stringify(event)}\n\n`;
     let sent = false;
     const reader = {
       read: jest.fn(async () => {
