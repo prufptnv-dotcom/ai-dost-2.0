@@ -389,17 +389,19 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
       await flushForgeInitialEffects();
       const textarea = await screen.findByPlaceholderText(/Ask Forge AI/i);
       fireEvent.change(textarea, { target: { value: 'Verify terminal run status' } });
-      // Keep the complete async terminal-event handler inside act: it updates
-      // the error message, toast, and run/working state after the stream closes.
+      // Keep the stream handler's terminal event, async project reload, toast,
+      // and finally-state updates inside one act scope without polling the DOM
+      // before React has had a chance to flush the state changes.
       await act(async () => {
         fireEvent.click(screen.getByLabelText(/send message/i));
-        expect(await screen.findByText(message)).toBeInTheDocument();
-        expect(await screen.findByText(toast)).toBeInTheDocument();
+        await new Promise((resolve) => setTimeout(resolve, 0));
         await Promise.resolve();
         await Promise.resolve();
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
 
+      expect(screen.getByText(message)).toBeInTheDocument();
+      expect(screen.getByText(toast)).toBeInTheDocument();
       expect(screen.queryByText('Forge Studio run complete')).not.toBeInTheDocument();
       await flushForgeInitialEffects();
     } finally {
