@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Copy, Check, Users, Link2, Shield } from 'lucide-react';
 
@@ -14,6 +14,19 @@ export default function ShareCollaborationModal({
 }) {
   const [copied, setCopied] = useState(false);
   const [permission, setPermission] = useState('edit'); // 'edit' | 'view'
+  const copiedTimerRef = useRef(null);
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (copiedTimerRef.current) {
+        clearTimeout(copiedTimerRef.current);
+        copiedTimerRef.current = null;
+      }
+    };
+  }, []);
 
   if (!isOpen) return null;
 
@@ -25,9 +38,16 @@ export default function ShareCollaborationModal({
   const copyShareLink = async () => {
     try {
       await navigator.clipboard.writeText(shareUrl);
+      if (!mountedRef.current) return;
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (_) {}
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => {
+        copiedTimerRef.current = null;
+        if (mountedRef.current) setCopied(false);
+      }, 2000);
+    } catch (_) {
+      /* Clipboard access may be unavailable in restricted browser contexts. */
+    }
   };
 
   const allUsers = currentUser
