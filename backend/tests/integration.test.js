@@ -1099,3 +1099,9 @@ test('dev-server workspace resolver rejects traversal and symlink escapes', asyn
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+
+test('dev-server path guard rejects null bytes', () => {
+  const devServerManager = require('../sandbox/devServerManager');
+  assert.equal(devServerManager._safeProjectPath('\0'), null);
+});

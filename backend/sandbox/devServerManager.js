@@ -127,7 +127,7 @@ class DevServerManager extends EventEmitter {
   // Reject absolute / traversal projectPath (was joined raw → path escape)
   _safeProjectPath(projectPath) {
     const raw = String(projectPath || '.').trim();
-    if (!raw || raw.includes('\\0')) return null;
+    if (!raw || raw.includes('\0')) return null;
     if (path.isAbsolute(raw) || /^[a-zA-Z]:[\\/]/.test(raw)) return null;
     if (raw.split(/[\\/]/).some(seg => seg === '..')) return null;
     return raw;
