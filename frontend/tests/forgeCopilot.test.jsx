@@ -321,4 +321,56 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
       global.fetch = previousFetch;
     }
   });
+
+  test.each([
+    {
+      status: 'FAILED',
+      message: 'Director execution failed during verification.',
+      toast: 'Forge run failed or was blocked',
+    },
+    {
+      status: 'CANCELLED',
+      message: 'Director run was cancelled.',
+      toast: 'Run canceled',
+    },
+  ])('respects terminal director status $status instead of reporting success', async ({ status, message, toast }) => {
+    const previousFetch = global.fetch;
+    const api = require('../services/api');
+    const previousFetchProject = api.fetchProject.getMockImplementation();
+    api.fetchProject.mockResolvedValue({ id: 'test-project', name: 'test-project', files: [] });
+
+    const event = { type: 'director_complete', status, message, changedPaths: [] };
+    const payload = `event: director_complete\\ndata: ${JSON.stringify(event)}\\n\\n`;
+    let sent = false;
+    const reader = {
+      read: jest.fn(async () => {
+        if (sent) return { done: true, value: undefined };
+        sent = true;
+        return { done: false, value: Buffer.from(payload) };
+      }),
+      cancel: jest.fn(async () => {}),
+    };
+
+    global.fetch = jest.fn(async (url) => {
+      if (String(url).includes('/api/agent/run')) {
+        return { ok: true, status: 200, body: { getReader: () => reader } };
+      }
+      return { ok: true, json: async () => ({ state: 'STOPPED', projects: [], success: true }) };
+    });
+
+    try {
+      render(<ForgeCopilot projectId="test-project" projectName="test-project" />);
+      const textarea = await screen.findByPlaceholderText(/Ask Forge AI/i);
+      fireEvent.change(textarea, { target: { value: 'Verify terminal run status' } });
+      fireEvent.click(screen.getByLabelText(/send message/i));
+
+      expect(await screen.findByText(message)).toBeInTheDocument();
+      expect(await screen.findByText(toast)).toBeInTheDocument();
+      expect(screen.queryByText('Forge Studio run complete')).not.toBeInTheDocument();
+    } finally {
+      global.fetch = previousFetch;
+      api.fetchProject.mockImplementation(previousFetchProject);
+    }
+  });
+
 });

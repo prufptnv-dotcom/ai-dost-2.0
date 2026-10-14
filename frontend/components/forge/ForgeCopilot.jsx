@@ -3165,7 +3165,25 @@ export default function ForgeCopilot({
               const terminalMessage = String(data.message || data.summary || '');
               const approvalPaused = data.type === 'done' && Boolean(data.approvalGate || /approval required|run paused/i.test(terminalMessage));
               const rejected = data.type === 'done' && /execution blocked|approval invalid|blocked by capabilitygatekeeper|^❌/i.test(terminalMessage);
-              terminalOutcome = approvalPaused ? 'paused' : rejected ? 'failed' : 'succeeded';
+              const explicitStatus = String(data.status || '').toUpperCase();
+              const explicitSuccess = ['SUCCEEDED', 'SUCCESS', 'COMPLETED'].includes(explicitStatus);
+              const explicitCancellation = ['CANCELLED', 'CANCELED'].includes(explicitStatus);
+              const explicitFailure = ['FAILED', 'ERROR', 'BLOCKED'].includes(explicitStatus);
+              if (explicitCancellation) {
+                terminalOutcome = 'canceled';
+              } else if (approvalPaused) {
+                terminalOutcome = 'paused';
+              } else if (
+                rejected ||
+                explicitFailure ||
+                (data.type === 'director_complete' && !explicitSuccess)
+              ) {
+                // Director completion is successful only when the backend explicitly
+                // reports a success status. Missing or unfamiliar statuses fail closed.
+                terminalOutcome = 'failed';
+              } else {
+                terminalOutcome = 'succeeded';
+              }
               if (Array.isArray(data.changedPaths)) data.changedPaths.forEach((p) => { if (typeof p === 'string' && p.trim()) terminalChangedPaths.add(p); });
               if (terminalOutcome === 'failed') setLastRunError(terminalMessage || 'Execution was blocked.');
               const replyTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
