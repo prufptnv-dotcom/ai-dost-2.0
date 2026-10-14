@@ -795,7 +795,7 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
               featurePreflight.attempted = true;
               const maxContextChars = 80000;
               const orderedFiles = parsedData.files.slice().sort((a, b) => {
-                const rank = (file) => /(?:^|\\/)App\\.[jt]sx?$|(?:^|\\/)page\\.[jt]sx?$/i.test(file.path || '') ? 0 : 1;
+                const rank = (file) => /(?:^|\\/)App\\.[jt]sx?$|(?:^|\\/)page\\.[jt]sx?$/i.test(file?.path || '') ? 0 : 1;
                 return rank(a) - rank(b);
               });
               const repairFiles = [];
@@ -1286,7 +1286,7 @@ ${generationModeReport}
 
 - Build/runtime smoke: **${runtimeSmokePassed ? 'PASS' : (rt.unverified || rt.unavailable ? 'UNVERIFIED' : 'FAIL')}**
 - Requirement-level acceptance: **NOT_EVALUATED** until real user-flow checks produce evidence.
-- `verified` remains the runtime-smoke compatibility field; it must not be interpreted as proof of full feature correctness.
+- The verified field remains the runtime-smoke compatibility field; it must not be interpreted as proof of full feature correctness.
 
 #### 🔎 Feature Completeness Preflight (diagnostic only)
 ${featurePreflightReport}
