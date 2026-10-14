@@ -62,6 +62,15 @@ describe('Phase 1 runtime evidence package validator', () => {
     assert.equal(safeEvidenceFile(fixture.runDir, 'missing.log'), false);
   });
 
+  test('rejects symlinks that escape the run directory', (t) => {
+    const fixture = makeRunFixture(t);
+    const outside = path.join(fixture.root, 'outside-evidence.txt');
+    fs.writeFileSync(outside, 'not part of this run');
+    const link = path.join(fixture.runDir, 'external-evidence.txt');
+    fs.symlinkSync(outside, link);
+    assert.equal(safeEvidenceFile(fixture.runDir, 'external-evidence.txt'), false);
+  });
+
   test('marks a missing manifest as incomplete', (t) => {
     const fixture = makeRunFixture(t);
     const result = validateRun(fixture.runDir, 'candidate', fixture.testCase.id, 1, fixture.testCase.requiredBehaviors);
