@@ -67,6 +67,32 @@ function shouldCreateAppSpecification(prompt) {
   return Boolean(request && ACTION_RE.test(request) && SOFTWARE_SCOPE_RE.test(request));
 }
 
+function featureSignalIsRequested(prompt, pattern) {
+  const source = String(prompt || '');
+  const flags = pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g';
+  const matcher = new RegExp(pattern.source, flags);
+  const boundaries = ['\\n', '.', '!', '?', ';'];
+  let match;
+  while ((match = matcher.exec(source)) !== null) {
+    let clauseStart = -1;
+    let clauseEnd = source.length;
+    for (const boundary of boundaries) {
+      clauseStart = Math.max(clauseStart, source.lastIndexOf(boundary, match.index - 1));
+      const next = source.indexOf(boundary, matcher.lastIndex);
+      if (next !== -1) clauseEnd = Math.min(clauseEnd, next);
+    }
+    const before = source.slice(clauseStart + 1, match.index)
+      .split(/\\b(?:but|however|except|instead|rather)\\b/i).pop()
+      .replace(/[\\s,]+$/g, '');
+    const after = source.slice(matcher.lastIndex, clauseEnd).replace(/^[\\s,]+/g, '');
+    const negatedPrefix = /\\b(?:no|without|exclude|excluding|omit|omitting|avoid|avoiding|remove|removing|don't|do not|shouldn't|should not|must not|never|not(?!\\s+only)|nahi|mat)\\b(?:\\s+[\\w'-]+){0,4}\\s*$/i;
+    const negatedSuffix = /^(?:(?:is|are|was|were|should be|must be|isn't|aren't)\\s+)?(?:not needed|not required|unnecessary|unwanted|nahi|na|mat)\\b/i;
+    if (negatedPrefix.test(before) || negatedSuffix.test(after)) continue;
+    return true;
+  }
+  return false;
+}
+
 function extractExplicitClauses(prompt) {
   const lines = String(prompt || '').split(/\r?\n/)
     .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim())
@@ -280,13 +306,13 @@ function buildAppSpecification(prompt, options = {}) {
   const archetype = inferArchetype(request);
   const requestedPages = EXPLICIT_PAGE_RULES.filter((entry) => entry[1].test(request)).map((entry) => entry[0]);
   const explicitClauses = extractExplicitClauses(request);
-  const matchedFeatures = FEATURE_RULES.filter((feature) => feature.pattern.test(request)).slice(0, MAX_REQUIREMENTS - 1);
+  const matchedFeatures = FEATURE_RULES.filter((feature) => featureSignalIsRequested(request, feature.pattern)).slice(0, MAX_REQUIREMENTS - 1);
   const explicitFeaturePatterns = matchedFeatures.map((feature) => feature.pattern);
   const unmatchedExplicitClauses = explicitClauses.filter((clause) =>
-    !explicitFeaturePatterns.some((pattern) => pattern.test(clause))
+    !matchedFeatures.some((feature) => featureSignalIsRequested(clause, feature.pattern))
   );
   const featureRequirements = matchedFeatures.map((feature, index) => {
-    const sourceClauses = explicitClauses.filter((clause) => feature.pattern.test(clause));
+    const sourceClauses = explicitClauses.filter((clause) => featureSignalIsRequested(clause, feature.pattern));
     return {
       id: 'REQ-' + String(index + 2).padStart(3, '0'),
       name: feature.name,
