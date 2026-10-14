@@ -25,23 +25,30 @@ export function KanbanBoard({ agentId, onTaskUpdate }) {
   const [newTaskText, setNewTaskText] = useState('');
   const taskSeqRef = useRef(0);
 
-  const loadTasks = useCallback(async () => {
+  const loadTasks = useCallback(async (isActive = () => true) => {
     try {
       const res = await fetch('/api/agent/tasks');
+      if (!isActive()) return;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      if (!isActive()) return;
       const list = Array.isArray(data) ? data : (Array.isArray(data?.tasks) ? data.tasks : []);
       if (list.length > 0) {
         setTasks(list);
         return;
       }
-    } catch (_) { /* backend unreachable — fall back to demo tasks */ }
-    setTasks(MOCK_TASKS.map(t => ({ ...t, agentId })));
+    } catch (_) {
+      if (!isActive()) return;
+      /* backend unreachable — fall back to demo tasks */
+    }
+    if (isActive()) setTasks(MOCK_TASKS.map(t => ({ ...t, agentId })));
   }, [agentId]);
 
   useEffect(() => {
-    // Load tasks from agent session
-    loadTasks();
+    // Do not update task state if the board is unmounted before fetch completes.
+    let active = true;
+    loadTasks(() => active);
+    return () => { active = false; };
   }, [loadTasks]);
 
   const handleDragStart = (e, task) => {
