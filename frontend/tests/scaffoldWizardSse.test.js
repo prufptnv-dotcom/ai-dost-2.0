@@ -17,6 +17,22 @@ describe('parseScaffoldWizardSse', () => {
     });
   });
 
+  test('preserves unverified output-quality status alongside completion', () => {
+    const raw = [
+      'data: {"type":"output_quality","status":"UNVERIFIED","acceptanceStatus":"NOT_EVALUATED"}',
+      '',
+      'data: {"type":"done","message":"files created","files":[{"path":"src/App.jsx"}]}',
+      '',
+    ].join('\\n');
+    const parsed = parseScaffoldWizardSse(raw);
+    expect(parsed.outputQuality).toMatchObject({
+      type: 'output_quality',
+      status: 'UNVERIFIED',
+      acceptanceStatus: 'NOT_EVALUATED',
+    });
+    expect(parsed.done.files).toHaveLength(1);
+  });
+
   test('surfaces backend error events instead of treating stream closure as success', () => {
     const parsed = parseScaffoldWizardSse('data: {"type":"error","message":"provider unavailable"}\n\n');
     expect(parsed.error).toMatchObject({ type: 'error', message: 'provider unavailable' });
