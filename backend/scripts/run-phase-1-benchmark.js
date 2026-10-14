@@ -142,7 +142,7 @@ async function runOne(config) {
   const terminalEvents = events.filter((event) => ['done', 'director_complete'].includes(event.type));
   const providerModelObservations = events
     .filter((event) => event && (event.provider || event.model))
-    .map((event) => ({ provider: event.provider || null, providerName: event.providerName || null, model: event.model || null, type: event.type || null }));
+    .map((event) => ({ provider: event.provider || null, providerName: event.providerName || null, model: event.model || null, fileCount: event.fileCount ?? null, phase: event.phase || null, type: event.type || null }));
   const projectFiles = [];
   const walk = (current, relative) => {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
