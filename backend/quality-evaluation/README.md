@@ -93,7 +93,7 @@ AI_DOST_BASE_URL=http://127.0.0.1:5000 AI_DOST_BENCHMARK_MODEL=gemini \
 
 # Stop baseline and start the candidate checkout on the same local backend port, then:
 AI_DOST_BENCHMARK_REVISION="$(git rev-parse HEAD)" \
-AI_DOST_BASE_URL=http://127.0.0.1:3000 AI_DOST_BENCHMARK_MODEL=gemini \
+AI_DOST_BASE_URL=http://127.0.0.1:5000 AI_DOST_BENCHMARK_MODEL=gemini \
   node scripts/run-phase-1-benchmark.js --phase candidate --runs 3 \
   --artifacts-dir /tmp/ai-dost-phase1-comparison
 
