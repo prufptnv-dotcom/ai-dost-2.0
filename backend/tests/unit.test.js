@@ -2503,5 +2503,69 @@ describe('P12.4 — planner honesty, mutation failure, verification gate', () =>
       assert.match(res.reason, /Verification failed|max repairs/i);
       assert.ok(state.runs.some((r) => r.status === 'FAILED'));
     });
+
+    test('runWithPlan rejects resolved success:false output and automatically repairs it', async () => {
+      let writeAttempts = 0;
+      const { loop, state } = harness({
+        executeTool: async (_stepId, tool) => {
+          if (tool === 'write_file' && writeAttempts++ === 0) {
+            return { success: false, code: 'WRITE_FORBIDDEN_ON_EXISTING', error: 'Use apply_diff for existing files' };
+          }
+          return { success: true };
+        },
+        repairPlan: { goal: 'repair', steps: [{ id: 'r1', tool: 'list_directory', description: 'inspect after rejected write', input: {} }] },
+      });
+
+      const result = await loop.runWithPlan(
+        'p1', 'u1',
+        { goal: 'implement a UI', steps: [{ id: 's1', tool: 'write_file', description: 'write App', input: {} }] },
+        1, () => false
+      );
+
+      assert.equal(result.status, 'SUCCEEDED');
+      assert.equal(state.repairCalls.length, 1, 'resolved tool failure must enter the repair planner');
+      assert.match(state.repairCalls[0].errorInfo, /WRITE_FORBIDDEN_ON_EXISTING/);
+      assert.match(state.repairCalls[0].errorInfo, /Use apply_diff/);
+      assert.ok(state.runs.some((run) => run.status === 'SUCCEEDED'));
+    });
+
+    test('executeQueue (run path) rejects resolved success:false output and repairs it', async () => {
+      let writeAttempts = 0;
+      const { loop, state } = harness({
+        executeTool: async (_stepId, tool) => {
+          if (tool === 'write_file' && writeAttempts++ === 0) {
+            return { success: false, error: 'Write was rejected by workspace policy' };
+          }
+          return { success: true };
+        },
+        repairPlan: { goal: 'repair', steps: [{ id: 'r1', tool: 'list_directory', description: 'inspect after rejected write', input: {} }] },
+        generatePlan: { goal: 'implement a UI', steps: [{ id: 's1', tool: 'write_file', description: 'write App', input: {} }] },
+      });
+
+      const result = await loop.run('p1', 'u1', 'implement a UI', 1);
+
+      assert.equal(result.status, 'SUCCEEDED');
+      assert.equal(state.repairCalls.length, 1, 'run() path must use the same structured failure contract');
+      assert.match(state.repairCalls[0].errorInfo, /Write was rejected by workspace policy/);
+      assert.ok(state.runs.some((run) => run.status === 'SUCCEEDED'));
+    });
+
+    test('repair budget exhaustion preserves the real resolved tool failure reason', async () => {
+      const { loop, state } = harness({
+        executeTool: async () => ({ success: false, code: 'BUILD_FAILED', error: 'Build failed: missing entry module' }),
+      });
+
+      const result = await loop.runWithPlan(
+        'p1', 'u1',
+        { goal: 'build project', steps: [{ id: 's1', tool: 'sandbox_dev_build', description: 'build project', input: {} }] },
+        0, () => false
+      );
+
+      assert.equal(result.status, 'FAILED');
+      assert.match(result.reason, /Max repairs reached for sandbox_dev_build/);
+      assert.match(result.reason, /Build failed: missing entry module/);
+      assert.ok(state.runs.some((run) => run.status === 'FAILED' && /Build failed: missing entry module/.test(run.reason)));
+    });
+
   });
 });
