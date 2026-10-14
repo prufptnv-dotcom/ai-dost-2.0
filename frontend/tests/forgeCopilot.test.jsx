@@ -117,7 +117,7 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
       message: 'Run stopped by test harness',
       changedPaths: [],
     };
-    const payload = `data: ${JSON.stringify(terminalEvent)}\\n\\n`;
+    const payload = `data: ${JSON.stringify(terminalEvent)}\n\n`;
     let resolveStreamRead;
     let sent = false;
     const firstRead = new Promise((resolve) => { resolveStreamRead = resolve; });
