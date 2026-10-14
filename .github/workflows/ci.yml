@@ -250,11 +250,10 @@ jobs:
           fi
 
   deploy:
-    name: Deploy Preview (Vercel frontend)
+    name: Deploy (main push only)
     needs: [frontend, backend, e2e, docker]
-    # Same-repository pull requests can produce an isolated Vercel preview.
-    # Main remains the only push-triggered deployment target.
-    if: github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && github.event_name == 'push')
+    # Per project workflow preference, PRs are reviewed via GitHub checks and are not deployed to Vercel.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     # secrets context is available in job-level env (not in steps.if) —
     # evaluate once here, then gate each deploy step on the env flag.
@@ -266,16 +265,16 @@ jobs:
       VERCEL_PROJECT_ID_SET: ${{ secrets.VERCEL_PROJECT_ID != '' }}
     steps:
       - uses: actions/checkout@v5
-      - name: Report missing Vercel preview credentials
+      - name: Report missing Vercel deployment credentials
         if: env.VERCEL_TOKEN_SET != 'true' || env.VERCEL_ORG_ID_SET != 'true' || env.VERCEL_PROJECT_ID_SET != 'true'
         run: |
           {
             echo '### Preview deployment status'
-            echo 'Vercel preview was not deployed because one or more required repository secrets are missing.'
+            echo 'Vercel deployment was not run because one or more required repository secrets are missing.'
             echo 'Required secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID.'
             echo 'No secret values are printed by this workflow.'
           } >> "$GITHUB_STEP_SUMMARY"
-          echo '::warning::Vercel preview skipped: configure VERCEL_TOKEN, VERCEL_ORG_ID, and VERCEL_PROJECT_ID.'
+          echo '::warning::Vercel deployment skipped: configure VERCEL_TOKEN, VERCEL_ORG_ID, and VERCEL_PROJECT_ID.'
       - name: Deploy to Vercel (Frontend)
         if: env.VERCEL_TOKEN_SET == 'true' && env.VERCEL_ORG_ID_SET == 'true' && env.VERCEL_PROJECT_ID_SET == 'true'
         uses: amondnet/vercel-action@v25
@@ -290,4 +289,18 @@ jobs:
             echo '### Backend deployment status'
             echo 'This workflow does not deploy the backend. The previous Railway/Render step was a placeholder, not a deployment.'
             echo 'Configure a real backend deployment workflow before treating the backend as deployed.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deployment-status:
+    name: Deployment policy (PRs are not deployed)
+    needs: [frontend, backend, e2e, docker]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain intentional deployment skip
+        run: |
+          {
+            echo '### Deployment policy'
+            echo 'This pull request is validated by CI and reviewed in GitHub; it is intentionally not deployed to Vercel.'
+            echo 'The Deploy job is main-push-only by design, so its skipped status on pull requests is expected rather than a failed check.'
           } >> "$GITHUB_STEP_SUMMARY"
