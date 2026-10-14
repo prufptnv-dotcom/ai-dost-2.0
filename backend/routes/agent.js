@@ -3239,6 +3239,13 @@ router.post('/scaffold-wizard', async (req, res) => {
   ].filter(Boolean).join('\n\n');
   const appSpecification = buildAppSpecification(specificationRequest, { force: true });
   const specificationContext = appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '';
+  const callWithTimeout = (promise, timeoutMs, message) => {
+    let timer;
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), timeoutMs); }),
+    ]).finally(() => clearTimeout(timer));
+  };
 
   const scaffoldPrompt = `You are an expert full-stack engineer. Build a COMPLETE, production-ready, beautiful web application based on this interactive specification:
 
@@ -3267,15 +3274,14 @@ STRUCTURED APP SPECIFICATION AND ACCEPTANCE CHECKS:
   try {
     let files = [];
     let generationSource = 'llm-output-pending';
-    let selectedProvider = null;
     try {
-      const rawResponse = await Promise.race([
+      const rawResponse = await callWithTimeout(
         callScaffoldLLM(scaffoldPrompt, null, req.headers, (provider) => {
-          selectedProvider = provider;
           send({ type: 'generation_provider', phase: 'wizard-initial', ...provider });
         }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('LLM Timeout')), 10000))
-      ]);
+        120000,
+        'LLM generation timed out'
+      );
       const stripped = String(rawResponse || '').replace(/```(?:json)?\s*/gi, '').trim();
       const jsonBlock = stripped.match(/\{[\s\S]*\}/);
       if (jsonBlock) {
@@ -3344,12 +3350,13 @@ STRUCTURED APP SPECIFICATION AND ACCEPTANCE CHECKS:
             'Inspect the actual files; diagnostics may be wrong. Preserve working code. If missing, implement the behavior end-to-end with state/data flow, event handlers, validation, visible outcomes, and useful empty/error states. Do not add comments, labels, placeholders, or dead code merely to satisfy a signal. Return complete contents for changed files using the normal FILE/code-block format.',
           ].join('\n\n');
           try {
-            const completionResponse = await Promise.race([
+            const completionResponse = await callWithTimeout(
               callScaffoldLLM(completionPrompt, null, req.headers, (provider) => {
                 send({ type: 'generation_provider', phase: 'wizard-targeted-completion', ...provider });
               }),
-              new Promise((_, reject) => setTimeout(() => reject(new Error('Targeted completion timed out')), 120000)),
-            ]);
+              120000,
+              'Targeted completion timed out'
+            );
             const completionFiles = extractFiles(completionResponse);
             if (Array.isArray(completionFiles) && completionFiles.length > 0) {
               const mergedFiles = new Map(
