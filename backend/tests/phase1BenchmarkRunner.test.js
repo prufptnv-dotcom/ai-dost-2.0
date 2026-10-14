@@ -52,14 +52,12 @@ describe('Phase 1 live benchmark capture runner', () => {
       let body = '';
       req.on('data', (chunk) => { body += chunk; });
       req.on('end', () => {
-        const payload = JSON.parse(body);
-        fs.mkdirSync(payload.projectPath, { recursive: true });
-        fs.writeFileSync(path.join(payload.projectPath, 'App.jsx'),
-          'export default function App(){ return <main><label>Search</label><button>Export CSV</button></main>; }');
+        JSON.parse(body);
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
-        res.write('data: {"type":"generation_provider","provider":"gemini","providerName":"Gemini (Flash)","model":null,"fileCount":4,"phase":"initial"}\n\n');
-        res.write('data: {"type":"output_quality","status":"UNVERIFIED","acceptanceStatus":"NOT_EVALUATED"}\n\n');
-        res.end('data: {"type":"done","message":"finished"}\n\n');
+        res.write('data: ' + JSON.stringify({ type: 'generation_provider', provider: 'gemini', providerName: 'Gemini (Flash)', model: null, fileCount: 1, phase: 'initial' }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ type: 'file_changed', path: 'src/App.jsx', content: 'export default function App(){ return <main><label>Search</label><button>Export CSV</button></main>; }' }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ type: 'output_quality', status: 'UNVERIFIED', acceptanceStatus: 'NOT_EVALUATED' }) + '\n\n');
+        res.end('data: ' + JSON.stringify({ type: 'done', message: 'finished' }) + '\n\n');
       });
     });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -95,9 +93,10 @@ describe('Phase 1 live benchmark capture runner', () => {
     assert.equal(metadata.outputQuality.status, 'UNVERIFIED');
     assert.equal(metadata.acceptanceStatus, 'NOT_EVALUATED');
     assert.equal(metadata.project.fileCount, 1);
-    assert.equal(events.length, 3);
+    assert.equal(events.length, 4);
     assert.equal(metadata.settings.actualProviderModelObservations[0].providerName, 'Gemini (Flash)');
-    assert.equal(metadata.settings.actualProviderModelObservations[0].fileCount, 4);
+    assert.equal(metadata.settings.actualProviderModelObservations[0].fileCount, 1);
+    assert.equal(fs.readFileSync(path.join(runDir, 'project', 'src', 'App.jsx'), 'utf8'), 'export default function App(){ return <main><label>Search</label><button>Export CSV</button></main>; }');
     assert.equal(metadata.settings.actualProviderModelObservations[0].phase, 'initial');
     assert.equal(metadata.settings.actualModelIdentityStatus, 'NOT_EXPOSED_BY_GENERATION_EVENT');
     assert.equal(summary.completedRuns, 1);
