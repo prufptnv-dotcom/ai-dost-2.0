@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   exceljs-compatibility:
@@ -133,6 +133,15 @@ jobs:
       - name: Production dependency audit
         run: npm audit --omit=dev
 
+
+      - name: Commit tested formatter compatibility override and lockfile
+        if: success() && github.event_name == 'push' && github.ref_name == 'experiment/exceljs-compatibility-2026-10'
+        run: |
+          git -C .. config user.name "github-actions[bot]"
+          git -C .. config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C .. add backend/package.json backend/package-lock.json
+          git -C .. commit -m "fix: remove deprecated fast-csv formatter dependency"
+          git -C .. push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Upload generated lockfile for review
         if: always()
