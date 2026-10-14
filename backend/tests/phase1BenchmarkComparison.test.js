@@ -75,6 +75,22 @@ describe('compare-phase-1-benchmark', () => {
     assert.match(report.interpretation.join(' '), /not a quality score/i);
   });
 
+  test('does not claim provider parity when the runtime does not expose the selected provider', (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-dost-phase1-provider-unknown-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const baselineRun = writeRun(path.join(root, 'baseline', 'case-a', 'run-1'), 'baseline-sha', 1000, 1, 100, 2, 0, null);
+    const candidateRun = writeRun(path.join(root, 'candidate', 'case-a', 'run-1'), 'candidate-sha', 1100, 1, 100, 2, 0, null);
+    const baseline = { phase: 'baseline', runsPerCase: 1, caseCount: 1, preferredModel: 'gemini', results: [baselineRun] };
+    const candidate = { phase: 'candidate', runsPerCase: 1, caseCount: 1, preferredModel: 'gemini', results: [candidateRun] };
+
+    const report = compareSummaries(baseline, candidate);
+    assert.equal(report.pairedRuns[0].providerParity, null);
+    assert.equal(report.pairedRuns[0].providerParityStatus, 'UNKNOWN');
+    assert.equal(report.providerParityCount, 0);
+    assert.equal(report.providerParityUnknownCount, 1);
+    assert.match(report.warnings.join(' '), /not exposed/i);
+  });
+
   test('rejects an uncontrolled preferred-model comparison', () => {
     assert.throws(() => compareSummaries({
       phase: 'baseline', runsPerCase: 1, caseCount: 1, preferredModel: 'gemini', results: [],
