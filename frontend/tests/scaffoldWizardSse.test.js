@@ -5,11 +5,17 @@ describe('parseScaffoldWizardSse', () => {
     const raw = [
       'data: {"type":"wizard_status","step":"writing"}',
       '',
+      'data: {"type":"file_changed","path":"src/App.jsx","content":"export default function App() {}"}',
+      '',
       'data: {"type":"done","message":"generated","files":[{"path":"src/App.jsx","size":120}]}',
       '',
     ].join('\n');
     const parsed = parseScaffoldWizardSse(raw);
     expect(parsed.error).toBeNull();
+    expect(parsed.events.find((event) => event.type === 'file_changed')).toMatchObject({
+      path: 'src/App.jsx',
+      content: 'export default function App() {}',
+    });
     expect(parsed.done).toMatchObject({
       type: 'done',
       message: 'generated',
