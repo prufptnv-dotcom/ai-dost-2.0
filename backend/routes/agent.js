@@ -1116,18 +1116,18 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
           if (onProgress) onProgress({ type: 'plan_tasks', tasks: [...todoList] });
 
           const projectTitle = String(appSpecification?.archetype?.label || category || 'Generated project')
-            .replace(/(^\\w|\\s\\w)/g, (match) => match.toUpperCase());
+            .replace(/(^\w|\s\w)/g, (match) => match.toUpperCase());
           const specificationRequirements = appSpecification?.requirements || [];
           const requirementsReport = specificationRequirements.length
             ? specificationRequirements.map((requirement) =>
                 `- **${requirement.id} — ${requirement.name}**${requirement.sourceText && requirement.id !== 'REQ-001' ? `: ${requirement.sourceText}` : ''}`
-              ).join('\\n')
+              ).join('\n')
             : '- Specification extraction was unavailable; the original prompt remains the source of truth.';
           const acceptanceReport = (appSpecification?.acceptanceCriteria || []).map((criterion) =>
             `- **${criterion.id} — ${criterion.title}:** ${criterion.check}`
-          ).join('\\n');
+          ).join('\n');
           const clauseCoverageNote = appSpecification?.explicitCoverage?.unrepresentedClauses?.length
-            ? `\\n\\n**⚠️ Explicit prompt clauses need follow-up:**\\n${appSpecification.explicitCoverage.unrepresentedClauses.map((clause) => `- ${clause}`).join('\\n')}`
+            ? `\n\n**⚠️ Explicit prompt clauses need follow-up:**\n${appSpecification.explicitCoverage.unrepresentedClauses.map((clause) => `- ${clause}`).join('\n')}`
             : '';
 
           const finalReport = `### 🚀 Project Generation Report: **${projectTitle}**
@@ -1142,7 +1142,7 @@ ${clauseCoverageNote}
 ${acceptanceReport || '- No machine-readable acceptance criteria were extracted.'}
 
 #### 📂 Files Created (${writtenFiles.length})
-${writtenFiles.map((file) => `- \`${file.path}\` (${file.size} bytes)`).join('\\n')}
+${writtenFiles.map((file) => `- \`${file.path}\` (${file.size} bytes)`).join('\n')}
 
 #### ⚙️ Dependency Installation
 ${installResult?.skipped
@@ -1157,7 +1157,7 @@ ${repairSummary.attempts === 0
     ? '- No repair was needed.'
     : repairSummary.repairs.map((repair) => repair.applied?.length
         ? `- Attempt ${repair.attempt}: rewrote \`${repair.applied.map((file) => file.path).join('\`, \`')}\` → re-verified${repair.unchanged?.length ? ` (${repair.unchanged.length} file(s) returned unchanged and were skipped)` : ''}`
-        : `- Attempt ${repair.attempt}: no usable repair (${repair.reason || 'unknown'})`).join('\\n')}` : ''}
+        : `- Attempt ${repair.attempt}: no usable repair (${repair.reason || 'unknown'})`).join('\n')}` : ''}
 
 ${verification?.ok
     ? '✅ **Build/runtime result: PASS.** The generated project builds and renders in the verification environment.'
