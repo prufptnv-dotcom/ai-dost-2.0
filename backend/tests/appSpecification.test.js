@@ -68,6 +68,67 @@ describe('AppSpecificationService', () => {
     assert.equal(spec.pages.explicitlyRequested.includes('Login/signup'), false);
   });
 
+  test('keeps excluded features out across varied negation wording and list lengths', () => {
+    const cases = [
+      { prompt: 'Create a dashboard with no search.', excluded: ['search-filter'] },
+      { prompt: 'Create a dashboard without search, charts, or login.', excluded: ['search-filter', 'charts-analytics', 'authentication'] },
+      { prompt: 'Create a dashboard; omit chat and CSV export.', excluded: ['chat', 'csv-export'] },
+      { prompt: 'Create a dashboard where login is not required.', excluded: ['authentication'] },
+      { prompt: "Create a dashboard where login isn't needed.", excluded: ['authentication'] },
+      { prompt: 'Create a dashboard and do not include search or charts.', excluded: ['search-filter', 'charts-analytics'] },
+      { prompt: 'Create a dashboard with search, but without login.', excluded: ['authentication'], included: ['search-filter'] },
+      { prompt: 'Create a dashboard with no login. Include search and charts.', excluded: ['authentication'], included: ['search-filter', 'charts-analytics'] },
+      { prompt: 'Create a dashboard; no charts. Include login.', excluded: ['charts-analytics'], included: ['authentication'] },
+      { prompt: 'Create a dashboard with search, not only charts but also login.', excluded: [], included: ['search-filter', 'charts-analytics', 'authentication'] },
+    ];
+
+    for (const entry of cases) {
+      const spec = buildAppSpecification(entry.prompt);
+      for (const featureKey of entry.excluded || []) {
+        assert.equal(
+          spec.requirements.some((item) => item.featureKey === featureKey),
+          false,
+          entry.prompt + ' should exclude ' + featureKey
+        );
+      }
+      for (const featureKey of entry.included || []) {
+        assert.ok(
+          spec.requirements.some((item) => item.featureKey === featureKey),
+          entry.prompt + ' should include ' + featureKey
+        );
+      }
+    }
+  });
+
+  test('keeps every feature in generated comma-list exclusions excluded', () => {
+    const featureTerms = [
+      { term: 'search', key: 'search-filter' },
+      { term: 'charts', key: 'charts-analytics' },
+      { term: 'login', key: 'authentication' },
+      { term: 'chat', key: 'chat' },
+      { term: 'CSV export', key: 'csv-export' },
+      { term: 'dark mode', key: 'dark-mode' },
+      { term: 'file upload', key: 'file-upload' },
+    ];
+
+    // Deterministic combination coverage: each list length and each position
+    // is tested, rather than relying on one hand-picked sentence.
+    for (let length = 1; length <= featureTerms.length; length += 1) {
+      const selected = featureTerms.slice(0, length);
+      const list = selected.map((item) => item.term);
+      const prompt = 'Create a dashboard without ' + list.slice(0, -1).join(', ') +
+        (list.length > 1 ? ' or ' : '') + list[list.length - 1] + '.';
+      const spec = buildAppSpecification(prompt);
+      for (const feature of selected) {
+        assert.equal(
+          spec.requirements.some((item) => item.featureKey === feature.key),
+          false,
+          prompt + ' should exclude ' + feature.key
+        );
+      }
+    }
+  });
+
   test('respects explicit framework choices without inventing a stack when omitted', () => {
     const explicit = buildAppSpecification('Create a Next.js education platform with quizzes');
     assert.equal(explicit.stack.requested, 'Next.js');
