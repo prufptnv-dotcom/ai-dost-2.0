@@ -96,7 +96,12 @@ AI_DOST_BENCHMARK_REVISION="$(git rev-parse HEAD)" \
 AI_DOST_BASE_URL=http://127.0.0.1:3000 AI_DOST_BENCHMARK_MODEL=gemini \
   node scripts/run-phase-1-benchmark.js --phase candidate --runs 3 \
   --artifacts-dir /tmp/ai-dost-phase1-comparison
+
+# After both summaries and all per-run artifacts exist:
+node scripts/compare-phase-1-benchmark.js --artifacts-dir /tmp/ai-dost-phase1-comparison
 ```
+
+The comparison script pairs case/run IDs and reports file/latency/static-diagnostic deltas, provider parity, and artifact paths. It deliberately keeps `comparisonStatus: DIAGNOSTIC_ONLY` and `acceptanceStatus: NOT_EVALUATED`; a larger file count or more regex matches is not a quality verdict.
 
 The runner sends each canonical prompt to `POST /api/agent/run` with `copilotDirector: true`, then preserves the generated project by reconstructing files from actual `file_written`/`file_changed` SSE events, alongside the normalized event log (`events.ndjson`), metadata, and static diagnostic report outside the repository. Each run uses a unique `projectId`; the Director route may persist its workspace through the project store rather than writing to the supplied `projectPath`, so SSE file events—not the request path—are the artifact source. A `generation_provider` event records the provider that returned usable scaffold files. Run baseline and candidate with identical backend settings, provider credentials, provider order, model preferences, and timeout. The exact model ID and failed fallback attempts may not be exposed in SSE; record them from backend logs/config where available and mark them unknown otherwise. Never infer the actual model from the requested preference.
 
