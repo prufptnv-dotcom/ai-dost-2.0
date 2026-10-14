@@ -46,10 +46,13 @@ class SandboxManager extends EventEmitter {
       // stale negative → fall through and re-ping
     }
     const start = Date.now();
+    let pingTimeout;
     try {
       await Promise.race([
         docker.ping(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Docker ping timeout')), 4000)),
+        new Promise((_, reject) => {
+          pingTimeout = setTimeout(() => reject(new Error('Docker ping timeout')), 4000);
+        }),
       ]);
       this._dockerAvailable = true;
       this._dockerPingLatency = Date.now() - start;
@@ -57,6 +60,9 @@ class SandboxManager extends EventEmitter {
       this._dockerAvailable = false;
       this._dockerPingLatency = null;
       this._dockerUnavailableAt = Date.now();
+    } finally {
+      // Do not keep Node alive for the full timeout after a successful ping.
+      if (pingTimeout) clearTimeout(pingTimeout);
     }
     this._dockerChecked = true;
     return this._dockerAvailable;
@@ -443,18 +449,27 @@ class SandboxManager extends EventEmitter {
     } catch {
       // Image missing → pull with timeout
     }
-    await Promise.race([
-      new Promise((resolve, reject) => {
-        docker.pull(image, (err, stream) => {
-          if (err) return reject(err);
-          docker.modem.followProgress(stream, onFinished => {
-            if (onFinished) reject(onFinished);
-            else resolve();
+    let pullTimeout;
+    try {
+      await Promise.race([
+        new Promise((resolve, reject) => {
+          docker.pull(image, (err, stream) => {
+            if (err) return reject(err);
+            docker.modem.followProgress(stream, onFinished => {
+              if (onFinished) reject(onFinished);
+              else resolve();
+            });
           });
-        });
-      }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error(`Image pull timeout for ${image}`)), 300000)),
-    ]);
+        }),
+        new Promise((_, reject) => {
+          pullTimeout = setTimeout(() => reject(new Error(`Image pull timeout for ${image}`)), 300000);
+        }),
+      ]);
+    } finally {
+      // The losing Promise in Promise.race remains scheduled unless cleared;
+      // without this cleanup every successful pull keeps the process alive 5m.
+      if (pullTimeout) clearTimeout(pullTimeout);
+    }
   }
 
   async execLocal(sandbox, cmd, options = {}) {
