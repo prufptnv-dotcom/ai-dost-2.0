@@ -38,7 +38,21 @@ function safeEvidenceFile(runDir, relativePath) {
   const normalized = relativePath.replace(/\\/g, '/');
   if (normalized.split('/').includes('..')) return false;
   const resolved = path.resolve(runDir, normalized);
-  return resolved.startsWith(path.resolve(runDir) + path.sep) && fs.existsSync(resolved) && fs.statSync(resolved).isFile();
+  const lexicalRoot = path.resolve(runDir);
+  if (!resolved.startsWith(lexicalRoot + path.sep)) return false;
+
+  // Lexical containment alone does not stop a symlink inside the run directory
+  // from pointing at a file outside it. Resolve both paths before accepting evidence.
+  try {
+    const realRoot = fs.realpathSync(lexicalRoot);
+    const realFile = fs.realpathSync(resolved);
+    const relativeToRoot = path.relative(realRoot, realFile);
+    if (!relativeToRoot || relativeToRoot.startsWith('..' + path.sep) ||
+        relativeToRoot === '..' || path.isAbsolute(relativeToRoot)) return false;
+    return fs.statSync(realFile).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function validateRun(runDir, phase, caseId, runNumber, requiredBehaviors) {
