@@ -8,6 +8,7 @@ on:
       - 'audit/**'
       - 'feature/**'
       - 'fix/**'
+      - 'diag/**'
   pull_request:
     branches: [main, master]
 
