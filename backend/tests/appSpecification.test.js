@@ -99,6 +99,20 @@ describe('AppSpecificationService', () => {
   });
 });
 
+describe('Full-stack generation prompt quality contract', () => {
+  const { buildFullstackSystemPrompt } = require('../agent/fullstackTrainer');
+
+  test('does not force one theme or a single monolithic component', () => {
+    const prompt = buildFullstackSystemPrompt('Build a light, accessible portfolio with case studies', 'portfolio');
+    assert.match(prompt, /request-appropriate visual system/i);
+    assert.match(prompt, /Theme is request-driven/i);
+    assert.match(prompt, /semantic design tokens/i);
+    assert.match(prompt, /Do not put the entire product in one giant App component/i);
+    assert.doesNotMatch(prompt, /dark theme \(slate-950\)/i);
+    assert.doesNotMatch(prompt, /Font Awesome ONLY/i);
+  });
+});
+
 describe('CopilotDirector AppSpecification integration', () => {
   test('passes the validated specification to the director before task planning', async () => {
     const { handleCopilotDirectorRequest } = require('../agent/runtime/copilotDirectorHandler');
