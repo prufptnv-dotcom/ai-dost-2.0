@@ -6,6 +6,7 @@ const { getActiveTask } = require('../../taskCancellation');
 const { capabilityDiscovery } = require('../../agent/registry/CapabilityDiscovery');
 const { capabilityGatekeeper } = require('../../agent/policy/CapabilityGatekeeper');
 const logger = require('../../logger');
+const { buildAppSpecification, formatAppSpecificationForPrompt } = require('../../services/appSpecificationService');
 
 const PERMISSION_LEVELS = ['ask', 'auto', 'turbo'];
 
@@ -226,9 +227,22 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
   const contextFiles = (Array.isArray(body.contextFiles) ? body.contextFiles : [])
     .filter(p => typeof p === 'string' && p.trim() && !p.includes('..') && p.length < 400)
     .slice(0, 20);
-  const directorRequest = contextFiles.length
+  const baseDirectorRequest = contextFiles.length
     ? `${request}\n\nUser @-mentioned files (prioritize reading/editing these): ${contextFiles.join(', ')}`
     : request;
+
+  // Phase 1: build a validated requirement/acceptance contract before the
+  // director creates tasks. Keep the raw request above for permission checks;
+  // only the execution/planning context receives the additional spec.
+  const appSpecification = buildAppSpecification(request);
+  const specificationContext = appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '';
+  const directorRequest = [baseDirectorRequest, specificationContext].filter(Boolean).join('\n\n');
+  if (appSpecification) {
+    writeSse(res, {
+      type: 'thinking',
+      message: '🧩 Mapped ' + appSpecification.requirements.length + ' requirement(s) to ' + appSpecification.acceptanceCriteria.length + ' acceptance checks before planning.',
+    });
+  }
 
   const result = await runtime.director.run({
     userId: authorization.user.id,
