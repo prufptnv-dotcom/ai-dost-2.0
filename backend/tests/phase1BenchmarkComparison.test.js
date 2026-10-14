@@ -61,7 +61,7 @@ describe('compare-phase-1-benchmark', () => {
       results: [candidateRun],
     };
 
-    const report = compareSummaries(root, baseline, candidate);
+    const report = compareSummaries(baseline, candidate);
     assert.equal(report.comparisonStatus, 'DIAGNOSTIC_ONLY');
     assert.equal(report.acceptanceStatus, 'NOT_EVALUATED');
     assert.equal(report.pairedRuns.length, 1);
@@ -76,7 +76,7 @@ describe('compare-phase-1-benchmark', () => {
   });
 
   test('rejects an uncontrolled preferred-model comparison', () => {
-    assert.throws(() => compareSummaries('/tmp', {
+    assert.throws(() => compareSummaries({
       phase: 'baseline', runsPerCase: 1, caseCount: 1, preferredModel: 'gemini', results: [],
     }, {
       phase: 'candidate', runsPerCase: 1, caseCount: 1, preferredModel: 'groq', results: [],
