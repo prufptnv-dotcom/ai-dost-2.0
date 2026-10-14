@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/exceljs-dependency-experiment.yml'
       - 'backend/package.json'
+      - 'backend/package-lock.json'
   pull_request:
     branches: [main, master]
     paths:
@@ -15,7 +16,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   exceljs-compatibility:
@@ -95,18 +96,6 @@ jobs:
       - name: Production dependency audit
         run: npm audit --omit=dev
 
-      - name: Commit regenerated lockfile on the isolated experiment branch
-        if: success()
-        run: |
-          if git diff --quiet -- package-lock.json; then
-            echo "Generated lockfile is already up to date."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package-lock.json
-          git commit -m "chore: regenerate backend lockfile for ExcelJS overrides"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Upload generated lockfile for review
         if: always()
