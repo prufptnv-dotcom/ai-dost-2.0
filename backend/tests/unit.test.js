@@ -2033,7 +2033,7 @@ describe('E2E-driven director fixes (P12.3)', () => {
       const completion = h.events.find((e) => e.type === 'director_complete');
       assert.ok(completion, 'verification still emits a terminal completion event');
       assert.equal(completion.status, 'FAILED', 'terminal event must not imply full success');
-      assert.match(completion.message, /2 planned task\\(s\\) did not succeed/);
+      assert.match(completion.message, /2 planned task\(s\) did not succeed/);
       assert.equal(h.runWithPlanArgs.length, 1, 'verification plan executed');
       const options = h.runWithPlanArgs[0][6];
       assert.equal(options.permissionLevel, 'turbo');
