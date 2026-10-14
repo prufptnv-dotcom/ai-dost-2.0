@@ -353,7 +353,7 @@ function buildAppSpecification(prompt, options = {}) {
     } : null,
     explicitCoverage: {
       extractedClauseCount: explicitClauses.length,
-      representedClauseCount: representedClauses.length + unmatchedExplicitClauses.length - unrepresentedClauses.length,
+      representedClauseCount: explicitClauses.length - unrepresentedClauses.length,
       unrepresentedClauses,
       note: unrepresentedClauses.length
         ? 'Some prompt clauses exceed the specification limit. They remain in originalRequest and require explicit handling before completion.'
@@ -424,6 +424,7 @@ function validateAppSpecification(spec) {
   if (requirementCoverage < 1) errors.push('acceptance coverage is ' + Math.round(requirementCoverage * 100) + '%; every requirement must have a check');
   if ((spec.requirements || []).length > MAX_REQUIREMENTS) errors.push('requirements exceed limit (' + MAX_REQUIREMENTS + ')');
   if ((spec.acceptanceCriteria || []).length > MAX_ACCEPTANCE_CRITERIA) warnings.push('acceptance criteria exceed cap (' + MAX_ACCEPTANCE_CRITERIA + ')');
+  if (spec.explicitCoverage?.unrepresentedClauses?.length) warnings.push(spec.explicitCoverage.unrepresentedClauses.length + ' explicit prompt clause(s) exceed the requirement limit and need handling before completion.');
   if (spec.scope === 'application-ui' && (!spec.designSystem || !Array.isArray(spec.designSystem.responsiveWidthsPx))) {
     errors.push('application-ui specifications require designSystem and responsive widths');
   }
@@ -451,6 +452,7 @@ function formatAppSpecificationForPrompt(spec) {
     stack: spec.stack,
     pages: spec.pages,
     requirements: spec.requirements,
+    explicitCoverage: spec.explicitCoverage,
     componentArchitecture: spec.componentArchitecture,
     dataModel: spec.dataModel,
     interactions: spec.interactions,
@@ -461,7 +463,7 @@ function formatAppSpecificationForPrompt(spec) {
   };
   return [
     '=== AI-DOST APP SPECIFICATION (validated implementation contract) ===',
-    'The original request remains authoritative. Suggestions are optional. Map implementation and verification to the REQ-* and AC-* identifiers.',
+    'The original request remains authoritative. Suggestions are optional. Map implementation and verification to the REQ-* and AC-* identifiers. If explicitCoverage.unrepresentedClauses is non-empty, handle those clauses explicitly or report why they are blocked.'
     'For existing projects, inspect and preserve current conventions and unrelated working code.',
     'Do not claim integrations or checks are complete because a prompt, file, or tool call mentions them. Report unmet requirements and missing evidence explicitly.',
     JSON.stringify(concise, null, 2),
