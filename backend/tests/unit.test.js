@@ -2025,10 +2025,15 @@ describe('E2E-driven director fixes (P12.3)', () => {
         plan: makePlan(), permissionLevel: 'turbo', approvalToken: 'tok-run',
         onEvent: (e) => h.events.push(e),
       });
-      assert.equal(result.status, 'COMPLETED');
+      assert.equal(result.status, 'FAILED', 'the overall plan must not report success when required tasks were skipped');
+      assert.equal(result.verification_status, 'PASSED', 'final verification still runs and reports its own result');
+      assert.equal(result.errors[0].code, 'INCOMPLETE_PLAN');
       const skipped = h.events.filter((e) => e.type === 'director_task' && e.status === 'SKIPPED');
       assert.equal(skipped.length, 2, 'the failed task AND its blocked dependent are reported SKIPPED');
-      assert.ok(h.events.some((e) => e.type === 'director_complete'), 'verification still runs to completion');
+      const completion = h.events.find((e) => e.type === 'director_complete');
+      assert.ok(completion, 'verification still emits a terminal completion event');
+      assert.equal(completion.status, 'FAILED', 'terminal event must not imply full success');
+      assert.match(completion.message, /2 planned task\\(s\\) did not succeed/);
       assert.equal(h.runWithPlanArgs.length, 1, 'verification plan executed');
       const options = h.runWithPlanArgs[0][6];
       assert.equal(options.permissionLevel, 'turbo');
