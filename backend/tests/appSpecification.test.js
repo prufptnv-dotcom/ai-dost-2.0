@@ -44,6 +44,19 @@ describe('AppSpecificationService', () => {
     assert.match(formatted, /explicitCoverage/);
   });
 
+  test('retains multiple explicit clauses mapped to the same feature type', () => {
+    const spec = buildAppSpecification([
+      'Build a customer dashboard.',
+      '- Search customers by name',
+      '- Search customers by email',
+    ].join('\n'));
+    const searchRequirement = spec.requirements.find((item) => item.featureKey === 'search-filter');
+    assert.ok(searchRequirement);
+    assert.match(searchRequirement.sourceText, /Search customers by name/i);
+    assert.match(searchRequirement.sourceText, /Search customers by email/i);
+    assert.equal(spec.explicitCoverage.unrepresentedClauses.length, 0);
+  });
+
   test('respects explicit framework choices without inventing a stack when omitted', () => {
     const explicit = buildAppSpecification('Create a Next.js education platform with quizzes');
     assert.equal(explicit.stack.requested, 'Next.js');
