@@ -3411,11 +3411,30 @@ STRUCTURED APP SPECIFICATION AND ACCEPTANCE CHECKS:
       await new Promise((res) => exec('git init', { cwd: workspacePath, timeout: 5000 }, res));
     } catch (_) {}
 
+    const qualityStatus = generationSource === 'heuristic-fallback' || featurePreflight.missingAfter.length > 0
+      ? 'PARTIAL'
+      : 'UNVERIFIED';
+    const qualityStatusReason = generationSource === 'heuristic-fallback'
+      ? 'heuristic-fallback-used'
+      : featurePreflight.missingAfter.length > 0
+        ? 'known-feature-signals-still-missing'
+        : 'runtime-and-requirement-checks-not-run';
+    const outputQuality = {
+      status: qualityStatus,
+      reason: qualityStatusReason,
+      generationSource,
+      runtimeVerified: false,
+      acceptanceStatus: 'NOT_EVALUATED',
+      featurePreflight,
+    };
+    send({ type: 'output_quality', ...outputQuality });
     send({
       type: 'done',
-      message: `🎉 ${wizardConfig.projectTitle || wizardConfig.projectName || 'Project'} successfully generated (${writtenFiles.length} files)!`,
+      message: 'Project files created (' + writtenFiles.length + '). Output quality: ' + qualityStatus +
+        '; runtime and requirement-level behavior have not been verified.',
       files: writtenFiles,
-      summary: wizardConfig.description || 'Project is ready to run and customize.'
+      outputQuality,
+      summary: wizardConfig.description || 'Project files are ready for verification.'
     });
     res.end();
   } catch (err) {
