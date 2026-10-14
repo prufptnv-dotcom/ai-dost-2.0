@@ -122,7 +122,7 @@ describe('Phase 3.7 — Secondary Product Surfaces Rebuild', () => {
                 sent = true;
                 return {
                   done: false,
-                  value: encoder.encode('data: {"chunk":"Handshake acknowledged"}\\n\\n')
+                  value: encoder.encode('data: {"chunk":"Handshake acknowledged"}\n\n')
                 };
               },
               async cancel() {},
