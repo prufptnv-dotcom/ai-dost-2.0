@@ -7,6 +7,7 @@ const {
   formatAppSpecificationForPrompt,
   shouldCreateAppSpecification,
   validateAppSpecification,
+  findMissingFeatureSignals,
 } = require('../services/appSpecificationService');
 
 describe('AppSpecificationService', () => {
@@ -26,6 +27,37 @@ describe('AppSpecificationService', () => {
     assert.ok(spec.requirements.some((item) => item.featureKey === 'csv-export'));
     assert.equal(validateAppSpecification(spec).valid, true);
     assert.equal(validateAppSpecification(spec).requirementCoverage, 1);
+  });
+
+  test('diagnoses missing known feature signals without treating signals as proof', () => {
+    const spec = buildAppSpecification('Build a finance dashboard with search, charts, and CSV export.');
+    const files = [
+      { path: 'src/App.jsx', content: 'export default function App() { return <main>Finance overview</main>; }' },
+      { path: 'package.json', content: '{"name":"finance-dashboard"}' },
+    ];
+    const missing = findMissingFeatureSignals(spec, files);
+    assert.deepEqual(
+      missing.map((item) => item.featureKey).sort(),
+      ['charts-analytics', 'csv-export', 'search-filter']
+    );
+    assert.ok(missing.every((item) => item.diagnostic.includes('not proof') || /inspect implementation/i.test(item.diagnostic)));
+  });
+
+  test('recognizes source signals but keeps the result diagnostic-only', () => {
+    const spec = buildAppSpecification('Build a finance dashboard with search, charts, and CSV export.');
+    const files = [
+      {
+        path: 'src/App.jsx',
+        content: [
+          'function searchTransactions(query) { return transactions.filter((item) => item.name.includes(query)); }',
+          'function renderChart(data) { return <Chart data={data} />; }',
+          'function exportCsv(rows) { return new Blob([rows.map((row) => row.join(",")).join("\\n")], { type: "text/csv" }); }',
+        ].join('\n'),
+      },
+    ];
+    assert.deepEqual(findMissingFeatureSignals(spec, files), []);
+    // Presence of source terms never changes the specification acceptance state.
+    assert.ok(spec.acceptanceCriteria.every((criterion) => criterion.status === undefined));
   });
 
   test('preserves prompt clauses that are not covered by known feature rules', () => {
