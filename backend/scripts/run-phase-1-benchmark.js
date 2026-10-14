@@ -185,7 +185,16 @@ async function runOne(config) {
     httpStatus,
     requestError,
     terminalError,
-    generationCompleted: terminalEvents.length > 0 && !requestError && !terminalError,
+    generationCompleted: terminalEvents.length > 0 && !requestError && !terminalError && projectFiles.length > 0,
+    generationCompletionReason: requestError
+      ? 'request-failed'
+      : terminalError
+        ? 'generation-emitted-error'
+        : terminalEvents.length === 0
+          ? 'no-terminal-event'
+          : projectFiles.length === 0
+            ? 'terminal-event-without-generated-files'
+            : 'terminal-event-and-generated-files-observed',
     outputQuality: outputQualityEvents.at(-1) || null,
     acceptanceStatus: 'NOT_EVALUATED',
     project: { directory: projectPath, fileCount: projectFiles.length, files: projectFiles },
