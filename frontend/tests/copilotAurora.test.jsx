@@ -722,10 +722,12 @@ describe('CopilotAurora (P11 A2 — real run wiring)', () => {
   });
 
   test('classic escape hatch writes the fallback flag', () => {
-    render(<CopilotAurora {...base} onToast={jest.fn()} />);
+    const reloadPage = jest.fn();
+    render(<CopilotAurora {...base} onToast={jest.fn()} reloadPage={reloadPage} />);
     expect(window.localStorage.getItem('ai_dost_copilot_ui')).toBeNull();
     fireEvent.click(screen.getByTestId('aurora-classic-btn'));
     expect(window.localStorage.getItem('ai_dost_copilot_ui')).toBe('classic');
+    expect(reloadPage).toHaveBeenCalledTimes(1);
   });
 });
 
