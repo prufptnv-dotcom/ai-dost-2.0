@@ -304,7 +304,11 @@ function buildAppSpecification(prompt, options = {}) {
   const isUi = UI_SCOPE_RE.test(request);
   const modification = MODIFY_RE.test(request) && !NEW_PROJECT_RE.test(request) && !CREATE_RE.test(request);
   const archetype = inferArchetype(request);
-  const requestedPages = EXPLICIT_PAGE_RULES.filter((entry) => entry[1].test(request)).map((entry) => entry[0]);
+  // Keep the explicit-page list consistent with feature negation handling: a page
+  // mentioned only to exclude it (for example, "without login") is not requested.
+  const requestedPages = EXPLICIT_PAGE_RULES
+    .filter((entry) => featureSignalIsRequested(request, entry[1]))
+    .map((entry) => entry[0]);
   const explicitClauses = extractExplicitClauses(request);
   const matchedFeatures = FEATURE_RULES.filter((feature) => featureSignalIsRequested(request, feature.pattern)).slice(0, MAX_REQUIREMENTS - 1);
   const explicitFeaturePatterns = matchedFeatures.map((feature) => feature.pattern);
