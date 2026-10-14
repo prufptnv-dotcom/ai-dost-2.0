@@ -1904,8 +1904,28 @@ const animate = () => {
       if (!Array.isArray(parsed.done.files) || parsed.done.files.length === 0) {
         throw new Error(parsed.done.message || 'Scaffolding reported completion without creating project files.');
       }
+      const generatedFileEvents = parsed.events.filter((event) =>
+        event?.type === 'file_changed' && typeof event.path === 'string' && typeof event.content === 'string'
+      );
+      if (generatedFileEvents.length === 0) {
+        throw new Error('Scaffolding returned file names but no generated file contents. The workspace was not updated.');
+      }
 
       await loadWorkspaceFiles();
+      const generatedFiles = generatedFileEvents.map((event) => ({
+        path: event.path,
+        content: event.content,
+        lastModified: Date.now(),
+      }));
+      setFiles((previous) => {
+        const byPath = new Map(previous.map((file) => [file.path, file]));
+        generatedFiles.forEach((file) => byPath.set(file.path, { ...byPath.get(file.path), ...file }));
+        return Array.from(byPath.values());
+      });
+      setContents((previous) => ({
+        ...previous,
+        ...Object.fromEntries(generatedFiles.map((file) => [file.path, file.content])),
+      }));
       setWorkspaceMode('preview');
       const qualityStatus = parsed.outputQuality?.status || parsed.done.outputQuality?.status || 'UNVERIFIED';
       if (qualityStatus === 'SUCCEEDED') {
