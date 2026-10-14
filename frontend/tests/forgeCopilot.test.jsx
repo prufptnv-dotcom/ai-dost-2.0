@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import ForgeCopilot, { normalizeWorkspacePath } from '../components/forge/ForgeCopilot';
 
 const flushForgeInitialEffects = async () => {
