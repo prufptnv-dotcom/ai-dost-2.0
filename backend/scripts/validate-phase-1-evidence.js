@@ -55,6 +55,30 @@ function safeEvidenceFile(runDir, relativePath) {
   }
 }
 
+function isPngScreenshot(runDir, relativePath) {
+  if (!safeEvidenceFile(runDir, relativePath)) return false;
+  try {
+    const filePath = path.resolve(runDir, relativePath.replace(/\\\\/g, '/'));
+    const header = Buffer.alloc(24);
+    const fd = fs.openSync(filePath, 'r');
+    let bytesRead;
+    try {
+      bytesRead = fs.readSync(fd, header, 0, header.length, 0);
+    } finally {
+      fs.closeSync(fd);
+    }
+    if (bytesRead !== header.length) return false;
+    const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    return header.subarray(0, 8).equals(signature) &&
+      header.readUInt32BE(8) === 13 &&
+      header.toString('ascii', 12, 16) === 'IHDR' &&
+      header.readUInt32BE(16) > 0 &&
+      header.readUInt32BE(20) > 0;
+  } catch {
+    return false;
+  }
+}
+
 function validateRun(runDir, phase, caseId, runNumber, requiredBehaviors) {
   const errors = [];
   const manifestPath = path.join(runDir, 'runtime-evidence.json');
@@ -86,8 +110,8 @@ function validateRun(runDir, phase, caseId, runNumber, requiredBehaviors) {
 
   const screenshots = manifest.screenshots || {};
   for (const width of WIDTHS) {
-    if (!safeEvidenceFile(runDir, screenshots[width])) {
-      errors.push('screenshots.' + width + ' must reference an existing screenshot file inside this run directory');
+    if (!isPngScreenshot(runDir, screenshots[width])) {
+      errors.push('screenshots.' + width + ' must reference a valid PNG screenshot with an IHDR and non-zero dimensions inside this run directory');
     }
   }
 
@@ -209,4 +233,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { parseArgs, safeEvidenceFile, validateRun, validateEvidence, REVIEW_DIMENSIONS, CHECKS };
+module.exports = { parseArgs, safeEvidenceFile, isPngScreenshot, validateRun, validateEvidence, REVIEW_DIMENSIONS, CHECKS };
