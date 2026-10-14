@@ -1907,7 +1907,18 @@ const animate = () => {
 
       await loadWorkspaceFiles();
       setWorkspaceMode('preview');
-      showToast(`🎉 Project scaffolded successfully (${parsed.done.files.length} files)!`, 'success');
+      const qualityStatus = parsed.outputQuality?.status || parsed.done.outputQuality?.status || 'UNVERIFIED';
+      if (qualityStatus === 'SUCCEEDED') {
+        showToast(`Project generated and accepted (${parsed.done.files.length} files).`, 'success');
+      } else if (qualityStatus === 'PARTIAL' || qualityStatus === 'FAILED') {
+        showToast(`Project files created (${parsed.done.files.length}), but output quality is ${qualityStatus}. Review the missing requirements before using it.`, 'warning');
+      } else {
+        showToast(`Project files created (${parsed.done.files.length}); runtime and requirement checks are still unverified.`, 'warning');
+      }
+      setCopilotStatus({
+        label: qualityStatus === 'SUCCEEDED' ? 'Project accepted' : `Output quality: ${qualityStatus} — verification needed`,
+        tone: qualityStatus === 'SUCCEEDED' ? 'success' : 'warn',
+      });
     } catch (err) {
       showToast(`Scaffold error: ${err.message}`, 'error');
     } finally {
