@@ -775,7 +775,7 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
           const featurePreflight = { attempted: false, missingBefore: [], missingAfter: [], repairApplied: false, skippedReason: null };
           try {
             const scaffoldResult = await callScaffoldLLM(systemPrompt, null, parameters?.headers || {}, (selectedProvider) => {
-              if (onProgress) onProgress({ type: 'generation_provider', phase: 'initial', ...selectedProvider });
+              if (onProgress && selectedProvider.fileCount >= 2) onProgress({ type: 'generation_provider', phase: 'initial', ...selectedProvider });
             });
             if (scaffoldResult && Array.isArray(scaffoldResult.files) && scaffoldResult.files.length >= 2) {
               parsedData = scaffoldResult;
@@ -828,7 +828,7 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
 
                 try {
                   const completionResult = await callScaffoldLLM(completionPrompt, null, parameters?.headers || {}, (selectedProvider) => {
-                    if (onProgress) onProgress({ type: 'generation_provider', phase: 'targeted-completion', ...selectedProvider });
+                    if (onProgress && selectedProvider.fileCount >= 1) onProgress({ type: 'generation_provider', phase: 'targeted-completion', ...selectedProvider });
                   });
                   let completionFiles = null;
                   if (completionResult && Array.isArray(completionResult.files)) {
@@ -1918,7 +1918,7 @@ async function callScaffoldLLM(scaffoldPrompt, customKeys = null, reqHeaders = {
         if (files && files.length >= 1) {
           logger.info(`[Agent] Live AI Model ${provider.name} generated/modified ${files.length} custom files`);
           if (typeof onProviderSelected === 'function') {
-            try { onProviderSelected({ provider: provider.key, providerName: provider.name, model: null }); } catch (_) {}
+            try { onProviderSelected({ provider: provider.key, providerName: provider.name, model: null, fileCount: files.length }); } catch (_) {}
           }
           return resp;
         }
@@ -1933,7 +1933,7 @@ async function callScaffoldLLM(scaffoldPrompt, customKeys = null, reqHeaders = {
     const files = extractFiles(resp);
     if (files && files.length >= 1) {
       if (typeof onProviderSelected === 'function') {
-        try { onProviderSelected({ provider: 'ollama', providerName: 'Ollama (local)', model: process.env.OLLAMA_MODEL || null }); } catch (_) {}
+        try { onProviderSelected({ provider: 'ollama', providerName: 'Ollama (local)', model: process.env.OLLAMA_MODEL || null, fileCount: files.length }); } catch (_) {}
       }
       return resp;
     }
