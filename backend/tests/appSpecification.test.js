@@ -17,6 +17,10 @@ describe('AppSpecificationService', () => {
     assert.equal(spec.archetype.id, 'saas-dashboard');
     assert.equal(spec.stack.requested, null);
     assert.deepEqual(spec.designSystem.responsiveWidthsPx, [360, 768, 1280]);
+    assert.ok(spec.componentArchitecture.boundaries.some((rule) => /reusable/i.test(rule)));
+    assert.ok(spec.nonFunctional.security.length >= 3);
+    assert.ok(spec.dataModel.entities.some((entity) => entity.name === 'Transaction'));
+    assert.ok(spec.interactions.some((interaction) => interaction.featureKey === 'search-filter' && interaction.stateTransitions.length > 1));
     assert.ok(spec.requirements.some((item) => item.featureKey === 'search-filter'));
     assert.ok(spec.requirements.some((item) => item.featureKey === 'charts-analytics'));
     assert.ok(spec.requirements.some((item) => item.featureKey === 'csv-export'));
@@ -60,6 +64,10 @@ describe('AppSpecificationService', () => {
     assert.match(prompt, /AI-DOST APP SPECIFICATION/);
     assert.match(prompt, /REQ-001/);
     assert.match(prompt, /AC-01/);
+    assert.match(prompt, /componentArchitecture/);
+    assert.match(prompt, /dataModel/);
+    assert.match(prompt, /stateTransitions/);
+    assert.match(prompt, /nonFunctional/);
     assert.match(prompt, /Do not claim integrations or checks are complete/i);
     assert.match(prompt, /original request remains authoritative/i);
   });
