@@ -107,8 +107,13 @@ function compareSummaries(baseline, candidate) {
 
     const baseProvider = base.metadata.settings?.actualProviderModelObservations?.[0]?.provider || null;
     const nextProvider = next.metadata.settings?.actualProviderModelObservations?.[0]?.provider || null;
-    const providerParity = baseProvider === nextProvider;
-    if (!providerParity) warnings.push(key + ': selected scaffold provider differs (' + (baseProvider || 'unknown') + ' -> ' + (nextProvider || 'unknown') + ').');
+    const providerParity = baseProvider && nextProvider ? baseProvider === nextProvider : null;
+    const providerParityStatus = providerParity === null ? 'UNKNOWN' : providerParity ? 'MATCH' : 'MISMATCH';
+    if (providerParity === false) {
+      warnings.push(key + ': selected scaffold provider differs (' + baseProvider + ' -> ' + nextProvider + ').');
+    } else if (providerParity === null) {
+      warnings.push(key + ': selected provider is not exposed by the captured generation events; inspect backend logs before attributing differences.');
+    }
 
     pairs.push({
       key,
@@ -129,6 +134,7 @@ function compareSummaries(baseline, candidate) {
           : next.metrics.placeholderCount - base.metrics.placeholderCount,
       },
       providerParity,
+      providerParityStatus,
       requirementAcceptance: {
         baseline: base.metrics.acceptanceStatus,
         candidate: next.metrics.acceptanceStatus,
@@ -160,7 +166,8 @@ function compareSummaries(baseline, candidate) {
       averageFileCount: average(pairs.map((pair) => pair.candidate.fileCount)),
       averageElapsedMs: average(pairs.map((pair) => pair.candidate.elapsedMs)),
     },
-    providerParityCount: pairs.filter((pair) => pair.providerParity).length,
+    providerParityCount: pairs.filter((pair) => pair.providerParity === true).length,
+    providerParityUnknownCount: pairs.filter((pair) => pair.providerParity === null).length,
     warnings,
     pairedRuns: pairs,
     interpretation: [
