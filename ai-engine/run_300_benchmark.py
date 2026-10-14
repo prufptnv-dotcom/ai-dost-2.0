@@ -2,9 +2,10 @@ import os
 import sys
 import time
 import json
-import re
 import requests
 import statistics
+
+from benchmark_scoring import evaluate_response
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -13,58 +14,6 @@ API_URL = "http://127.0.0.1:8002/api/ai-dost/chat"
 DATASET_FILE = "benchmark_300_dataset.json"
 RESULTS_FILE = "benchmark_300_results.json"
 SUMMARY_REPORT = "benchmark_300_summary_sheet.md"
-
-def evaluate_response(item, reply, latency):
-    prompt = item["prompt"]
-    cat = item["cat"]
-    diff = item["diff"]
-
-    refusal_patterns = [
-        r"I'm sorry, but I can't assist",
-        r"as a text-based AI, I don't have access",
-        r"I cannot fulfill"
-    ]
-    has_refusal = any(re.search(pat, reply, re.IGNORECASE) for pat in refusal_patterns)
-    has_code = "```" in reply
-    length = len(reply)
-    tokens_est = max(1, int(length / 3.8))
-
-    score = 10
-    notes = []
-
-    if has_refusal:
-        score -= 6
-        notes.append("False refusal detected")
-
-    if length < 60:
-        score -= 4
-        notes.append("Too brief")
-    elif length > 250:
-        notes.append("Detailed response")
-
-    if "Algorithm" in cat or "Web Development" in cat:
-        if "implement" in prompt.lower() or "write a python" in prompt.lower() or "write a javascript" in prompt.lower() or "function" in prompt.lower():
-            if not has_code:
-                score -= 3
-                notes.append("Missing code block")
-            else:
-                notes.append("Code provided")
-
-    if "Database" in cat and "write sql" in prompt.lower() and not ("select" in reply.lower() or "with" in reply.lower()):
-        score -= 2
-        notes.append("Missing SQL query")
-
-    score = max(1, min(10, score))
-    pass_fail = "PASS" if score >= 6 else "FAIL"
-
-    eval_note = "; ".join(notes) if notes else "Accurate and coherent response"
-
-    return {
-        "score": score,
-        "pass_fail": pass_fail,
-        "tokens_est": tokens_est,
-        "eval_note": eval_note
-    }
 
 def run_benchmark():
     if not os.path.exists(DATASET_FILE):
@@ -89,7 +38,7 @@ def run_benchmark():
             print(f"Could not load previous results: {e}")
 
     print("=" * 75)
-    print("VKP-Omni-2B: Real Benchmark Test Set (300 Blind Evaluation Questions)")
+    print("AI Dost response-format heuristic benchmark (correctness is not evaluated)")
     print(f"Total Questions: {len(questions)} | Target: {API_URL}")
     print(f"Remaining to run: {len(questions) - len(done_qids)}")
     print("=" * 75)
@@ -105,7 +54,7 @@ def run_benchmark():
         cat = item["cat"]
         diff = item["diff"]
 
-        print(f"[{idx}/300] [{qid} | {diff}] {prompt[:50]}...", end=" ", flush=True)
+        print(f"[{idx}/{len(questions)}] [{qid} | {diff}] {prompt[:50]}...", end=" ", flush=True)
 
         t0 = time.time()
         success = False
@@ -134,7 +83,7 @@ def run_benchmark():
             tokens = eval_data["tokens_est"]
             tps = round(tokens / dt, 1) if dt > 0 else 0
             score = eval_data["score"]
-            pf = eval_data["pass_fail"]
+            format_status = eval_data["format_status"]
             note = eval_data["eval_note"]
 
             record = {
@@ -147,11 +96,15 @@ def run_benchmark():
                 "generated_tokens": tokens,
                 "tokens_per_sec": tps,
                 "score": score,
-                "pass_fail": pf,
+                "pass_fail": "NOT_EVALUATED",
+                "format_status": format_status,
+                "evaluation_type": eval_data["evaluation_type"],
+                "correctness_evaluated": False,
+                "is_accuracy_metric": False,
                 "evaluator_note": note,
                 "success": True
             }
-            print(f"-> {pf} ({score}/10, {dt:.1f}s, {tokens} tok, {tps} tok/s) [{note}]", flush=True)
+            print(f"-> {format_status} (heuristic {score}/10, {dt:.1f}s, ~{tokens} tokens, ~{tps} tok/s) [{note}]", flush=True)
         else:
             record = {
                 "qid": qid,
@@ -191,67 +144,101 @@ def generate_summary_sheet(results):
     completed = len(successful)
     failed = total_q - completed
 
-    latencies = [r["latency_s"] for r in successful]
+    def format_status(record):
+        status = record.get("format_status")
+        if status in {"FORMAT_PASS", "FORMAT_FAIL"}:
+            return status
+        # Interpret older PASS/FAIL values as the former heuristic threshold,
+        # never as evidence that the answer or generated code was correct.
+        legacy_status = record.get("pass_fail")
+        if legacy_status == "PASS":
+            return "FORMAT_PASS"
+        if legacy_status == "FAIL":
+            return "FORMAT_FAIL"
+        return "NOT_EVALUATED"
+
+    latencies = [float(r.get("latency_s", 0) or 0) for r in successful]
     avg_latency = round(statistics.mean(latencies), 2) if latencies else 0
     median_latency = round(statistics.median(latencies), 2) if latencies else 0
-    total_tokens = sum(r["generated_tokens"] for r in successful)
+    total_tokens = sum(int(r.get("generated_tokens", 0) or 0) for r in successful)
     total_time = sum(latencies)
     avg_tps = round(total_tokens / total_time, 1) if total_time > 0 else 0
-    overall_score = round(sum(r["score"] for r in successful) / len(successful), 2) if successful else 0
+    scores = [float(r.get("score", 0) or 0) for r in successful if r.get("score") is not None]
+    overall_score = round(statistics.mean(scores), 2) if scores else 0
+    format_passes = sum(1 for r in results if format_status(r) == "FORMAT_PASS")
+    format_rate = round((format_passes / total_q) * 100, 1) if total_q else 0
 
     cats = {}
     for r in results:
-        c = r["cat"]
-        if c not in cats:
-            cats[c] = []
-        cats[c].append(r)
+        c = r.get("cat", "Uncategorized")
+        cats.setdefault(c, []).append(r)
 
-    md = f"""# VKP-Omni-2B: Real Benchmark Test Run Summary Sheet
-**Evaluated Questions:** 300 Blind Evaluation Questions (10 categories x 30 questions)  
-**Execution Environment:** Local GPU Acceleration (`cuda:0` / float16), Offline Neural Engine  
+    model_label = os.getenv("AI_DOST_BENCHMARK_MODEL", "Not recorded (set AI_DOST_BENCHMARK_MODEL)")
+    checkpoint_label = os.getenv("AI_DOST_BENCHMARK_CHECKPOINT", "Not recorded")
+    hardware_label = os.getenv("AI_DOST_BENCHMARK_HARDWARE", "Not measured by this runner")
+    precision_label = os.getenv("AI_DOST_BENCHMARK_PRECISION", "Not recorded")
 
-## Benchmark Run Summary Sheet
+    md = f"""# AI Dost: Response-Format Heuristic Run Summary
+
+> **Important limitation:** This is a response-format heuristic, not an accuracy or task-success benchmark. It does not check factual truth, code execution, or whether a requested software change works. Do not use this score alone to claim superiority over another model or coding agent.
+
+**Evaluation method:** `response_format_heuristic_v1`  
+**Dataset:** {total_q} prompts from the repository; this is not a blind holdout set.  
+**Model identifier:** {model_label}  
+**Checkpoint:** {checkpoint_label}  
+**Hardware:** {hardware_label}  
+**Precision:** {precision_label}  
+
+## Run summary
 
 | Metric | Value |
 |---|---|
-| **Model checkpoint** | `NandiAi/VKP-Omni-2B` (snapshot `b8473449fccbd9dbec9cfafafc34a790f3d6a959`) |
-| **Base model / training method** | Qwen2-VL-2B-Instruct / Fine-tuned by Vikash Kumar Pandit at IIT Patna |
-| **Hardware** | NVIDIA GPU (`cuda:0`), 8GB+ VRAM |
-| **Precision / quantization** | float16 / Full precision |
-| **Total questions** | {total_q} |
-| **Completed** | {completed} |
-| **Failed / timeout** | {failed} |
-| **Average latency** | {avg_latency}s |
-| **Median latency** | {median_latency}s |
-| **Tokens/sec** | {avg_tps} tok/s |
-| **Peak VRAM** | ~4.8 GB |
-| **Overall score** | **{overall_score} / 10** |
-| **Pass Rate** | **{round((sum(1 for r in successful if r.get('pass_fail')=='PASS')/total_q)*100, 1)}%** |
+| **Prompts in results** | {total_q} |
+| **Responses received** | {completed} |
+| **Request failures / timeouts** | {failed} |
+| **Average response latency** | {avg_latency}s |
+| **Median response latency** | {median_latency}s |
+| **Estimated tokens/sec** | {avg_tps} (character-based token estimate; not provider telemetry) |
+| **Mean heuristic format score** | **{overall_score} / 10** |
+| **Format-threshold pass rate** | **{format_rate}%** (not correctness/accuracy) |
+| **Peak VRAM** | Not measured by this runner |
 
 ---
 
-## Category-Wise Breakdown (10 Categories × 30 Questions)
+## Category-wise breakdown
 
-| Category | Completed | Pass Rate | Avg Score | Avg Latency | Avg Tokens |
-|---|---|---|---|---|---|
+| Category | Responses received | Format-threshold rate | Mean heuristic score | Mean latency | Mean estimated tokens |
+|---|---:|---:|---:|---:|---:|
 """
     for c, items in cats.items():
         s_items = [x for x in items if x.get("success")]
-        pass_cnt = sum(1 for x in s_items if x.get("pass_fail") == "PASS")
-        c_rate = f"{(pass_cnt / len(items)) * 100:.1f}%"
-        c_score = f"{sum(x['score'] for x in s_items) / len(s_items):.2f}" if s_items else "0"
-        c_lat = f"{statistics.mean([x['latency_s'] for x in s_items]):.1f}s" if s_items else "0s"
-        c_tok = f"{int(statistics.mean([x['generated_tokens'] for x in s_items]))}" if s_items else "0"
-        md += f"| {c} | {len(s_items)}/30 | {c_rate} | {c_score}/10 | {c_lat} | {c_tok} |\n"
+        pass_cnt = sum(1 for x in items if format_status(x) == "FORMAT_PASS")
+        c_rate = f"{(pass_cnt / len(items)) * 100:.1f}%" if items else "0.0%"
+        valid_scores = [float(x.get("score", 0) or 0) for x in s_items if x.get("score") is not None]
+        c_score = f"{statistics.mean(valid_scores):.2f}" if valid_scores else "N/A"
+        c_latencies = [float(x.get("latency_s", 0) or 0) for x in s_items]
+        c_lat = f"{statistics.mean(c_latencies):.1f}s" if c_latencies else "N/A"
+        c_tokens = [int(x.get("generated_tokens", 0) or 0) for x in s_items]
+        c_tok = f"{int(statistics.mean(c_tokens))}" if c_tokens else "N/A"
+        md += f"| {c} | {len(s_items)}/{len(items)} | {c_rate} | {c_score}/10 | {c_lat} | {c_tok} |\n"
 
     md += """
 ---
-*Generated automatically by Antigravity IDE Benchmark Engine for VKP-Omni-2B.*
+
+## Interpretation
+
+- A response-format pass means only that the configured, shallow format checks did not flag the response.
+- A high heuristic score can still belong to a wrong or non-working answer.
+- The runner estimates tokens from characters and does not collect actual provider token usage or GPU VRAM.
+- Legacy result rows are interpreted as format-threshold results only.
+
+See [BENCHMARK_VALIDITY.md](BENCHMARK_VALIDITY.md) for a competition-ready evaluation protocol.
 """
 
     with open(SUMMARY_REPORT, "w", encoding="utf-8") as f:
         f.write(md)
-    print(f"\nSaved formal summary sheet to {SUMMARY_REPORT}")
+    print(f"\nSaved transparent heuristic summary to {SUMMARY_REPORT}")
+
 
 if __name__ == "__main__":
     run_benchmark()
