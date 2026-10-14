@@ -170,7 +170,7 @@ These are targets only. Record actual values and sample sizes; do not present th
 | Date | Phase/item | Change or evidence | PR/commit | Status |
 |---|---|---|---|---|
 | 2026-10-14 | Roadmap | Phases, order, constraints, and exit gates documented. | PR #15 | DOCUMENTED |
-| 2026-10-14 | Phase 0 / Phase 1 | Primary Copilot path traced; structured AppSpecification wired into Director and legacy full-project flows; full-stack prompt no longer forces dark theme or one icon library; fabricated feature-claim list replaced with requirement/evidence report. Generated output quality is not yet benchmarked; baseline corpus and full request-path map remain open. | [PR #16](https://github.com/prufptnv-dotcom/ai-dost-2.0/pull/16), current head CI pending | IN PROGRESS |
+| 2026-10-14 | Phase 0 / Phase 1 | Primary Copilot path traced; structured AppSpecification wired into Director and legacy full-project flows; full-stack prompt no longer forces dark theme or one icon library; fabricated feature-claim list replaced with requirement/evidence report. Generated output quality is not yet benchmarked; baseline corpus and full request-path map remain open. | [PR #16](https://github.com/prufptnv-dotcom/ai-dost-2.0/pull/16), current head CI PASS (backend/frontend/E2E/Docker/sandbox); generated app quality evaluation pending | IN PROGRESS |
 
 ## 9. Next concrete action
 
