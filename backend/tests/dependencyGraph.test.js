@@ -54,4 +54,11 @@ describe('DependencyGraph', () => {
         graph.nodes.get('/project/deep/' + (count - 1) + '.js').dependencies.add('/project/deep/0.js');
         assert.strictEqual(graph.detectCycle(), true);
     });
+
+    it('does not return the changed file as its own dependent in a cycle', () => {
+        graph.addOrUpdate('/project/cycle-a.js', "require('./cycle-b.js')");
+        graph.addOrUpdate('/project/cycle-b.js', "require('./cycle-a.js')");
+
+        assert.deepStrictEqual(graph.getAffectedFiles('/project/cycle-a.js'), ['/project/cycle-b.js']);
+    });
 });
