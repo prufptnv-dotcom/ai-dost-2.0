@@ -256,9 +256,20 @@ jobs:
             exit 1
           fi
 
+  benchmark-validation:
+    name: Benchmark tooling (Python unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Test benchmark format-scoring semantics
+        run: python -m unittest discover -s ai-engine -p 'test_*.py' -v
+
   deploy:
     name: Deploy (main push only)
-    needs: [frontend, frontend-browser, backend, e2e, docker]
+    needs: [frontend, frontend-browser, backend, e2e, docker, benchmark-validation]
     # Per project workflow preference, PRs are reviewed via GitHub checks and are not deployed to Vercel.
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
