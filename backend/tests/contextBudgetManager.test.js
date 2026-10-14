@@ -238,4 +238,35 @@ test('Phase 2F.5 - Context Budget Manager', async (t) => {
     assert.strictEqual(res.package.retrieval.length, 0);
     assert.strictEqual(res.metadata.selected_items_count, 1);
   });
+
+  await t.test('25. overallocated category weights cannot exceed the global optional budget', () => {
+    const budgetMgr = new ContextBudgetManager({
+      totalBudget: 20,
+      allocation: {
+        workspace: 1,
+        conversation: 1,
+        memory: 1,
+        retrieval: 1,
+        artifact: 1,
+        execution_history: 1
+      }
+    });
+    const items = scopeItems([
+      { source_id: 'w', category: 'WORKSPACE', content: 'W'.repeat(40), relevance: 1, authority: 1 },
+      { source_id: 'm', category: 'MEMORY', content: 'M'.repeat(40), relevance: 0.8, authority: 1 },
+      { source_id: 'r', category: 'RETRIEVAL', content: 'R'.repeat(40), relevance: 0.7, authority: 1 }
+    ]);
+    const res = budgetMgr.packageContext({ projectId, items });
+    assert.ok(res.metadata.estimated_total_tokens <= 20);
+    assert.strictEqual(res.metadata.budget_exceeded, false);
+  });
+
+  await t.test('26. high-value workspace context remains full at default authority', () => {
+    const budgetMgr = new ContextBudgetManager({ totalBudget: 1000 });
+    const res = budgetMgr.packageContext({
+      projectId,
+      items: [{ source_id: 'default-workspace', project_id: projectId, category: 'WORKSPACE', content: 'Canonical workspace source '.repeat(20) }]
+    });
+    assert.strictEqual(res.package.workspace[0].representation, 'full');
+  });
 });
