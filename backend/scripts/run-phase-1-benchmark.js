@@ -284,4 +284,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { parseArgs, parseSseFrame, ensureLocalUrl };
+module.exports = { parseArgs, parseSseFrame, collectSse, ensureLocalUrl };
