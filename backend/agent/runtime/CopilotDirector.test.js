@@ -387,7 +387,7 @@ test('run fails closed when a required planned task is skipped after delegation 
 
   assert.equal(result.status, 'FAILED');
   assert.equal(result.verification_status, 'PASSED');
-  assert.match(result.summary, /1 planned task\\(s\\) did not succeed: required \\(SKIPPED\\)/);
+  assert.match(result.summary, /1 planned task\(s\) did not succeed: required \(SKIPPED\)/);
   assert.equal(result.errors[0].code, 'INCOMPLETE_PLAN');
 
   assert.equal(
