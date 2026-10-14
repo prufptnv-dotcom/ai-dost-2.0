@@ -7,7 +7,7 @@ const MAX_ACCEPTANCE_CRITERIA = 40;
 
 const ACTION_RE = /\b(build|create|make|generate|develop|design|scaffold|implement|add|fix|update|upgrade|improve|modify|refactor|enhance|integrate|wire|change|banao|banaye|banado|bana|lagao|jodo|badlo|sudhar|theek)\b/i;
 const SOFTWARE_SCOPE_RE = /\b(app|application|website|web ?app|site|platform|dashboard|admin panel|portal|tool|software|system|api|backend|frontend|server|route|module|function|component|page|screen|form|button|feature|project|code|repository|repo|algorithm|database|schema|service|workflow|automation|game|assistant|agent|landing page|portfolio|store|shop|booking)\b|(?:^|\s)[\w./-]+\.(?:js|jsx|ts|tsx|py|css|html|json)(?:$|\s)/i;
-const UI_SCOPE_RE = /\b(ui|ux|frontend|front-end|website|web ?app|landing page|dashboard|admin panel|portal|screen|page|component|layout|design system|responsive|mobile-first|portfolio|storefront|shop|e-?commerce|booking|form|button|navigation|navbar|sidebar|visual|styling|theme)\b/i;
+const UI_SCOPE_RE = /\b(app|application|website|web ?app|web|site|ui|ux|frontend|front-end|landing page|dashboard|admin panel|portal|screen|page|component|layout|design system|responsive|mobile-first|portfolio|storefront|shop|e-?commerce|booking|form|button|navigation|navbar|sidebar|visual|styling|theme|dark mode|light mode|todo app|to-do app)\b/i;
 const NEW_PROJECT_RE = /\b(new|brand new|from scratch|scratch se|naya|nayi|fresh|greenfield)\b/i;
 const MODIFY_RE = /\b(add|fix|update|upgrade|improve|modify|refactor|enhance|integrate|wire|change|debug|repair|lagao|jodo|badlo|sudhar|theek|existing|current)\b/i;
 const CREATE_RE = /\b(build|create|generate|scaffold|start from scratch|scratch se|banao|banado|naya|nayi)\b/i;
@@ -212,9 +212,6 @@ function validateAppSpecification(spec) {
     if (!requirement || typeof requirement.id !== 'string' || !/^REQ-\d{3}$/.test(requirement.id)) {
       errors.push('every requirement must have a valid REQ-### id');
       continue;
-    }
-    if (requirementIds.size !== new Set((spec.requirements || []).map((item) => item && item.id).filter(Boolean)).size) {
-      // Duplicate ids are detected below without counting malformed records as requirements.
     }
     if (typeof requirement.name !== 'string' || !requirement.name.trim()) errors.push(requirement.id + ' needs a name');
     if (!Array.isArray(requirement.acceptance) || requirement.acceptance.length === 0 || requirement.acceptance.some((value) => typeof value !== 'string' || !value.trim())) {
