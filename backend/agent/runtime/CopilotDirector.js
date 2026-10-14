@@ -493,6 +493,17 @@ class CopilotDirector {
         result: finalVerification
       });
       if (verificationStatus !== 'SUCCEEDED') throw new Error('Final Director verification gate did not pass');
+      const incompleteTasks = results.filter((item) => item.status !== 'SUCCEEDED');
+      if (incompleteTasks.length > 0) {
+        const taskSummary = incompleteTasks
+          .slice(0, 8)
+          .map(({ task, status }) => `${task.id} (${status})`)
+          .join(', ');
+        const remainder = incompleteTasks.length > 8 ? `, and ${incompleteTasks.length - 8} more` : '';
+        throw new Error(
+          `Director cannot report success: ${incompleteTasks.length} planned task(s) did not succeed: ${taskSummary}${remainder}`
+        );
+      }
       this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
       this.agentRunDao.updateStatus(supervisorRunId, 'SUCCEEDED');
       const artifactRefs = [
