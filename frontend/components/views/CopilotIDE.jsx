@@ -38,6 +38,7 @@ import { generateLiveAppHtml, PREVIEW_TELEMETRY_SCRIPT } from '../ide/PreviewEng
 import { syncFileToWebContainer } from '../../lib/webcontainer';
 import { marked } from 'marked';
 import { extractOutputQualityStatus, settlePlanTasks } from '../../lib/outputQualityStatus';
+import { parseScaffoldWizardSse } from '../../lib/scaffoldWizardSse';
 
 function isPathInFolder(filePath, folderPath) {
   const file = normalizePath(filePath).toLowerCase();
@@ -1883,15 +1884,30 @@ const animate = () => {
 
     try {
       const res = await api.post('/agent/scaffold-wizard', {
-        spec,
+        userPrompt: spec.description || spec.projectTitle || 'Build the configured application',
+        wizardConfig: spec,
         projectId
-      });
+      }, { responseType: 'text', timeout: 12 * 60 * 1000 });
 
-      if (res.data?.success) {
-        showToast('🎉 Project scaffolded successfully!', 'success');
-        await loadWorkspaceFiles();
-        setWorkspaceMode('preview');
+      const parsed = parseScaffoldWizardSse(res.data);
+      if (parsed.error) {
+        throw new Error(parsed.error.message || 'Scaffolding failed.');
       }
+      if (!parsed.done) {
+        let serverMessage = '';
+        try {
+          const body = JSON.parse(String(res.data || ''));
+          serverMessage = body.error || body.message || '';
+        } catch (_) {}
+        throw new Error(serverMessage || 'Scaffolding ended without a completion event.');
+      }
+      if (!Array.isArray(parsed.done.files) || parsed.done.files.length === 0) {
+        throw new Error(parsed.done.message || 'Scaffolding reported completion without creating project files.');
+      }
+
+      await loadWorkspaceFiles();
+      setWorkspaceMode('preview');
+      showToast(`🎉 Project scaffolded successfully (${parsed.done.files.length} files)!`, 'success');
     } catch (err) {
       showToast(`Scaffold error: ${err.message}`, 'error');
     } finally {
