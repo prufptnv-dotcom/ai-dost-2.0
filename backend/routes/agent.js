@@ -3306,6 +3306,75 @@ STRUCTURED APP SPECIFICATION AND ACCEPTANCE CHECKS:
       generationSource = 'heuristic-fallback';
     }
 
+    const featurePreflight = {
+      attempted: false,
+      missingBefore: [],
+      missingAfter: [],
+      repairApplied: false,
+      skippedReason: null,
+    };
+    if (appSpecification) {
+      featurePreflight.missingBefore = findMissingFeatureSignals(appSpecification, files);
+      featurePreflight.missingAfter = featurePreflight.missingBefore.slice();
+      if (generationSource === 'llm-output' && featurePreflight.missingBefore.length > 0) {
+        featurePreflight.attempted = true;
+        const boundedFiles = [];
+        let contextChars = 0;
+        for (const file of files) {
+          if (!file || typeof file.path !== 'string' || typeof file.content !== 'string') continue;
+          const size = file.path.length + file.content.length;
+          if (contextChars + size > 80000) continue;
+          boundedFiles.push({ path: file.path, content: file.content });
+          contextChars += size;
+        }
+        if (!boundedFiles.length) {
+          featurePreflight.skippedReason = 'No bounded generated source context was available.';
+        } else {
+          const missingList = featurePreflight.missingBefore.map((item) =>
+            '- ' + item.requirementId + ' (' + item.featureKey + '): ' + item.name +
+            '. User clause: ' + (item.sourceText || '(see original request)')
+          ).join('\n');
+          const completionPrompt = [
+            scaffoldPrompt,
+            '=== FIRST-PASS GENERATED FILES ===',
+            JSON.stringify(boundedFiles, null, 2),
+            '=== TARGETED REQUIREMENT COMPLETION ===',
+            'Source-text diagnostics found no recognizable implementation signal for these explicitly requested features:',
+            missingList,
+            'Inspect the actual files; diagnostics may be wrong. Preserve working code. If missing, implement the behavior end-to-end with state/data flow, event handlers, validation, visible outcomes, and useful empty/error states. Do not add comments, labels, placeholders, or dead code merely to satisfy a signal. Return complete contents for changed files using the normal FILE/code-block format.',
+          ].join('\n\n');
+          try {
+            const completionResponse = await Promise.race([
+              callScaffoldLLM(completionPrompt, null, req.headers, (provider) => {
+                send({ type: 'generation_provider', phase: 'wizard-targeted-completion', ...provider });
+              }),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Targeted completion timed out')), 120000)),
+            ]);
+            const completionFiles = extractFiles(completionResponse);
+            if (Array.isArray(completionFiles) && completionFiles.length > 0) {
+              const mergedFiles = new Map(
+                files.filter((file) => file && typeof file.path === 'string' && typeof file.content === 'string')
+                  .map((file) => [file.path, file])
+              );
+              for (const file of completionFiles) {
+                if (file && typeof file.path === 'string' && typeof file.content === 'string' && file.path.trim()) {
+                  mergedFiles.set(file.path, file);
+                }
+              }
+              files = Array.from(mergedFiles.values());
+              featurePreflight.repairApplied = true;
+              generationSource = 'llm-output+targeted-completion';
+              featurePreflight.missingAfter = findMissingFeatureSignals(appSpecification, files);
+            } else {
+              featurePreflight.skippedReason = 'Targeted completion returned no usable files.';
+            }
+          } catch (completionError) {
+            featurePreflight.skippedReason = completionError.message || 'Targeted completion failed.';
+          }
+        }
+      }
+    }
+
     send({ type: 'wizard_status', step: 'writing', message: `📂 Writing ${files.length} project files to workspace...` });
 
     const writtenFiles = [];
