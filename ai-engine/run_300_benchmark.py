@@ -5,7 +5,7 @@ import json
 import requests
 import statistics
 
-from benchmark_scoring import evaluate_response
+from benchmark_scoring import evaluate_response, normalize_result_record
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -31,9 +31,21 @@ def run_benchmark():
             with open(RESULTS_FILE, "r", encoding="utf-8") as f:
                 existing = json.load(f)
                 if isinstance(existing, list):
-                    results = existing
-                    done_qids = {r["qid"] for r in results if r.get("success")}
-                    print(f"Resuming benchmark: loaded {len(done_qids)} previously completed questions.")
+                    # Normalize historical heuristic rows and collapse duplicate qids
+                    # created by older failed-retry behavior. Last record wins.
+                    normalized_by_qid = {}
+                    for row in existing:
+                        if not isinstance(row, dict) or not row.get("qid"):
+                            continue
+                        normalized_by_qid[str(row["qid"])] = normalize_result_record(row)
+                    results = list(normalized_by_qid.values())
+                    done_qids = {str(r["qid"]) for r in results if r.get("success")}
+                    with open(RESULTS_FILE, "w", encoding="utf-8") as normalized_file:
+                        json.dump(results, normalized_file, ensure_ascii=False, indent=2)
+                    print(
+                        f"Resuming benchmark: normalized {len(results)} saved records; "
+                        f"{len(done_qids)} prompts already have responses."
+                    )
         except Exception as e:
             print(f"Could not load previous results: {e}")
 
