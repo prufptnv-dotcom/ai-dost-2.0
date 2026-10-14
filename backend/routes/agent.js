@@ -1223,6 +1223,16 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
             qualityStatusReason = 'Build/render smoke passed and no missing source signals were detected, but requirement-level interactions were not executed.';
           }
 
+          if (onProgress) {
+            onProgress({
+              type: 'output_quality',
+              status: qualityStatus,
+              reason: qualityStatusReason,
+              runtimeVerified: runtimeSmokePassed,
+              acceptanceStatus: 'NOT_EVALUATED',
+            });
+          }
+
           // Generation tasks may be complete; the final QA task must not be
           // marked complete when requirement acceptance remains unverified.
           todoList.forEach((task, index) => {
