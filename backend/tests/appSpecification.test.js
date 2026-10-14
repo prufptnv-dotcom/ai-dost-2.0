@@ -87,7 +87,8 @@ describe('CopilotDirector AppSpecification integration', () => {
       setHeader(key, value) { this.headers[key] = value; },
       flushHeaders() {},
       write(chunk) { this.writes.push(String(chunk)); },
-      end() { this.writableEnded = true; },
+      on(event, handler) { if (event === 'finish') this.finishHandler = handler; return this; },
+      end() { this.writableEnded = true; this.finishHandler?.(); },
       status(code) { this.statusCode = code; return this; },
       json(payload) { this.payload = payload; this.writableEnded = true; return this; },
     };
@@ -132,7 +133,8 @@ describe('CopilotDirector AppSpecification integration', () => {
       setHeader() {},
       flushHeaders() {},
       write() {},
-      end() { this.writableEnded = true; },
+      on(event, handler) { if (event === 'finish') this.finishHandler = handler; return this; },
+      end() { this.writableEnded = true; this.finishHandler?.(); },
     };
     const req = {
       body: { copilotDirector: true, userPrompt: 'Explain what a REST API is', projectId: 'spec-question-test' },
