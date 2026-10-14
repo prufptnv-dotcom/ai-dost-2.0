@@ -58,6 +58,7 @@ These are hypotheses to re-confirm on the current default/active branch, not cla
 - [x] Define a validated AppSpecification contract with requirement IDs, target audience guidance, stack, page/archetype guidance, component boundaries, data entities, interactions/state transitions, responsive/accessibility guidance, security/non-functional constraints, and linked acceptance criteria.
 - [x] Inject the spec before generation/planning in the primary Copilot Director flow and legacy full-project prompt; general tool paths still need end-to-end confirmation.
 - [x] Add non-binding archetype guidance (SaaS dashboard, commerce, education, booking, portfolio/marketing, content, collaboration) without making it a hard-coded page template.
+- [x] Add a bounded generation-time source-signal preflight for known requested features; when signals are missing, attempt one targeted completion pass and report remaining signals as diagnostics, not proof.
 - [ ] Build reusable design-system foundations: spacing/typography/color tokens, hierarchy, responsive layouts, consistent components, loading/error/empty/success states, and accessible controls.
 - [ ] Generate request-specific pages and real interactions from the specification. Templates can seed the design system but must not be treated as the finished answer for a non-trivial request.
 - [ ] Preserve requirement IDs through implementation and verification so omissions are detectable.
@@ -92,7 +93,7 @@ These are hypotheses to re-confirm on the current default/active branch, not cla
 **Exit gate:** Parallel work is real, bounded, conflict-safe, and measurably useful. Multiple names or roles alone do not count as multi-agent completion.
 
 ### Phase 4 — Evidence-based verification and self-healing
-**Status: NOT STARTED**
+**Status: IN PROGRESS (minimum status-honesty gate only; full verification suite remains incomplete)**
 
 - [ ] Remove file-existence-only checks as the sole success condition.
 - [ ] Run applicable formatting/lint/type checks, build, unit/integration tests, and application startup in an isolated runtime/sandbox.
@@ -102,6 +103,7 @@ These are hypotheses to re-confirm on the current default/active branch, not cla
 - [ ] Classify failures: planning, generation, dependency/install, compile, runtime, integration, UX, security, or environment.
 - [ ] Attempt bounded targeted repairs and re-run failed gates. A failure cannot become success without new passing evidence.
 - [ ] Prevent mocked, simulated, or missing-runner success from masquerading as production verification.
+- [x] Add a minimum output-status honesty gate in the legacy full-project generation path: build/render smoke does not count as request-level success; acceptance checks remain NOT_EVALUATED without evidence, and fallback/missing-signal results stay PARTIAL or UNVERIFIED.
 - [ ] Standardize final statuses: SUCCEEDED, FAILED, UNVERIFIED, and PARTIAL, each with evidence and unresolved issues.
 
 **Exit gate:** An application is called successful only after its applicable acceptance gates pass; otherwise the report truthfully states what is failed or unverified.
@@ -171,6 +173,7 @@ These are targets only. Record actual values and sample sizes; do not present th
 |---|---|---|---|---|
 | 2026-10-14 | Roadmap | Phases, order, constraints, and exit gates documented. | PR #15 | DOCUMENTED |
 | 2026-10-14 | Phase 0 / Phase 1 | Primary Copilot path traced; structured AppSpecification wired into Director and legacy full-project flows; full-stack prompt no longer forces dark theme or one icon library; fabricated feature-claim list replaced with requirement/evidence report. Added four repeatable generation cases, a static diagnostic runner, a manual review rubric, and unit tests. No baseline/candidate artifacts have been generated yet; the evaluation tooling is not evidence of quality improvement. Baseline corpus and full request-path map remain open. | [PR #16](https://github.com/prufptnv-dotcom/ai-dost-2.0/pull/16), evaluation harness commits `43e787d`, `cecc9c7`, `e370b63`, `b5448a1`, `ab0125f`; CI for the updated head pending | IN PROGRESS |
+| 2026-10-14 | Phase 1 / Phase 4 minimum honesty gate | Added one bounded targeted completion pass when known feature signals are absent; remaining signals are diagnostic only. Added explicit `SUCCEEDED` / `PARTIAL` / `UNVERIFIED` / `FAILED` output-quality status, kept requirement acceptance at `NOT_EVALUATED` until real evidence exists, and updated the Copilot plan UI to preserve an unverified QA step. Added regression tests and documented that static signals do not prove functionality. CI for the current implementation head must finish; actual baseline/candidate generation and browser-flow evidence remain outstanding. | [PR #16](https://github.com/prufptnv-dotcom/ai-dost-2.0/pull/16), implementation head `6776a70047e125e19abe9154bd3593c90fea5f78` | IN PROGRESS |
 
 ## 9. Next concrete action
 
