@@ -8,8 +8,8 @@ const { ContextBudgetManager } = require('../agent/runtime/ContextBudgetManager'
 test('Dynamic Semantic Pruning keeps important context and summarizes low importance', () => {
   const manager = new ContextBudgetManager({ totalBudget: 1000, summaryWordLimit: 20 });
   const result = manager.packageContext({ projectId: 'p1', items: [
-    { source_id: 'important', category: 'WORKSPACE', importance_score: 9, content: 'function important() { return true; }' },
-    { source_id: 'background', category: 'RETRIEVAL', importance_score: 3, content: Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ') }
+    { source_id: 'important', project_id: 'p1', category: 'WORKSPACE', importance_score: 9, content: 'function important() { return true; }' },
+    { source_id: 'background', project_id: 'p1', category: 'RETRIEVAL', importance_score: 3, content: Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ') }
   ] });
   const important = result.package.workspace[0];
   const background = result.package.retrieval[0];
