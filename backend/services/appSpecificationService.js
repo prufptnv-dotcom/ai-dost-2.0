@@ -91,7 +91,11 @@ function featureSignalIsRequested(prompt, pattern) {
     const after = source.slice(matcher.lastIndex, clauseEnd).replace(/^[\s,]+/g, '');
     const negatedPrefix = /\b(?:no|without|exclude|excluding|omit|omitting|avoid|avoiding|remove|removing|don't|do not|shouldn't|should not|must not|never|not(?!\s+only)|nahi|mat)\b(?:\s+[\w'-]+){0,24}\s*$/i;
     const negatedSuffix = /^(?:(?:is|are|was|were|should be|must be)\s+)?(?:not\s+(?:needed|required|necessary|wanted)|(?:isn't|aren't|wasn't|weren't)\s+(?:needed|required|necessary|wanted)|unnecessary|unwanted|nahi|na|mat)\b/i;
-    if (negatedPrefix.test(before) || negatedSuffix.test(after)) continue;
+    const negationMarker = before.match(/\b(?:no|without|exclude|excluding|omit|omitting|avoid|avoiding|remove|removing|don't|do not|shouldn't|should not|must not|never|not(?!\s+only)|nahi|mat)\b/i);
+    const exclusionStyle = negationMarker && /^(?:no|without|exclude|excluding|omit|omitting|avoid|avoiding|remove|removing|nahi|mat)$/i.test(negationMarker[0]);
+    // A later positive verb can explicitly re-enable a feature: "without login and include search".
+    const positiveOverride = exclusionStyle && /\b(?:and|also)\s+(?:include|add|enable|support|require)\b/i.test(before.slice(negationMarker.index + negationMarker[0].length));
+    if ((negatedPrefix.test(before) && !positiveOverride) || negatedSuffix.test(after)) continue;
     return true;
   }
   return false;
