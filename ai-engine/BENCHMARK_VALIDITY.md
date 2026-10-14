@@ -29,5 +29,5 @@ Treat its numeric score and format-threshold rate as diagnostics only—not mode
 Run the pure-Python scoring tests without model access:
 
 ```bash
-python -m unittest discover -s ai-engine -p 'test_*.py' -v
+python ai-engine/test_benchmark_scoring.py -v
 ```
