@@ -493,6 +493,11 @@ class CopilotDirector {
         result: finalVerification
       });
       if (verificationStatus !== 'SUCCEEDED') throw new Error('Final Director verification gate did not pass');
+
+      const artifactRefs = [
+        ...results.flatMap((item) => item.result?.result?.artifact_refs || item.result?.artifact_refs || []),
+        ...verificationArtifacts
+      ].filter((ref, index, all) => typeof ref === 'string' && ref.trim() && all.indexOf(ref) === index).slice(0, 10);
       const incompleteTasks = results.filter((item) => item.status !== 'SUCCEEDED');
       if (incompleteTasks.length > 0) {
         const taskSummary = incompleteTasks
@@ -500,16 +505,37 @@ class CopilotDirector {
           .map(({ task, status }) => `${task.id} (${status})`)
           .join(', ');
         const remainder = incompleteTasks.length > 8 ? `, and ${incompleteTasks.length - 8} more` : '';
-        throw new Error(
-          `Director cannot report success: ${incompleteTasks.length} planned task(s) did not succeed: ${taskSummary}${remainder}`
-        );
+        const summary = `Director verification passed, but ${incompleteTasks.length} planned task(s) did not succeed: ${taskSummary}${remainder}.`.slice(0, 480);
+        this.agentTaskDao.updateStatus(supervisorTaskId, 'FAILED');
+        this.agentRunDao.updateStatus(supervisorRunId, 'FAILED', summary, null, new Date().toISOString());
+        const completion = {
+          type: 'director_complete',
+          status: 'FAILED',
+          taskId: supervisorTaskId,
+          runId: supervisorRunId,
+          taskCount: plan.tasks.length,
+          tasksSkipped: incompleteTasks.length,
+          message: summary,
+          summary,
+          verification: {
+            status: verificationStatus,
+            summary: verificationSummary || 'Partial workspace verification passed; plan incomplete.',
+            artifact_refs: verificationArtifacts
+          }
+        };
+        onEvent(completion);
+        return ResultValidator.validate({
+          status: 'FAILED',
+          summary,
+          artifact_refs: artifactRefs,
+          context_refs: [],
+          verification_status: 'PASSED',
+          errors: [{ code: 'INCOMPLETE_PLAN', message: summary.slice(0, 256) }]
+        });
       }
+
       this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
       this.agentRunDao.updateStatus(supervisorRunId, 'SUCCEEDED');
-      const artifactRefs = [
-        ...results.flatMap((item) => item.result?.result?.artifact_refs || item.result?.artifact_refs || []),
-        ...verificationArtifacts
-      ].filter((ref, index, all) => typeof ref === 'string' && ref.trim() && all.indexOf(ref) === index).slice(0, 10);
       const completion = {
         type: 'director_complete',
         status: 'SUCCEEDED',
