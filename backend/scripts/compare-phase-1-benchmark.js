@@ -72,7 +72,7 @@ function loadRunEvidence(result) {
   };
 }
 
-function compareSummaries(artifactsDir, baseline, candidate) {
+function compareSummaries(baseline, candidate) {
   if (baseline.phase !== 'baseline' || candidate.phase !== 'candidate') {
     throw new Error('Expected baseline-summary.json and candidate-summary.json with matching phase fields.');
   }
@@ -178,7 +178,7 @@ function main() {
   const artifactsDir = path.resolve(args['artifacts-dir']);
   const baseline = readJson(path.join(artifactsDir, 'baseline-summary.json'));
   const candidate = readJson(path.join(artifactsDir, 'candidate-summary.json'));
-  const report = compareSummaries(artifactsDir, baseline, candidate);
+  const report = compareSummaries(baseline, candidate);
   const outputPath = path.resolve(args.out || path.join(artifactsDir, 'baseline-vs-candidate-comparison.json'));
   fs.writeFileSync(outputPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
   console.log('Diagnostic comparison written to ' + outputPath);
