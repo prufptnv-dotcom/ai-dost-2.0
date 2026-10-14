@@ -85,13 +85,13 @@ The generated report keeps each acceptance criterion at `NOT_EVALUATED` until a 
 ## Automated live-generation capture
 
 ```bash
-# Start the backend from the exact baseline checkout, then run from backend/ in the candidate checkout:
+# Start the backend from the exact baseline checkout, then run from backend/ in the candidate checkout. The backend defaults to port 5000; use the backend port directly (not the frontend dev server) unless you have verified the proxy preserves the agent SSE route:
 AI_DOST_BENCHMARK_REVISION=76efa666d809c381d61579de5fa7c9d31f6a5a53 \
-AI_DOST_BASE_URL=http://127.0.0.1:3000 AI_DOST_BENCHMARK_MODEL=gemini \
+AI_DOST_BASE_URL=http://127.0.0.1:5000 AI_DOST_BENCHMARK_MODEL=gemini \
   node scripts/run-phase-1-benchmark.js --phase baseline --runs 3 \
   --artifacts-dir /tmp/ai-dost-phase1-comparison
 
-# Stop baseline and start the candidate checkout on the same local port, then:
+# Stop baseline and start the candidate checkout on the same local backend port, then:
 AI_DOST_BENCHMARK_REVISION="$(git rev-parse HEAD)" \
 AI_DOST_BASE_URL=http://127.0.0.1:3000 AI_DOST_BENCHMARK_MODEL=gemini \
   node scripts/run-phase-1-benchmark.js --phase candidate --runs 3 \
