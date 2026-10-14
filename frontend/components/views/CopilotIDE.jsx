@@ -2389,8 +2389,8 @@ const animate = () => {
               // P9: live completion — this run needs no reattach anymore.
               clearBgRun(latestRunIdRef.current);
               const stepCount = Array.isArray(data.steps) ? data.steps.length : (data.steps || '?');
-              const qualityStatus = extractOutputQualityStatus(data.message);
-              setPlanTasks(prev => settlePlanTasks(prev, data.message));
+              const qualityStatus = extractOutputQualityStatus(data.message) || outputQualityStatusRef.current;
+              setPlanTasks(prev => settlePlanTasks(prev, data.message || (qualityStatus ? `**${qualityStatus}** — output quality gate` : '')));
               setCopilotStatus({
                 label: qualityStatus && qualityStatus !== 'SUCCEEDED'
                   ? `⚠️ Run finished; output quality ${qualityStatus}`
