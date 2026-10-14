@@ -463,7 +463,7 @@ function formatAppSpecificationForPrompt(spec) {
   };
   return [
     '=== AI-DOST APP SPECIFICATION (validated implementation contract) ===',
-    'The original request remains authoritative. Suggestions are optional. Map implementation and verification to the REQ-* and AC-* identifiers. If explicitCoverage.unrepresentedClauses is non-empty, handle those clauses explicitly or report why they are blocked.'
+    'The original request remains authoritative. Suggestions are optional. Map implementation and verification to the REQ-* and AC-* identifiers. If explicitCoverage.unrepresentedClauses is non-empty, handle those clauses explicitly or report why they are blocked.',
     'For existing projects, inspect and preserve current conventions and unrelated working code.',
     'Do not claim integrations or checks are complete because a prompt, file, or tool call mentions them. Report unmet requirements and missing evidence explicitly.',
     JSON.stringify(concise, null, 2),
