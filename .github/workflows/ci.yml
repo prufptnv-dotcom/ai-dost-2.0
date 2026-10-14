@@ -7,6 +7,7 @@ on:
       - master
       - 'audit/**'
       - 'feature/**'
+      - 'fix/**'
   pull_request:
     branches: [main, master]
 
@@ -249,9 +250,11 @@ jobs:
           fi
 
   deploy:
-    name: Deploy Preview
+    name: Deploy Preview (Vercel frontend)
     needs: [frontend, backend, e2e, docker]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Same-repository pull requests can produce an isolated Vercel preview.
+    # Main remains the only push-triggered deployment target.
+    if: github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && github.event_name == 'push')
     runs-on: ubuntu-latest
     # secrets context is available in job-level env (not in steps.if) —
     # evaluate once here, then gate each deploy step on the env flag.
@@ -261,9 +264,18 @@ jobs:
       VERCEL_TOKEN_SET: ${{ secrets.VERCEL_TOKEN != '' }}
       VERCEL_ORG_ID_SET: ${{ secrets.VERCEL_ORG_ID != '' }}
       VERCEL_PROJECT_ID_SET: ${{ secrets.VERCEL_PROJECT_ID != '' }}
-      RAILWAY_TOKEN_SET: ${{ secrets.RAILWAY_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v5
+      - name: Report missing Vercel preview credentials
+        if: env.VERCEL_TOKEN_SET != 'true' || env.VERCEL_ORG_ID_SET != 'true' || env.VERCEL_PROJECT_ID_SET != 'true'
+        run: |
+          {
+            echo '### Preview deployment status'
+            echo 'Vercel preview was not deployed because one or more required repository secrets are missing.'
+            echo 'Required secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID.'
+            echo 'No secret values are printed by this workflow.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo '::warning::Vercel preview skipped: configure VERCEL_TOKEN, VERCEL_ORG_ID, and VERCEL_PROJECT_ID.'
       - name: Deploy to Vercel (Frontend)
         if: env.VERCEL_TOKEN_SET == 'true' && env.VERCEL_ORG_ID_SET == 'true' && env.VERCEL_PROJECT_ID_SET == 'true'
         uses: amondnet/vercel-action@v25
@@ -272,8 +284,10 @@ jobs:
           vercel-org-id: ${{secrets.VERCEL_ORG_ID}}
           vercel-project-id: ${{secrets.VERCEL_PROJECT_ID}}
           working-directory: frontend
-      - name: Deploy to Railway/Render (Backend)
-        if: env.RAILWAY_TOKEN_SET == 'true'
+      - name: Report backend deployment limitation
         run: |
-          echo "Deploy backend to Railway/Render"
-          # Add your deployment script here
+          {
+            echo '### Backend deployment status'
+            echo 'This workflow does not deploy the backend. The previous Railway/Render step was a placeholder, not a deployment.'
+            echo 'Configure a real backend deployment workflow before treating the backend as deployed.'
+          } >> "$GITHUB_STEP_SUMMARY"
