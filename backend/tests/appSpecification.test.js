@@ -64,6 +64,8 @@ describe('AppSpecificationService', () => {
     assert.equal(spec.requirements.some((item) => item.featureKey === 'authentication'), false);
     assert.ok(spec.requirements.some((item) => item.featureKey === 'csv-export'));
     assert.ok(spec.requirements.some((item) => item.source === 'explicit-clause' && /without search/i.test(item.sourceText)));
+    assert.ok(spec.pages.explicitlyRequested.includes('Dashboard'));
+    assert.equal(spec.pages.explicitlyRequested.includes('Login/signup'), false);
   });
 
   test('respects explicit framework choices without inventing a stack when omitted', () => {
