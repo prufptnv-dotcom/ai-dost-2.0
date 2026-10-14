@@ -8,7 +8,6 @@ on:
       - 'audit/**'
       - 'feature/**'
       - 'fix/**'
-      - 'diag/**'
   pull_request:
     branches: [main, master]
 
@@ -63,8 +62,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       - run: npm run lint
-      - name: Diagnose open handles while collecting frontend coverage
-        run: npm test -- --coverage --detectOpenHandles
+      - run: npm test -- --coverage
 
   backend:
     name: Backend (unit + integration + security + chat-runtime)
