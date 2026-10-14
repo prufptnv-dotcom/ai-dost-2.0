@@ -1147,7 +1147,7 @@ ${writtenFiles.map((file) => `- \`${file.path}\` (${file.size} bytes)`).join('\n
 #### ⚙️ Dependency Installation
 ${installResult?.skipped
     ? `- Skipped — ${installResult.reason}`
-    : `- `npm install` exit code **${installResult?.exitCode ?? 'n/a'}**${installResult?.ms ? ` (${Math.round(installResult.ms / 100) / 10}s)` : ''}`}
+    : `- \`npm install\` exit code **${installResult?.exitCode ?? 'n/a'}**${installResult?.ms ? ` (${Math.round(installResult.ms / 100) / 10}s)` : ''}`}
 
 #### 👁️ Build & Runtime Evidence
 ${runtimeBridge.describeVerification(verification)}
