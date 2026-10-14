@@ -77,6 +77,8 @@ describe('AppSpecificationService', () => {
       { prompt: "Create a dashboard where login isn't needed.", excluded: ['authentication'] },
       { prompt: 'Create a dashboard and do not include search or charts.', excluded: ['search-filter', 'charts-analytics'] },
       { prompt: 'Create a dashboard with search, but without login.', excluded: ['authentication'], included: ['search-filter'] },
+      { prompt: 'Create a dashboard without login and include search.', excluded: ['authentication'], included: ['search-filter'] },
+      { prompt: 'Create a dashboard with no login; add charts.', excluded: ['authentication'], included: ['charts-analytics'] },
       { prompt: 'Create a dashboard with no login. Include search and charts.', excluded: ['authentication'], included: ['search-filter', 'charts-analytics'] },
       { prompt: 'Create a dashboard; no charts. Include login.', excluded: ['charts-analytics'], included: ['authentication'] },
       { prompt: 'Create a dashboard with search, not only charts but also login.', excluded: [], included: ['search-filter', 'charts-analytics', 'authentication'] },
