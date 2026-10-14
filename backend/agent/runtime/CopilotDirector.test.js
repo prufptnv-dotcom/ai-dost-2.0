@@ -279,9 +279,14 @@ function assertCancelledPersistence(director) {
     'the supervisor task must be persisted as CANCELLED'
   );
   assert.equal(
-    director._testEvents.some((event) => event[0] === 'runStatus' && event[2] === 'CANCELLED'),
+    director._testEvents.some((event) =>
+      event[0] === 'runStatus' &&
+      event[2] === 'CANCELLED' &&
+      typeof event[5] === 'string' &&
+      !Number.isNaN(Date.parse(event[5]))
+    ),
     true,
-    'the supervisor run must be persisted as CANCELLED'
+    'the supervisor run must be persisted as CANCELLED with a completion timestamp'
   );
   assert.equal(
     director._testEvents.some((event) => event[0] === 'taskStatus' && event[2] === 'FAILED'),
