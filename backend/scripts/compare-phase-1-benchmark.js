@@ -165,14 +165,25 @@ function compareSummaries(baseline, candidate) {
       throw new Error('Run-level model preference mismatch for ' + key + '.');
     }
 
-    const baseProvider = base.metadata.settings?.actualProviderModelObservations?.[0]?.provider || null;
-    const nextProvider = next.metadata.settings?.actualProviderModelObservations?.[0]?.provider || null;
+    const baseObservation = base.metadata.settings?.actualProviderModelObservations?.[0] || null;
+    const nextObservation = next.metadata.settings?.actualProviderModelObservations?.[0] || null;
+    const baseProvider = baseObservation?.provider || null;
+    const nextProvider = nextObservation?.provider || null;
     const providerParity = baseProvider && nextProvider ? baseProvider === nextProvider : null;
     const providerParityStatus = providerParity === null ? 'UNKNOWN' : providerParity ? 'MATCH' : 'MISMATCH';
+    const baseModel = baseObservation?.model || null;
+    const nextModel = nextObservation?.model || null;
+    const actualModelParity = baseModel && nextModel ? baseModel === nextModel : null;
+    const actualModelParityStatus = actualModelParity === null ? 'UNKNOWN' : actualModelParity ? 'MATCH' : 'MISMATCH';
     if (providerParity === false) {
       warnings.push(key + ': selected scaffold provider differs (' + baseProvider + ' -> ' + nextProvider + ').');
     } else if (providerParity === null) {
       warnings.push(key + ': selected provider is not exposed by the captured generation events; inspect backend logs before attributing differences.');
+    }
+    if (actualModelParity === false) {
+      warnings.push(key + ': actual model differs (' + baseModel + ' -> ' + nextModel + '); model changes confound the code comparison.');
+    } else if (actualModelParity === null) {
+      warnings.push(key + ': exact model identity is unknown from captured generation events; inspect backend logs before attributing differences.');
     }
 
     pairs.push({
@@ -195,6 +206,8 @@ function compareSummaries(baseline, candidate) {
       },
       providerParity,
       providerParityStatus,
+      actualModelParity,
+      actualModelParityStatus,
       requirementAcceptance: {
         baseline: base.metrics.acceptanceStatus,
         candidate: next.metrics.acceptanceStatus,
@@ -228,13 +241,16 @@ function compareSummaries(baseline, candidate) {
     },
     providerParityCount: pairs.filter((pair) => pair.providerParity === true).length,
     providerParityUnknownCount: pairs.filter((pair) => pair.providerParity === null).length,
+    actualModelParityCount: pairs.filter((pair) => pair.actualModelParity === true).length,
+    actualModelMismatchCount: pairs.filter((pair) => pair.actualModelParity === false).length,
+    actualModelParityUnknownCount: pairs.filter((pair) => pair.actualModelParity === null).length,
     warnings,
     pairedRuns: pairs,
     interpretation: [
       'This report compares capture and static diagnostic evidence only; it is not a quality score.',
       'More files, bytes, or regex matches do not imply a better application.',
       'Requirement acceptance remains NOT_EVALUATED until isolated build/browser checks and criterion-specific behavior evidence are attached.',
-      'Review provider parity and backend logs before attributing any change to the candidate code.',
+      'Review provider and exact-model parity; an unknown or mismatched model weakens causal attribution to candidate code.',
     ],
   };
   return report;
