@@ -97,7 +97,13 @@ Rules:
 - For upgrades/fixes, target the affected subsystem; do not rebuild unrelated areas.
 - Include testing, security, browser QA, or verification when the request/risk requires it.
 - Runtime failures are automatically retried and repaired; use repair for explicit repair work too.
-- Do not include human/manual task assignment.`;
+- Do not include human/manual task assignment.
+- APP SPECIFICATION TRACEABILITY (when the request includes a validated AI-Dost App Specification):
+  - Preserve every REQ-### identifier from the specification in at least one implementation task objective or expectedOutput; do not merge away or omit explicit requirements.
+  - Map relevant AC-## acceptance checks to a dedicated verification/testing task or explicit output evidence. Do not state that checks passed before execution evidence exists.
+  - For application UI tasks, include the specified design-system, responsive-width, accessibility, and functional-state requirements in implementation outputs.
+  - Treat suggested pages/archetypes as optional guidance; only explicit user requirements are mandatory.
+  - If a requirement is ambiguous or impossible with the available tools/configuration, state that as a blocker in the task expectedOutput instead of silently substituting a mock.`;
 
 function escapeControlCharsInStrings(str) {
   let inStr = false;
