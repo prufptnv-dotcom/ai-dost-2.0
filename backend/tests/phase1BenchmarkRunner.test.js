@@ -48,7 +48,11 @@ describe('Phase 1 live benchmark capture runner', () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-dost-phase1-runner-'));
     t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
     const artifactsDir = path.join(tempRoot, 'artifacts');
+    let receivedAuthorization = null;
+    let receivedUserId = null;
     const server = http.createServer((req, res) => {
+      receivedAuthorization = req.headers.authorization || null;
+      receivedUserId = req.headers['x-user-id'] || null;
       let body = '';
       req.on('data', (chunk) => { body += chunk; });
       req.on('end', () => {
@@ -73,7 +77,11 @@ describe('Phase 1 live benchmark capture runner', () => {
       '--revision', 'test-baseline-sha',
       '--base-url', 'http://127.0.0.1:' + address.port,
       '--artifacts-dir', artifactsDir,
-    ], { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'pipe'] });
+    ], {
+      cwd: path.join(__dirname, '..'),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, AI_DOST_BENCHMARK_TOKEN: 'test-secret-token', AI_DOST_BENCHMARK_USER_ID: 'benchmark-user' },
+    });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
@@ -94,6 +102,11 @@ describe('Phase 1 live benchmark capture runner', () => {
     assert.equal(metadata.acceptanceStatus, 'NOT_EVALUATED');
     assert.equal(metadata.project.fileCount, 1);
     assert.equal(events.length, 4);
+    assert.equal(metadata.settings.authConfigured, true);
+    assert.equal(metadata.settings.userIdHeaderConfigured, true);
+    assert.equal(receivedAuthorization, 'Bearer test-secret-token');
+    assert.equal(receivedUserId, 'benchmark-user');
+    assert.equal(JSON.stringify(metadata).includes('test-secret-token'), false);
     assert.equal(metadata.settings.actualProviderModelObservations[0].providerName, 'Gemini (Flash)');
     assert.equal(metadata.settings.actualProviderModelObservations[0].fileCount, 1);
     assert.equal(fs.readFileSync(path.join(runDir, 'project', 'src', 'App.jsx'), 'utf8'), 'export default function App(){ return <main><label>Search</label><button>Export CSV</button></main>; }');
