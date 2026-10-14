@@ -316,13 +316,33 @@ function findMissingFeatureSignals(spec, files) {
     .filter((file) => file && typeof file.path === 'string' && typeof file.content === 'string')
     .map((file) => '\n/* FILE: ' + file.path + ' */\n' + file.content)
     .join('\n');
+  // Request-detection patterns are intentionally broad (for example, "export"
+  // is a valid user request signal). Source diagnostics need stronger patterns:
+  // JavaScript's ordinary `export default` must not satisfy a CSV export request.
+  const sourceSignals = {
+    'search-filter': /\b(search|searchTerm|searchQuery|filter|filteredItems|setSearch|onSearch|handleSearch)\b/i,
+    'charts-analytics': /\b(chart|charts|ChartJS|recharts|victory|nivo|plotly|renderChart|series|dataKey)\b/i,
+    'csv-export': /\b(csv|text\/csv|exportCsv|downloadCsv|downloadCSV|URL\.createObjectURL|createObjectURL|\.toCSV\s*\(|json2csv|papaparse|Papa\.unparse|spreadsheet|xlsx)\b/i,
+    'authentication': /\b(signIn|signUp|login|logIn|authenticate|authProvider|passwordReset)\b/i,
+    'data-management': /\b(createItem|updateItem|deleteItem|addItem|removeItem|handleSave|handleDelete|onSubmit|localStorage|\.insert\(|\.update\(|\.delete\()\b/i,
+    'payments': /\b(stripe|razorpay|checkout|paymentIntent|createPayment|billing)\b/i,
+    'cart': /\b(addToCart|removeFromCart|cartItems|cartTotal|shoppingCart)\b/i,
+    'booking': /\b(bookAppointment|createBooking|selectedDate|timeSlot|reservation)\b/i,
+    'notifications': /\b(notification|toast|notify|showAlert|reminder)\b/i,
+    'chat': /\b(sendMessage|messages|chatMessages|conversation|websocket|socket\.io)\b/i,
+    'file-upload': /\b(inputType=[\"']file|type=[\"']file|onDrop|dropzone|uploadFile|FormData)\b/i,
+    'dark-mode': /\b(darkMode|themeMode|toggleTheme|setTheme|prefers-color-scheme)\b/i,
+    'multi-language': /\b(i18n|useTranslation|changeLanguage|locale|translations)\b/i,
+    'forms-validation': /\b(required|validationSchema|validateForm|setError|formErrors|aria-invalid)\b/i,
+  };
   return spec.requirements
     .filter((requirement) => requirement && requirement.featureKey)
     .map((requirement) => ({
       requirement,
       rule: FEATURE_RULES.find((feature) => feature.id === requirement.featureKey),
+      sourceSignal: sourceSignals[requirement.featureKey],
     }))
-    .filter(({ rule }) => rule && !rule.pattern.test(source))
+    .filter(({ rule, sourceSignal }) => rule && !(sourceSignal || rule.pattern).test(source))
     .map(({ requirement, rule }) => ({
       requirementId: requirement.id,
       featureKey: requirement.featureKey,
