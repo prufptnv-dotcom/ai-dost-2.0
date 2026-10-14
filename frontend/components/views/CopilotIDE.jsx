@@ -74,6 +74,23 @@ const TerminalPanel = dynamic(() => import('./TerminalPanel'), { ssr: false });
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+// Parse the explicit backend quality gate without confusing a finished tool run
+// with a verified application. Older generic responses keep their prior behavior.
+function extractOutputQualityStatus(message) {
+  const match = String(message || '').match(/\*\*(SUCCEEDED|FAILED|UNVERIFIED|PARTIAL)\*\*\s*[—-]/i);
+  return match ? match[1].toUpperCase() : null;
+}
+
+function settlePlanTasks(tasks, message) {
+  const status = extractOutputQualityStatus(message);
+  if (!status) return tasks.map((task) => ({ ...task, status: 'completed' }));
+  if (status === 'SUCCEEDED') return tasks.map((task) => ({ ...task, status: 'completed' }));
+  return tasks.map((task, index) => ({
+    ...task,
+    status: index < tasks.length - 1 ? 'completed' : status === 'FAILED' ? 'error' : 'unverified',
+  }));
+}
+
 // Agent tool action → human-readable live status
 const STATUS_BY_ACTION = {
   write_file: '✍️ Writing source code...',
@@ -2175,8 +2192,14 @@ const animate = () => {
             // ── Director Complete: CRITICAL — Map to done, reset running state ──
             else if (data.type === 'director_complete') {
               const taskCount = data.taskCount || '?';
-              setPlanTasks(prev => prev.map(t => ({ ...t, status: 'completed' })));
-              setCopilotStatus({ label: `✅ Director completed — ${taskCount} tasks`, tone: 'success' });
+              const qualityStatus = extractOutputQualityStatus(data.message);
+              setPlanTasks(prev => settlePlanTasks(prev, data.message));
+              setCopilotStatus({
+                label: qualityStatus && qualityStatus !== 'SUCCEEDED'
+                  ? `⚠️ Director finished; output quality ${qualityStatus}`
+                  : `✅ Director completed — ${taskCount} tasks`,
+                tone: qualityStatus === 'FAILED' ? 'error' : qualityStatus && qualityStatus !== 'SUCCEEDED' ? 'work' : 'success',
+              });
 
               const finalFiles = createdFilesTracker.length > 0 ? createdFilesTracker : files.map(f => f.path);
               setCopilotMessages(prev => [
@@ -2366,8 +2389,14 @@ const animate = () => {
               // P9: live completion — this run needs no reattach anymore.
               clearBgRun(latestRunIdRef.current);
               const stepCount = Array.isArray(data.steps) ? data.steps.length : (data.steps || '?');
-              setPlanTasks(prev => prev.map(t => ({ ...t, status: 'completed' })));
-              setCopilotStatus({ label: `✅ Done — ${stepCount} steps`, tone: 'success' });
+              const qualityStatus = extractOutputQualityStatus(data.message);
+              setPlanTasks(prev => settlePlanTasks(prev, data.message));
+              setCopilotStatus({
+                label: qualityStatus && qualityStatus !== 'SUCCEEDED'
+                  ? `⚠️ Run finished; output quality ${qualityStatus}`
+                  : `✅ Done — ${stepCount} steps`,
+                tone: qualityStatus === 'FAILED' ? 'error' : qualityStatus && qualityStatus !== 'SUCCEEDED' ? 'work' : 'success',
+              });
 
               const finalFiles = createdFilesTracker.length > 0 ? createdFilesTracker : files.map(f => f.path);
 
