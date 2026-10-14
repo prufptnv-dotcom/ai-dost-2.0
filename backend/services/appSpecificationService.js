@@ -97,6 +97,134 @@ function inferStack(prompt) {
   };
 }
 
+function inferComponentArchitecture(isUi, archetype, requirements) {
+  if (!isUi) {
+    return {
+      approach: 'Trace affected modules and follow the existing repository architecture.',
+      boundaries: ['Keep changes local to the relevant module/service.', 'Separate I/O from pure business logic where useful.', 'Avoid broad rewrites of unrelated files.'],
+      suggestedFiles: [],
+    };
+  }
+
+  const featureKeys = new Set(requirements.map((item) => item.featureKey).filter(Boolean));
+  const hasDataLayer = ['data-management', 'persistent-data', 'api-integration', 'authentication', 'csv-export', 'payments', 'booking'].some((key) => featureKeys.has(key));
+  const suggestedFiles = ['src/App.jsx', 'src/styles/tokens.css', 'src/styles/global.css', 'src/components/ui/'];
+  if (archetype.id === 'saas-dashboard') suggestedFiles.push('src/features/dashboard/');
+  if (archetype.id === 'ecommerce') suggestedFiles.push('src/features/products/', 'src/features/cart/');
+  if (archetype.id === 'education') suggestedFiles.push('src/features/courses/', 'src/features/progress/');
+  if (archetype.id === 'booking') suggestedFiles.push('src/features/booking/');
+  if (archetype.id === 'collaboration') suggestedFiles.push('src/features/tasks/');
+  if (hasDataLayer) suggestedFiles.push('src/services/', 'src/data/');
+
+  return {
+    approach: 'Use a shared app shell and feature-oriented components; adapt file names to the existing stack instead of forcing a scaffold.',
+    boundaries: [
+      'Keep app shell/navigation separate from page-specific content.',
+      'Extract repeated UI into reusable, accessible components; keep feature logic close to its feature.',
+      'Separate API/storage access from presentation when data is loaded or mutated.',
+      'Avoid a monolithic component when the request includes multiple pages or independent workflows.',
+      'Suggested file paths are guidance only; preserve established workspace conventions.',
+    ],
+    suggestedFiles: [...new Set(suggestedFiles)],
+  };
+}
+
+function inferDataModel(prompt, archetype, requirements) {
+  const p = String(prompt || '').toLowerCase();
+  const featureKeys = new Set(requirements.map((item) => item.featureKey).filter(Boolean));
+  const entitiesByArchetype = {
+    ecommerce: [
+      { name: 'Product', fields: ['id', 'name', 'description', 'price', 'image', 'availability'] },
+      { name: 'CartItem', fields: ['productId', 'quantity', 'unitPrice'] },
+      { name: 'Order', fields: ['id', 'items', 'total', 'status', 'createdAt'] },
+    ],
+    education: [
+      { name: 'Course', fields: ['id', 'title', 'description', 'level'] },
+      { name: 'Lesson', fields: ['id', 'courseId', 'title', 'content', 'order'] },
+      { name: 'Progress', fields: ['userId', 'lessonId', 'status', 'updatedAt'] },
+    ],
+    booking: [
+      { name: 'Resource', fields: ['id', 'name', 'description', 'availability'] },
+      { name: 'Booking', fields: ['id', 'resourceId', 'startAt', 'endAt', 'status', 'contact'] },
+    ],
+    'saas-dashboard': [
+      { name: 'WorkspaceItem', fields: ['id', 'name', 'status', 'createdAt', 'updatedAt'] },
+      { name: 'Metric', fields: ['id', 'label', 'value', 'period', 'source'] },
+    ],
+    'portfolio-landing': [
+      { name: 'PortfolioItem', fields: ['id', 'title', 'summary', 'image', 'href', 'tags'] },
+      { name: 'ContactMessage', fields: ['name', 'email', 'message', 'createdAt', 'status'] },
+    ],
+    'content-platform': [
+      { name: 'Article', fields: ['id', 'title', 'slug', 'summary', 'body', 'publishedAt', 'status'] },
+      { name: 'Category', fields: ['id', 'name', 'slug'] },
+    ],
+    collaboration: [
+      { name: 'Project', fields: ['id', 'name', 'description', 'status'] },
+      { name: 'Task', fields: ['id', 'projectId', 'title', 'description', 'status', 'assigneeId', 'dueAt'] },
+    ],
+  };
+  let entities = entitiesByArchetype[archetype.id] || [];
+  if (/\b(expense|finance|budget|transaction|income|wallet|ledger)\b/i.test(p)) {
+    entities = [
+      { name: 'Transaction', fields: ['id', 'date', 'description', 'amount', 'category', 'type'] },
+      { name: 'Account', fields: ['id', 'name', 'balance', 'currency'] },
+      { name: 'Budget', fields: ['id', 'category', 'limit', 'period'] },
+    ];
+  }
+  if (featureKeys.has('authentication')) {
+    entities.push({ name: 'User', fields: ['id', 'displayName', 'email', 'role', 'createdAt'] });
+  }
+  if (featureKeys.has('csv-export')) {
+    entities.push({ name: 'ExportJob', fields: ['format', 'filters', 'createdAt', 'status'] });
+  }
+
+  return {
+    entities: entities.slice(0, 8),
+    storagePolicy: featureKeys.has('persistent-data')
+      ? 'Use the requested/configured persistent store and document the schema/migration requirements.'
+      : featureKeys.has('api-integration') || featureKeys.has('data-management')
+        ? 'Use the configured API/store if present; otherwise clearly label demo data and isolate it behind a replaceable data-access layer.'
+        : 'If this is a static presentation, local transient state is acceptable. Do not add a database unless the request or existing project requires it.',
+    rules: [
+      'Entity examples are suggestions, not extra required features; adjust fields and relationships to the original request.',
+      'Keep one canonical source of truth for each record; derive totals/counts instead of keeping conflicting duplicate state.',
+      'Validate user input before mutations and provide explicit success/error feedback.',
+      'Do not claim persistence beyond the storage actually implemented.',
+    ],
+  };
+}
+
+function buildInteractionContracts(requirements) {
+  const transitions = {
+    'search-filter': ['idle -> searching', 'searching -> results', 'searching -> empty', 'results/empty -> idle when cleared'],
+    'charts-analytics': ['loading -> rendered data', 'loading -> empty/error', 'period/filter change -> updated visualization'],
+    'data-management': ['list -> create/edit form', 'form -> validation errors or save', 'save -> updated list/detail', 'delete -> confirmation -> updated list'],
+    'csv-export': ['idle -> preparing file', 'preparing -> download ready or error'],
+    payments: ['cart/summary -> pending checkout', 'pending -> success, declined, canceled, or unavailable'],
+    cart: ['catalog -> item selected', 'quantity change -> recalculated totals', 'last item removed -> empty cart'],
+    booking: ['availability -> selected slot', 'selection -> review', 'review -> confirmed, validation error, or unavailable'],
+    notifications: ['action result -> visible feedback', 'dismiss -> feedback removed'],
+    chat: ['idle -> message composed', 'valid submit -> sending -> message/error', 'empty submit -> validation feedback'],
+    'file-upload': ['idle -> selected', 'selected -> uploading', 'uploading -> complete/error/canceled'],
+    'dark-mode': ['current theme -> alternate theme -> consistent surface/text update'],
+    'multi-language': ['current language -> selected language -> translated navigation/content/form messages'],
+    'forms-validation': ['idle -> editing', 'submit -> field errors or submitting', 'submitting -> success/error'],
+    'sorting-pagination': ['current order/page -> user selection -> updated visible records'],
+    'persistent-data': ['edit -> save -> confirmed persistence', 'load -> populated/empty/error'],
+    'api-integration': ['idle -> loading -> response data or recoverable error'],
+  };
+  const byKey = new Map(requirements.map((item) => [item.featureKey, item]));
+  return Object.entries(transitions)
+    .filter(([key]) => byKey.has(key))
+    .map(([featureKey, stateTransitions]) => ({
+      requirementId: byKey.get(featureKey).id,
+      featureKey,
+      name: byKey.get(featureKey).name,
+      stateTransitions,
+    }));
+}
+
 function buildAcceptanceCriteria(isUi, requirements) {
   const criteria = [
     { id: 'AC-01', title: 'Primary outcome', check: 'The implementation demonstrates the outcome requested in the original prompt. List blocked or incomplete parts explicitly rather than claiming completion.', requirementIds: ['REQ-001'], scope: ['overall'] },
