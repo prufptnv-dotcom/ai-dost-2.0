@@ -774,7 +774,9 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
           let generationSource = 'llm-output-pending';
           const featurePreflight = { attempted: false, missingBefore: [], missingAfter: [], repairApplied: false, skippedReason: null };
           try {
-            const scaffoldResult = await callScaffoldLLM(systemPrompt, null, parameters?.headers || {});
+            const scaffoldResult = await callScaffoldLLM(systemPrompt, null, parameters?.headers || {}, (selectedProvider) => {
+              if (onProgress) onProgress({ type: 'generation_provider', phase: 'initial', ...selectedProvider });
+            });
             if (scaffoldResult && Array.isArray(scaffoldResult.files) && scaffoldResult.files.length >= 2) {
               parsedData = scaffoldResult;
             } else if (typeof scaffoldResult === 'string') {
@@ -825,7 +827,9 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
                 ].join('\n\n');
 
                 try {
-                  const completionResult = await callScaffoldLLM(completionPrompt, null, parameters?.headers || {});
+                  const completionResult = await callScaffoldLLM(completionPrompt, null, parameters?.headers || {}, (selectedProvider) => {
+                    if (onProgress) onProgress({ type: 'generation_provider', phase: 'targeted-completion', ...selectedProvider });
+                  });
                   let completionFiles = null;
                   if (completionResult && Array.isArray(completionResult.files)) {
                     completionFiles = completionResult.files;
@@ -1835,7 +1839,7 @@ function extractFiles(resp) {
 }
 
 // ── Scaffolding LLM (mini-cascade for generate_project_from_prompt) ──────────
-async function callScaffoldLLM(scaffoldPrompt, customKeys = null, reqHeaders = {}) {
+async function callScaffoldLLM(scaffoldPrompt, customKeys = null, reqHeaders = {}, onProviderSelected = null) {
   const isPrivacyMode = reqHeaders['x-privacy-mode'] === 'true';
   // P1: the old predicate accepted any response of ≤5 characters as success,
   // which let `null`, `{}`, `"[DONE]"` etc. stop the cascade and be used as
@@ -1913,6 +1917,9 @@ async function callScaffoldLLM(scaffoldPrompt, customKeys = null, reqHeaders = {
         const files = extractFiles(resp);
         if (files && files.length >= 1) {
           logger.info(`[Agent] Live AI Model ${provider.name} generated/modified ${files.length} custom files`);
+          if (typeof onProviderSelected === 'function') {
+            try { onProviderSelected({ provider: provider.key, providerName: provider.name, model: null }); } catch (_) {}
+          }
           return resp;
         }
       } catch (e) {
@@ -1924,7 +1931,12 @@ async function callScaffoldLLM(scaffoldPrompt, customKeys = null, reqHeaders = {
   try {
     const resp = await callOllamaLocal(scaffoldPrompt);
     const files = extractFiles(resp);
-    if (files && files.length >= 1) return resp;
+    if (files && files.length >= 1) {
+      if (typeof onProviderSelected === 'function') {
+        try { onProviderSelected({ provider: 'ollama', providerName: 'Ollama (local)', model: process.env.OLLAMA_MODEL || null }); } catch (_) {}
+      }
+      return resp;
+    }
   } catch (e) {
     logger.info('[Agent] Scaffold Ollama failed:', e.message || e);
   }
