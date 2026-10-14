@@ -334,6 +334,11 @@ function findMissingFeatureSignals(spec, files) {
     'dark-mode': /\b(darkMode|themeMode|toggleTheme|setTheme|prefers-color-scheme)\b/i,
     'multi-language': /\b(i18n|useTranslation|changeLanguage|locale|translations)\b/i,
     'forms-validation': /\b(required|validationSchema|validateForm|setError|formErrors|aria-invalid)\b/i,
+    'sorting-pagination': /\b(sortBy|sortOrder|sortedItems|currentPage|pageSize|pagination|nextPage|previousPage)\b/i,
+    responsive: /@media|\b(sm:|md:|lg:|xl:|grid-template-columns|min-width|max-width)\b/i,
+    accessibility: /\b(aria-[a-z-]+|ariaLabel|htmlFor|tabIndex|role=["']|alt=["'])|:focus-visible/i,
+    'persistent-data': /\b(localStorage|sessionStorage|indexedDB|prisma|mongoose|sequelize|knex|sqlite|postgres|mongodb)\b/i,
+    'api-integration': /\b(fetch\s*\(|axios|useSWR|useQuery|queryClient|apiClient)\b|\/api\//i,
   };
   return spec.requirements
     .filter((requirement) => requirement && requirement.featureKey)
