@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
-const { parseSseFrame, ensureLocalUrl } = require('../scripts/run-phase-1-benchmark');
+const { parseSseFrame, collectSse, ensureLocalUrl } = require('../scripts/run-phase-1-benchmark');
 
 describe('Phase 1 live benchmark capture runner', () => {
   test('parses SSE JSON frames and event-name fallback', () => {
@@ -20,6 +20,23 @@ describe('Phase 1 live benchmark capture runner', () => {
       message: 'finished',
     });
     assert.equal(parseSseFrame('data: [DONE]').type, 'done');
+  });
+
+  test('preserves UTF-8 characters split across streamed SSE chunks', async () => {
+    const bytes = Buffer.from('data: {"type":"message","text":"🧪"}\n\n', 'utf8');
+    const emojiOffset = bytes.indexOf(Buffer.from('🧪', 'utf8'));
+    const chunks = [
+      bytes.subarray(0, emojiOffset + 2),
+      bytes.subarray(emojiOffset + 2),
+    ];
+    const response = {
+      body: (async function* () {
+        for (const chunk of chunks) yield chunk;
+      })(),
+    };
+    const events = [];
+    await collectSse(response, (event) => events.push(event));
+    assert.deepEqual(events, [{ type: 'message', text: '🧪' }]);
   });
 
   test('rejects remote hosts because the generated workspace must be locally capturable', () => {
