@@ -256,18 +256,20 @@ class CopilotDirector {
     this.coordinator = coordinator || new AgentCoordinator({ db, projectAuthService: projectAuthorization, workspaceManager, toolRegistry, plannerExecutionLoop, contextAssembler, executionController, agentTaskDao, agentRunDao });
   }
 
-  async createPlan(request, context = {}) {
+  async createPlan(request, context = {}, preferredModel = 'auto') {
     if (!String(request || '').trim()) throw new Error('Director request is required');
     try {
       const prompt = `${DIRECTOR_PLANNER_PROMPT}\n\nREQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
       // P12.4: mode 'planner' (no system prompt) — 'agent' mode's FILE: format
       // instruction fights this prompt's "respond with valid JSON" contract.
-      const response = await this.aiService.chat(prompt, [], 'planner');
+      const response = preferredModel && preferredModel !== 'auto'
+        ? await this.aiService.chat(prompt, [], 'planner', null, preferredModel)
+        : await this.aiService.chat(prompt, [], 'planner');
       return normalizePlan(extractJson(response), request);
     } catch (_) { return normalizePlan(null, request); }
   }
 
-  async executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent = () => {}, permissionLevel = 'auto', approvalToken = null, approvalState = null }) {
+  async executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent = () => {}, permissionLevel = 'auto', approvalToken = null, approvalState = null, preferredModel = 'auto' }) {
     let hasExistingFiles = false;
     let existingFiles = [];
     let existingFileContents = null;
@@ -318,7 +320,8 @@ class CopilotDirector {
           request, 
           expectedOutput: task.expectedOutput,
           ...(existingFiles.length ? { existingFiles } : {}),
-          ...(existingFileContents ? { existingFileContents } : {})
+          ...(existingFileContents ? { existingFileContents } : {}),
+          ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {})
         });
 
         onEvent({ type: 'thinking', message: `⚡ Specialist [${task.id}] executing ${workerPlan.steps?.length || 0} step(s)...` });
@@ -331,7 +334,7 @@ class CopilotDirector {
           maxRepairs || 3, 
           () => Boolean(signal?.aborted), 
           `copilot_${delegated.workerRun.id}_att${attempt}`,
-          { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined }
+          { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined, ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) }
         );
 
         // Execution completed all steps successfully
@@ -357,7 +360,7 @@ class CopilotDirector {
     throw new Error(`Worker ${task.id} failed after ${attempt} self-healing attempts. Final error: ${lastError}`);
   }
 
-  async run({ userId, projectId, request, signal = null, onEvent = () => {}, maxRepairs = 3, plan: presetPlan = null, permissionLevel = 'auto', approvalToken = null }) {
+  async run({ userId, projectId, request, signal = null, onEvent = () => {}, maxRepairs = 3, plan: presetPlan = null, permissionLevel = 'auto', approvalToken = null, preferredModel = 'auto' }) {
     // P12.3: ONE shared mutable approval state for this run — every worker (and
     // the final verification) gets the SAME holder. ExecutionController's
     // single-use rotation writes through the ChatPlanner context proxy into it,
@@ -367,7 +370,7 @@ class CopilotDirector {
     const approvalState = { token: approvalToken || null };
     // Plan-mode override: use the user-approved plan (normalized + validated —
     // bad shapes fall back to a generic sequential plan, never crash).
-    const plan = presetPlan ? normalizePlan(presetPlan, request) : await this.createPlan(request, { projectId });
+    const plan = presetPlan ? normalizePlan(presetPlan, request) : await this.createPlan(request, { projectId }, preferredModel);
     const supervisorResult = await this.coordinator.createSupervisorTask({ userId, projectId, title: `Copilot Director: ${String(request).slice(0, 180)}`, prompt: request, metadata: { source: 'copilot-director', plannedTaskCount: plan.tasks.length } });
     const supervisorTaskId = supervisorResult.task.id;
     const supervisorRunId = supervisorResult.run.id;
@@ -416,7 +419,7 @@ class CopilotDirector {
               break;
             }
             try {
-              executionResult = await this.coordinator.startWorker(delegated.workerRun.id, { autoPlan: false, runner: () => this.executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent, permissionLevel, approvalToken, approvalState }) });
+              executionResult = await this.coordinator.startWorker(delegated.workerRun.id, { autoPlan: false, runner: () => this.executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent, permissionLevel, approvalToken, approvalState, preferredModel }) });
               lastError = null;
               break;
             } catch (error) {
@@ -482,7 +485,7 @@ class CopilotDirector {
       }
       onEvent({ type: 'director_verification', status: 'DELEGATING' });
       const verifier = await this.coordinator.delegate({ supervisorRunId, role: 'VERIFIER', objective: `Perform the final read-only verification gate for the requested outcome: ${request}. Inspect the current workspace state and confirm tests/build/runtime evidence where supported. Do not mutate the workspace.`, constraints: { specialty: 'verification', generatedByDirector: true }, expectedOutput: 'Final verification evidence and any remaining blockers.' });
-      const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, { runner: async () => { const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER' }); return this.plannerExecutionLoop.runWithPlan(projectId, userId, verificationPlan, 0, () => Boolean(signal?.aborted), `copilot_verify_${verifier.workerRun.id}`, { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined }); } });
+      const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, { runner: async () => { const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER', ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) }); return this.plannerExecutionLoop.runWithPlan(projectId, userId, verificationPlan, 0, () => Boolean(signal?.aborted), `copilot_verify_${verifier.workerRun.id}`, { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined, ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) }); } });
       const verificationStatus = String(finalVerification?.status || 'FAILED').toUpperCase();
       const verificationSummary = String(
         finalVerification?.summary || finalVerification?.result?.summary || finalVerification?.message || ''
