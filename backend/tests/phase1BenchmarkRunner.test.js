@@ -40,6 +40,7 @@ describe('Phase 1 live benchmark capture runner', () => {
         fs.writeFileSync(path.join(payload.projectPath, 'App.jsx'),
           'export default function App(){ return <main><label>Search</label><button>Export CSV</button></main>; }');
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+        res.write('data: {"type":"generation_provider","provider":"gemini","providerName":"Gemini (Flash)","model":null}\n\n');
         res.write('data: {"type":"output_quality","status":"UNVERIFIED","acceptanceStatus":"NOT_EVALUATED"}\n\n');
         res.end('data: {"type":"done","message":"finished"}\n\n');
       });
@@ -75,7 +76,9 @@ describe('Phase 1 live benchmark capture runner', () => {
     assert.equal(metadata.outputQuality.status, 'UNVERIFIED');
     assert.equal(metadata.acceptanceStatus, 'NOT_EVALUATED');
     assert.equal(metadata.project.fileCount, 1);
-    assert.equal(events.length, 2);
+    assert.equal(events.length, 3);
+    assert.equal(metadata.settings.actualProviderModelObservations[0].providerName, 'Gemini (Flash)');
+    assert.equal(metadata.settings.actualModelIdentityStatus, 'NOT_EXPOSED_BY_GENERATION_EVENT');
     assert.equal(summary.completedRuns, 1);
     assert.equal(summary.acceptanceStatus, 'NOT_EVALUATED');
     assert.ok(fs.existsSync(path.join(runDir, 'static-diagnostic.json')));
