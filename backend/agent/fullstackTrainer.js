@@ -155,19 +155,19 @@ User Requirement: "${prompt}"
 Domain: ${category.toUpperCase()}
 ${domainDirectives}
 STRICT RULES:
-ICON RULE (Font Awesome ONLY — no exceptions):
-- Every icon MUST be a real Font Awesome Free icon via @fortawesome/react-fontawesome with individual icon imports. Example:
+ICON RULE:
+- In an existing project, use its installed icon system and conventions; do not force a second icon dependency. In a new project, choose one consistent real icon library and import only valid icons. Font Awesome usage example:
   import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
   import { faMagnifyingGlass, faPlus, faTrashCan } from '@fortawesome/free-solid-svg-icons';
   <FontAwesomeIcon icon={faMagnifyingGlass} style={{ fontSize: 15 }} className="text-zinc-400" />
-- Brand logos (Github, Google, Twitter/X) MUST come from '@fortawesome/free-brands-svg-icons' (e.g. faGithub, faGoogle, faXTwitter).
-- FORBIDDEN: lucide-react (any import), emoji-as-icons (never use 🚀📝💰🎯 etc. as UI icons or favicons), and hand-written <svg> icon markup.
-- package.json dependencies MUST include: @fortawesome/fontawesome-svg-core, @fortawesome/free-solid-svg-icons, @fortawesome/free-regular-svg-icons, @fortawesome/free-brands-svg-icons, @fortawesome/react-fontawesome.
+- Use the chosen library's official brand icons when a brand mark is needed; never imitate protected logos with arbitrary symbols.
+- FORBIDDEN: emoji-as-icons (never use decorative emoji as functional UI icons). Avoid hand-written SVG icon markup unless the task specifically requires custom vector artwork.
+- Add dependencies only when needed and ensure every imported icon package is declared in package.json; do not install a second icon system when an appropriate one already exists.
 1. Return code using this markdown format for each file:
 
 FILE: src/App.jsx
 \`\`\`jsx
-// Complete stateful React UI with dark theme (slate-950), Font Awesome icons, filters, modals, and dynamic data
+// Complete stateful React UI with a request-appropriate theme, modular components, functional controls, and realistic data
 \`\`\`
 
 FILE: server.js
@@ -182,8 +182,14 @@ FILE: src/services/api.js
 
 2. ZERO PLACEHOLDERS: Write complete, functional code without "// TODO".
 3. QUALITY BAR (principal-engineer standard):
+   - Theme is request-driven: use dark mode only when explicitly requested or already established by the existing project's design system.
+   - Define/reuse semantic design tokens for colors, typography, spacing, radius, elevation, borders, and focus states; keep contrast and component states consistent.
+   - Build a clear page-level visual hierarchy and domain-appropriate information architecture; do not reuse a generic dashboard/card grid for every kind of product.
+   - For multi-page or multi-workflow apps, split app shell, pages, reusable UI, feature components, and data/API access into coherent modules. Do not put the entire product in one giant App component.
+   - Implement the important end-to-end interactions from the user requirement; a button that only changes appearance or has no meaningful handler is incomplete.
+   - For existing projects, preserve their stack, theme, conventions, and working features unless the user explicitly requests a change.
    - Every listed file gets its FULL working content — complete imports, complete function bodies, error handling. Never truncate or write "// rest of same".
-   - Frontend: real stateful UI (loading, empty, error states), responsive layout, dark theme, keyboard accessible; no dead buttons.
+   - Frontend: real stateful UI with loading/empty/error states, a request-appropriate visual system, responsive layouts, keyboard accessibility, and no dead buttons.
    - Backend: working REST routes with validation, JSON errors, CORS, and in-memory/SQLite seed data so the app runs immediately after npm install + npm start.
    - Security: no hardcoded secrets, no eval/exec on user input, input sanitization where user data is rendered.
    - Include package.json, README.md (setup + run commands), and .env.example when config is needed.
