@@ -61,12 +61,12 @@ class SandboxManager extends EventEmitter {
     const rootInput = String(sandboxPath || '');
     // path.win32.isAbsolute('/home/...') returns true for POSIX-rooted paths
     // too. Only select win32 semantics for recognizable Windows roots; normal
-    // Unix absolute paths must retain native separators and realpath checks.
+    // Unix absolute paths (including valid POSIX double-slash roots) must retain native separators and realpath checks.
     const windowsRoot =
       /^[A-Za-z]:[\\/]/.test(rootInput) ||
       rootInput.startsWith('\\\\') ||
       rootInput.startsWith('\\') ||
-      rootInput.startsWith('//');
+      (process.platform === 'win32' && rootInput.startsWith('//'));
     const foreignWindowsRoot = windowsRoot && process.platform !== 'win32';
     const pathApi = windowsRoot ? path.win32 : path;
     const realRootPath = pathApi.resolve(rootInput);
