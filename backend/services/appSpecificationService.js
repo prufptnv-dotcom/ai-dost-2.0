@@ -2,8 +2,8 @@
 
 const SPEC_VERSION = '1.0';
 const MAX_PROMPT_LENGTH = 4000;
-const MAX_REQUIREMENTS = 20;
-const MAX_ACCEPTANCE_CRITERIA = 40;
+const MAX_REQUIREMENTS = 60;
+const MAX_ACCEPTANCE_CRITERIA = 75;
 
 const ACTION_RE = /\b(build|create|make|generate|develop|design|scaffold|implement|add|fix|update|upgrade|improve|modify|refactor|enhance|integrate|wire|change|banao|banaye|banado|bana|lagao|jodo|badlo|sudhar|theek)\b/i;
 const SOFTWARE_SCOPE_RE = /\b(app|application|website|web ?app|site|platform|dashboard|admin panel|portal|tool|software|system|api|backend|frontend|server|route|module|function|component|page|screen|form|button|feature|project|code|repository|repo|algorithm|database|schema|service|workflow|automation|game|assistant|agent|landing page|portfolio|store|shop|booking)\b|(?:^|\s)[\w./-]+\.(?:js|jsx|ts|tsx|py|css|html|json)(?:$|\s)/i;
@@ -65,6 +65,26 @@ function cleanPrompt(prompt) {
 function shouldCreateAppSpecification(prompt) {
   const request = cleanPrompt(prompt);
   return Boolean(request && ACTION_RE.test(request) && SOFTWARE_SCOPE_RE.test(request));
+}
+
+function extractExplicitClauses(prompt) {
+  const lines = String(prompt || '').split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim())
+    .filter(Boolean);
+  const hasList = String(prompt || '').split(/\r?\n/).some((line) => /^\s*(?:[-*•]|\d+[.)])\s+/.test(line));
+  const candidates = hasList
+    ? lines.filter((line) => line.length >= 4 && !/^#{1,6}\s/.test(line))
+    : String(prompt || '').split(/(?<=[.!?])\s+|;\s+/).map((part) => part.trim()).filter(Boolean);
+  const seen = new Set();
+  return candidates
+    .map((clause) => clause.replace(/^#{1,6}\s*/, '').replace(/\s+/g, ' ').trim())
+    .filter((clause) => {
+      const key = clause.toLowerCase();
+      if (clause.length < 4 || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, MAX_REQUIREMENTS);
 }
 
 function inferArchetype(prompt) {
@@ -259,7 +279,33 @@ function buildAppSpecification(prompt, options = {}) {
   const modification = MODIFY_RE.test(request) && !NEW_PROJECT_RE.test(request) && !CREATE_RE.test(request);
   const archetype = inferArchetype(request);
   const requestedPages = EXPLICIT_PAGE_RULES.filter((entry) => entry[1].test(request)).map((entry) => entry[0]);
+  const explicitClauses = extractExplicitClauses(request);
   const matchedFeatures = FEATURE_RULES.filter((feature) => feature.pattern.test(request)).slice(0, MAX_REQUIREMENTS - 1);
+  const explicitFeaturePatterns = matchedFeatures.map((feature) => feature.pattern);
+  const unmatchedExplicitClauses = explicitClauses.filter((clause) =>
+    !explicitFeaturePatterns.some((pattern) => pattern.test(clause))
+  );
+  const featureRequirements = matchedFeatures.map((feature, index) => {
+    const sourceClause = explicitClauses.find((clause) => feature.pattern.test(clause));
+    return {
+      id: 'REQ-' + String(index + 2).padStart(3, '0'),
+      name: feature.name,
+      source: 'explicit-feature-signal',
+      featureKey: feature.id,
+      sourceText: (sourceClause || request).slice(0, 600),
+      acceptance: [feature.acceptance],
+    };
+  });
+  const availableClauseSlots = Math.max(0, MAX_REQUIREMENTS - 1 - featureRequirements.length);
+  const representedClauses = unmatchedExplicitClauses.slice(0, availableClauseSlots);
+  const unrepresentedClauses = unmatchedExplicitClauses.slice(availableClauseSlots);
+  const clauseRequirements = representedClauses.map((clause, index) => ({
+    id: 'REQ-' + String(featureRequirements.length + index + 2).padStart(3, '0'),
+    name: 'Explicit request: ' + clause.slice(0, 100),
+    source: 'explicit-clause',
+    sourceText: clause.slice(0, 600),
+    acceptance: ['Implement and verify this user-stated requirement: ' + clause + '. If it is blocked, state the blocker and do not imply completion.'],
+  }));
   const requirements = [
     {
       id: 'REQ-001',
@@ -268,14 +314,8 @@ function buildAppSpecification(prompt, options = {}) {
       sourceText: request.slice(0, 600),
       acceptance: ['Demonstrate the primary outcome stated by the user; disclose any unimplemented or blocked sub-requirement.'],
     },
-    ...matchedFeatures.map((feature, index) => ({
-      id: 'REQ-' + String(index + 2).padStart(3, '0'),
-      name: feature.name,
-      source: 'explicit',
-      featureKey: feature.id,
-      sourceText: request.slice(0, 600),
-      acceptance: [feature.acceptance],
-    })),
+    ...featureRequirements,
+    ...clauseRequirements,
   ];
   const spec = {
     schemaVersion: SPEC_VERSION,
@@ -311,6 +351,14 @@ function buildAppSpecification(prompt, options = {}) {
       responsiveWidthsPx: [360, 768, 1280],
       accessibility: ['semantic HTML', 'labels and accessible names', 'keyboard operation', 'visible focus', 'sufficient contrast', 'meaningful image alt text'],
     } : null,
+    explicitCoverage: {
+      extractedClauseCount: explicitClauses.length,
+      representedClauseCount: representedClauses.length + unmatchedExplicitClauses.length - unrepresentedClauses.length,
+      unrepresentedClauses,
+      note: unrepresentedClauses.length
+        ? 'Some prompt clauses exceed the specification limit. They remain in originalRequest and require explicit handling before completion.'
+        : 'Explicit clauses are represented directly or by a matching feature-specific requirement.',
+    },
     acceptanceCriteria: [],
     rules: [
       'Treat this specification as a traceability contract, not permission to ignore the original request.',
