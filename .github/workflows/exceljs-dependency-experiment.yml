@@ -80,7 +80,7 @@ jobs:
           const path = require('node:path');
           const archiverUtils = path.dirname(require.resolve('archiver-utils/package.json'));
           const glob = require(require.resolve('glob/package.json', { paths: [archiverUtils] }));
-          assert.match(glob.version, /^13\\./, `Expected glob 13.x, got ${glob.version}`);
+          assert.match(glob.version, /^13\./, `Expected glob 13.x, got ${glob.version}`);
           console.log(`archiver-utils glob resolved to ${glob.version}`);
           NODE
 
