@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { compareSummaries } = require('../scripts/compare-phase-1-benchmark');
 
-function writeRun(root, revision, elapsedMs, fileCount, bytes, signals, placeholders, provider = 'gemini') {
+function writeRun(root, revision, elapsedMs, fileCount, bytes, signals, placeholders, provider = 'gemini', model = null) {
   fs.mkdirSync(root, { recursive: true });
   const projectDir = path.join(root, 'project');
   fs.mkdirSync(projectDir, { recursive: true });
@@ -24,7 +24,7 @@ function writeRun(root, revision, elapsedMs, fileCount, bytes, signals, placehol
     prompt: 'Build a test app',
     settings: {
       preferredModel: 'gemini',
-      actualProviderModelObservations: [{ provider, model: null }],
+      actualProviderModelObservations: [{ provider, model }],
     },
     generationCompleted: true,
     directorPathObserved: true,
@@ -92,7 +92,23 @@ describe('compare-phase-1-benchmark', () => {
     assert.equal(report.pairedRuns[0].providerParityStatus, 'UNKNOWN');
     assert.equal(report.providerParityCount, 0);
     assert.equal(report.providerParityUnknownCount, 1);
+    assert.equal(report.actualModelParityUnknownCount, 1);
+    assert.equal(report.pairedRuns[0].actualModelParityStatus, 'UNKNOWN');
     assert.match(report.warnings.join(' '), /not exposed/i);
+  });
+
+  test('flags exact model mismatch even when the provider matches', (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-dost-phase1-model-identity-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const baselineRun = writeRun(path.join(root, 'baseline', 'case-a', 'run-1'), 'baseline-sha', 1000, 1, 100, 2, 0, 'gemini', 'gemini-2.5-pro');
+    const candidateRun = writeRun(path.join(root, 'candidate', 'case-a', 'run-1'), 'candidate-sha', 1000, 1, 100, 2, 0, 'gemini', 'gemini-2.5-flash');
+    const baseline = { phase: 'baseline', revision: 'baseline-sha', runsPerCase: 1, caseCount: 1, preferredModel: 'gemini', results: [baselineRun] };
+    const candidate = { phase: 'candidate', revision: 'candidate-sha', runsPerCase: 1, caseCount: 1, preferredModel: 'gemini', results: [candidateRun] };
+    const report = compareSummaries(baseline, candidate);
+    assert.equal(report.pairedRuns[0].providerParityStatus, 'MATCH');
+    assert.equal(report.pairedRuns[0].actualModelParityStatus, 'MISMATCH');
+    assert.equal(report.actualModelMismatchCount, 1);
+    assert.match(report.warnings.join(' '), /actual model differs/);
   });
 
   test('rejects an uncontrolled preferred-model comparison', (t) => {
