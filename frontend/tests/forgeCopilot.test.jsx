@@ -1,6 +1,16 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent } from '@testing-library/react';
 import ForgeCopilot, { normalizeWorkspacePath } from '../components/forge/ForgeCopilot';
+
+const flushForgeInitialEffects = async () => {
+  await act(async () => {
+    // Resolve the mocked project / preview requests started by Forge's mount effects.
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+};
+
 
 // Mock API
 jest.mock('../services/api', () => ({
@@ -44,8 +54,9 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
     };
   });
 
-  test('renders Forge shell, topbar, sidebar and assistant panel with real user and project', () => {
+  test('renders Forge shell, topbar, sidebar and assistant panel with real user and project', async () => {
     render(<ForgeCopilot projectName="test-project" />);
+    await flushForgeInitialEffects();
 
     // Brand and header
     expect(screen.getByText('Forge Studio')).toBeInTheDocument();
@@ -63,8 +74,9 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
     expect(screen.getByPlaceholderText(/Ask Forge AI/i)).toBeInTheDocument();
   });
 
-  test('switches workspace view mode between Preview, Code, and Terminal', () => {
+  test('switches workspace view mode between Preview, Code, and Terminal', async () => {
     render(<ForgeCopilot projectName="test-project" />);
+    await flushForgeInitialEffects();
 
     // Default is preview
     expect(screen.getByText(/Live preview/i)).toBeInTheDocument();
@@ -80,8 +92,9 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
     expect(screen.getByText('zsh · 80 × 24')).toBeInTheDocument();
   });
 
-  test('switches device size in preview mode', () => {
+  test('switches device size in preview mode', async () => {
     render(<ForgeCopilot />);
+    await flushForgeInitialEffects();
 
     const mobileBtn = screen.getByTitle(/mobile preview/i);
     fireEvent.click(mobileBtn);
@@ -92,8 +105,9 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
     expect(desktopBtn).toHaveClass('active');
   });
 
-  test('handles assistant prompt submission and displays working state', () => {
+  test('handles assistant prompt submission and displays working state', async () => {
     render(<ForgeCopilot />);
+    await flushForgeInitialEffects();
 
     const textarea = screen.getByPlaceholderText(/Ask Forge AI/i);
     fireEvent.change(textarea, { target: { value: 'Add hero glow animation' } });
@@ -106,8 +120,9 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
     expect(screen.getByText(/Working through your request/i)).toBeInTheDocument();
   });
 
-  test('navigates to MCP Connect and Skills Library views', () => {
+  test('navigates to MCP Connect and Skills Library views', async () => {
     render(<ForgeCopilot />);
+    await flushForgeInitialEffects();
 
     // Open MCP Connect
     const mcpLinks = screen.getAllByRole('button', { name: /mcp/i });
@@ -118,12 +133,14 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
     // Open Skills Library
     const skillsLinks = screen.getAllByRole('button', { name: /skills/i });
     fireEvent.click(skillsLinks[0]);
+    await flushForgeInitialEffects();
     expect(screen.getByText(/Agent Skills Library/i)).toBeInTheDocument();
     expect(screen.getByText('Minimal Input Planner')).toBeInTheDocument();
   });
 
-  test('allows theme selection from the theme picker popover', () => {
+  test('allows theme selection from the theme picker popover', async () => {
     render(<ForgeCopilot />);
+    await flushForgeInitialEffects();
 
     const themeBtn = screen.getByRole('button', { name: /change workspace theme/i });
     fireEvent.click(themeBtn);
@@ -137,11 +154,13 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
     expect(screen.queryByText('Make the workspace yours')).not.toBeInTheDocument();
   });
 
-  test('opens and closes Git Snapshots modal from topbar branch button', () => {
+  test('opens and closes Git Snapshots modal from topbar branch button', async () => {
     render(<ForgeCopilot projectName="test-project" />);
+    await flushForgeInitialEffects();
 
     const branchBtn = screen.getByTitle(/Git Snapshots & Local Commits/i);
     fireEvent.click(branchBtn);
+    await flushForgeInitialEffects();
 
     expect(screen.getByText(/Git Snapshots & Local Commits/i)).toBeInTheDocument();
     expect(screen.getByText('Create New Snapshot')).toBeInTheDocument();
@@ -153,8 +172,9 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
     expect(screen.queryByText('Create New Snapshot')).not.toBeInTheDocument();
   });
 
-  test('renders interactive terminal with quick pills and input field', () => {
+  test('renders interactive terminal with quick pills and input field', async () => {
     render(<ForgeCopilot projectName="test-project" />);
+    await flushForgeInitialEffects();
 
     // Switch to Terminal
     const termTab = screen.getByRole('tab', { name: /terminal/i });
@@ -172,8 +192,9 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
     expect(input.value).toBe('npm run test');
   });
 
-  test('allows adding a custom MCP server in MCP Connect catalog', () => {
+  test('allows adding a custom MCP server in MCP Connect catalog', async () => {
     render(<ForgeCopilot />);
+    await flushForgeInitialEffects();
 
     const mcpLinks = screen.getAllByRole('button', { name: /mcp/i });
     fireEvent.click(mcpLinks[0]);
@@ -197,6 +218,7 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
   test('allows deleting a project from the project workspaces dropdown', async () => {
     window.confirm = jest.fn().mockReturnValue(true);
     render(<ForgeCopilot projectName="test-project" />);
+    await flushForgeInitialEffects();
 
     // Open project switcher
     const switcher = screen.getByLabelText(/Current project/i);
@@ -251,6 +273,7 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
 
     try {
       render(<ForgeCopilot projectId="test-project" projectName="test-project" />);
+      await flushForgeInitialEffects();
       const textarea = await screen.findByPlaceholderText(/Ask Forge AI/i);
       fireEvent.change(textarea, { target: { value: 'Add a component and verify the build' } });
       fireEvent.click(screen.getByLabelText(/send message/i));
@@ -304,6 +327,7 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
 
     try {
       render(<ForgeCopilot projectId="test-project" projectName="test-project" />);
+      await flushForgeInitialEffects();
       fireEvent.click(await screen.findByRole('button', { name: /Autopilot on/i }));
       const textarea = await screen.findByPlaceholderText(/Ask Forge AI/i);
       fireEvent.change(textarea, { target: { value: 'Build an account settings page' } });
@@ -360,6 +384,7 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
 
     try {
       render(<ForgeCopilot projectId="test-project" projectName="test-project" />);
+      await flushForgeInitialEffects();
       const textarea = await screen.findByPlaceholderText(/Ask Forge AI/i);
       fireEvent.change(textarea, { target: { value: 'Verify terminal run status' } });
       fireEvent.click(screen.getByLabelText(/send message/i));
