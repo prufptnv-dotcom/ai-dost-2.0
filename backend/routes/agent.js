@@ -52,6 +52,7 @@ const codeContext      = require('../services/codeContext');
 const fixMemory        = require('../services/fixMemory');
 const deterministicCodeGuard = require('../services/DeterministicCodeGuard');
 const { detectCategory, buildFullstackSystemPrompt, generateGoldenScaffold } = require('../agent/fullstackTrainer');
+const { buildAppSpecification, formatAppSpecificationForPrompt } = require('../services/appSpecificationService');
 const { saveProjectFile, deleteProjectFile, getProjectFiles, onWorkspaceChange } = require('../projectStore');
 const { learnNotes, retrieveNotes, formatNotes, extractRunNotes } = require('../services/copilotMemory');
 const backgroundRuns = require('../services/backgroundRuns'); // P9 background runs
@@ -765,7 +766,9 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
             onProgress({ type: 'step', stepLog: { action: 'Architecting Project', thought: `Selecting specialized ${category} components and REST API schema...` } });
           }
 
-          const systemPrompt = buildFullstackSystemPrompt(prompt, category);
+          const appSpecification = buildAppSpecification(prompt, { force: true });
+          const specificationContext = appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '';
+          const systemPrompt = [buildFullstackSystemPrompt(prompt, category), specificationContext].filter(Boolean).join('\n\n');
           
           let parsedData = null;
           try {
