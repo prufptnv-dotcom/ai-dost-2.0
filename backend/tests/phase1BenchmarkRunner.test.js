@@ -58,6 +58,7 @@ describe('Phase 1 live benchmark capture runner', () => {
       req.on('end', () => {
         JSON.parse(body);
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+        res.write('data: ' + JSON.stringify({ type: 'director_start', phase: 'queued', status: 'accepted' }) + '\n\n');
         res.write('data: ' + JSON.stringify({ type: 'generation_provider', provider: 'gemini', providerName: 'Gemini (Flash)', model: null, fileCount: 1, phase: 'initial' }) + '\n\n');
         res.write('data: ' + JSON.stringify({ type: 'file_changed', path: 'src/App.jsx', content: 'export default function App(){ return <main><label>Search</label><button>Export CSV</button></main>; }' }) + '\n\n');
         res.write('data: ' + JSON.stringify({ type: 'output_quality', status: 'UNVERIFIED', acceptanceStatus: 'NOT_EVALUATED' }) + '\n\n');
@@ -97,11 +98,13 @@ describe('Phase 1 live benchmark capture runner', () => {
     const summary = JSON.parse(fs.readFileSync(path.join(artifactsDir, 'candidate-summary.json'), 'utf8'));
     const events = fs.readFileSync(path.join(runDir, 'events.ndjson'), 'utf8').trim().split('\n');
     assert.equal(metadata.generationCompleted, true);
+    assert.equal(metadata.directorPathObserved, true);
+    assert.equal(metadata.generationCompletionReason, 'director-terminal-event-and-generated-files-observed');
     assert.equal(metadata.revision, 'test-baseline-sha');
     assert.equal(metadata.outputQuality.status, 'UNVERIFIED');
     assert.equal(metadata.acceptanceStatus, 'NOT_EVALUATED');
     assert.equal(metadata.project.fileCount, 1);
-    assert.equal(events.length, 4);
+    assert.equal(events.length, 5);
     assert.equal(metadata.settings.authConfigured, true);
     assert.equal(metadata.settings.userIdHeaderConfigured, true);
     assert.equal(receivedAuthorization, 'Bearer test-secret-token');
