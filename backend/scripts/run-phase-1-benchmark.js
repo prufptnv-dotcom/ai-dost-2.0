@@ -168,6 +168,7 @@ async function runOne(config) {
   const elapsedMs = Date.now() - start;
   const outputQualityEvents = events.filter((event) => event.type === 'output_quality');
   const terminalEvents = events.filter((event) => ['done', 'director_complete'].includes(event.type));
+  const directorPathObserved = events.some((event) => event.type === 'director_start');
   const providerModelObservations = events
     .filter((event) => event && (event.provider || event.model))
     .map((event) => ({ provider: event.provider || null, providerName: event.providerName || null, model: event.model || null, fileCount: event.fileCount ?? null, phase: event.phase || null, type: event.type || null }));
@@ -215,16 +216,19 @@ async function runOne(config) {
     httpStatus,
     requestError,
     terminalError,
-    generationCompleted: terminalEvents.length > 0 && !requestError && !terminalError && projectFiles.length > 0,
+    directorPathObserved,
+    generationCompleted: directorPathObserved && terminalEvents.length > 0 && !requestError && !terminalError && projectFiles.length > 0,
     generationCompletionReason: requestError
       ? 'request-failed'
       : terminalError
         ? 'generation-emitted-error'
-        : terminalEvents.length === 0
-          ? 'no-terminal-event'
-          : projectFiles.length === 0
-            ? 'terminal-event-without-generated-files'
-            : 'terminal-event-and-generated-files-observed',
+        : !directorPathObserved
+          ? 'director-path-not-observed'
+          : terminalEvents.length === 0
+            ? 'no-terminal-event'
+            : projectFiles.length === 0
+              ? 'terminal-event-without-generated-files'
+              : 'director-terminal-event-and-generated-files-observed',
     outputQuality: outputQualityEvents.at(-1) || null,
     acceptanceStatus: 'NOT_EVALUATED',
     project: { directory: projectPath, fileCount: projectFiles.length, files: projectFiles, captureErrors: capturedFileWriteErrors },
@@ -292,6 +296,8 @@ async function main() {
       caseId: item.caseId,
       runNumber: item.runNumber,
       generationCompleted: item.generationCompleted,
+      directorPathObserved: item.directorPathObserved,
+      generationCompletionReason: item.generationCompletionReason,
       fileCount: item.project.fileCount,
       elapsedMs: item.elapsedMs,
       outputQuality: item.outputQuality?.status || 'NOT_REPORTED',
