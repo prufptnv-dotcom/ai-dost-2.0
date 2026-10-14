@@ -80,3 +80,24 @@ The generated report keeps each acceptance criterion at `NOT_EVALUATED` until a 
 - Preserve complete generated projects, actual provider/model settings, build and browser logs, screenshots at 360/768/1280px, and cost/latency where available.
 - Execute requirement-specific user flows; the source-signal preflight and repository CI do not count as behavior evidence.
 - Compare baseline/candidate artifacts and complete the blind human UX review. Until this is done, Phase 1 remains **IN PROGRESS**.
+
+
+## Automated live-generation capture
+
+```bash
+# Start the backend from the exact baseline checkout, then run from backend/ in the candidate checkout:
+AI_DOST_BASE_URL=http://127.0.0.1:3000 AI_DOST_BENCHMARK_MODEL=gemini \
+  node scripts/run-phase-1-benchmark.js --phase baseline --runs 3 \
+  --artifacts-dir /tmp/ai-dost-phase1-comparison
+
+# Stop baseline and start the candidate checkout on the same local port, then:
+AI_DOST_BASE_URL=http://127.0.0.1:3000 AI_DOST_BENCHMARK_MODEL=gemini \
+  node scripts/run-phase-1-benchmark.js --phase candidate --runs 3 \
+  --artifacts-dir /tmp/ai-dost-phase1-comparison
+```
+
+The runner sends each canonical prompt to `POST /api/agent/run`, gives every run a fresh workspace, and preserves the generated project, raw event stream (`events.ndjson`), metadata, and static diagnostic report outside the repository. Run baseline and candidate with the same model preference, backend settings, provider credentials, and timeout. Provider fallback may still change the actual model; inspect the event logs and metadata rather than assuming the preference equals the served model.
+
+The runner requires a loopback backend URL because `projectPath` is a server-local path. It refuses to overwrite existing run folders. Use a new artifacts directory for a fresh experiment. By default it runs all four cases three times (12 generations per phase; 24 total across both phases). To smoke-test one case first, pass `--case dashboard-search-charts-csv --runs 1`.
+
+This is a capture harness, not an automatic acceptance test. It deliberately records `acceptanceStatus: NOT_EVALUATED`; it does not execute arbitrary generated npm scripts, assign UX scores, or claim that a finished SSE stream means a correct app. Run build and requirement-specific browser flows in an isolated environment, capture screenshots at 360/768/1280px, and attach evidence before interpreting baseline/candidate quality.
