@@ -1,13 +1,14 @@
 name: CI
 
+# Push builds run only on protected integration branches. Feature/fix branches
+# are validated by pull_request, avoiding a full duplicate suite on every commit.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
-    branches:
-      - main
-      - master
-      - 'audit/**'
-      - 'feature/**'
-      - 'fix/**'
+    branches: [main, master]
   pull_request:
     branches: [main, master]
 
