@@ -139,6 +139,8 @@ async function runOne(config) {
         'Content-Type': 'application/json',
         'Accept': 'text/event-stream',
         'Connection': 'keep-alive',
+        ...(config.authToken ? { Authorization: 'Bearer ' + config.authToken } : {}),
+        ...(config.userId ? { 'x-user-id': config.userId } : {}),
       },
       body: JSON.stringify({
         userPrompt: testCase.prompt,
@@ -199,6 +201,8 @@ async function runOne(config) {
       baseUrl: config.baseUrl,
       preferredModel: config.preferredModel,
       timeoutMs: config.timeoutMs,
+      authConfigured: Boolean(config.authToken),
+      userIdHeaderConfigured: Boolean(config.userId),
       requestedCopilotDirector: true,
       permissionLevel: 'auto',
       actualProviderModelObservations: providerModelObservations,
@@ -242,6 +246,8 @@ async function main() {
   const baseUrl = ensureLocalUrl(args['base-url'] || process.env.AI_DOST_BASE_URL || '');
   const preferredModel = args['preferred-model'] || process.env.AI_DOST_BENCHMARK_MODEL;
   if (!preferredModel) throw new Error('Set --preferred-model or AI_DOST_BENCHMARK_MODEL to keep model preference explicit and comparable.');
+  const authToken = process.env.AI_DOST_BENCHMARK_TOKEN || null;
+  const userId = process.env.AI_DOST_BENCHMARK_USER_ID || null;
   const revision = args.revision || process.env.AI_DOST_BENCHMARK_REVISION;
   if (!revision) throw new Error('Set --revision or AI_DOST_BENCHMARK_REVISION to record the exact backend code revision.');
   const runs = Number(args.runs || 3);
@@ -262,7 +268,7 @@ async function main() {
   for (const testCase of selectedCases) {
     for (let runNumber = 1; runNumber <= runs; runNumber += 1) {
       console.log('[' + phase + '] ' + testCase.id + ' run ' + runNumber + '/' + runs);
-      const result = await runOne({ baseUrl, preferredModel, revision, phase, testCase, runNumber, artifactsDir, timeoutMs });
+      const result = await runOne({ baseUrl, preferredModel, revision, authToken, userId, phase, testCase, runNumber, artifactsDir, timeoutMs });
       results.push(result);
       console.log('  generationCompleted=' + result.generationCompleted + '; files=' + result.project.fileCount +
         '; outputQuality=' + (result.outputQuality?.status || 'NOT_REPORTED') + '; elapsedMs=' + result.elapsedMs);
