@@ -1115,57 +1115,55 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
           todoList.forEach(t => { t.status = 'completed'; });
           if (onProgress) onProgress({ type: 'plan_tasks', tasks: [...todoList] });
 
-          const titleCase = prompt.slice(0, 40).replace(/(^\w|\s\w)/g, m => m.toUpperCase());
-          const featureList = category === 'calculator' ? [
-            '🧮 **Interactive LCD Display**: Real-time expression parsing, active operator indicator, and dynamic text sizing.',
-            '💾 **Full Memory Registers**: Standard Memory Clear (**MC**), Memory Recall (**MR**), Memory Add (**M+**), Memory Subtract (**M-**), and Memory Store (**MS**) with illuminated memory badge.',
-            '📜 **Calculation History Tape**: Slide-over drawer with timestamped calculations, click-to-recall expressions, and one-click clear.',
-            '⚡ **Keypad Operations**: Arithmetic (+, -, ×, ÷), backspace (⌫), sign toggle (±), percent (%), square root (√x), square (x²), and reciprocal (1/x).',
-            '🎨 **Vibrant Cyberpunk Glassmorphism UI**: High-contrast glowing neon aesthetic with smooth active-press bounce and audio feedback.',
-            '⌨️ **Physical Keyboard Support**: Direct keyboard input for numbers, operations, Enter, Backspace, and Escape.'
-          ] : category === 'crypto_trading' ? [
-            '⚡ **Simulated Live Price Tickers**: High-frequency real-time price ticks for BTC, ETH, SOL, BNB, ADA, AVAX with neon green/red flashes.',
-            '📊 **Interactive SVG Asset Donut Chart**: Hoverable allocation percentages, center portfolio value, and interactive color legend.',
-            '🔄 **Buy / Sell Transaction Modal**: Real-time conversion calculator, slippage tolerance, gas estimation, and instant wallet balance updates.',
-            '📜 **Realized P&L Ledger**: Comprehensive execution history tracking trade status, dollar value, and timestamps.',
-            '💵 **Paper-Trading USDT Deposit**: Quick deposit actions to test trading strategies with simulated buying power.'
-          ] : [
-            '📱 **Responsive Glassmorphic UI**: Tailored modern design tokens with smooth animations.',
-            '🧩 **Modular Architecture**: Clean separation between state stores, UI components, and API client.',
-            '⚡ **Full Stack Integration**: REST API endpoints wired with Express backend and persistence.'
-          ];
+          const projectTitle = String(appSpecification?.archetype?.label || category || 'Generated project')
+            .replace(/(^\\w|\\s\\w)/g, (match) => match.toUpperCase());
+          const specificationRequirements = appSpecification?.requirements || [];
+          const requirementsReport = specificationRequirements.length
+            ? specificationRequirements.map((requirement) =>
+                `- **${requirement.id} — ${requirement.name}**${requirement.sourceText && requirement.id !== 'REQ-001' ? `: ${requirement.sourceText}` : ''}`
+              ).join('\\n')
+            : '- Specification extraction was unavailable; the original prompt remains the source of truth.';
+          const acceptanceReport = (appSpecification?.acceptanceCriteria || []).map((criterion) =>
+            `- **${criterion.id} — ${criterion.title}:** ${criterion.check}`
+          ).join('\\n');
+          const clauseCoverageNote = appSpecification?.explicitCoverage?.unrepresentedClauses?.length
+            ? `\\n\\n**⚠️ Explicit prompt clauses need follow-up:**\\n${appSpecification.explicitCoverage.unrepresentedClauses.map((clause) => `- ${clause}`).join('\\n')}`
+            : '';
 
-          const finalReport = `### 🚀 Project Generated: **${titleCase || category.toUpperCase()}**
+          const finalReport = `### 🚀 Project Generation Report: **${projectTitle}**
 
-**Prompt:** "${prompt}"
+**Original prompt:** "${prompt}"
 
-#### ✨ Key Features Implemented:
-${featureList.map(f => `- ${f}`).join('\n')}
+#### 📋 Requirements Tracked (not proof of implementation)
+${requirementsReport}
+${clauseCoverageNote}
 
-#### 📂 Files Created (${writtenFiles.length}):
-${writtenFiles.map(f => `- \`${f.path}\` (${f.size} bytes)`).join('\n')}
+#### ✅ Acceptance Criteria to Verify (not pass claims)
+${acceptanceReport || '- No machine-readable acceptance criteria were extracted.'}
 
-#### ⚙️ Dependencies:
+#### 📂 Files Created (${writtenFiles.length})
+${writtenFiles.map((file) => `- \`${file.path}\` (${file.size} bytes)`).join('\\n')}
+
+#### ⚙️ Dependency Installation
 ${installResult?.skipped
     ? `- Skipped — ${installResult.reason}`
-    : `- \`npm install\` exit code **${installResult?.exitCode ?? 'n/a'}**${installResult?.ms ? ` (${Math.round(installResult.ms / 100) / 10}s)` : ''}`}
+    : `- `npm install` exit code **${installResult?.exitCode ?? 'n/a'}**${installResult?.ms ? ` (${Math.round(installResult.ms / 100) / 10}s)` : ''}`}
 
-#### 👁️ Visual & Runtime Verification:
+#### 👁️ Build & Runtime Evidence
 ${runtimeBridge.describeVerification(verification)}
 
-${repairSummary ? `#### 🔧 Repair Attempts (${repairSummary.attempts}/${maxRepairAttempts}):
+${repairSummary ? `#### 🔧 Repair Attempts (${repairSummary.attempts}/${maxRepairAttempts})
 ${repairSummary.attempts === 0
     ? '- No repair was needed.'
-    : repairSummary.repairs.map(r => r.applied?.length
-        ? `- Attempt ${r.attempt}: rewrote \`${r.applied.map(f => f.path).join('`, `')}\` → re-verified${r.unchanged?.length ? ` (${r.unchanged.length} file(s) returned unchanged and were skipped)` : ''}`
-        : `- Attempt ${r.attempt}: no usable repair (${r.reason || 'unknown'})`).join('\n')}
+    : repairSummary.repairs.map((repair) => repair.applied?.length
+        ? `- Attempt ${repair.attempt}: rewrote \`${repair.applied.map((file) => file.path).join('\`, \`')}\` → re-verified${repair.unchanged?.length ? ` (${repair.unchanged.length} file(s) returned unchanged and were skipped)` : ''}`
+        : `- Attempt ${repair.attempt}: no usable repair (${repair.reason || 'unknown'})`).join('\\n')}` : ''}
 
-${verification?.ok ? '✅ **Final state: the project builds and renders.**' : '❌ **Final state: still failing after every repair attempt.**'}
-` : ''}
 ${verification?.ok
-    ? 'Click the **Live Preview** tab to interact with your running application.'
-    : '⚠️ **This project was written but did NOT pass verification.** The evidence above is real command output — review the failing step before using it.'}`;
+    ? '✅ **Build/runtime result: PASS.** The generated project builds and renders in the verification environment.'
+    : '❌ **Build/runtime result: FAIL or UNVERIFIED.** Review the evidence above before using this project.'}
 
+**Scope of this result:** Build/render verification does not prove that every requested feature works end-to-end. Each requirement above remains an acceptance target unless it has its own passing test or recorded runtime evidence.`;
           // `success` means "files were generated", which is true and stays true.
           // Whether the code actually WORKS is `verified` — kept separate so the
           // ReAct loop (and the UI) can react to a real failure instead of an
