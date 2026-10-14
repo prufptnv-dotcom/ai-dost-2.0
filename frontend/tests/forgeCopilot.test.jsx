@@ -389,10 +389,17 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
       await flushForgeInitialEffects();
       const textarea = await screen.findByPlaceholderText(/Ask Forge AI/i);
       fireEvent.change(textarea, { target: { value: 'Verify terminal run status' } });
-      fireEvent.click(screen.getByLabelText(/send message/i));
+      // Keep the complete async terminal-event handler inside act: it updates
+      // the error message, toast, and run/working state after the stream closes.
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText(/send message/i));
+        expect(await screen.findByText(message)).toBeInTheDocument();
+        expect(await screen.findByText(toast)).toBeInTheDocument();
+        await Promise.resolve();
+        await Promise.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
 
-      expect(await screen.findByText(message)).toBeInTheDocument();
-      expect(await screen.findByText(toast)).toBeInTheDocument();
       expect(screen.queryByText('Forge Studio run complete')).not.toBeInTheDocument();
       await flushForgeInitialEffects();
     } finally {
