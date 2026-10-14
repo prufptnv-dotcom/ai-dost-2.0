@@ -85,14 +85,20 @@ jobs:
           console.log(`archiver-utils glob resolved to ${glob.version}`);
           NODE
 
-      - name: Verify fast-csv formatter v5 removes lodash.isequal dependency
+      - name: Verify formatter override and deprecated dependency removal
         run: |
-          npm ls @fast-csv/format lodash.isequal --all || true
+          npm ls @fast-csv/format --all
           node - <<'NODE'
           const assert = require('node:assert/strict');
+          const fs = require('node:fs');
           const formatter = require('@fast-csv/format/package.json');
+          const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
           assert.match(formatter.version, /^5\./, `Expected @fast-csv/format 5.x, got ${formatter.version}`);
-          console.log(`@fast-csv/format resolved to ${formatter.version}`);
+          assert.equal(lock.packages['node_modules/@fast-csv/format']?.version, formatter.version);
+          assert.equal(lock.packages['node_modules/lodash.isequal'], undefined, 'Deprecated lodash.isequal must be absent from lockfile');
+          const deprecated = Object.entries(lock.packages).filter(([, pkg]) => pkg.deprecated);
+          assert.deepEqual(deprecated.map(([name]) => name), [], `Deprecated package metadata remains: ${deprecated.map(([name, pkg]) => `${name} (${pkg.version}): ${pkg.deprecated}`).join('; ')}`);
+          console.log(`@fast-csv/format ${formatter.version}; lodash.isequal absent; deprecated package entries: ${deprecated.length}`);
           NODE
 
       - name: XLSX read/write and CSV round-trip smoke test
