@@ -196,9 +196,16 @@ class ContextBudgetManager {
     for (const raw of rawItems) {
       const item = this.normalizeItem(raw);
       // Defensive Security: Ensure all context is properly scoped
-      if (item.project_id && item.project_id !== projectId) {
-        console.warn(`[ContextBudgetManager] Security Violation: Discarding cross-tenant context from project ${item.project_id}`);
-        continue; // Drop violating items
+      const isTrustedGlobalSystemItem =
+        item.category === 'SYSTEM' &&
+        item.source_id === 'sys_core' &&
+        item.is_mandatory === true &&
+        item.project_id == null;
+      if (item.project_id !== String(projectId) && !isTrustedGlobalSystemItem) {
+        // Fail closed for both cross-project and unscoped context; only the
+        // canonical core-system item is allowed to be project-agnostic.
+        console.warn('[ContextBudgetManager] Security Violation: Discarding unscoped or cross-project context');
+        continue;
       }
       items.push(item);
     }
@@ -293,7 +300,15 @@ class ContextBudgetManager {
     }
 
     const finalSelected = [...mandatory, ...selectedOptional];
-    
+    const selectedKeys = new Set(finalSelected.map((item) =>
+      JSON.stringify([item.project_id || '', item.source_type || 'unknown', item.source_id])
+    ));
+    const actualDiscardedOptionalCount = items.filter((item) => {
+      if (item.is_mandatory) return false;
+      const key = JSON.stringify([item.project_id || '', item.source_type || 'unknown', item.source_id]);
+      return !selectedKeys.has(key);
+    }).length;
+
     // Sort final output deterministically (Mandatory first, then highest score)
     finalSelected.sort((a, b) => {
       if (a.is_mandatory && !b.is_mandatory) return -1;
@@ -331,7 +346,7 @@ class ContextBudgetManager {
       metadata: {
         estimated_total_tokens: totalTokens,
         selected_items_count: finalSelected.length,
-        discarded_items_count: Math.max(0, discardedOptionalCount),
+        discarded_items_count: actualDiscardedOptionalCount,
         pruned_items_count: prunedItemsCount,
         compression_enabled: this.pruningEnabled,
         total_budget: this.totalBudget,
