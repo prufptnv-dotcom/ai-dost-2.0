@@ -1,79 +1,95 @@
+'use strict';
+
 const DependencyAnalyzer = require('./DependencyAnalyzer');
 const fs = require('fs');
 const path = require('path');
 
 class DependencyGraph {
     constructor() {
-        // Map of absoluteFilePath -> { dependencies: Set<String>, dependents: Set<String> }
+        // Map of canonical absolute paths -> dependency and reverse-dependency sets.
         this.nodes = new Map();
     }
 
+    normalizePath(filePath) {
+        if (typeof filePath !== 'string' || !filePath.trim()) return null;
+        return path.resolve(filePath).replace(/\\/g, '/');
+    }
+
     updateFile(filePath, content) {
-        filePath = filePath.replace(/\\/g, '/');
-        if (!content) return;
-        
+        const normalizedPath = this.normalizePath(filePath);
+        if (!normalizedPath || typeof content !== 'string') return;
+
         let deps;
         try {
-            deps = DependencyAnalyzer.analyze(filePath, content);
-        } catch (e) {
-            return; // ignore parse errors safely
+            deps = DependencyAnalyzer.analyze(normalizedPath, content);
+        } catch (_) {
+            // Keep the last known-good edges when dependency analysis fails.
+            return;
         }
 
-        if (!this.nodes.has(filePath)) {
-            this.nodes.set(filePath, { dependencies: new Set(), dependents: new Set() });
+        if (!this.nodes.has(normalizedPath)) {
+            this.nodes.set(normalizedPath, { dependencies: new Set(), dependents: new Set() });
         }
-        const node = this.nodes.get(filePath);
-        
-        // Remove old dependencies reverse links
+        const node = this.nodes.get(normalizedPath);
+
+        // Remove reverse links first so edits and emptied files cannot leave stale edges.
         for (const oldDep of node.dependencies) {
-            if (this.nodes.has(oldDep)) {
-                this.nodes.get(oldDep).dependents.delete(filePath);
-            }
+            const target = this.nodes.get(oldDep);
+            if (target) target.dependents.delete(normalizedPath);
         }
         node.dependencies.clear();
 
-        // Add new dependencies
         for (const rawDep of deps) {
             const depPath = this._resolveExtension(rawDep);
             if (!depPath) continue;
-            
+
             node.dependencies.add(depPath);
             if (!this.nodes.has(depPath)) {
                 this.nodes.set(depPath, { dependencies: new Set(), dependents: new Set() });
             }
-            this.nodes.get(depPath).dependents.add(filePath);
+            this.nodes.get(depPath).dependents.add(normalizedPath);
         }
     }
 
     _resolveExtension(basePath) {
-        // normalize paths to forward slashes for cross-platform consistency
-        const normalize = (p) => p.replace(/\\/g, '/');
-        const exts = ['', '.js', '.jsx', '.ts', '.tsx', '/index.js', '/index.ts'];
-        for (const ext of exts) {
-            const p = basePath + ext;
-            if (fs.existsSync(p)) return normalize(p);
+        const normalizedBase = this.normalizePath(basePath);
+        if (!normalizedBase) return null;
+
+        const extensions = ['', '.js', '.jsx', '.ts', '.tsx', '/index.js', '/index.ts'];
+        for (const extension of extensions) {
+            const candidate = normalizedBase + extension;
+            try {
+                if (fs.existsSync(candidate)) return this.normalizePath(candidate);
+            } catch (_) {
+                // A transient filesystem error should not crash graph updates.
+            }
         }
-        // If file doesn't exist on disk yet (newly created imports), fallback to .js
-        return normalize(basePath + (path.extname(basePath) ? '' : '.js'));
+
+        // Generated files may not exist on disk yet; preserve an explicit extension.
+        return this.normalizePath(normalizedBase + (path.extname(normalizedBase) ? '' : '.js'));
     }
 
     getAffectedFiles(filePath) {
-        const normalized = filePath.replace(/\\/g, '/');
+        const normalizedPath = this.normalizePath(filePath);
+        if (!normalizedPath) return [];
+
         const affected = new Set();
-        const queue = [normalized];
-        
-        while (queue.length > 0) {
-            const current = queue.shift();
-            if (this.nodes.has(current)) {
-                for (const dependent of this.nodes.get(current).dependents) {
-                    if (!affected.has(dependent)) {
-                        affected.add(dependent);
-                        queue.push(dependent);
-                    }
+        const queue = [normalizedPath];
+        // An index avoids Array.shift(), whose repeated reindexing becomes quadratic
+        // for large dependency graphs.
+        for (let head = 0; head < queue.length; head += 1) {
+            const current = queue[head];
+            const node = this.nodes.get(current);
+            if (!node) continue;
+
+            for (const dependent of node.dependents) {
+                if (!affected.has(dependent)) {
+                    affected.add(dependent);
+                    queue.push(dependent);
                 }
             }
         }
-        return Array.from(affected);
+        return Array.from(affected).sort();
     }
 
     addOrUpdate(filePath, content) {
@@ -82,32 +98,47 @@ class DependencyGraph {
     }
 
     detectCycle() {
-        const visited = new Set();
-        const stack = new Set();
+        // Iterative three-color DFS avoids a call-stack overflow on deeply chained
+        // projects while retaining O(V + E) traversal complexity.
+        const state = new Map(); // absent = unvisited, 1 = active, 2 = complete
+        const nodeIds = Array.from(this.nodes.keys()).sort();
 
-        const dfs = (nodeId) => {
-            if (stack.has(nodeId)) return true; // Cycle detected
-            if (visited.has(nodeId)) return false; // Already checked
+        for (const startId of nodeIds) {
+            if (state.get(startId) === 2) continue;
 
-            visited.add(nodeId);
-            stack.add(nodeId);
+            state.set(startId, 1);
+            const startNode = this.nodes.get(startId);
+            const stack = [{
+                id: startId,
+                dependencies: Array.from(startNode ? startNode.dependencies : []).sort(),
+                index: 0
+            }];
 
-            const node = this.nodes.get(nodeId);
-            if (node) {
-                for (const dep of node.dependencies) {
-                    if (dfs(dep)) return true;
+            while (stack.length > 0) {
+                const frame = stack[stack.length - 1];
+                if (frame.index >= frame.dependencies.length) {
+                    state.set(frame.id, 2);
+                    stack.pop();
+                    continue;
                 }
+
+                const dependencyId = frame.dependencies[frame.index];
+                frame.index += 1;
+                const dependencyState = state.get(dependencyId) || 0;
+                if (dependencyState === 1) return true;
+                if (dependencyState === 2) continue;
+
+                state.set(dependencyId, 1);
+                const dependencyNode = this.nodes.get(dependencyId);
+                stack.push({
+                    id: dependencyId,
+                    dependencies: Array.from(dependencyNode ? dependencyNode.dependencies : []).sort(),
+                    index: 0
+                });
             }
-
-            stack.delete(nodeId);
-            return false;
-        };
-
-        for (const nodeId of this.nodes.keys()) {
-            if (dfs(nodeId)) return true;
         }
-
         return false;
     }
 }
+
 module.exports = DependencyGraph;
