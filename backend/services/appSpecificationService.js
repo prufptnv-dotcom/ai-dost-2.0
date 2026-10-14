@@ -71,7 +71,7 @@ function featureSignalIsRequested(prompt, pattern) {
   const source = String(prompt || '');
   const flags = pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g';
   const matcher = new RegExp(pattern.source, flags);
-  const boundaries = ['\\n', '.', '!', '?', ';'];
+  const boundaries = ['\n', '.', '!', '?', ';'];
   let match;
   while ((match = matcher.exec(source)) !== null) {
     let clauseStart = -1;
@@ -82,11 +82,11 @@ function featureSignalIsRequested(prompt, pattern) {
       if (next !== -1) clauseEnd = Math.min(clauseEnd, next);
     }
     const before = source.slice(clauseStart + 1, match.index)
-      .split(/\\b(?:but|however|except|instead|rather)\\b/i).pop()
-      .replace(/[\\s,]+$/g, '');
-    const after = source.slice(matcher.lastIndex, clauseEnd).replace(/^[\\s,]+/g, '');
-    const negatedPrefix = /\\b(?:no|without|exclude|excluding|omit|omitting|avoid|avoiding|remove|removing|don't|do not|shouldn't|should not|must not|never|not(?!\\s+only)|nahi|mat)\\b(?:\\s+[\\w'-]+){0,4}\\s*$/i;
-    const negatedSuffix = /^(?:(?:is|are|was|were|should be|must be|isn't|aren't)\\s+)?(?:not needed|not required|unnecessary|unwanted|nahi|na|mat)\\b/i;
+      .split(/\b(?:but|however|except|instead|rather)\b/i).pop()
+      .replace(/[\s,]+$/g, '');
+    const after = source.slice(matcher.lastIndex, clauseEnd).replace(/^[\s,]+/g, '');
+    const negatedPrefix = /\b(?:no|without|exclude|excluding|omit|omitting|avoid|avoiding|remove|removing|don't|do not|shouldn't|should not|must not|never|not(?!\s+only)|nahi|mat)\b(?:\s+[\w'-]+){0,4}\s*$/i;
+    const negatedSuffix = /^(?:(?:is|are|was|were|should be|must be|isn't|aren't)\s+)?(?:not needed|not required|unnecessary|unwanted|nahi|na|mat)\b/i;
     if (negatedPrefix.test(before) || negatedSuffix.test(after)) continue;
     return true;
   }
