@@ -23,7 +23,7 @@ describe('parseScaffoldWizardSse', () => {
       '',
       'data: {"type":"done","message":"files created","files":[{"path":"src/App.jsx"}]}',
       '',
-    ].join('\\n');
+    ].join('\n');
     const parsed = parseScaffoldWizardSse(raw);
     expect(parsed.outputQuality).toMatchObject({
       type: 'output_quality',
