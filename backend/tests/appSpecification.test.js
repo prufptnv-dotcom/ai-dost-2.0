@@ -28,6 +28,22 @@ describe('AppSpecificationService', () => {
     assert.equal(validateAppSpecification(spec).requirementCoverage, 1);
   });
 
+  test('preserves prompt clauses that are not covered by known feature rules', () => {
+    const spec = buildAppSpecification([
+      'Create a scheduling app.',
+      '- Let users reserve time slots',
+      '- Export bookings as CSV',
+      '- Include timezone selection and a cancellation policy',
+    ].join('\n'));
+    assert.ok(spec.requirements.some((item) => item.source === 'explicit-clause' && /timezone selection/i.test(item.sourceText)));
+    assert.ok(spec.requirements.some((item) => item.featureKey === 'csv-export'));
+    assert.equal(spec.explicitCoverage.unrepresentedClauses.length, 0);
+    assert.equal(validateAppSpecification(spec).valid, true);
+    const formatted = formatAppSpecificationForPrompt(spec);
+    assert.match(formatted, /timezone selection and a cancellation policy/i);
+    assert.match(formatted, /explicitCoverage/);
+  });
+
   test('respects explicit framework choices without inventing a stack when omitted', () => {
     const explicit = buildAppSpecification('Create a Next.js education platform with quizzes');
     assert.equal(explicit.stack.requested, 'Next.js');
