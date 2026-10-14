@@ -49,7 +49,9 @@ describe('AppSpecificationService', () => {
   test('does not add application specs to ordinary explanatory questions', () => {
     assert.equal(shouldCreateAppSpecification('Explain what a REST API is'), false);
     assert.equal(buildAppSpecification('Explain what a REST API is'), null);
-    assert.equal(buildAppSpecification('Fix src/services/cache.js'), true === false ? null : null);
+    const codeChange = buildAppSpecification('Fix src/services/cache.js');
+    assert.ok(codeChange);
+    assert.equal(codeChange.scope, 'software-change');
   });
 
   test('formatter includes stable requirement IDs, acceptance IDs, and honesty rules', () => {
