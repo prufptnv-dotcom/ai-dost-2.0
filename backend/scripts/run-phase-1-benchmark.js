@@ -189,6 +189,20 @@ async function runOne(config) {
     '--out', path.join(runDir, 'static-diagnostic.json'),
   ], { encoding: 'utf8', timeout: 30000 });
 
+function deriveGenerationCompletion({ requestError, terminalError, directorPathObserved, terminalEventCount, fileCount, captureErrorCount }) {
+  let reason = 'director-terminal-event-and-generated-files-observed';
+  if (requestError) reason = 'request-failed';
+  else if (terminalError) reason = 'generation-emitted-error';
+  else if (!directorPathObserved) reason = 'director-path-not-observed';
+  else if (terminalEventCount === 0) reason = 'no-terminal-event';
+  else if (captureErrorCount > 0) reason = 'generated-file-capture-errors';
+  else if (fileCount === 0) reason = 'terminal-event-without-generated-files';
+  return {
+    generationCompleted: reason === 'director-terminal-event-and-generated-files-observed',
+    generationCompletionReason: reason,
+  };
+}
+
   const metadata = {
     schemaVersion: '1.0',
     evaluator: 'phase-1-live-generation-capture',
@@ -217,18 +231,14 @@ async function runOne(config) {
     requestError,
     terminalError,
     directorPathObserved,
-    generationCompleted: directorPathObserved && terminalEvents.length > 0 && !requestError && !terminalError && projectFiles.length > 0,
-    generationCompletionReason: requestError
-      ? 'request-failed'
-      : terminalError
-        ? 'generation-emitted-error'
-        : !directorPathObserved
-          ? 'director-path-not-observed'
-          : terminalEvents.length === 0
-            ? 'no-terminal-event'
-            : projectFiles.length === 0
-              ? 'terminal-event-without-generated-files'
-              : 'director-terminal-event-and-generated-files-observed',
+    ...deriveGenerationCompletion({
+      requestError,
+      terminalError,
+      directorPathObserved,
+      terminalEventCount: terminalEvents.length,
+      fileCount: projectFiles.length,
+      captureErrorCount: capturedFileWriteErrors.length,
+    }),
     outputQuality: outputQualityEvents.at(-1) || null,
     acceptanceStatus: 'NOT_EVALUATED',
     project: { directory: projectPath, fileCount: projectFiles.length, files: projectFiles, captureErrors: capturedFileWriteErrors },
@@ -320,4 +330,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { parseArgs, parseSseFrame, collectSse, ensureLocalUrl };
+module.exports = { parseArgs, parseSseFrame, collectSse, ensureLocalUrl, deriveGenerationCompletion };
