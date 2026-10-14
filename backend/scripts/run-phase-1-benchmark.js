@@ -96,11 +96,35 @@ async function runOne(config) {
   const startedAt = new Date().toISOString();
   const start = Date.now();
   const events = [];
+  const capturedFileWriteErrors = [];
   let terminalError = null;
+
+  const captureGeneratedFile = (event) => {
+    if (!event || !['file_written', 'file_changed'].includes(event.type)) return;
+    const rawPath = event.path || event.file;
+    if (typeof rawPath !== 'string' || typeof event.content !== 'string' || !rawPath.trim()) return;
+    const relativePath = rawPath.replace(/\\/g, '/');
+    if (path.isAbsolute(relativePath) || /^[a-zA-Z]:/.test(relativePath) || relativePath.split('/').includes('..')) {
+      capturedFileWriteErrors.push({ path: rawPath, error: 'unsafe-generated-path-rejected' });
+      return;
+    }
+    const destination = path.resolve(projectPath, relativePath);
+    if (destination === projectPath || !destination.startsWith(projectPath + path.sep)) {
+      capturedFileWriteErrors.push({ path: rawPath, error: 'generated-path-outside-artifact-workspace' });
+      return;
+    }
+    try {
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.writeFileSync(destination, event.content, 'utf8');
+    } catch (error) {
+      capturedFileWriteErrors.push({ path: rawPath, error: error.message });
+    }
+  };
 
   const recordEvent = (event) => {
     events.push(event);
     fs.appendFileSync(eventsPath, JSON.stringify(event) + '\n', 'utf8');
+    captureGeneratedFile(event);
     if (['error', 'agent_error', 'director_error'].includes(String(event.type || '').toLowerCase())) {
       terminalError = String(event.message || event.error || event.reason || event.type);
     }
@@ -179,7 +203,7 @@ async function runOne(config) {
       permissionLevel: 'auto',
       actualProviderModelObservations: providerModelObservations,
       actualModelIdentityStatus: providerModelObservations.some((item) => item.model) ? 'OBSERVED' : 'NOT_EXPOSED_BY_GENERATION_EVENT',
-      note: 'The generation_provider event identifies the successful scaffold provider. Exact model identity and failed fallback attempts may require backend logs; do not infer them from preferredModel.',
+      note: 'The generation_provider event identifies the successful scaffold provider. Exact model identity and failed fallback attempts may require backend logs; do not infer them from preferredModel. Generated project files are reconstructed from emitted file events.',
     },
     startedAt,
     finishedAt,
@@ -199,7 +223,7 @@ async function runOne(config) {
             : 'terminal-event-and-generated-files-observed',
     outputQuality: outputQualityEvents.at(-1) || null,
     acceptanceStatus: 'NOT_EVALUATED',
-    project: { directory: projectPath, fileCount: projectFiles.length, files: projectFiles },
+    project: { directory: projectPath, fileCount: projectFiles.length, files: projectFiles, captureErrors: capturedFileWriteErrors },
     staticDiagnostic: {
       exitCode: scan.status,
       reportPath: path.join(runDir, 'static-diagnostic.json'),
