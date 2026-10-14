@@ -1,9 +1,11 @@
 function assertToolOutputSucceeded(toolName, output) {
   if (!output || typeof output !== 'object' || output.success !== false) return output;
 
-  const detail = output.error || output.message || output.code || 'tool returned success:false';
+  const rawDetail = output.error || output.message || 'tool returned success:false';
+  const code = typeof output.code === 'string' ? output.code.trim() : '';
+  const detail = code && !String(rawDetail).includes(code) ? `${code}: ${rawDetail}` : rawDetail;
   const error = new Error(`${toolName} reported failure: ${String(detail).slice(0, 1000)}`);
-  if (typeof output.code === 'string' && output.code.trim()) error.code = output.code;
+  if (code) error.code = code;
   error.toolOutputFailure = true;
   throw error;
 }
