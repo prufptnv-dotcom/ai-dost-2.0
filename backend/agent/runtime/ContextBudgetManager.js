@@ -120,9 +120,9 @@ class ContextBudgetManager {
     // The previous fallback was always 10, disabling relevance-based pruning.
     const score = Number(finalScore);
     if (!Number.isFinite(score)) return 1;
-    // Authority defaults to 0.5 for canonical context sources; map that
-    // midpoint to full importance when all other factors are strong.
-    return Math.max(1, Math.min(10, 1 + Math.round(Math.max(0, Math.min(1, score)) * 18)));
+    // With canonical sources defaulting to authority 0.5, a top-quality workspace
+    // item scores 7; lower relevance/freshness can still trigger summarization.
+    return Math.max(1, Math.min(10, 1 + Math.round(Math.max(0, Math.min(1, score)) * 12)));
   }
 
   summarize(content) {
