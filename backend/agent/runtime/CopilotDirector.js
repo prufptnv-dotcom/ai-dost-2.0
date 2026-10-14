@@ -367,13 +367,18 @@ class CopilotDirector {
     const supervisorRunId = supervisorResult.run.id;
     const completed = new Map();
     const results = [];
+    const markCancelled = (reason = 'Task canceled by user') => {
+      this.agentTaskDao.updateStatus(supervisorTaskId, 'CANCELLED');
+      this.agentRunDao.updateStatus(supervisorRunId, 'CANCELLED', reason);
+      return { status: 'CANCELLED', taskId: supervisorTaskId, runId: supervisorRunId, plan, results };
+    };
     onEvent({ type: 'director_plan', status: 'PLANNED', summary: plan.summary, taskCount: plan.tasks.length, tasks: plan.tasks.map(({ id, specialty, role, dependsOn }) => ({ id, specialty, role, dependsOn })) });
     this.agentTaskDao.updateStatus(supervisorTaskId, 'RUNNING');
     this.agentRunDao.updateStatus(supervisorRunId, 'RUNNING');
     try {
       const pending = new Set(plan.tasks.map((task) => task.id));
       while (pending.size) {
-        if (signal?.aborted) return { status: 'CANCELLED', taskId: supervisorTaskId, runId: supervisorRunId, plan, results };
+        if (signal?.aborted) return markCancelled();
         const ready = plan.tasks.filter((task) => pending.has(task.id) && task.dependsOn.every((dep) => completed.get(dep) === 'SUCCEEDED'));
         if (!ready.length) {
           // P12.3: remaining tasks are blocked by skipped/failed deps — report
@@ -408,12 +413,18 @@ class CopilotDirector {
               executionResult = await this.coordinator.startWorker(delegated.workerRun.id, { autoPlan: false, runner: () => this.executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent, permissionLevel, approvalToken, approvalState }) });
               lastError = null;
               break;
-            } catch (error) { lastError = error; if (signal?.aborted || error?.code === 'APPROVAL_REQUIRED') break; }
+            } catch (error) {
+              lastError = error;
+              if (signal?.aborted || ['APPROVAL_REQUIRED', 'TASK_CANCELED'].includes(error?.code)) break;
+            }
           }
           if (delegateFailed) {
             results.push({ task, status: 'SKIPPED', error: delegateFailed.message });
             onEvent({ type: 'director_task', status: 'SKIPPED', taskId: task.id, specialty: task.specialty, role: task.role, error: delegateFailed.message });
             continue;
+          }
+          if (lastError && (signal?.aborted || lastError?.code === 'TASK_CANCELED')) {
+            return markCancelled(lastError.message || 'Task canceled by user');
           }
           if (lastError) {
             completed.set(task.id, 'FAILED');
@@ -460,7 +471,7 @@ class CopilotDirector {
             }
           }
 
-          if (taskStatus === 'CANCELLED') return { status: 'CANCELLED', taskId: supervisorTaskId, runId: supervisorRunId, plan, results };
+          if (taskStatus === 'CANCELLED') return markCancelled('Worker canceled execution');
         }
       }
       onEvent({ type: 'director_verification', status: 'DELEGATING' });
@@ -510,6 +521,9 @@ class CopilotDirector {
         errors: []
       });
     } catch (error) {
+      if (signal?.aborted || error?.code === 'TASK_CANCELED') {
+        return markCancelled(error.message || 'Task canceled by user');
+      }
       this.agentTaskDao.updateStatus(supervisorTaskId, 'FAILED');
       this.agentRunDao.updateStatus(supervisorRunId, 'FAILED', error.message);
       throw error;
