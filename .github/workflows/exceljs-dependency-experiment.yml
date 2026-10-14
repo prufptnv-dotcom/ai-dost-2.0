@@ -130,9 +130,9 @@ jobs:
           const fs = require('node:fs');
           const path = '.github/workflows/exceljs-dependency-experiment.yml';
           let workflow = fs.readFileSync(path, 'utf8');
-          workflow = workflow.replace('permissions:\\n  contents: write', 'permissions:\\n  contents: read');
-          const start = workflow.indexOf('      - name: Commit tested dependency manifest and lockfile on isolated experiment branch\\n');
-          const end = workflow.indexOf('      - name: Upload generated lockfile for review\\n', start);
+          workflow = workflow.replace('permissions:\n  contents: write', 'permissions:\n  contents: read');
+          const start = workflow.indexOf('      - name: Commit tested dependency manifest and lockfile on isolated experiment branch\n');
+          const end = workflow.indexOf('      - name: Upload generated lockfile for review\n', start);
           if (start < 0 || end < 0) throw new Error('Could not safely remove one-time commit step from workflow');
           workflow = workflow.slice(0, start) + workflow.slice(end);
           fs.writeFileSync(path, workflow);
