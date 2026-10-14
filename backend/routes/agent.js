@@ -3267,7 +3267,7 @@ REQUIREMENTS:
 3. Apply modern, responsive styling with clean UI components, cards, buttons, and state management.
 
 STRUCTURED APP SPECIFICATION AND ACCEPTANCE CHECKS:
-\${specificationContext}`;
+${specificationContext}`;
 
   send({ type: 'wizard_status', step: 'generating', message: '⚡ Generating production-grade code across components...' });
 
