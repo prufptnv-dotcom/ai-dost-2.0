@@ -291,6 +291,14 @@ function buildAppSpecification(prompt, options = {}) {
       rule: 'Suggestions are optional guidance, not new user requirements. Preserve existing pages unless the user asks to remove them.',
     },
     requirements,
+    componentArchitecture: inferComponentArchitecture(isUi, isUi ? archetype : { id: 'software-change' }, requirements),
+    dataModel: inferDataModel(request, isUi ? archetype : { id: 'software-change' }, requirements),
+    interactions: buildInteractionContracts(requirements),
+    nonFunctional: {
+      security: ['Validate untrusted inputs at the boundary.', 'Keep secrets in configuration, never generated source.', 'Use authorization checks for protected data/actions.', 'Do not use eval or execute user-provided input as code.'],
+      reliability: ['Handle asynchronous loading and expected errors.', 'Preserve existing behavior outside the requested change.', 'Use bounded retries and actionable failure messages where retries are used.'],
+      performance: ['Avoid unnecessary dependencies and expensive repeated computations.', 'Keep large lists and visualizations responsive for expected data size.'],
+    },
     designSystem: isUi ? {
       principles: [
         'Derive palette and density from the domain, prompt, and existing design system; do not force a theme that conflicts with the request.',
@@ -371,6 +379,13 @@ function validateAppSpecification(spec) {
   if (spec.scope === 'application-ui' && (!spec.designSystem || !Array.isArray(spec.designSystem.responsiveWidthsPx))) {
     errors.push('application-ui specifications require designSystem and responsive widths');
   }
+  if (spec.scope === 'application-ui' && (!spec.componentArchitecture || !Array.isArray(spec.componentArchitecture.boundaries) || !Array.isArray(spec.dataModel?.entities) || !Array.isArray(spec.interactions))) {
+    errors.push('application-ui specifications require component architecture, data model, and interaction contracts');
+  }
+  for (const interaction of Array.isArray(spec.interactions) ? spec.interactions : []) {
+    if (!requirementIds.has(interaction.requirementId)) errors.push('interaction references unknown requirement ' + interaction.requirementId);
+    if (!Array.isArray(interaction.stateTransitions) || interaction.stateTransitions.length === 0) errors.push('interaction ' + interaction.featureKey + ' needs state transitions');
+  }
   return { valid: errors.length === 0, errors, warnings, requirementCoverage };
 }
 
@@ -388,6 +403,10 @@ function formatAppSpecificationForPrompt(spec) {
     stack: spec.stack,
     pages: spec.pages,
     requirements: spec.requirements,
+    componentArchitecture: spec.componentArchitecture,
+    dataModel: spec.dataModel,
+    interactions: spec.interactions,
+    nonFunctional: spec.nonFunctional,
     designSystem: spec.designSystem,
     acceptanceCriteria: spec.acceptanceCriteria,
     rules: spec.rules,
