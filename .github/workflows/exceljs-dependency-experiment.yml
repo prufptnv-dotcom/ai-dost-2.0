@@ -19,6 +19,26 @@ permissions:
   contents: read
 
 jobs:
+  frontend-ci-parity:
+    name: Frontend CI parity (Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Enforce production audit and frontend dev-tool policy
+        run: node scripts/check-audit-policy.mjs
+      - run: npm run lint
+      - run: npm test -- --coverage
+
   exceljs-compatibility:
     name: ExcelJS scoped override compatibility (Node 22)
     runs-on: ubuntu-latest
