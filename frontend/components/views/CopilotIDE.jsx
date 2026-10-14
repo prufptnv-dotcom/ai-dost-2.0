@@ -37,6 +37,7 @@ import { IdeFooter } from '../ide/IdeFooter';
 import { generateLiveAppHtml, PREVIEW_TELEMETRY_SCRIPT } from '../ide/PreviewEngine';
 import { syncFileToWebContainer } from '../../lib/webcontainer';
 import { marked } from 'marked';
+import { extractOutputQualityStatus, settlePlanTasks } from '../../lib/outputQualityStatus';
 
 function isPathInFolder(filePath, folderPath) {
   const file = normalizePath(filePath).toLowerCase();
@@ -73,23 +74,6 @@ const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false 
 const TerminalPanel = dynamic(() => import('./TerminalPanel'), { ssr: false });
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-// Parse the explicit backend quality gate without confusing a finished tool run
-// with a verified application. Older generic responses keep their prior behavior.
-function extractOutputQualityStatus(message) {
-  const match = String(message || '').match(/\*\*(SUCCEEDED|FAILED|UNVERIFIED|PARTIAL)\*\*\s*[—-]/i);
-  return match ? match[1].toUpperCase() : null;
-}
-
-function settlePlanTasks(tasks, message) {
-  const status = extractOutputQualityStatus(message);
-  if (!status) return tasks.map((task) => ({ ...task, status: 'completed' }));
-  if (status === 'SUCCEEDED') return tasks.map((task) => ({ ...task, status: 'completed' }));
-  return tasks.map((task, index) => ({
-    ...task,
-    status: index < tasks.length - 1 ? 'completed' : status === 'FAILED' ? 'error' : 'unverified',
-  }));
-}
 
 // Agent tool action → human-readable live status
 const STATUS_BY_ACTION = {
