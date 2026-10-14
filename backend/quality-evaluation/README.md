@@ -82,6 +82,20 @@ The generated report keeps each acceptance criterion at `NOT_EVALUATED` until a 
 - Compare baseline/candidate artifacts and complete the blind human UX review. Until this is done, Phase 1 remains **IN PROGRESS**.
 
 
+## Benchmark readiness preflight
+
+Before spending time or model tokens on a generation run, start the intended backend checkout on the local benchmark port and run this from `backend/`:
+
+```bash
+AI_DOST_BENCHMARK_REVISION=76efa666d809c381d61579de5fa7c9d31f6a5a53 \
+AI_DOST_BASE_URL=http://127.0.0.1:5000 AI_DOST_BENCHMARK_MODEL=gemini \
+  npm run quality:preflight
+```
+
+For the candidate checkout, set `AI_DOST_BENCHMARK_REVISION` to that checkout's exact `git rev-parse HEAD`. The preflight checks the loopback-only `/health` endpoint and requires explicit model preference and revision metadata. It does not call the generation endpoint, create artifacts, or consume model tokens. A health check is not proof that generation will succeed or that the preferred model is ultimately selected. If the health response reports zero recognized API keys, it warns rather than failing because an OAuth or other provider path may be configured; verify the intended provider before starting the benchmark.
+
+Run the preflight separately against both baseline and candidate backend checkouts, using the same intended provider configuration. Do not run the full 12-generation phase until both are healthy.
+
 ## Automated live-generation capture
 
 ```bash
