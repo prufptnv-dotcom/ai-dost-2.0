@@ -393,5 +393,5 @@ def build_pdf(results_file, output_pdf_path):
 
 if __name__ == "__main__":
     results_json = "benchmark_300_results.json"
-    dest_pdf = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "public", "downloads", "VKP_Omni_2B_300_Benchmark_Report.pdf"))
+    dest_pdf = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "public", "downloads", "AI_Dost_300_Response_Format_Heuristic_Report.pdf"))
     build_pdf(results_json, dest_pdf)
