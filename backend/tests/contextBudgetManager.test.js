@@ -148,4 +148,69 @@ test('Phase 2F.5 - Context Budget Manager', async (t) => {
     assert.strictEqual(res1.metadata.selected_items_count, 9);
     assert.strictEqual(JSON.stringify(res1.package), JSON.stringify(res2.package), 'Output MUST be perfectly deterministic regardless of input order');
   });
+
+  await t.test('19. derived importance actually prunes low-value long content', () => {
+    const budgetMgr = new ContextBudgetManager({ totalBudget: 1000, summaryCharLimit: 80 });
+    const res = budgetMgr.packageContext({
+      projectId,
+      items: [
+        {
+          source_id: 'low-value-long-line',
+          category: 'RETRIEVAL',
+          relevance: 0.01,
+          authority: 1,
+          content: 'x'.repeat(500)
+        },
+        {
+          source_id: 'high-value',
+          category: 'WORKSPACE',
+          relevance: 1,
+          authority: 1,
+          content: 'Keep this high-relevance workspace content intact.'
+        }
+      ]
+    });
+
+    assert.strictEqual(res.package.retrieval[0].representation, 'summary');
+    assert.ok(res.package.retrieval[0].content.length <= 81, 'Long single-token content must obey the character ceiling');
+    assert.strictEqual(res.package.workspace[0].representation, 'full');
+  });
+
+  await t.test('20. malformed token estimates cannot undercount the context budget', () => {
+    const budgetMgr = new ContextBudgetManager({ totalBudget: 200, pruningEnabled: false });
+    const res = budgetMgr.packageContext({
+      projectId,
+      items: [{ source_id: 'bad-estimate', category: 'RETRIEVAL', content: 'C'.repeat(400), estimated_tokens: -100 }]
+    });
+
+    assert.strictEqual(res.metadata.selected_items_count, 1);
+    assert.strictEqual(res.metadata.estimated_total_tokens, 100);
+  });
+
+  await t.test('21. artifact category is placed in the public artifacts bucket', () => {
+    const budgetMgr = new ContextBudgetManager({ totalBudget: 500 });
+    const res = budgetMgr.packageContext({
+      projectId,
+      items: [{ source_id: 'artifact-1', category: 'ARTIFACT', content: 'artifact body' }]
+    });
+
+    assert.strictEqual(res.package.artifacts.length, 1);
+    assert.strictEqual(res.package.other.length, 0);
+  });
+
+  await t.test('22. missing source IDs are stable across repeated packaging', () => {
+    const budgetMgr = new ContextBudgetManager({ totalBudget: 500 });
+    const items = [{ category: 'RETRIEVAL', content: 'anonymous but deterministic context' }];
+    const first = budgetMgr.packageContext({ projectId, items });
+    const second = budgetMgr.packageContext({ projectId, items });
+    assert.strictEqual(first.package.retrieval[0].source_id, second.package.retrieval[0].source_id);
+  });
+
+  await t.test('23. invalid item collections fail with a useful error', () => {
+    const budgetMgr = new ContextBudgetManager();
+    assert.throws(
+      () => budgetMgr.packageContext({ projectId, items: 'not-an-array' }),
+      /items must be an array/
+    );
+  });
 });
