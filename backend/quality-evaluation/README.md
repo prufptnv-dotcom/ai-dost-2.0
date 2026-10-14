@@ -96,7 +96,7 @@ AI_DOST_BASE_URL=http://127.0.0.1:3000 AI_DOST_BENCHMARK_MODEL=gemini \
   --artifacts-dir /tmp/ai-dost-phase1-comparison
 ```
 
-The runner sends each canonical prompt to `POST /api/agent/run`, gives every run a fresh workspace, and preserves the generated project, raw event stream (`events.ndjson`), metadata, and static diagnostic report outside the repository. Run baseline and candidate with the same model preference, backend settings, provider credentials, and timeout. Provider fallback may still change the actual model; inspect the event logs and metadata rather than assuming the preference equals the served model.
+The runner sends each canonical prompt to `POST /api/agent/run`, gives every run a fresh workspace, and preserves the generated project, normalized SSE event stream (`events.ndjson`), metadata, and static diagnostic report outside the repository. A `generation_provider` event records which provider successfully returned scaffold files. Run baseline and candidate with the same backend settings, provider credentials, model preferences, and timeout. The exact model ID and failed fallback attempts may not be exposed in the SSE stream; record those from backend logs/config where available and mark them unknown otherwise. Never assume the preferred provider equals the actual provider/model.
 
 The runner requires a loopback backend URL because `projectPath` is a server-local path. It refuses to overwrite existing run folders. Use a new artifacts directory for a fresh experiment. By default it runs all four cases three times (12 generations per phase; 24 total across both phases). To smoke-test one case first, pass `--case dashboard-search-charts-csv --runs 1`.
 
