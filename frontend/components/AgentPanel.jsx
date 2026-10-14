@@ -338,6 +338,8 @@ const AgentPanel = ({
   const timerRef = useRef(null);
   const startTimeRef = useRef(null);
   const promptRef = useRef(prompt);
+  // Preserve the submitted prompt after the editor input is cleared for the run.
+  const activePromptRef = useRef('');
 
   // Keep promptRef in sync via effect (avoids direct render-time mutation)
   useEffect(() => { promptRef.current = prompt; }, [prompt]);
@@ -466,7 +468,7 @@ const AgentPanel = ({
         setLiveMessage('');
         setHistory(prev => [{
           id: Date.now(),
-          prompt: promptRef.current || 'Quick task',
+          prompt: activePromptRef.current || promptRef.current || 'Quick task',
           answer: data.message,
           steps: data.steps?.length || 0,
           time: new Date().toLocaleTimeString()
@@ -485,6 +487,7 @@ const AgentPanel = ({
     const userPrompt = (customPrompt || promptRef.current).trim();
     if (!userPrompt || isRunning) return;
 
+    activePromptRef.current = userPrompt;
     setPrompt('');
     setIsRunning(true);
     setSteps([]);

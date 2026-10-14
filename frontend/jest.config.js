@@ -30,12 +30,18 @@ const customJestConfig = {
   ],
   coverageThreshold: {
     global: {
-      statements: 18,
-      branches: 15,
-      // functions: 14 — was 15 before the dead-component/test prune (2026-09-30);
-      // removing tested-but-dead components trimmed the denominator slightly.
-      functions: 14,
-      lines: 19,
+      statements: 25,
+      branches: 22,
+      functions: 20,
+      lines: 25,
+    },
+    // Keep focused regression coverage for the agent run and history flow, not
+    // just the aggregate percentages for a large, mostly UI component.
+    './components/AgentPanel.jsx': {
+      statements: 45,
+      branches: 35,
+      functions: 28,
+      lines: 50,
     },
   },
 };
