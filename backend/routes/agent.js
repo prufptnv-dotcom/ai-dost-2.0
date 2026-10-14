@@ -3266,9 +3266,14 @@ STRUCTURED APP SPECIFICATION AND ACCEPTANCE CHECKS:
 
   try {
     let files = [];
+    let generationSource = 'llm-output-pending';
+    let selectedProvider = null;
     try {
       const rawResponse = await Promise.race([
-        callScaffoldLLM(scaffoldPrompt, null, req.headers),
+        callScaffoldLLM(scaffoldPrompt, null, req.headers, (provider) => {
+          selectedProvider = provider;
+          send({ type: 'generation_provider', phase: 'wizard-initial', ...provider });
+        }),
         new Promise((_, reject) => setTimeout(() => reject(new Error('LLM Timeout')), 10000))
       ]);
       const stripped = String(rawResponse || '').replace(/```(?:json)?\s*/gi, '').trim();
@@ -3278,12 +3283,16 @@ STRUCTURED APP SPECIFICATION AND ACCEPTANCE CHECKS:
           const parsed = JSON.parse(jsonBlock[0]);
           if (parsed && Array.isArray(parsed.files) && parsed.files.length > 0) {
             files = parsed.files;
+            generationSource = 'llm-output';
           }
         } catch (err) {
           try {
             const repaired = jsonBlock[0].replace(/(?<=:\s*"[\s\S]*?)\r?\n(?=[\s\S]*?")/g, '\\n');
             const parsed = JSON.parse(repaired);
-            if (parsed && Array.isArray(parsed.files)) files = parsed.files;
+            if (parsed && Array.isArray(parsed.files) && parsed.files.length > 0) {
+              files = parsed.files;
+              generationSource = 'llm-output';
+            }
           } catch (_) {}
         }
       }
@@ -3294,6 +3303,7 @@ STRUCTURED APP SPECIFICATION AND ACCEPTANCE CHECKS:
     if (!files || files.length === 0) {
       logger.info('[Wizard] Generating smart architecture files.');
       files = generateSmartProject(wizardConfig, userPrompt);
+      generationSource = 'heuristic-fallback';
     }
 
     send({ type: 'wizard_status', step: 'writing', message: `📂 Writing ${files.length} project files to workspace...` });
