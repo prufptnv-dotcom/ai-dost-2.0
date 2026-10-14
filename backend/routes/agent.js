@@ -1217,7 +1217,9 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
             qualityStatusReason = 'The fallback scaffold rendered, but it is not proof that the requested application was implemented.';
           } else if (featurePreflight.missingAfter.length > 0) {
             qualityStatus = 'PARTIAL';
-            qualityStatusReason = 'The bounded completion pass ran, but recognizable source signals remain missing for explicit feature requirements. These are diagnostic warnings, not proof of behavior.';
+            qualityStatusReason = featurePreflight.repairApplied
+              ? 'After the bounded completion attempt, recognizable source signals remain missing for explicit feature requirements. These are diagnostic warnings, not proof of behavior.'
+              : 'The preflight found missing source signals, but targeted completion did not produce usable replacement files. These are diagnostic warnings, not proof of behavior.';
           } else {
             qualityStatus = 'UNVERIFIED';
             qualityStatusReason = 'Build/render smoke passed and no missing source signals were detected, but requirement-level interactions were not executed.';
