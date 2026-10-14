@@ -62,7 +62,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       - run: npm run lint
-      - run: npm test -- --coverage
+      - name: Diagnose open handles while collecting frontend coverage
+        run: npm test -- --coverage --detectOpenHandles
 
   backend:
     name: Backend (unit + integration + security + chat-runtime)
