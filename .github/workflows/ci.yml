@@ -79,6 +79,9 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
+      - name: Test root npm test argument forwarding
+        working-directory: .
+        run: node --test scripts/test.test.js
       - name: Enforce production dependency audit
         run: npm audit --omit=dev
       - name: Capture dependency audit report (baseline)
