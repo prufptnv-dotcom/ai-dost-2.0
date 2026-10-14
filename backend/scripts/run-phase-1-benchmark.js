@@ -54,7 +54,7 @@ function parseSseFrame(frame) {
 async function collectSse(response, onEvent) {
   let pending = '';
   for await (const chunk of response.body) {
-    pending += chunk.toString('utf8');
+    pending += Buffer.from(chunk).toString('utf8');
     let boundary;
     while ((boundary = pending.search(/\r?\n\r?\n/)) !== -1) {
       const frame = pending.slice(0, boundary);
