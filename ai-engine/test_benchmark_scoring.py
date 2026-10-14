@@ -38,7 +38,7 @@ class BenchmarkScoringTests(unittest.TestCase):
                 "cat": "Python, Algorithms & Data Structures",
                 "diff": "Easy",
             },
-            "```python\ndef wrong():\n    return 999\n```",
+            "```python\n# Deliberately incorrect sample that passes only superficial code-block formatting checks.\ndef wrong():\n    return 999\n```",
         )
         self.assertEqual(result["format_status"], "FORMAT_PASS")
         self.assertFalse(result["correctness_evaluated"])
