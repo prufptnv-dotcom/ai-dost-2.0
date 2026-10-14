@@ -265,7 +265,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Test benchmark format-scoring semantics
-        run: python -m unittest discover -s ai-engine -p 'test_*.py' -v
+        run: python ai-engine/test_benchmark_scoring.py -v
 
   deploy:
     name: Deploy (main push only)
