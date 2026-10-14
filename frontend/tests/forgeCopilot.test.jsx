@@ -281,6 +281,7 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
       expect(await screen.findByText('End of requested build — verified')).toBeInTheDocument();
       expect(screen.getAllByRole('button', { name: /App\.jsx/i }).length).toBeGreaterThan(0);
       expect(reader.read).toHaveBeenCalledTimes(1);
+      await flushForgeInitialEffects();
     } finally {
       global.fetch = previousFetch;
       api.fetchProject.mockImplementation(previousFetchProject);
@@ -341,6 +342,7 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
       expect(requestBodies[1].taskId).toBe(requestBodies[0].taskId);
       expect(requestBodies[1].approvalToken).toBe('forge-approval-token');
       expect(screen.getAllByText('Build an account settings page')).toHaveLength(1);
+      await flushForgeInitialEffects();
     } finally {
       global.fetch = previousFetch;
     }
@@ -392,6 +394,7 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
       expect(await screen.findByText(message)).toBeInTheDocument();
       expect(await screen.findByText(toast)).toBeInTheDocument();
       expect(screen.queryByText('Forge Studio run complete')).not.toBeInTheDocument();
+      await flushForgeInitialEffects();
     } finally {
       global.fetch = previousFetch;
       api.fetchProject.mockImplementation(previousFetchProject);
