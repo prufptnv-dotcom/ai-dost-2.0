@@ -1,7 +1,7 @@
 """Unit tests for format-only benchmark scoring; no network is required."""
 import unittest
 
-from benchmark_scoring import EVALUATION_TYPE, evaluate_response
+from benchmark_scoring import EVALUATION_TYPE, evaluate_response, normalize_result_record
 
 
 class BenchmarkScoringTests(unittest.TestCase):
@@ -63,6 +63,52 @@ class BenchmarkScoringTests(unittest.TestCase):
         )
         self.assertEqual(result["format_status"], "FORMAT_FAIL")
         self.assertFalse(result["correctness_evaluated"])
+
+
+    def test_legacy_result_is_rescored_as_format_only(self):
+        record = {
+            "qid": "Q-legacy",
+            "cat": "General knowledge",
+            "diff": "Easy",
+            "prompt": "Explain something.",
+            "model_answer": "A confidently worded but incorrect answer. " * 5,
+            "latency_s": 2.0,
+            "score": 10,
+            "pass_fail": "PASS",
+            "success": True,
+        }
+        normalized = normalize_result_record(record)
+        self.assertEqual(normalized["pass_fail"], "NOT_EVALUATED")
+        self.assertEqual(normalized["format_status"], "FORMAT_PASS")
+        self.assertEqual(normalized["evaluation_type"], EVALUATION_TYPE)
+        self.assertFalse(normalized["correctness_evaluated"])
+        self.assertFalse(normalized["is_accuracy_metric"])
+        self.assertIn("NOT evaluated", normalized["evaluator_note"])
+        self.assertEqual(normalized["token_count_method"], "response_characters_divided_by_3.8")
+
+    def test_request_failure_is_not_mislabeled_as_wrong_model_answer(self):
+        normalized = normalize_result_record({
+            "qid": "Q-fail",
+            "success": False,
+            "pass_fail": "FAIL",
+            "score": 0,
+            "error": "Connection timeout",
+        })
+        self.assertEqual(normalized["pass_fail"], "NOT_EVALUATED")
+        self.assertEqual(normalized["format_status"], "NOT_EVALUATED")
+        self.assertFalse(normalized["correctness_evaluated"])
+        self.assertIn("not a model-correctness failure", normalized["evaluator_note"])
+
+    def test_success_without_saved_answer_is_marked_incomplete(self):
+        normalized = normalize_result_record({
+            "qid": "Q-missing",
+            "success": True,
+            "pass_fail": "PASS",
+            "score": 10,
+        })
+        self.assertFalse(normalized["success"])
+        self.assertEqual(normalized["format_status"], "NOT_EVALUATED")
+        self.assertIn("incomplete", normalized["evaluator_note"])
 
 
 if __name__ == "__main__":
