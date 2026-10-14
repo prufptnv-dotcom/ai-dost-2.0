@@ -31,7 +31,7 @@ function average(values) {
   return finite.length ? finite.reduce((sum, value) => sum + value, 0) / finite.length : null;
 }
 
-function loadRunEvidence(artifactsDir, result) {
+function loadRunEvidence(result) {
   const runDir = result.runDir;
   const metadataPath = path.join(runDir, 'metadata.json');
   if (!fs.existsSync(metadataPath)) {
@@ -96,8 +96,8 @@ function compareSummaries(artifactsDir, baseline, candidate) {
   for (const key of baselineKeys) {
     const baseResult = baselineMap.get(key);
     const candidateResult = candidateMap.get(key);
-    const base = loadRunEvidence(artifactsDir, baseResult);
-    const next = loadRunEvidence(artifactsDir, candidateResult);
+    const base = loadRunEvidence(baseResult);
+    const next = loadRunEvidence(candidateResult);
     if (base.metadata.prompt !== next.metadata.prompt) {
       throw new Error('Prompt mismatch for ' + key + '; results are not paired.');
     }
@@ -145,7 +145,7 @@ function compareSummaries(artifactsDir, baseline, candidate) {
     comparisonStatus: 'DIAGNOSTIC_ONLY',
     acceptanceStatus: 'NOT_EVALUATED',
     baseline: {
-      revision: baseline.results?.[0] ? loadRunEvidence(artifactsDir, baseline.results[0]).metadata.revision : null,
+      revision: baseline.results?.[0] ? loadRunEvidence(baseline.results[0]).metadata.revision : null,
       preferredModel: baseline.preferredModel,
       runs: pairs.length,
       completedGenerations: baselineCompleted,
@@ -153,7 +153,7 @@ function compareSummaries(artifactsDir, baseline, candidate) {
       averageElapsedMs: average(pairs.map((pair) => pair.baseline.elapsedMs)),
     },
     candidate: {
-      revision: candidate.results?.[0] ? loadRunEvidence(artifactsDir, candidate.results[0]).metadata.revision : null,
+      revision: candidate.results?.[0] ? loadRunEvidence(candidate.results[0]).metadata.revision : null,
       preferredModel: candidate.preferredModel,
       runs: pairs.length,
       completedGenerations: candidateCompleted,
