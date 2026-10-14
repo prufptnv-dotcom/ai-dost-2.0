@@ -86,8 +86,23 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
   // first gated tool). Auto/turbo pass body.approvalToken straight through.
   let runApprovalToken = body.approvalToken || req.headers?.['x-approval-token'] || null;
   if (permissionLevel === 'ask') {
-    let capabilities = null;
-    try { capabilities = capabilityDiscovery.discover(request); } catch (_) { /* fail-open: no caps → no gate */ }
+    let capabilities;
+    try {
+      capabilities = (dependencies.capabilityDiscovery || capabilityDiscovery).discover(request);
+    } catch (_) {
+      // Approval mode must fail closed: a discovery outage must not silently
+      // turn a protected request into an ungated execution.
+      writeSse(res, {
+        type: 'gate_blocked',
+        message: 'Ask mode cannot verify the required capabilities right now. Execution is blocked for safety.',
+      });
+      writeSse(res, {
+        type: 'done',
+        message: '❌ Execution blocked because capability discovery failed.',
+        steps: [],
+      });
+      return res.end();
+    }
     const probe = capabilityGatekeeper.evaluateWithLevel(
       capabilities,
       { requestId: taskId, source: 'copilot_director' },

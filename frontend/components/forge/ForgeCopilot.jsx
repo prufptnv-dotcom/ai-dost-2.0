@@ -24,6 +24,22 @@ const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false 
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || '';
 
+function displayProjectName(name, projectId) {
+  const label = String(name || '').trim();
+  const reservedWorkspace = ['default', 'copilot-workspace'].includes(String(projectId || '').toLowerCase());
+  if (reservedWorkspace && /^copilot workspace$/i.test(label)) return 'Forge Studio Workspace';
+  return label || (reservedWorkspace ? 'Forge Studio Workspace' : 'Untitled');
+}
+
+// Workspace paths are case-sensitive on Linux. Normalize separators and leading
+// relative/root markers, but never fold case when verifying persisted files.
+export function normalizeWorkspacePath(value) {
+  return String(value || '')
+    .replaceAll('\\', '/')
+    .replace(/^\.\//, '')
+    .replace(/^\/+/, '');
+}
+
 const themePresets = [
   { id: 'violet', name: 'Violet', color: '#a78bfa' },
   { id: 'ocean', name: 'Ocean', color: '#62b5ff' },
@@ -187,7 +203,7 @@ function Rail({ activeTab, onSelectTab, user }) {
       <div className="rail-actions">
         <button
           className={`rail-item ${activeTab === 'builder' ? 'selected' : ''}`}
-          title="Builder IDE"
+          title="Forge Studio"
           onClick={() => onSelectTab('builder')}
         >
           <LuLayoutDashboard size={18} />
@@ -411,7 +427,7 @@ function FileSidebar({
                 {projects.length > 0 ? (
                   projects.map((p) => {
                     const pId = p.project_id || p.id;
-                    const pName = p.project_name || p.name || 'Untitled';
+                    const pName = displayProjectName(p.project_name || p.name || 'Untitled', pId);
                     const isCurrent = pId === currentProjectId;
                     return (
                       <div
@@ -1417,6 +1433,8 @@ function AssistantPanel({
   sessionFilesWritten = [],
   elapsedSeconds = 0,
   lastError = null,
+  pendingApproval = null,
+  onApprove,
   onOpenFile,
   onRetry,
 }) {
@@ -1637,6 +1655,14 @@ function AssistantPanel({
                 onRetry={onRetry}
                 lastError={lastError}
               />
+            </div>
+          )}
+          {pendingApproval?.token && (
+            <div className="approval-banner rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs" role="alert">
+              <p className="mb-2">{pendingApproval.message || 'Forge needs your approval before continuing.'}</p>
+              <button type="button" onClick={onApprove} disabled={isAssistantWorking} className="rounded-md bg-amber-300 px-3 py-1.5 font-semibold text-zinc-950 disabled:opacity-50">
+                Approve and continue
+              </button>
             </div>
           )}
         </div>
@@ -2424,7 +2450,7 @@ function SettingsPage({ onToast }) {
 
 export default function ForgeCopilot({
   projectId = 'copilot-workspace',
-  projectName: initialProjectName = 'Copilot Workspace',
+  projectName: initialProjectName = 'Forge Studio Workspace',
   onToast: externalToast,
 }) {
   const [currentProjectId, setCurrentProjectId] = useState(projectId);
@@ -2453,11 +2479,12 @@ export default function ForgeCopilot({
   const [sessionFilesWritten, setSessionFilesWritten] = useState([]);
   const [runElapsedSeconds, setRunElapsedSeconds] = useState(0);
   const [lastRunError, setLastRunError] = useState(null);
+  const [pendingApproval, setPendingApproval] = useState(null);
   const [lastPrompt, setLastPrompt] = useState('');
   const [toast, setToast] = useState('');
   const [refreshCount, setRefreshCount] = useState(0);
   const [activeTab, setActiveTab] = useState('builder');
-  const [projectName, setProjectName] = useState(initialProjectName);
+  const [projectName, setProjectName] = useState(displayProjectName(initialProjectName, projectId));
   const [saved, setSaved] = useState(true);
   const [devServer, setDevServer] = useState({ state: null, url: null, hostPort: null });
   const [terminalLogs, setTerminalLogs] = useState([]);
@@ -2568,25 +2595,26 @@ export default function ForgeCopilot({
   const loadProjectData = useCallback(async () => {
     try {
       const data = await fetchProject(currentProjectId);
-      if (data) {
-        if (data.name || data.project_name) {
-          setProjectName(data.name || data.project_name);
-        }
-        const fileList = data.files || [];
-        setFiles(fileList);
-
-        const newContents = {};
-        fileList.forEach((f) => {
-          newContents[f.path] = f.content || '';
-        });
-        setContents(newContents);
-
-        if (fileList.length > 0 && !activeFile) {
-          setActiveFile(fileList[0].path);
-        }
+      if (!data) return [];
+      if (data.name || data.project_name) {
+        setProjectName(displayProjectName(data.name || data.project_name, currentProjectId));
       }
+      const fileList = Array.isArray(data.files) ? data.files : [];
+      setFiles(fileList);
+
+      const newContents = {};
+      fileList.forEach((f) => {
+        newContents[f.path] = f.content || '';
+      });
+      setContents(newContents);
+
+      if (fileList.length > 0 && !activeFile) {
+        setActiveFile(fileList[0].path);
+      }
+      return fileList;
     } catch (err) {
       console.warn('Could not load project files from backend:', err?.message);
+      return null;
     }
   }, [currentProjectId, activeFile]);
 
@@ -2641,9 +2669,10 @@ export default function ForgeCopilot({
     const pId = p.project_id || p.id;
     if (pId) {
       setCurrentProjectId(pId);
-      setProjectName(p.project_name || p.name || 'Workspace');
+      const nextProjectName = displayProjectName(p.project_name || p.name || 'Workspace', pId);
+      setProjectName(nextProjectName);
       setActiveFile('');
-      showToast(`Switched to ${p.project_name || p.name}`);
+      showToast(`Switched to ${nextProjectName}`);
     }
   };
 
@@ -2666,7 +2695,7 @@ export default function ForgeCopilot({
           handleSelectProject(remaining[0]);
         } else {
           setCurrentProjectId('copilot-workspace');
-          setProjectName('Copilot Workspace');
+          setProjectName('Forge Studio Workspace');
           setFiles([]);
           setContents({});
           setActiveFile('');
@@ -2809,7 +2838,8 @@ export default function ForgeCopilot({
   };
 
   // Real Run / Dev Server Trigger
-  const runBuild = async () => {
+  const runBuild = async (options = {}) => {
+    const silent = options?.silent === true;
     setIsRunning(true);
     setTerminalLogs((prev) => [...prev, '> Starting dev server in sandbox container...']);
     try {
@@ -2820,19 +2850,29 @@ export default function ForgeCopilot({
       });
       if (res.ok) {
         const data = await res.json();
-        setDevServer(data);
+        if (data?.success !== true || data?.state === 'FAILED' || (!data?.url && data?.hostPort == null)) {
+          throw new Error(data?.error || `Dev server did not become ready (HTTP ${res.status})`);
+        }
+        setDevServer({ ...data, state: 'READY' });
         setTerminalLogs((prev) => [
           ...prev,
           `> Dev server ready on http://localhost:${data.hostPort || 5173}`,
         ]);
-        showToast('Dev server ready');
+        if (!silent) showToast('Dev server ready');
+        return true;
       } else {
-        setTerminalLogs((prev) => [...prev, '> Preview build generated via in-browser compiler.']);
-        showToast('Live preview updated');
+        const reason = `Preview server request failed (HTTP ${res.status})`;
+        setDevServer({ state: 'FAILED', url: null, hostPort: null, reason, error: reason });
+        setTerminalLogs((prev) => [...prev, `> Live dev server failed: ${reason}`, '> The in-browser preview remains available as a fallback.']);
+        if (!silent) showToast('Live server failed; check Terminal');
+        return false;
       }
     } catch (err) {
-      setTerminalLogs((prev) => [...prev, `> Build notice: ${err.message}`]);
-      showToast('Live preview recompiled');
+      const reason = String(err?.message || err || 'Unknown preview error').slice(0, 220);
+      setDevServer({ state: 'FAILED', url: null, hostPort: null, reason, error: reason });
+      setTerminalLogs((prev) => [...prev, `> Live dev server failed: ${reason}`, '> The in-browser preview remains available as a fallback.']);
+      if (!silent) showToast('Live server failed; check Terminal');
+      return false;
     } finally {
       setIsRunning(false);
       setRefreshCount((c) => c + 1);
@@ -2840,15 +2880,19 @@ export default function ForgeCopilot({
   };
 
   // Real Autonomous Agent Run Execution (POST /api/agent/run SSE stream)
-  const submitPrompt = async (event) => {
+  const submitPrompt = async (event, resumeOptions = {}) => {
     event?.preventDefault();
-    const text = prompt.trim();
-    if (!text || isAssistantWorking) return;
+    const text = String(resumeOptions.prompt || prompt || '').trim();
+    const approvalToken = resumeOptions.approvalToken || null;
+    if (!text || (isAssistantWorking && !approvalToken)) return;
 
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setMessages((prev) => [...prev, { role: 'user', text, time }]);
-    setLastPrompt(text);
-    setPrompt('');
+    if (!approvalToken) {
+      setMessages((prev) => [...prev, { role: 'user', text, time }]);
+      setLastPrompt(text);
+      setPrompt('');
+      setPendingApproval(null);
+    }
     setIsAssistantWorking(true);
     setActivityStep(0);
     setActivityDetail('Connecting to autonomous director...');
@@ -2857,8 +2901,11 @@ export default function ForgeCopilot({
     setLastRunError(null);
     setActiveSpecialist(null);
 
-    const taskId = `forge-${Date.now()}`;
+    const taskId = resumeOptions.taskId || `forge-${Date.now()}`;
     currentTaskIdRef.current = taskId;
+    let terminalOutcome = null;
+    const terminalChangedPaths = new Set();
+    const terminalExpectedContent = new Map();
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -2876,8 +2923,9 @@ export default function ForgeCopilot({
           projectId: currentProjectId,
           taskId,
           copilotDirector: true,
-          permissionLevel: autopilot ? 'auto' : 'ask',
+          permissionLevel: resumeOptions.permissionLevel || (autopilot ? 'auto' : 'ask'),
           preferredModel,
+          ...(approvalToken ? { approvalToken } : {}),
         }),
         signal: controller.signal,
       });
@@ -2909,6 +2957,19 @@ export default function ForgeCopilot({
 
           try {
             const data = JSON.parse(jsonStr);
+
+            // Surface a real approval action and retain the same task ID so the
+            // backend can validate/consume the single-use approval token.
+            if (data.type === 'gate_approval_required' && data.gate?.approval_token) {
+              setPendingApproval({
+                token: data.gate.approval_token,
+                taskId,
+                prompt: text,
+                permissionLevel: resumeOptions.permissionLevel || (autopilot ? 'auto' : 'ask'),
+                message: data.message || 'This action requires approval before Forge can continue.',
+              });
+              setActivityDetail('Waiting for your approval before making changes…');
+            }
 
             // 1. Plan established
             if (data.type === 'plan' || data.type === 'director_plan' || data.plan) {
@@ -3036,9 +3097,11 @@ export default function ForgeCopilot({
 
             // 5. File written / File diff event
             if (data.type === 'file_written' || data.file_written || data.action === 'write_file' || data.type === 'director_file_diff') {
-              const filePath = data.path || data.file || data.fullPath;
+              const filePath = data.path || data.fullPath || data.file;
               const content = data.content || '';
               if (filePath) {
+                if (data.type !== 'director_file_diff') terminalChangedPaths.add(String(filePath));
+                if (data.type === 'file_written' && typeof data.content === 'string') terminalExpectedContent.set(String(filePath), data.content);
                 if (content) {
                   setContents((c) => ({ ...c, [filePath]: content }));
                 }
@@ -3095,26 +3158,53 @@ export default function ForgeCopilot({
               setTerminalLogs((prev) => [...prev, data.text]);
             }
 
-            // 8. Completion events (done / director_complete)
-            if (data.type === 'done' || data.type === 'director_complete' || data.status === 'completed' || data.status === 'SUCCEEDED') {
+            // Explicit terminal events only. A single successful worker is not the end of a multi-task run.
+            // Worker events also carry status=SUCCEEDED; only terminal event types finish the whole run.
+            if (data.type === 'done' || data.type === 'director_complete') {
               finished = true;
+              const terminalMessage = String(data.message || data.summary || '');
+              const approvalPaused = data.type === 'done' && Boolean(data.approvalGate || /approval required|run paused/i.test(terminalMessage));
+              const rejected = data.type === 'done' && /execution blocked|approval invalid|blocked by capabilitygatekeeper|^❌/i.test(terminalMessage);
+              const explicitStatus = String(data.status || '').toUpperCase();
+              const explicitSuccess = ['SUCCEEDED', 'SUCCESS', 'COMPLETED'].includes(explicitStatus);
+              const explicitCancellation = ['CANCELLED', 'CANCELED'].includes(explicitStatus);
+              const explicitFailure = ['FAILED', 'ERROR', 'BLOCKED'].includes(explicitStatus);
+              if (explicitCancellation) {
+                terminalOutcome = 'canceled';
+              } else if (approvalPaused) {
+                terminalOutcome = 'paused';
+              } else if (
+                rejected ||
+                explicitFailure ||
+                (data.type === 'director_complete' && !explicitSuccess)
+              ) {
+                // Director completion is successful only when the backend explicitly
+                // reports a success status. Missing or unfamiliar statuses fail closed.
+                terminalOutcome = 'failed';
+              } else {
+                terminalOutcome = 'succeeded';
+              }
+              if (Array.isArray(data.changedPaths)) data.changedPaths.forEach((p) => { if (typeof p === 'string' && p.trim()) terminalChangedPaths.add(p); });
+              if (terminalOutcome === 'failed') setLastRunError(terminalMessage || 'Execution was blocked.');
               const replyTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              setLiveActivities((prev) => prev.map((a) => (a.status === 'running' ? { ...a, status: 'done' } : a)));
+              setLiveActivities((prev) => prev.map((a) => (a.status === 'running' ? { ...a, status: terminalOutcome === 'failed' ? 'failed' : 'done' } : a)));
               setMessages((prev) => [
                 ...prev,
                 {
                   role: 'assistant',
                   time: replyTime,
-                  text: data.message || data.summary || `🎉 Finished applying autonomous changes for: "${text}".`,
+                  text: terminalMessage || (terminalOutcome === 'succeeded' ? `Forge Studio finished the requested changes for: "${text}".` : terminalOutcome === 'paused' ? 'Run paused for approval.' : 'Execution was blocked.'),
                   files: data.changedPaths || sessionFilesWritten.map((f) => f.path),
+                  ...(terminalOutcome === 'failed' ? { error: terminalMessage || 'Execution was blocked.' } : {}),
                 },
               ]);
               break;
             }
 
             // 9. Error events (director_error / error / FAILED)
-            if (data.type === 'director_error' || data.type === 'error' || data.status === 'FAILED') {
+            if (data.type === 'director_error' || data.type === 'error') {
               finished = true;
+              terminalOutcome = 'failed';
               const errMsg = data.error || data.message || 'Execution failed';
               setLastRunError(errMsg);
               const replyTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -3133,8 +3223,9 @@ export default function ForgeCopilot({
             }
 
             // 10. Cancellation event
-            if (data.type === 'director_canceled' || data.status === 'CANCELLED') {
+            if (data.type === 'director_canceled' || data.type === 'task_canceled') {
               finished = true;
+              terminalOutcome = 'canceled';
               showToast('Run canceled');
               break;
             }
@@ -3142,9 +3233,83 @@ export default function ForgeCopilot({
         }
       }
 
-      await loadProjectData();
+      const reloadedFiles = await loadProjectData();
       setRefreshCount((c) => c + 1);
-      showToast('Autonomous run complete');
+
+      // A successful tool event is not enough to prove persistence. Confirm the
+      // backend returns each changed path before reporting the run as complete.
+      if (terminalOutcome === 'succeeded' && terminalChangedPaths.size > 0) {
+        const savedPaths = new Set(
+          Array.isArray(reloadedFiles)
+            ? reloadedFiles.map((file) => normalizeWorkspacePath(file.path))
+            : []
+        );
+        const missingPaths = Array.isArray(reloadedFiles)
+          ? [...terminalChangedPaths].filter((filePath) => !savedPaths.has(normalizeWorkspacePath(filePath)))
+          : [...terminalChangedPaths];
+        const savedByPath = new Map(
+          Array.isArray(reloadedFiles)
+            ? reloadedFiles.map((file) => [normalizeWorkspacePath(file.path), file])
+            : []
+        );
+        const normalizeContent = (value) => String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        const contentMismatchPaths = Array.isArray(reloadedFiles)
+          ? [...terminalExpectedContent].filter(([filePath, expected]) => {
+              const saved = savedByPath.get(normalizeWorkspacePath(filePath));
+              return saved && normalizeContent(saved.content) !== normalizeContent(expected);
+            }).map(([filePath]) => filePath)
+          : [...terminalExpectedContent.keys()];
+        const unverifiedPaths = [...new Set([...missingPaths, ...contentMismatchPaths])];
+        if (unverifiedPaths.length > 0) {
+          terminalOutcome = 'failed';
+          const persistenceError = !Array.isArray(reloadedFiles)
+            ? 'Workspace could not be reloaded to verify file persistence.'
+            : missingPaths.length > 0
+              ? `Workspace reload did not confirm saved files: ${missingPaths.slice(0, 6).join(', ')}`
+              : `Workspace returned stale content for changed files: ${contentMismatchPaths.slice(0, 6).join(', ')}`;
+          setLastRunError(persistenceError);
+          setMessages((prev) => {
+            const next = [...prev];
+            const lastAssistant = next.map((message, index) => ({ message, index })).reverse()
+              .find(({ message }) => message.role === 'assistant');
+            const updated = {
+              role: 'assistant',
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              text: `⚠️ **Save verification failed**: ${persistenceError}`,
+              error: persistenceError,
+            };
+            if (lastAssistant) next[lastAssistant.index] = { ...next[lastAssistant.index], ...updated };
+            else next.push(updated);
+            return next;
+          });
+          showToast('Save verification failed; changes are not confirmed');
+        }
+      }
+
+      if (terminalOutcome === 'succeeded') {
+        const hasPackageJson = Array.isArray(reloadedFiles) && reloadedFiles.some(
+          (file) => normalizeWorkspacePath(file.path).split('/').pop() === 'package.json'
+        );
+        if (terminalChangedPaths.size > 0 && hasPackageJson) {
+          const previewReady = await runBuild({ silent: true });
+          showToast(previewReady
+            ? 'Forge Studio run complete — live preview ready'
+            : 'Code saved, but live build failed. Check Terminal; static preview remains available.');
+        } else {
+          showToast('Forge Studio run complete');
+        }
+      } else if (terminalOutcome === 'paused') {
+        showToast('Approval required to continue');
+      } else if (terminalOutcome === 'canceled') {
+        showToast('Run canceled');
+      } else if (terminalOutcome === 'failed' && !lastRunError) {
+        showToast('Forge run failed or was blocked');
+      } else if (!terminalOutcome) {
+        const incompleteMessage = 'Forge stream ended without a terminal completion event. The run was not marked successful.';
+        setLastRunError(incompleteMessage);
+        setMessages((prev) => [...prev, { role: 'assistant', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), text: `⚠️ **Run could not be verified**: ${incompleteMessage}`, error: incompleteMessage }]);
+        showToast('Forge run ended without confirmation');
+      }
     } catch (err) {
       if (err.name === 'AbortError') {
         showToast('Agent run cancelled');
@@ -3168,6 +3333,18 @@ export default function ForgeCopilot({
       setActivityDetail('');
       setActiveSpecialist(null);
     }
+  };
+
+  const handleApprove = () => {
+    const approval = pendingApproval;
+    if (!approval?.token || isAssistantWorking) return;
+    setPendingApproval(null);
+    submitPrompt(null, {
+      prompt: approval.prompt,
+      taskId: approval.taskId,
+      approvalToken: approval.token,
+      permissionLevel: approval.permissionLevel,
+    });
   };
 
   // Stop running agent
@@ -3437,6 +3614,8 @@ export default function ForgeCopilot({
             sessionFilesWritten={sessionFilesWritten}
             elapsedSeconds={runElapsedSeconds}
             lastError={lastRunError}
+            pendingApproval={pendingApproval}
+            onApprove={handleApprove}
             onOpenFile={handleOpenFileInEditor}
             onRetry={handleRetryRun}
           />

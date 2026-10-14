@@ -22,7 +22,6 @@ export function SmartImg({ src, alt = '', className, style, onLoad, onError, ret
   if (!show) return null;
 
   return (
-    /* eslint-disable-next-line @next/next/no-img-element */
     <img
       key={attempt}
       src={src}
@@ -126,7 +125,6 @@ export function ImageLightbox({ url, alt = '', onClose }) {
           className="rounded-2xl overflow-hidden flex items-center justify-center"
           style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', minHeight: '50vh' }}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={url} alt={alt} className="max-w-full max-h-[75vh] object-contain" />
         </div>
         <div className="mt-4 flex items-center justify-center gap-3">

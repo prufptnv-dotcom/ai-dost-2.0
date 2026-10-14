@@ -7,6 +7,7 @@ on:
       - master
       - 'audit/**'
       - 'feature/**'
+      - 'fix/**'
   pull_request:
     branches: [main, master]
 
@@ -18,33 +19,105 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      - name: Enforce production audit and scoped frontend dev-tool exception
+        run: node scripts/check-audit-policy.mjs
+      - name: Capture dependency audit report (baseline)
+        if: always()
+        run: |
+          npm audit --json > npm-audit-report.json || audit_exit=$?
+          AUDIT_EXIT="${audit_exit:-0}" node - <<'NODE'
+          const fs = require('node:fs');
+          let report;
+          try {
+            report = JSON.parse(fs.readFileSync('npm-audit-report.json', 'utf8'));
+          } catch (error) {
+            console.error(`npm audit did not produce valid JSON: ${error.message}`);
+            process.exit(1);
+          }
+          if (report.error || !report.metadata || !report.metadata.vulnerabilities) {
+            console.error(`npm audit could not complete: ${report.error?.summary || report.error?.code || 'report metadata is missing'}`);
+            process.exit(1);
+          }
+          const v = report.metadata.vulnerabilities;
+          console.log(`Dependency audit snapshot saved: ${v.total} total (critical=${v.critical}, high=${v.high}, moderate=${v.moderate}, low=${v.low}, info=${v.info}).`);
+          console.log('This baseline step records vulnerabilities for review; it does not hide them or fail solely because findings exist.');
+          if (Number(process.env.AUDIT_EXIT) > 1) {
+            console.error(`npm audit exited with unexpected status ${process.env.AUDIT_EXIT}.`);
+            process.exit(1);
+          }
+          NODE
+      - name: Upload frontend dependency audit report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: frontend-npm-audit-report
+          path: frontend/npm-audit-report.json
+          if-no-files-found: ignore
+          retention-days: 14
       - run: npm run lint
       - run: npm test -- --coverage
 
   backend:
     name: Backend (unit + integration + security + chat-runtime)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
+      - name: Enforce production dependency audit
+        run: npm audit --omit=dev
+      - name: Capture dependency audit report (baseline)
+        if: always()
+        run: |
+          npm audit --json > npm-audit-report.json || audit_exit=$?
+          AUDIT_EXIT="${audit_exit:-0}" node - <<'NODE'
+          const fs = require('node:fs');
+          let report;
+          try {
+            report = JSON.parse(fs.readFileSync('npm-audit-report.json', 'utf8'));
+          } catch (error) {
+            console.error(`npm audit did not produce valid JSON: ${error.message}`);
+            process.exit(1);
+          }
+          if (report.error || !report.metadata || !report.metadata.vulnerabilities) {
+            console.error(`npm audit could not complete: ${report.error?.summary || report.error?.code || 'report metadata is missing'}`);
+            process.exit(1);
+          }
+          const v = report.metadata.vulnerabilities;
+          console.log(`Dependency audit snapshot saved: ${v.total} total (critical=${v.critical}, high=${v.high}, moderate=${v.moderate}, low=${v.low}, info=${v.info}).`);
+          console.log('This baseline step records vulnerabilities for review; it does not hide them or fail solely because findings exist.');
+          if (Number(process.env.AUDIT_EXIT) > 1) {
+            console.error(`npm audit exited with unexpected status ${process.env.AUDIT_EXIT}.`);
+            process.exit(1);
+          }
+          NODE
+      - name: Upload backend dependency audit report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: backend-npm-audit-report
+          path: backend/npm-audit-report.json
+          if-no-files-found: ignore
+          retention-days: 14
       - run: node --check server.js
       - name: Run backend test suite
-        run: node --test tests/unit.test.js tests/integration.test.js tests/mcpClientManager.test.js tests/security-hardening.test.js tests/projectAuthorization.security.test.js tests/ssrf.security.test.js tests/chatTaskEvents.test.js tests/taskCancellation.test.js tests/chatTaskAdapter.test.js tests/chatTaskGateway.identity.test.js tests/chatTaskGateway.idempotency.test.js tests/durableTaskIdempotencyStore.test.js tests/startupParity.test.js tests/codeDiffHardening.test.js
+        timeout-minutes: 15
+        run: node --test --test-force-exit tests/unit.test.js tests/integration.test.js tests/mcpClientManager.test.js tests/security-hardening.test.js tests/projectAuthorization.security.test.js tests/ssrf.security.test.js tests/chatTaskEvents.test.js tests/taskCancellation.test.js tests/chatTaskAdapter.test.js tests/chatTaskGateway.identity.test.js tests/chatTaskGateway.idempotency.test.js tests/durableTaskIdempotencyStore.test.js tests/startupParity.test.js tests/codeDiffHardening.test.js
       - name: Run Copilot Director runtime tests
         run: node --test agent/runtime/CopilotDirector.test.js
       - name: Run ChatTaskGateway replay tests
@@ -63,8 +136,8 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -75,7 +148,8 @@ jobs:
       # already present) — no second Chromium download. Cache makes even the
       # first download one-time per lockfile change.
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        # v5 uses the Node 24 action runtime; keep CI free of the retired Node 20 warning.
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('backend/package-lock.json') }}
@@ -84,7 +158,7 @@ jobs:
         working-directory: frontend
         run: npm ci
       - run: npx playwright test
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: failure()
         with:
           name: playwright-report
@@ -100,21 +174,22 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        # v5 uses the Node 24 action runtime; keep CI free of the retired Node 20 warning.
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: failure()
         with:
           name: frontend-browser-report
@@ -125,7 +200,7 @@ jobs:
     name: Docker (compose validation + agent SSE smoke test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Validate compose files (P3 #200)
         run: |
           docker compose config -q
@@ -136,7 +211,7 @@ jobs:
           docker buildx build --check ./frontend
           docker buildx build --check ./ai-engine
           docker buildx build --check ./memory-brain
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -175,8 +250,9 @@ jobs:
           fi
 
   deploy:
-    name: Deploy Preview
+    name: Deploy (main push only)
     needs: [frontend, backend, e2e, docker]
+    # Per project workflow preference, PRs are reviewed via GitHub checks and are not deployed to Vercel.
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     # secrets context is available in job-level env (not in steps.if) —
@@ -187,9 +263,18 @@ jobs:
       VERCEL_TOKEN_SET: ${{ secrets.VERCEL_TOKEN != '' }}
       VERCEL_ORG_ID_SET: ${{ secrets.VERCEL_ORG_ID != '' }}
       VERCEL_PROJECT_ID_SET: ${{ secrets.VERCEL_PROJECT_ID != '' }}
-      RAILWAY_TOKEN_SET: ${{ secrets.RAILWAY_TOKEN != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+      - name: Report missing Vercel deployment credentials
+        if: env.VERCEL_TOKEN_SET != 'true' || env.VERCEL_ORG_ID_SET != 'true' || env.VERCEL_PROJECT_ID_SET != 'true'
+        run: |
+          {
+            echo '### Preview deployment status'
+            echo 'Vercel deployment was not run because one or more required repository secrets are missing.'
+            echo 'Required secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID.'
+            echo 'No secret values are printed by this workflow.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo '::warning::Vercel deployment skipped: configure VERCEL_TOKEN, VERCEL_ORG_ID, and VERCEL_PROJECT_ID.'
       - name: Deploy to Vercel (Frontend)
         if: env.VERCEL_TOKEN_SET == 'true' && env.VERCEL_ORG_ID_SET == 'true' && env.VERCEL_PROJECT_ID_SET == 'true'
         uses: amondnet/vercel-action@v25
@@ -198,8 +283,24 @@ jobs:
           vercel-org-id: ${{secrets.VERCEL_ORG_ID}}
           vercel-project-id: ${{secrets.VERCEL_PROJECT_ID}}
           working-directory: frontend
-      - name: Deploy to Railway/Render (Backend)
-        if: env.RAILWAY_TOKEN_SET == 'true'
+      - name: Report backend deployment limitation
         run: |
-          echo "Deploy backend to Railway/Render"
-          # Add your deployment script here
+          {
+            echo '### Backend deployment status'
+            echo 'This workflow does not deploy the backend. The previous Railway/Render step was a placeholder, not a deployment.'
+            echo 'Configure a real backend deployment workflow before treating the backend as deployed.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deployment-status:
+    name: Deployment policy (PRs are not deployed)
+    needs: [frontend, backend, e2e, docker]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain intentional deployment skip
+        run: |
+          {
+            echo '### Deployment policy'
+            echo 'This pull request is validated by CI and reviewed in GitHub; it is intentionally not deployed to Vercel.'
+            echo 'The Deploy job is main-push-only by design, so its skipped status on pull requests is expected rather than a failed check.'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -421,7 +421,21 @@ class CopilotDirector {
             onEvent({ type: 'director_task', status: 'FAILED', taskId: task.id, specialty: task.specialty, role: task.role, error: lastError.message });
             throw lastError;
           }
-          const taskStatus = executionResult?.status === 'CANCELLED' ? 'CANCELLED' : 'SUCCEEDED';
+          const executionStatus = String(executionResult?.status || '').toUpperCase();
+          const taskStatus = executionStatus === 'CANCELLED'
+            ? 'CANCELLED'
+            : ['SUCCEEDED', 'COMPLETED'].includes(executionStatus)
+              ? 'SUCCEEDED'
+              : 'FAILED';
+          if (taskStatus === 'FAILED') {
+            const failureMessage = executionResult?.error || executionResult?.reason ||
+              `Worker ${task.id} returned non-success status "${executionResult?.status || 'unknown'}".`;
+            completed.set(task.id, 'FAILED');
+            results.push({ task, status: 'FAILED', error: failureMessage, workerRunId: delegated.workerRun.id, result: executionResult });
+            onEvent({ type: 'director_task', status: 'FAILED', taskId: task.id, specialty: task.specialty, role: task.role, workerRunId: delegated.workerRun.id, error: failureMessage, result: executionResult });
+            throw new Error(failureMessage);
+          }
+
           completed.set(task.id, taskStatus);
           results.push({ task, status: taskStatus, workerRunId: delegated.workerRun.id, result: executionResult });
           onEvent({ type: 'director_task', status: taskStatus, taskId: task.id, specialty: task.specialty, role: task.role, workerRunId: delegated.workerRun.id, result: executionResult });
@@ -452,12 +466,49 @@ class CopilotDirector {
       onEvent({ type: 'director_verification', status: 'DELEGATING' });
       const verifier = await this.coordinator.delegate({ supervisorRunId, role: 'VERIFIER', objective: `Perform the final read-only verification gate for the requested outcome: ${request}. Inspect the current workspace state and confirm tests/build/runtime evidence where supported. Do not mutate the workspace.`, constraints: { specialty: 'verification', generatedByDirector: true }, expectedOutput: 'Final verification evidence and any remaining blockers.' });
       const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, { runner: async () => { const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER' }); return this.plannerExecutionLoop.runWithPlan(projectId, userId, verificationPlan, 0, () => Boolean(signal?.aborted), `copilot_verify_${verifier.workerRun.id}`, { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined }); } });
-      onEvent({ type: 'director_verification', status: finalVerification?.status || 'FAILED', workerRunId: verifier.workerRun.id, result: finalVerification });
-      if (finalVerification?.status !== 'SUCCEEDED') throw new Error('Final Director verification gate did not pass');
+      const verificationStatus = String(finalVerification?.status || 'FAILED').toUpperCase();
+      const verificationSummary = String(
+        finalVerification?.summary || finalVerification?.result?.summary || finalVerification?.message || ''
+      ).trim().slice(0, 400);
+      const verificationArtifacts = Array.isArray(finalVerification?.artifact_refs)
+        ? finalVerification.artifact_refs.filter((ref) => typeof ref === 'string' && ref.trim()).slice(0, 10)
+        : [];
+      onEvent({
+        type: 'director_verification',
+        status: verificationStatus,
+        workerRunId: verifier.workerRun.id,
+        summary: verificationSummary || undefined,
+        artifact_refs: verificationArtifacts,
+        result: finalVerification
+      });
+      if (verificationStatus !== 'SUCCEEDED') throw new Error('Final Director verification gate did not pass');
       this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
       this.agentRunDao.updateStatus(supervisorRunId, 'SUCCEEDED');
-      onEvent({ type: 'director_complete', status: 'SUCCEEDED', taskId: supervisorTaskId, runId: supervisorRunId, taskCount: plan.tasks.length });
-      return ResultValidator.validate({ status: 'COMPLETED', summary: `Director completed ${plan.tasks.length} adaptive task(s) and final verification.`, artifact_refs: results.flatMap((item) => item.result?.result?.artifact_refs || item.result?.artifact_refs || []), context_refs: [], verification_status: 'PASSED', errors: [] });
+      const artifactRefs = [
+        ...results.flatMap((item) => item.result?.result?.artifact_refs || item.result?.artifact_refs || []),
+        ...verificationArtifacts
+      ].filter((ref, index, all) => typeof ref === 'string' && ref.trim() && all.indexOf(ref) === index).slice(0, 10);
+      const completion = {
+        type: 'director_complete',
+        status: 'SUCCEEDED',
+        taskId: supervisorTaskId,
+        runId: supervisorRunId,
+        taskCount: plan.tasks.length,
+        verification: {
+          status: verificationStatus,
+          summary: verificationSummary || 'Final verification passed.',
+          artifact_refs: verificationArtifacts
+        }
+      };
+      onEvent(completion);
+      return ResultValidator.validate({
+        status: 'COMPLETED',
+        summary: `Director completed ${plan.tasks.length} adaptive task(s) and final verification.`,
+        artifact_refs: artifactRefs,
+        context_refs: [],
+        verification_status: 'PASSED',
+        errors: []
+      });
     } catch (error) {
       this.agentTaskDao.updateStatus(supervisorTaskId, 'FAILED');
       this.agentRunDao.updateStatus(supervisorRunId, 'FAILED', error.message);

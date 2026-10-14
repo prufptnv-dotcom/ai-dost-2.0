@@ -1178,7 +1178,7 @@ app.delete(['/api/v1/memory/project/:id', '/api/memory/project/:id', '/api/proje
 
 app.get(['/api/v1/memory/project/:id', '/api/memory/project/:id', '/api/project/:id'], (req, res) => {
     const { id } = req.params;
-    const auth = projectAuth.authorize(id, req, { autoCreateIfMissing: true, autoCreateSessionProject: true });
+    const auth = projectAuth.authorize(id, req, { autoCreateIfMissing: true });
     if (!auth.authorized) {
         // A workspace load for a project that doesn't exist yet is NOT an error —
         // the editor wants an empty file list. autoCreateIfMissing only covers

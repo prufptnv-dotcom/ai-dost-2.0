@@ -265,6 +265,26 @@ describe('sandboxManager path safety', () => {
     assert.ok(out.endsWith('sub\\dir\\file.txt'));
   });
 
+  if (process.platform !== 'win32') {
+    test('preserves symlink escape checks for POSIX double-slash roots', () => {
+      const fs = require('node:fs');
+      const os = require('node:os');
+      const path = require('node:path');
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-dost-sandbox-root-'));
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-dost-sandbox-outside-'));
+      try {
+        fs.symlinkSync(outside, path.join(root, 'escape'), 'dir');
+        assert.throws(
+          () => sandboxManager._resolveSafe(`/${root}`, 'escape/secret.txt'),
+          /symlink escape blocked/i
+        );
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+        fs.rmSync(outside, { recursive: true, force: true });
+      }
+    });
+  }
+
   test('parseMemory caps memory at 2GB and computes units', () => {
     assert.equal(sandboxManager.parseMemory('512m'), 512 * 1024 * 1024);
     assert.equal(sandboxManager.parseMemory('1g'), 1024 * 1024 * 1024);
@@ -2130,6 +2150,26 @@ describe('E2E-driven director fixes (P12.3)', () => {
       const done = frames.find((e) => e.type === 'done');
       assert.equal(done.approvalGate.approval_token, 'tok-step');
       assert.ok(!frames.some((e) => e.type === 'director_error'));
+    });
+
+
+    test('Ask mode blocks execution when capability discovery fails', async () => {
+      const res = makeRes();
+      let directorCalled = false;
+      const deps = depsWith(() => {
+        directorCalled = true;
+        return { status: 'SUCCEEDED' };
+      });
+      deps.capabilityDiscovery = {
+        discover: () => { throw new Error('simulated registry outage'); },
+      };
+
+      await handleCopilotDirectorRequest(reqFor({ permissionLevel: 'ask' }), res, () => {}, deps);
+      const frames = parseFrames(res);
+      assert.ok(frames.some((event) => event.type === 'gate_blocked'));
+      assert.ok(frames.some((event) => event.type === 'done' && /capability discovery failed/i.test(event.message)));
+      assert.equal(directorCalled, false, 'the Director must not run without a verified capability set');
+      assert.equal(res.writableEnded, true);
     });
   });
 });

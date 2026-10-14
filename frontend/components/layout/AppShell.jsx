@@ -69,7 +69,7 @@ export function AppShell({
     {
       chat: 'Chat',
       agent: 'Agent Workbench',
-      copilot: 'Copilot IDE',
+      copilot: 'Forge Studio',
       projects: 'Projects',
       artifacts: 'Artifacts',
       resume: 'Resume Builder',
@@ -155,7 +155,7 @@ export function AppShell({
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-fast cursor-pointer ${
               currentView === 'copilot' ? 'bg-accent/15 text-accent border border-accent/30' : 'text-ink-muted hover:text-paper-100 hover:bg-canvas-surface'
             }`}
-            title="Copilot IDE (Ctrl+3)"
+            title="Forge Studio (Ctrl+3)"
           >
             <AppIcon name="code" size={15} />
           </button>

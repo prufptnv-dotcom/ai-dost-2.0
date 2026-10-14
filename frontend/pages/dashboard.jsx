@@ -32,16 +32,6 @@ const ForgeCopilot = dynamic(() => import('../components/forge/ForgeCopilot'), {
   loading: () => <ViewSkeletonLoader type="ide" />,
 });
 
-const CopilotIDE = dynamic(() => import('../components/views/CopilotIDE'), {
-  ssr: false,
-  loading: () => <ViewSkeletonLoader type="ide" />,
-});
-
-const CopilotAurora = dynamic(() => import('../components/aurora/CopilotAurora'), {
-  ssr: false,
-  loading: () => <ViewSkeletonLoader type="ide" />,
-});
-
 const ChatView = dynamic(() => import('../components/views/ChatView'), {
   ssr: false,
   loading: () => <ViewSkeletonLoader type="chat" />,
@@ -96,7 +86,7 @@ const PALETTE_ACTIONS = [
   { id: 'chat', label: 'Open Chat', hint: 'Ctrl+1', icon: MessageSquare },
   { id: 'capabilities', label: '50-Domain Master Hub', hint: '50 Skills & Standards', icon: Sparkles },
   { id: 'agent', label: 'Open Agent Workbench', hint: 'Ctrl+2', icon: Bot },
-  { id: 'copilot', label: 'Open Copilot IDE', hint: 'Ctrl+3', icon: Code2 },
+  { id: 'copilot', label: 'Open Forge Studio', hint: 'Ctrl+3', icon: Code2 },
   { id: 'animations', label: 'Anime.js 3D Motion Studio', hint: '3D/Motion', icon: Move3d },
   { id: 'bharat', label: 'Bharat Hub (Free India APIs)', hint: 'Pincode/IFSC/ISRO', icon: Building2 },
   { id: 'analytics', label: 'Open Data Analytics', hint: 'Charts/Insights', icon: BarChart3 }, // P3 #88: no Ctrl+A — reserved for native Select All
@@ -134,23 +124,12 @@ export default function Dashboard() {
   const [creating, setCreating] = useState(false);
   const [voiceAssistantOpen, setVoiceAssistantOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [copilotUi, setCopilotUi] = useState('aurora');
 
   const paletteRef = useRef(null);
   const paletteInputRef = useRef(null);
 
   useEffect(() => {
     setMounted(true);
-  }, []);
-
-  // P11 A1: read the copilot UI flag post-mount (no hydration mismatch —
-  // server/first paint stays 'aurora'; classic users flip on mount).
-  useEffect(() => {
-    try {
-      setCopilotUi(localStorage.getItem('ai_dost_copilot_ui') || 'aurora');
-    } catch (_) {
-      /* private mode: stay on aurora */
-    }
   }, []);
 
   // Load preferences
@@ -289,7 +268,7 @@ export default function Dashboard() {
   }, []);
 
   const activeChatTitle = useMemo(() => {
-    if (typeof window === 'undefined') return 'Copilot Workspace';
+    if (typeof window === 'undefined') return 'Forge Studio Workspace';
     try {
       const stored = localStorage.getItem('ai_dost_chat_sessions');
       if (stored) {
@@ -298,7 +277,7 @@ export default function Dashboard() {
         if (current && (current.title || current.name)) return current.title || current.name;
       }
     } catch (_) {}
-    return 'Copilot Workspace';
+    return 'Forge Studio Workspace';
   }, [activeSessionId]);
 
   const [initialChatPrompt, setInitialChatPrompt] = useState('');
@@ -485,7 +464,7 @@ export default function Dashboard() {
             <AgentView
               onToast={showToast}
               onOpenFile={(filePath) => {
-                // P3 #118: persist the clicked file so CopilotIDE (mounted after
+                // P3 #118: persist the clicked file so Forge Studio (mounted after
                 // the view switch) opens it instead of dropping the request.
                 try {
                   if (filePath && typeof window !== 'undefined') {
@@ -501,7 +480,7 @@ export default function Dashboard() {
               <ForgeCopilot
                 key={activeProject?.id || 'copilot-workspace'}
                 projectId={activeProject?.id || 'copilot-workspace'}
-                projectName={activeProject?.name || 'Copilot Workspace'}
+                projectName={activeProject?.name || 'Forge Studio Workspace'}
                 onToast={showToast}
               />
             </IDEErrorBoundary>

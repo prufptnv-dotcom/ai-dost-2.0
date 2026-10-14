@@ -96,6 +96,40 @@ test('replays completed result without executing twice and includes terminal eve
   assert.ok(firstEvents.some((event) => event.phase === 'success'));
 });
 
+test('synthesizes a terminal event when replaying a legacy completed record without events', async () => {
+  const durableStore = isolatedDurableStore();
+  const identity = { projectId: 'project-legacy', userId: 'user-legacy', taskId: 'legacy-task' };
+  durableStore.begin(identity);
+  durableStore.complete(identity, { status: 'SUCCEEDED', output: 'saved' });
+  durableStore.update(identity, { events: [] });
+
+  const gateway = new ChatTaskGateway({
+    adapter: {
+      toAgentPlan: () => ({ steps: [{ id: 'step-1', tool: 'noop', input: {} }] }),
+      validateAgentPlan: (plan) => plan,
+      validateResult: (result) => result,
+    },
+    plannerExecutionLoop: {
+      runWithPlan: async () => {
+        throw new Error('replayed tasks must not execute again');
+      },
+    },
+    idempotencyStore: new TaskIdempotencyStore({ ttlMs: 60_000, maxEntries: 100 }),
+    durableTaskStore: durableStore,
+  });
+
+  const events = [];
+  const result = await gateway.run({
+    projectId: identity.projectId,
+    userId: identity.userId,
+    taskPlan: makeTaskPlan(identity.taskId),
+    onEvent: (event) => events.push(event),
+  });
+
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.ok(events.some((event) => event.phase === 'success'));
+});
+
 test('rejects duplicate task while execution is running', async () => {
   let release;
   const gate = new Promise((resolve) => {

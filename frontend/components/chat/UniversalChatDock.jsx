@@ -32,7 +32,7 @@ function clickNewConversationButton() {
   return true;
 }
 
-function resetChatState() {
+function resetChatState(router) {
   if (typeof window === 'undefined') return;
   try {
     // P2 #100: clear the ACTIVE session's transcript (was hard-wired to
@@ -42,17 +42,17 @@ function resetChatState() {
     localStorage.removeItem(sessionId === 'default' ? 'ai_dost_messages_chat' : `ai_dost_messages_${sessionId}`);
     localStorage.setItem('ai_dost_session_id', 'default');
   } catch (_) {}
-  if (!clickNewConversationButton()) window.location.assign('/dashboard');
+  if (!clickNewConversationButton()) router.push('/dashboard');
 }
 
-function deleteCurrentChatState() {
+function deleteCurrentChatState(router) {
   if (typeof window === 'undefined') return;
   try {
     const sessionId = localStorage.getItem('ai_dost_session_id') || 'default';
     localStorage.removeItem(sessionId === 'default' ? 'ai_dost_messages_chat' : `ai_dost_messages_${sessionId}`);
     localStorage.setItem('ai_dost_session_id', 'default');
   } catch (_) {}
-  if (!clickNewConversationButton()) window.location.assign('/dashboard');
+  if (!clickNewConversationButton()) router.push('/dashboard');
 }
 
 export default function UniversalChatDock() {
@@ -68,12 +68,12 @@ export default function UniversalChatDock() {
   }, [router]);
 
   const onNewChat = useCallback(() => {
-    resetChatState();
-  }, []);
+    resetChatState(router);
+  }, [router]);
 
   const onDeleteChat = useCallback(() => {
-    deleteCurrentChatState();
-  }, []);
+    deleteCurrentChatState(router);
+  }, [router]);
 
   if (router.pathname !== '/dashboard') return null;
 

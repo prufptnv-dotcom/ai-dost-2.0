@@ -11,7 +11,7 @@ export const CAPABILITY_GROUPS = [
   {
     title: 'Code & Autonomous Engineering',
     items: [
-      { id: 'copilot', label: 'Copilot IDE', desc: 'In-browser editor, WebContainer dev server & live preview', icon: Code2, badge: 'Core' },
+      { id: 'copilot', label: 'Forge Studio', desc: 'Autonomous coding, code review, build verification & live preview', icon: Code2, badge: 'Core' },
       { id: 'agent', label: 'Agent Workbench', desc: 'Autonomous planning, terminal execution & self-healing', icon: Bot, badge: 'Agentic' },
       { id: 'mcp', label: 'MCP Integrations', desc: 'Model Context Protocol servers & external bridges', icon: Puzzle, badge: 'Protocol' },
       { id: 'skills', label: 'Skills Marketplace', desc: 'On-demand agent skills, workflows & prompt extensions', icon: Sparkles, badge: 'Skills' },

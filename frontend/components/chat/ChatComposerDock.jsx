@@ -31,8 +31,7 @@ export default function ChatComposerDock({
                 className="flex items-center gap-2 px-2.5 py-1 rounded-lg text-xs bg-canvas-surface border border-border shadow-xs"
               >
                 {att.type === 'image' && att.base64 ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img
+                    <img
                     src={`data:${att.mime || 'image/png'};base64,${att.base64}`}
                     alt="Attachment"
                     className="w-5 h-5 rounded object-cover border border-border shrink-0"

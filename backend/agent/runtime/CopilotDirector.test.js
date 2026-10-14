@@ -105,7 +105,17 @@ function createExecutionHarness({ plan, workerStatuses = ['SUCCEEDED'], verifica
       generateVerificationPlan: async () => ({ steps: [] })
     },
     plannerExecutionLoop: {
-      runWithPlan: async () => ({ status: workerStatuses[workerIndex++] || 'SUCCEEDED', result: { artifact_refs: [] } })
+      runWithPlan: async (...args) => {
+        if (String(args[5] || '').startsWith('copilot_verify_')) {
+          return {
+            status: verificationStatus,
+            summary: 'Build and smoke test passed',
+            artifact_refs: ['verification:build-pass'],
+            result: { artifact_refs: [] }
+          };
+        }
+        return { status: workerStatuses[workerIndex++] || 'SUCCEEDED', result: { artifact_refs: [] } };
+      }
     },
     agentTaskDao: { updateStatus: (...args) => events.push(['taskStatus', ...args]) },
     agentRunDao: { updateStatus: (...args) => events.push(['runStatus', ...args]) }
@@ -156,6 +166,30 @@ test('run retries a failed worker and succeeds without duplicating completed tas
   assert.equal(attempts, 2);
 });
 
+
+test('run fails closed when a worker resolves with a non-success result', async () => {
+  const plan = {
+    summary: 'failed mutation',
+    tasks: [{ id: 'change', specialty: 'frontend', role: 'CODER', objective: 'change UI', dependsOn: [], expectedOutput: 'updated UI' }]
+  };
+  const director = createExecutionHarness({ plan });
+  const originalStartWorker = director.coordinator.startWorker.bind(director.coordinator);
+  director.coordinator.startWorker = async (workerRunId, options = {}) => {
+    if (workerRunId === 'worker-1') return { status: 'FAILED', error: 'Mutation did not apply' };
+    return originalStartWorker(workerRunId, options);
+  };
+
+  await assert.rejects(
+    director.run({ userId: 'user-1', projectId: 'project-1', request: 'change UI', onEvent: (event) => director._testEvents.push(event) }),
+    /Mutation did not apply/
+  );
+  assert.equal(
+    director._testEvents.some((event) => event.type === 'director_task' && event.status === 'FAILED'),
+    true,
+    'the failure must be streamed instead of being reported as a successful worker'
+  );
+});
+
 test('run fails closed when final verification does not pass', async () => {
   const plan = {
     summary: 'verification failure',
@@ -173,4 +207,66 @@ test('run fails closed when final verification does not pass', async () => {
     /Final Director verification gate did not pass/
   );
   assert.equal(director._testEvents.some((event) => event[0] === 'taskStatus' && event[2] === 'FAILED'), true);
+});
+
+
+test('self-healing retries a failed build with the concrete failure in the repair prompt', async () => {
+  const plan = {
+    summary: 'self-healing regression',
+    tasks: [{ id: 'build', specialty: 'frontend', role: 'CODER', objective: 'build the requested UI', dependsOn: [], expectedOutput: 'working UI' }]
+  };
+  const director = createExecutionHarness({ plan });
+  const objectives = [];
+  let executionAttempts = 0;
+  director.taskPlanner.generatePlan = async (objective) => {
+    objectives.push(objective);
+    return { steps: [{ action: 'run_command', params: { command: 'npm run build' } }] };
+  };
+  director.plannerExecutionLoop.runWithPlan = async () => {
+    executionAttempts += 1;
+    if (executionAttempts === 1) {
+      return { status: 'FAILED', error: 'Build failed: Cannot find module ./Button' };
+    }
+    return { status: 'SUCCEEDED', result: { artifact_refs: ['build:verified'] } };
+  };
+
+  const result = await director.executeWorker({
+    task: plan.tasks[0],
+    delegated: { workerRun: { id: 'worker-self-heal' } },
+    projectId: 'project-1',
+    userId: 'user-1',
+    request: 'build the requested UI',
+    maxRepairs: 1
+  });
+
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.equal(executionAttempts, 2);
+  assert.equal(objectives.length, 2);
+  assert.match(objectives[1], /REPAIR ATTEMPT 2/);
+  assert.match(objectives[1], /Cannot find module \.\/Button/);
+});
+
+
+test('successful completion preserves final verification evidence in terminal event and result', async () => {
+  const plan = {
+    summary: 'verified plan',
+    tasks: [{ id: 'frontend', specialty: 'frontend', role: 'CODER', objective: 'build UI', dependsOn: [], expectedOutput: 'UI' }]
+  };
+  const director = createExecutionHarness({ plan });
+  const events = [];
+  const result = await director.run({
+    userId: 'user-1',
+    projectId: 'project-1',
+    request: 'build UI',
+    onEvent: (event) => events.push(event)
+  });
+
+  const completion = events.find((event) => event.type === 'director_complete');
+  const verification = events.find((event) => event.type === 'director_verification' && event.status === 'SUCCEEDED');
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(completion.verification.status, 'SUCCEEDED');
+  assert.equal(completion.verification.summary, 'Build and smoke test passed');
+  assert.deepEqual(completion.verification.artifact_refs, ['verification:build-pass']);
+  assert.equal(verification.summary, 'Build and smoke test passed');
+  assert.ok(result.artifact_refs.includes('verification:build-pass'));
 });

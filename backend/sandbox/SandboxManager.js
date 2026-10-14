@@ -46,10 +46,13 @@ class SandboxManager extends EventEmitter {
       // stale negative → fall through and re-ping
     }
     const start = Date.now();
+    let pingTimeout;
     try {
       await Promise.race([
         docker.ping(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Docker ping timeout')), 4000)),
+        new Promise((_, reject) => {
+          pingTimeout = setTimeout(() => reject(new Error('Docker ping timeout')), 4000);
+        }),
       ]);
       this._dockerAvailable = true;
       this._dockerPingLatency = Date.now() - start;
@@ -57,6 +60,9 @@ class SandboxManager extends EventEmitter {
       this._dockerAvailable = false;
       this._dockerPingLatency = null;
       this._dockerUnavailableAt = Date.now();
+    } finally {
+      // Do not keep Node alive for the full timeout after a successful ping.
+      if (pingTimeout) clearTimeout(pingTimeout);
     }
     this._dockerChecked = true;
     return this._dockerAvailable;
@@ -71,10 +77,23 @@ class SandboxManager extends EventEmitter {
 
   // Resolve a requested file path inside the sandbox dir, rejecting traversal.
   _resolveSafe(sandboxPath, relPath) {
-    const fullPath = path.resolve(sandboxPath, relPath || '');
-    if (!fullPath.startsWith(sandboxPath + path.sep) && fullPath !== sandboxPath) {
+    // Accept Windows-style roots in cross-platform unit tests and callers,
+    // even when the process itself runs on POSIX (e.g. GitHub Actions Linux).
+    // Select the path implementation from the root syntax, not host OS.
+    const win32Path = /^[a-z]:[\\\\/]/i.test(String(sandboxPath || '')) ||
+      String(sandboxPath || '').startsWith('\\\\\\\\');
+    const pathApi = win32Path ? path.win32 : path;
+    const root = pathApi.resolve(String(sandboxPath || ''));
+    const requested = String(relPath || '');
+    const fullPath = pathApi.resolve(root, requested);
+    const relative = pathApi.relative(root, fullPath);
+    if (relative === '..' || relative.startsWith('..' + pathApi.sep) || pathApi.isAbsolute(relative)) {
       throw new Error(`Invalid sandbox path: ${relPath} (path traversal blocked)`);
     }
+    // Windows-style roots are not native paths on POSIX. Their lexical
+    // containment is checked above; native symlink checks apply only when the
+    // root is represented by the host filesystem.
+    if (win32Path && process.platform !== 'win32') return fullPath;
     // P3 #36: a plain prefix check is fooled by symlinks — a link INSIDE the
     // sandbox pointing outside would pass the check but read/write elsewhere.
     // Resolve the real path of the deepest existing ancestor and require it to
@@ -197,10 +216,50 @@ class SandboxManager extends EventEmitter {
     if (!raw || typeof raw !== 'string') return null;
     let resolved;
     try { resolved = path.resolve(raw.trim()); } catch (_) { return null; }
-    const base = path.resolve(os.tmpdir());
-    if (resolved !== base && !resolved.startsWith(base + path.sep)) return null;
-    if (!fsSync.existsSync(resolved)) return null;
-    return resolved;
+
+    // Lexical containment is insufficient: a path inside os.tmpdir() may be a
+    // symlink to a sensitive host directory. Resolve both sides and return the
+    // canonical path so Docker/local execution never follows that escape.
+    try {
+      const realBase = fsSync.realpathSync(os.tmpdir());
+      const realResolved = fsSync.realpathSync(resolved);
+      const relative = path.relative(realBase, realResolved);
+      if (
+        relative !== '' &&
+        (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative))
+      ) return null;
+      if (!fsSync.statSync(realResolved).isDirectory()) return null;
+      return realResolved;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _safeProjectSegment(projectId) {
+    const segment = String(projectId == null ? 'project' : projectId)
+      .replace(/[^A-Za-z0-9_-]/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 64);
+    return segment || 'project';
+  }
+
+  _resolveNetwork(rawNetwork) {
+    // Docker host networking shares the host network namespace and defeats
+    // the expected network boundary for a command-execution sandbox.
+    const network = String(rawNetwork || 'bridge');
+    return network === 'bridge' || network === 'none' ? network : 'bridge';
+  }
+
+  _buildPortBindings(ports) {
+    const bindings = {};
+    for (const candidate of Array.isArray(ports) ? ports : []) {
+      const port = Number(candidate);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) continue;
+      // Preview/dev ports are consumed by the local backend proxy. Do not
+      // publish arbitrary sandbox services on every host network interface.
+      bindings[`${port}/tcp`] = [{ HostIp: '127.0.0.1', HostPort: '' }];
+    }
+    return bindings;
   }
 
   async createSandbox(projectId, options = {}) {
@@ -238,23 +297,20 @@ class SandboxManager extends EventEmitter {
     }
 
     const sandboxId = crypto.randomUUID().substring(0, 8);
-    const sandboxPath = path.join(SANDBOX_DIR, `${projectId}-${sandboxId}`);
+    const sandboxPath = path.join(SANDBOX_DIR, `${this._safeProjectSegment(projectId)}-${sandboxId}`);
     await fs.mkdir(sandboxPath, { recursive: true });
 
     const defaultDevPorts = [3000, 5173, 8080, 8000, 4321, 8081, 1420, 5000, 3001];
-    const portsToExpose = Array.from(new Set([...defaultDevPorts, ...(options.ports || [])]));
-    const portBindings = {};
-    for (const port of portsToExpose) {
-      portBindings[`${port}/tcp`] = [{ HostPort: '' }];
-    }
+    const requestedPorts = Array.isArray(options.ports) ? options.ports : [];
+    const portsToExpose = Array.from(new Set([...defaultDevPorts, ...requestedPorts]));
+    const portBindings = this._buildPortBindings(portsToExpose);
 
-    // Image/network allowlist — never pull arbitrary client-supplied images
-    // or attach to sensitive Docker networks (host, none custom, etc.)
+    // Image/network allowlist — never pull arbitrary client-supplied images.
+    // Host networking bypasses the normal sandbox network boundary.
     const SAFE_IMAGE = /^(node|python|ubuntu|alpine|nginx)(:[A-Za-z0-9._-]+)?$/;
     const requestedImage = String(options.image || 'node:22-alpine');
     const image = SAFE_IMAGE.test(requestedImage) ? requestedImage : 'node:22-alpine';
-    const SAFE_NETWORKS = new Set(['bridge', 'host', 'none']);
-    const network = SAFE_NETWORKS.has(String(options.network || 'bridge')) ? String(options.network || 'bridge') : 'bridge';
+    const network = this._resolveNetwork(options.network);
 
     // Sanitize env: strip secrets / NODE_OPTIONS / PATH overrides from client input
     const SENSITIVE_ENV = new Set(['PATH', 'NODE_OPTIONS', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'HOME', 'SSH_AUTH_SOCK',
@@ -357,7 +413,7 @@ class SandboxManager extends EventEmitter {
   // Creates a hardened local isolated sandbox on disk with path-traversal & command policies
   async createLocalSandbox(projectId, options = {}) {
     const sandboxId = crypto.randomUUID().substring(0, 8);
-    const sandboxPath = path.join(SANDBOX_DIR, `local-${projectId}-${sandboxId}`);
+    const sandboxPath = path.join(SANDBOX_DIR, `local-${this._safeProjectSegment(projectId)}-${sandboxId}`);
     await fs.mkdir(sandboxPath, { recursive: true });
     // P3 #39: run local commands in the caller's real project workspace when
     // it is a safe path under the workspace base (see _resolveWorkdir).
@@ -393,18 +449,27 @@ class SandboxManager extends EventEmitter {
     } catch {
       // Image missing → pull with timeout
     }
-    await Promise.race([
-      new Promise((resolve, reject) => {
-        docker.pull(image, (err, stream) => {
-          if (err) return reject(err);
-          docker.modem.followProgress(stream, onFinished => {
-            if (onFinished) reject(onFinished);
-            else resolve();
+    let pullTimeout;
+    try {
+      await Promise.race([
+        new Promise((resolve, reject) => {
+          docker.pull(image, (err, stream) => {
+            if (err) return reject(err);
+            docker.modem.followProgress(stream, onFinished => {
+              if (onFinished) reject(onFinished);
+              else resolve();
+            });
           });
-        });
-      }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error(`Image pull timeout for ${image}`)), 300000)),
-    ]);
+        }),
+        new Promise((_, reject) => {
+          pullTimeout = setTimeout(() => reject(new Error(`Image pull timeout for ${image}`)), 300000);
+        }),
+      ]);
+    } finally {
+      // The losing Promise in Promise.race remains scheduled unless cleared;
+      // without this cleanup every successful pull keeps the process alive 5m.
+      if (pullTimeout) clearTimeout(pullTimeout);
+    }
   }
 
   async execLocal(sandbox, cmd, options = {}) {
@@ -545,62 +610,145 @@ class SandboxManager extends EventEmitter {
     return new Promise((resolve, reject) => {
       // timeout: 0 means "no timeout" (long-running dev servers)
       const timeoutMs = options.timeout === 0 ? 0 : (options.timeout || 60000);
-      const timeout = timeoutMs ? setTimeout(() => reject(new Error('Exec timeout')), timeoutMs) : null;
-      const clearTimer = () => { if (timeout) clearTimeout(timeout); };
+      let timer = null;
+      let stream = null;
+      let settled = false;
+      const stdout = [];
+      const stderr = [];
+      const closeTimer = () => { if (timer) clearTimeout(timer); };
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        closeTimer();
+        reject(error);
+      };
+      const capture = (channel, target, chunk) => {
+        if (!chunk || chunk.length === 0) return;
+        const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
+        target.push(text);
+        if (typeof options.onData === 'function') {
+          try { options.onData(channel, text); } catch (_) {}
+        }
+      };
 
-      exec.start({ hijack: true, stdin: !!options.input }, (err, stream) => {
-        if (err) { clearTimer(); return reject(err); }
+      // Docker uses an 8-byte multiplex header for non-TTY exec output, but
+      // some daemon/TTY combinations return raw bytes. Parse frames across
+      // arbitrary TCP chunk boundaries and fall back to raw stdout if the
+      // initial bytes do not form a valid Docker frame.
+      const MAX_FRAME_SIZE = 64 * 1024 * 1024;
+      let outputMode = options.tty ? 'raw' : 'detect';
+      let pendingOutput = Buffer.alloc(0);
 
-        // Docker exec (Tty:false) multiplexes stdout+stderr as frames:
-        // [1B stream-id (1=stdout, 2=stderr)][3B zero][4B BE payload length][payload]
-        // = an 8-BYTE header. The old code appended whole chunks raw, so every
-        // line of output was prefixed with binary framing bytes (E2E pre-flight
-        // saw "....PRE_FLIGHT_OK") — polluting both the model-facing
-        // observation and the honest `error` text built from stderr.
-        // Buffer + parse frames; a leading byte that is not a frame header
-        // (Tty/raw mode) passes through untouched.
-        let stdout = '', stderr = '';
-        let buf = Buffer.alloc(0);
-        const emit = (kind, text) => {
-          if (!text) return;
-          if (kind === 2) stderr += text; else stdout += text;
-          if (typeof options.onData === 'function') {
-            try { options.onData(kind === 2 ? 'stderr' : 'stdout', text); } catch (_) {}
+      const processOutput = (chunk) => {
+        if (!chunk || chunk.length === 0) return;
+        if (outputMode === 'raw') {
+          capture('stdout', stdout, chunk);
+          return;
+        }
+
+        pendingOutput = pendingOutput.length
+          ? Buffer.concat([pendingOutput, chunk])
+          : Buffer.from(chunk);
+
+        if (outputMode === 'detect') {
+          if (pendingOutput.length < 8) return;
+          const type = pendingOutput[0];
+          const reservedBytesAreZero =
+            pendingOutput[1] === 0 &&
+            pendingOutput[2] === 0 &&
+            pendingOutput[3] === 0;
+          const frameSize = pendingOutput.readUInt32BE(4);
+
+          if (
+            (type !== 1 && type !== 2) ||
+            !reservedBytesAreZero ||
+            frameSize > MAX_FRAME_SIZE
+          ) {
+            outputMode = 'raw';
+            capture('stdout', stdout, pendingOutput);
+            pendingOutput = Buffer.alloc(0);
+            return;
           }
-        };
-        stream.on('data', chunk => {
-          buf = Buffer.concat([buf, chunk]);
-          let progressed = true;
-          while (progressed && buf.length > 0) {
-            progressed = false;
-            const type = buf[0];
-            if (type === 1 || type === 2) {
-              if (buf.length < 8) break;                       // header split — wait
-              const len = buf.readUInt32BE(4);
-              if (buf.length < 8 + len) break;                 // payload split — wait
-              emit(type, buf.subarray(8, 8 + len).toString());
-              buf = buf.subarray(8 + len);
-              progressed = true;
-            } else {
-              emit(1, buf.toString());                         // raw/Tty mode passthrough
-              buf = Buffer.alloc(0);
-            }
+          outputMode = 'multiplexed';
+        }
+
+        while (outputMode === 'multiplexed' && pendingOutput.length >= 8) {
+          const type = pendingOutput[0];
+          const reservedBytesAreZero =
+            pendingOutput[1] === 0 &&
+            pendingOutput[2] === 0 &&
+            pendingOutput[3] === 0;
+          const frameSize = pendingOutput.readUInt32BE(4);
+
+          if (
+            (type !== 1 && type !== 2) ||
+            !reservedBytesAreZero ||
+            frameSize > MAX_FRAME_SIZE
+          ) {
+            // A malformed frame after valid frames should not make us lose
+            // any remaining output. Preserve these bytes as stdout.
+            outputMode = 'raw';
+            capture('stdout', stdout, pendingOutput);
+            pendingOutput = Buffer.alloc(0);
+            return;
           }
-        });
+
+          if (pendingOutput.length < 8 + frameSize) return;
+          const payload = pendingOutput.subarray(8, 8 + frameSize);
+          capture(type === 2 ? 'stderr' : 'stdout', type === 2 ? stderr : stdout, payload);
+          pendingOutput = pendingOutput.subarray(8 + frameSize);
+        }
+      };
+
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          if (settled) return;
+          try { stream?.destroy(); } catch (_) {}
+          fail(new Error('Exec timeout'));
+        }, timeoutMs);
+      }
+
+      exec.start({ hijack: true, stdin: !!options.input }, (err, outputStream) => {
+        if (err) return fail(err);
+        stream = outputStream;
+        stream.on('data', processOutput);
 
         stream.on('end', async () => {
-          clearTimer();
-          if (buf.length > 0) emit(1, buf.toString());         // flush any tail bytes
-          const inspect = await exec.inspect();
-          resolve({
-            exitCode: inspect.ExitCode,
-            stdout,
-            stderr,
-            success: inspect.ExitCode === 0
-          });
+          if (settled) return;
+          try {
+            if (pendingOutput.length > 0) {
+              if (outputMode === 'detect') {
+                capture('stdout', stdout, pendingOutput);
+              } else if (outputMode === 'multiplexed') {
+                // Incomplete final frames are unusual, but retain the payload
+                // rather than silently discarding the command's last output.
+                const type = pendingOutput.length >= 8 ? pendingOutput[0] : 1;
+                const hasHeader = pendingOutput.length >= 8 &&
+                  (type === 1 || type === 2) &&
+                  pendingOutput[1] === 0 &&
+                  pendingOutput[2] === 0 &&
+                  pendingOutput[3] === 0;
+                const payload = hasHeader ? pendingOutput.subarray(8) : pendingOutput;
+                capture(type === 2 ? 'stderr' : 'stdout', type === 2 ? stderr : stdout, payload);
+              }
+              pendingOutput = Buffer.alloc(0);
+            }
+            closeTimer();
+            const inspect = await exec.inspect();
+            if (settled) return;
+            settled = true;
+            resolve({
+              exitCode: inspect.ExitCode,
+              stdout: stdout.join(''),
+              stderr: stderr.join(''),
+              success: inspect.ExitCode === 0
+            });
+          } catch (inspectError) {
+            fail(inspectError);
+          }
         });
 
-        stream.on('error', err => { clearTimer(); reject(err); });
+        stream.on('error', fail);
 
         if (options.input) {
           stream.write(options.input);

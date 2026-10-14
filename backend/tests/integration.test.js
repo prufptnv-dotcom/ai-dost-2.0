@@ -13,6 +13,7 @@ const assert = require('node:assert/strict');
 const { app, server, db, io } = require('../server.js');
 const { getWorkflowEngine } = require('../services/workflowEngine');
 const cacheService = require('../services/cacheService');
+const sandboxManager = require('../sandbox/SandboxManager');
 
 let base = '';
 
@@ -267,9 +268,12 @@ test('GET /api/v1/memory/project/default -> 200 (auto-created shared workspace)'
 });
 
 test('DELETE /api/v1/memory/project unknown session id -> still reports an error envelope', async () => {
-  // Writes keep their 404 semantics — only the GET read was softened.
-  const { status, body } = await req('DELETE', '/api/v1/memory/project/copilot-session-000000000000');
-  assert.ok(status === 403 || status === 404, `expected 403/404, got ${status}`);
+  // Use a unique ID: CI databases can retain rows from previous runs, and a
+  // fixed copilot-session ID may already exist from a local/manual workspace.
+  // Writes must preserve 404 semantics; only GET reads may return an empty view.
+  const missingId = `missing-delete-it-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const { status, body } = await req('DELETE', `/api/v1/memory/project/${missingId}`);
+  assert.equal(status, 404, `expected unknown project to return 404, got ${status}`);
   assert.ok(body && (body.error || body.success === false), 'error envelope preserved');
 });
 
@@ -496,11 +500,11 @@ test('POST /api/sandbox/create with local fallback -> 200 and lifecycle roundtri
   const sbId = body.sandbox.id;
 
   // File write
-  const { status: writeStatus } = await req('POST', `/api/sandbox/${sbId}/files/write`, {
+  const { status: writeStatus, body: writeBody } = await req('POST', `/api/sandbox/${sbId}/files/write`, {
     filePath: 'test.js',
     content: 'console.log("hello sandbox");'
   });
-  assert.equal(writeStatus, 200);
+  assert.equal(writeStatus, 200, `Sandbox file write failed: ${JSON.stringify(writeBody)}`);
 
   // File read
   const { status: readStatus, body: readBody } = await req('GET', `/api/sandbox/${sbId}/files/read?path=test.js`);
@@ -513,7 +517,19 @@ test('POST /api/sandbox/create with local fallback -> 200 and lifecycle roundtri
   });
   assert.equal(execStatus, 200);
   assert.equal(execBody.success, true);
-  assert.match(execBody.result.stdout, /hello sandbox/);
+  const sandboxInstance = sandboxManager.getSandbox(sbId);
+  let mountInfo = [];
+  try {
+    const dockerInfo = sandboxInstance?.container ? await sandboxInstance.container.inspect() : null;
+    mountInfo = (dockerInfo?.Mounts || []).map(({ Type, Source, Destination, RW }) => ({ Type, Source, Destination, RW }));
+  } catch (_) {
+    // Diagnostics must never turn an otherwise valid fallback sandbox into a test failure.
+  }
+  assert.match(
+    execBody.result.stdout,
+    /hello sandbox/,
+    `Sandbox exec did not return expected stdout. isolation=${body.sandbox.isolation}; hostPath=${body.sandbox.path}; mounts=${JSON.stringify(mountInfo)}; result=${JSON.stringify(execBody.result)}`
+  );
 
   // Destroy
   const { status: delStatus } = await req('DELETE', `/api/sandbox/${sbId}`);
@@ -1010,4 +1026,82 @@ test('P8: client update -> server doc, agent write -> client receives it (real s
   try {
     db.prepare("DELETE FROM collab_docs WHERE project_id LIKE 'itest-p8%'").run();
   } catch (_) { /* table missing (old db) — migration creates it on boot */ }
+});
+
+
+// ── Sandbox isolation policy regressions ──────────────────────────────────
+test('sandbox policy rejects host networking, binds dev ports to loopback, and sanitizes project paths', () => {
+  assert.equal(sandboxManager._resolveNetwork('bridge'), 'bridge');
+  assert.equal(sandboxManager._resolveNetwork('none'), 'none');
+  assert.equal(sandboxManager._resolveNetwork('host'), 'bridge');
+  assert.equal(sandboxManager._resolveNetwork('arbitrary-network'), 'bridge');
+
+  assert.deepEqual(sandboxManager._buildPortBindings([5173, '8080', 0, 65536, 'invalid']), {
+    '5173/tcp': [{ HostIp: '127.0.0.1', HostPort: '' }],
+    '8080/tcp': [{ HostIp: '127.0.0.1', HostPort: '' }],
+  });
+
+  const safeSegment = sandboxManager._safeProjectSegment('../../etc/ssh/keys');
+  assert.match(safeSegment, /^[A-Za-z0-9_-]+$/);
+  assert.ok(safeSegment.length <= 64);
+});
+
+test('sandbox workdir resolver rejects symlink escapes outside os.tmpdir', async (t) => {
+  const fs = require('node:fs/promises');
+  const path = require('node:path');
+  const os = require('node:os');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-dost-sandbox-workdir-test-'));
+  const link = path.join(root, 'outside-link');
+  try {
+    try {
+      await fs.symlink(await fs.realpath(os.homedir()), link, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch (err) {
+      if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes(err.code)) {
+        t.skip('symlink creation is not permitted in this Windows environment');
+        return;
+      }
+      throw err;
+    }
+    assert.equal(sandboxManager._resolveWorkdir(link), null);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test('dev-server workspace resolver rejects traversal and symlink escapes', async (t) => {
+  const fs = require('node:fs/promises');
+  const path = require('node:path');
+  const os = require('node:os');
+  const devServerManager = require('../sandbox/devServerManager');
+  const originalWorkspaceDir = devServerManager._workspaceDir;
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-dost-workspace-path-test-'));
+  try {
+    const safeDir = path.join(root, 'safe-project');
+    await fs.mkdir(safeDir);
+    devServerManager._workspaceDir = () => root;
+    assert.equal(await devServerManager._resolveWorkspacePath('test-project', 'safe-project'), await fs.realpath(safeDir));
+    assert.equal(await devServerManager._resolveWorkspacePath('test-project', '../../'), null);
+
+    const escapeLink = path.join(root, 'external-link');
+    try {
+      await fs.symlink(await fs.realpath(os.homedir()), escapeLink, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch (err) {
+      if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes(err.code)) {
+        t.skip('symlink creation is not permitted in this Windows environment');
+        return;
+      }
+      throw err;
+    }
+    assert.equal(await devServerManager._resolveWorkspacePath('test-project', 'external-link'), null);
+  } finally {
+    devServerManager._workspaceDir = originalWorkspaceDir;
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test('dev-server path guard rejects null bytes', () => {
+  const devServerManager = require('../sandbox/devServerManager');
+  assert.equal(devServerManager._safeProjectPath('\0'), null);
 });

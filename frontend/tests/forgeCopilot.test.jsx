@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import ForgeCopilot from '../components/forge/ForgeCopilot';
+import ForgeCopilot, { normalizeWorkspacePath } from '../components/forge/ForgeCopilot';
 
 // Mock API
 jest.mock('../services/api', () => ({
@@ -22,6 +22,14 @@ jest.mock('../services/api', () => ({
     { id: 'legacy-project', name: 'legacy-project' }
   ]),
 }));
+
+describe('normalizeWorkspacePath', () => {
+  test('normalizes separators without conflating case-sensitive paths', () => {
+    expect(normalizeWorkspacePath('src\\App.jsx')).toBe('src/App.jsx');
+    expect(normalizeWorkspacePath('./src/App.jsx')).toBe('src/App.jsx');
+    expect(normalizeWorkspacePath('src/App.jsx')).not.toBe(normalizeWorkspacePath('src/app.jsx'));
+  });
+});
 
 describe('ForgeCopilot Autonomous Builder UI', () => {
   beforeEach(() => {
@@ -195,5 +203,174 @@ describe('ForgeCopilot Autonomous Builder UI', () => {
     fireEvent.click(switcher);
 
     expect(screen.getByText('PROJECT WORKSPACES')).toBeInTheDocument();
+
   });
+
+  test('does not treat a successful specialist event as the end of the whole build', async () => {
+    const previousFetch = global.fetch;
+    const api = require('../services/api');
+    const previousFetchProject = api.fetchProject.getMockImplementation();
+    api.fetchProject.mockResolvedValue({
+      id: 'test-project',
+      name: 'test-project',
+      files: [
+        { path: 'src/App.jsx', content: 'export default function App() { return <button>Ready</button>; }' },
+        { path: 'package.json', content: '{"name":"test","scripts":{"dev":"vite"}}' },
+      ],
+    });
+    const events = [
+      { type: 'run_started', taskId: 'forge-e2e-1', runId: 'director-e2e-1' },
+      { type: 'director_plan', summary: 'Implement and verify', tasks: [{ id: 'coder', specialty: 'CODER' }, { id: 'verifier', specialty: 'VERIFIER' }] },
+      // This is a non-terminal event: the first worker succeeding must not end the stream.
+      { type: 'file_written', path: 'package.json', content: '{"name":"test","scripts":{"dev":"vite"}}' },
+      { type: 'director_task', status: 'SUCCEEDED', taskId: 'coder', specialty: 'CODER' },
+      { type: 'file_written', path: 'src/App.jsx', content: 'export default function App() { return <button>Ready</button>; }' },
+      { type: 'director_task', status: 'SUCCEEDED', taskId: 'verifier', specialty: 'VERIFIER' },
+      { type: 'director_complete', status: 'SUCCEEDED', taskCount: 2, changedPaths: ['package.json', 'src/App.jsx'], message: 'End of requested build — verified' },
+    ];
+    const payload = events.map((data) => `event: ${data.type}\ndata: ${JSON.stringify(data)}\n\n`).join('');
+    let sent = false;
+    const reader = {
+      read: jest.fn(async () => {
+        if (sent) return { done: true, value: undefined };
+        sent = true;
+        return { done: false, value: Buffer.from(payload) };
+      }),
+      cancel: jest.fn(async () => {}),
+    };
+
+    global.fetch = jest.fn(async (url) => {
+      if (String(url).includes('/api/agent/run')) {
+        return { ok: true, status: 200, body: { getReader: () => reader } };
+      }
+      return {
+        ok: true,
+        json: async () => ({ state: 'STOPPED', projects: [], success: true }),
+      };
+    });
+
+    try {
+      render(<ForgeCopilot projectId="test-project" projectName="test-project" />);
+      const textarea = await screen.findByPlaceholderText(/Ask Forge AI/i);
+      fireEvent.change(textarea, { target: { value: 'Add a component and verify the build' } });
+      fireEvent.click(screen.getByLabelText(/send message/i));
+
+      expect(await screen.findByText('End of requested build — verified')).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: /App\.jsx/i }).length).toBeGreaterThan(0);
+      expect(reader.read).toHaveBeenCalledTimes(1);
+    } finally {
+      global.fetch = previousFetch;
+      api.fetchProject.mockImplementation(previousFetchProject);
+    }
+  });
+
+  test('approval prompt resumes the same Forge task with its single-use token', async () => {
+    const previousFetch = global.fetch;
+    const requestBodies = [];
+    const responses = [
+      [
+        { type: 'gate_approval_required', message: 'Approval required to modify the workspace.', gate: { approval_token: 'forge-approval-token', decision: 'REQUIRE_EXPLICIT_APPROVAL' } },
+        { type: 'done', message: '⏸️ Ask mode: run paused — press Approve in the chat to start.', steps: [] },
+      ],
+      [
+        { type: 'gate_approved', message: 'Approval verified.' },
+        { type: 'director_complete', status: 'SUCCEEDED', taskCount: 1, changedPaths: ['src/App.jsx'], message: 'Approved run completed successfully' },
+      ],
+    ];
+
+    global.fetch = jest.fn(async (url, init = {}) => {
+      if (String(url).includes('/api/agent/run')) {
+        requestBodies.push(JSON.parse(init.body));
+        const events = responses.shift() || [];
+        const payload = events.map((data) => `event: ${data.type}\ndata: ${JSON.stringify(data)}\n\n`).join('');
+        let sent = false;
+        return {
+          ok: true,
+          status: 200,
+          body: {
+            getReader: () => ({
+              read: async () => {
+                if (sent) return { done: true, value: undefined };
+                sent = true;
+                return { done: false, value: Buffer.from(payload) };
+              },
+              cancel: async () => {},
+            }),
+          },
+        };
+      }
+      return { ok: true, json: async () => ({ state: 'STOPPED', projects: [], success: true }) };
+    });
+
+    try {
+      render(<ForgeCopilot projectId="test-project" projectName="test-project" />);
+      fireEvent.click(await screen.findByRole('button', { name: /Autopilot on/i }));
+      const textarea = await screen.findByPlaceholderText(/Ask Forge AI/i);
+      fireEvent.change(textarea, { target: { value: 'Build an account settings page' } });
+      fireEvent.click(screen.getByLabelText(/send message/i));
+
+      fireEvent.click(await screen.findByRole('button', { name: /Approve and continue/i }));
+      expect(await screen.findByText('Approved run completed successfully')).toBeInTheDocument();
+      expect(requestBodies).toHaveLength(2);
+      expect(requestBodies[0].permissionLevel).toBe('ask');
+      expect(requestBodies[1].permissionLevel).toBe('ask');
+      expect(requestBodies[1].taskId).toBe(requestBodies[0].taskId);
+      expect(requestBodies[1].approvalToken).toBe('forge-approval-token');
+      expect(screen.getAllByText('Build an account settings page')).toHaveLength(1);
+    } finally {
+      global.fetch = previousFetch;
+    }
+  });
+
+  test.each([
+    {
+      status: 'FAILED',
+      message: 'Director execution failed during verification.',
+      toast: 'Forge run failed or was blocked',
+    },
+    {
+      status: 'CANCELLED',
+      message: 'Director run was cancelled.',
+      toast: 'Run canceled',
+    },
+  ])('respects terminal director status $status instead of reporting success', async ({ status, message, toast }) => {
+    const previousFetch = global.fetch;
+    const api = require('../services/api');
+    const previousFetchProject = api.fetchProject.getMockImplementation();
+    api.fetchProject.mockResolvedValue({ id: 'test-project', name: 'test-project', files: [] });
+
+    const event = { type: 'director_complete', status, message, changedPaths: [] };
+    const payload = `event: director_complete\ndata: ${JSON.stringify(event)}\n\n`;
+    let sent = false;
+    const reader = {
+      read: jest.fn(async () => {
+        if (sent) return { done: true, value: undefined };
+        sent = true;
+        return { done: false, value: Buffer.from(payload) };
+      }),
+      cancel: jest.fn(async () => {}),
+    };
+
+    global.fetch = jest.fn(async (url) => {
+      if (String(url).includes('/api/agent/run')) {
+        return { ok: true, status: 200, body: { getReader: () => reader } };
+      }
+      return { ok: true, json: async () => ({ state: 'STOPPED', projects: [], success: true }) };
+    });
+
+    try {
+      render(<ForgeCopilot projectId="test-project" projectName="test-project" />);
+      const textarea = await screen.findByPlaceholderText(/Ask Forge AI/i);
+      fireEvent.change(textarea, { target: { value: 'Verify terminal run status' } });
+      fireEvent.click(screen.getByLabelText(/send message/i));
+
+      expect(await screen.findByText(message)).toBeInTheDocument();
+      expect(await screen.findByText(toast)).toBeInTheDocument();
+      expect(screen.queryByText('Forge Studio run complete')).not.toBeInTheDocument();
+    } finally {
+      global.fetch = previousFetch;
+      api.fetchProject.mockImplementation(previousFetchProject);
+    }
+  });
+
 });

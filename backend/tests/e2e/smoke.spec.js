@@ -6,7 +6,7 @@
 const { test, expect } = require('@playwright/test');
 
 const NAV_LABELS = [
-  'Chat', 'Copilot IDE', 'Agent Workbench', 'Projects', 'Studios & Tools', 'History', 'Settings'
+  'Chat', 'Forge Studio', 'Agent Workbench', 'Projects', 'Studios & Tools', 'History', 'Settings'
 ];
 
 // Sidebar nav buttons (there are duplicate-named buttons elsewhere on the page)
@@ -77,12 +77,25 @@ test.describe('Sidebar navigation', () => {
   });
 });
 
+test.describe('Forge Studio workspace', () => {
+  test('opens the primary coding workspace with project and builder controls', async ({ page }) => {
+    await page.goto('/dashboard');
+    await page.waitForLoadState('networkidle');
+    await navButton(page, 'Forge Studio').click();
+
+    await expect(page.getByLabel('Workspace navigation')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('button', { name: 'New project' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Current project' })).toBeVisible();
+    await expect(page.getByText('Builder', { exact: true }).first()).toBeVisible();
+  });
+});
+
 test.describe('Chat flow', () => {
   test('user message appears in the conversation after Enter', async ({ page }) => {
     await page.goto('/dashboard');
     await page.waitForLoadState('networkidle');
 
-    const input = page.getByPlaceholder(/Ask AI-Dost anything/i);
+    const input = page.getByLabel('Ask AI-Dost anything');
     await expect(input).toBeVisible();
     await input.fill('E2E test message');
     await input.press('Enter');

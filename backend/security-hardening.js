@@ -37,10 +37,10 @@ function parseCsv(value) {
 }
 
 function selfOrigins() {
-  // The backend's OWN origin is always legitimate: browsers attach `Origin` to
-  // same-origin module-script / fetch requests too, and rejecting our own
-  // origin500'd every proxied Live Preview sub-module (`/src/main.jsx`…)
-  // loaded straight from :5000.
+  // Local API origins are useful during development. Never add localhost to a
+  // production allowlist: same-origin requests do not need CORS permission,
+  // and a production allowlist must contain only explicitly configured origins.
+  if (isProduction) return [];
   const port = process.env.PORT || '5000';
   return [`http://localhost:${port}`, `http://127.0.0.1:${port}`];
 }

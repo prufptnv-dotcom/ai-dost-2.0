@@ -4,20 +4,6 @@ import { dirname, resolve } from 'path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BACKEND_URL = process.env.BACKEND_INTERNAL_URL || process.env.NEXT_PUBLIC_EXPRESS_BACKEND_URL || 'http://127.0.0.1:5000';
 
-async function loadPWA() {
-  const { default: withPWA } = await import('@ducanh2912/next-pwa');
-  return withPWA({
-    dest: 'public',
-    register: true,
-    skipWaiting: true,
-    disable: true, // Forced disable to prevent cached crashes
-    // P3 #197: if `disable` is ever flipped to false, the plugin must NOT
-    // clobber the hand-written public/sw.js (custom cache/fetch logic) —
-    // give the generated worker its own filename.
-    sw: 'next-pwa-sw.js',
-  });
-}
-
 const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',
@@ -312,4 +298,4 @@ const nextConfig = {
   },
 };
 
-export default loadPWA().then(withPWA => withPWA(nextConfig));
+export default nextConfig;
