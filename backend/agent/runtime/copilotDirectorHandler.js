@@ -33,6 +33,9 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
   const taskId = String(req.get('x-ai-dost-task-id') || body.taskId || `copilot-${Date.now().toString(36)}`);
   const runId = `director-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const request = String(body.userPrompt || body.prompt || '').trim();
+  const preferredModel = typeof body.preferredModel === 'string' && body.preferredModel.trim()
+    ? body.preferredModel.trim()
+    : 'auto';
   if (!request) return res.status(400).json({ success: false, error: 'Director request is required', taskId });
 
   const authorization = (dependencies.projectAuthorization || projectAuthorization).authorize(projectId, req, {
@@ -250,6 +253,7 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
     request: directorRequest,
     signal,
     maxRepairs: 3,
+    preferredModel,
     ...(presetPlan ? { plan: presetPlan } : {}),
     onEvent: countingOnEvent,
     permissionLevel,
