@@ -2561,17 +2561,21 @@ export default function ForgeCopilot({
   }, []);
 
   // Load real project list
-  const loadProjects = useCallback(async () => {
+  const loadProjects = useCallback(async (isActive = () => true) => {
     try {
       const list = await fetchProjects('default');
-      if (Array.isArray(list)) {
+      // Async requests can outlive a closed Forge view. Avoid scheduling React
+      // updates after its effect has been cleaned up.
+      if (isActive() && Array.isArray(list)) {
         setProjectList(list);
       }
     } catch (_) {}
   }, []);
 
   useEffect(() => {
-    loadProjects();
+    let active = true;
+    loadProjects(() => active);
+    return () => { active = false; };
   }, [loadProjects]);
 
   // Load theme preferences
@@ -2592,9 +2596,10 @@ export default function ForgeCopilot({
   }, [theme, customColor]);
 
   // Load real project data & files from backend
-  const loadProjectData = useCallback(async () => {
+  const loadProjectData = useCallback(async (isActive = () => true) => {
     try {
       const data = await fetchProject(currentProjectId);
+      if (!isActive()) return [];
       if (!data) return [];
       if (data.name || data.project_name) {
         setProjectName(displayProjectName(data.name || data.project_name, currentProjectId));
@@ -2613,13 +2618,17 @@ export default function ForgeCopilot({
       }
       return fileList;
     } catch (err) {
-      console.warn('Could not load project files from backend:', err?.message);
+      if (isActive()) {
+        console.warn('Could not load project files from backend:', err?.message);
+      }
       return null;
     }
   }, [currentProjectId, activeFile]);
 
   useEffect(() => {
-    loadProjectData();
+    let active = true;
+    loadProjectData(() => active);
+    return () => { active = false; };
   }, [loadProjectData]);
 
   // Check Dev Server status
