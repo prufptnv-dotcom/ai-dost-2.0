@@ -54,12 +54,20 @@ function listExistingFilesBounded(root, max = 100) {
 // SEARCH is copied verbatim, not recalled. Bounded: priority names first,
 // ≤6 files, ≤2600 chars each (truncated marker beyond), ≤9000 chars total.
 function readKeyFileContents(diskPath, files) {
-  const PRIORITY = ['package.json', 'src/styles/global.css', 'src/index.css', 'src/App.jsx', 'index.html', 'vite.config.js', 'src/main.jsx'];
+  const PRIORITY = [
+    'package.json', 'frontend/package.json', 'web/package.json',
+    'src/styles/global.css', 'src/index.css', 'src/App.jsx',
+    'index.html', 'vite.config.js', 'next.config.js', 'next.config.mjs',
+    'astro.config.mjs', 'nuxt.config.ts', 'svelte.config.js', 'src/main.jsx'
+  ];
   const pick = [];
-  for (const p of PRIORITY) if (files.includes(p)) pick.push(p);
-  for (const p of files) { if (pick.length >= 5) break; if (!pick.includes(p)) pick.push(p); }
+  for (const p of PRIORITY) if (files.includes(p) && pick.length < 7) pick.push(p);
+  for (const p of files) {
+    if (pick.length >= 7) break;
+    if (!pick.includes(p) && /(^|\/)(package\.json|next\.config\.[^/]+|astro\.config\.[^/]+|nuxt\.config\.[^/]+|svelte\.config\.[^/]+)$/.test(p)) pick.push(p);
+  }
   const out = {};
-  let budget = 4800;
+  let budget = 6000;
   for (const p of pick) {
     if (budget <= 0) break;
     try {
@@ -325,7 +333,8 @@ class CopilotDirector {
       if (packageSource) workspacePackageJson = JSON.parse(packageSource);
     } catch (_) {}
     const codeStrategy = analyzeCodeGenerationRequest(request || task.objective, {
-      ...(workspacePackageJson ? { packageJson: workspacePackageJson } : {})
+      ...(workspacePackageJson ? { packageJson: workspacePackageJson } : {}),
+      ...(existingFileContents ? { files: existingFileContents } : {})
     });
     const objectiveWithDirective = `${directive}\n${formatCodeGenerationStrategy(codeStrategy)}\n${task.objective}`;
     
