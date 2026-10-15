@@ -58,6 +58,7 @@ backend/data/*.db*
 backend/data/local-settings.json
 # P7 runtime artifacts — downloaded tunnel binary + dev-server registry
 backend/data/bin/
+backend/data/workspaces/
 backend/data/live-servers.json
 # P3 #218: this line was one malformed concatenation of two paths
 # (memory-brain/.data/ + frontend/public/downloads/) and matched nothing.

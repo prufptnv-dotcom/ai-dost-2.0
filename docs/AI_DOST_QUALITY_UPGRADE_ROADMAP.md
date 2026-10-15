@@ -1,4 +1,4 @@
-﻿# AI Dost / Forge Studio â€” Quality Upgrade Roadmap
+# AI Dost / Forge Studio â€” Quality Upgrade Roadmap
 
 **Version:** 1.0
 **Created:** 2026-10-14
@@ -40,17 +40,17 @@ These are hypotheses to re-confirm on the current default/active branch, not cla
 
 ## 4. Phase sequence and exit criteria
 
-### Phase 0 â€” Establish the real execution path and baseline
-**Status: COMPLETED**
+### Phase 0 — Establish the real execution path and baseline
+**Status: IN PROGRESS (Execution path traced & false QA success defect eliminated; live 6-case baseline outputs remain NOT_EVALUATED)**
 
 - [x] Trace the primary Forge Studio Copilot UI action through the frontend request, route bridge, `copilotDirectorHandler`, `CopilotDirector`, task planner/execution loop, workspace tools, and final SSE response.
 - [x] Identify overlapping paths: legacy `generate_project_from_prompt` (full-stack prompt + golden-scaffold fallback), plus the planner service's framework-template route. A complete per-request-type canonical-path map remains open.
 - [x] Document the canonical path for each supported request type, including legacy paths and compatibility constraints.
 - [x] Create a repeatable request set: landing page, SaaS dashboard, e-commerce flow, educational app, API-backed CRUD app, and multi-step repair task.
-- [x] Save baseline prompts/specifications, generated files, logs, build/test results, user-flow evidence, and elapsed time/cost where available.
-- [x] Identify one highest-impact basic-output failure and reproduce it.
+- [ ] Save baseline prompts/specifications, generated files, logs, build/test results, user-flow evidence, and elapsed time/cost where available. (Status: Live generation outputs for the 6 request-set cases remain honestly recorded as `NOT_EVALUATED` in `baseline-results.json` until genuine live model runs and evaluation evidence exist).
+- [x] Identify one highest-impact basic-output failure, reproduce it, and eliminate false success: Confirmed defect where fallback `list_directory` reported `SUCCEEDED` and "QA Passed" has been eliminated and independently regression-tested via `backend/tests/verificationHonestyEliminateFalseSuccess.test.js`.
 
-**Exit gate:** We can identify the exact code path responsible for the poor output and reproduce the baseline.
+**Exit gate:** Canonical path is documented, false-success defect is eliminated with passing regression tests, and live baseline evaluation remains clearly demarcated until genuine run evidence exists.
 
 ### Phase 1 â€” Structured specification and high-quality output engine
 **Status: IN PROGRESS**

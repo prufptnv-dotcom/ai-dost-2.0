@@ -62,6 +62,9 @@ class TaskPlanner {
       logger.warn('[TaskPlanner] No read-only verification steps survived sanitization — falling back to list_directory evidence check');
       return {
         goal: plan.goal,
+        isFallback: true,
+        evidenceLevel: 'INSPECTION_ONLY',
+        fallbackReason: 'No read-only verification steps survived sanitization',
         steps: [{
           id: 'verify_fallback_list',
           tool: 'list_directory',
@@ -70,7 +73,13 @@ class TaskPlanner {
         }]
       };
     }
-    return { goal: plan.goal, steps: validSteps };
+    return {
+      goal: plan.goal,
+      steps: validSteps,
+      isFallback: Boolean(plan.isFallback),
+      evidenceLevel: plan.evidenceLevel || (validSteps.every((s) => ['list_directory', 'fetch_webpage', 'web_search', 'load_skill'].includes(s.tool)) ? 'INSPECTION_ONLY' : 'FUNCTIONAL'),
+      fallbackReason: plan.fallbackReason || null,
+    };
   }
 
   async _generate(method, ...args) {
@@ -162,6 +171,9 @@ class TaskPlanner {
     return {
       goal: rawPlan.goal.trim(),
       steps: rawPlan.steps.map((step) => ({ id: step.id.trim(), tool: step.tool.trim(), description: step.description.trim(), input: step.input })),
+      isFallback: Boolean(rawPlan.isFallback),
+      evidenceLevel: rawPlan.evidenceLevel || undefined,
+      fallbackReason: rawPlan.fallbackReason || null,
     };
   }
 }

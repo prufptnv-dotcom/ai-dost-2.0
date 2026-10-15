@@ -3153,7 +3153,8 @@ export default function ForgeCopilot({
             // 6. Verification event
             if (data.type === 'director_verification') {
               setActivityStep(3);
-              const isSucceeded = data.status === 'SUCCEEDED';
+              const isSucceeded = data.status === 'SUCCEEDED' || data.status === 'PASSED';
+              const isUnverified = data.status === 'UNVERIFIED' || data.status === 'PARTIAL' || data.status === 'SKIPPED';
               setActivityDetail(`Verifying code integrity (${data.status})...`);
               setLiveActivities((prev) => [
                 ...prev,
@@ -3161,8 +3162,12 @@ export default function ForgeCopilot({
                   id: `verify-${Date.now()}`,
                   type: 'verify',
                   badge: 'VERIFY',
-                  title: isSucceeded ? 'Build and interface verification passed' : `Verification status: ${data.status}`,
-                  status: isSucceeded ? 'done' : data.status === 'FAILED' ? 'failed' : 'running',
+                  title: isSucceeded
+                    ? 'Build and interface verification passed'
+                    : isUnverified
+                    ? `Verification unverified: ${data.summary || 'passive file inspection only, no tests or build executed'}`
+                    : `Verification status: ${data.status}`,
+                  status: isSucceeded ? 'done' : isUnverified ? 'unverified' : data.status === 'FAILED' ? 'failed' : 'running',
                   time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
                 },
               ]);
