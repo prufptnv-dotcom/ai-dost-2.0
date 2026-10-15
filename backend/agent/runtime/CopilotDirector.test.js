@@ -517,3 +517,46 @@ test('fallbackPlan keeps a small Hinglish code request fast', () => {
   const plan = fallbackPlan('ek date formatting function likho');
   assert.equal(plan.tasks.length, 1);
 });
+
+test('worker receives framework guidance from an existing nested workspace manifest', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-dost-stack-context-'));
+  try {
+    fs.mkdirSync(path.join(tempDir, 'frontend'), { recursive: true });
+    fs.writeFileSync(path.join(tempDir, 'frontend', 'package.json'), JSON.stringify({ dependencies: { next: '^16.0.0', react: '^19.0.0' } }));
+    fs.writeFileSync(path.join(tempDir, 'frontend', 'src.js'), 'export default 1;');
+    const plannerCalls = [];
+    const workerDirector = new CopilotDirector({
+      aiService: { chat: async () => '{}' },
+      coordinator: {
+        async createSupervisorTask() { return { task: { id: 'supervisor-1' }, run: { id: 'supervisor-run-1' } }; },
+        async delegate() { return { workerRun: { id: 'worker-1' } }; },
+        async startWorker(_id, options) { return options.runner(); },
+      },
+      workspaceManager: { getWorkspaceMetadata: () => ({ fileCount: 2, diskPath: tempDir }) },
+      taskPlanner: {
+        async generatePlan(objective, context) { plannerCalls.push({ objective, context }); return { steps: [] }; },
+        async generateVerificationPlan() { return { steps: [] }; },
+      },
+      plannerExecutionLoop: {
+        async runWithPlan(_projectId, _userId, _plan, _repairs, _cancel, runId) {
+          return String(runId).startsWith('copilot_verify_') ? { status: 'SUCCEEDED' } : { status: 'SUCCEEDED' };
+        },
+      },
+      agentTaskDao: { updateStatus() {} },
+      agentRunDao: { updateStatus() {} },
+    });
+    const result = await workerDirector.run({ userId: 'u1', projectId: 'p1', request: 'Add a settings page to the existing app', plan: {
+      summary: 'stack preservation',
+      tasks: [{ id: 'edit', specialty: 'frontend', objective: 'Add settings page', dependsOn: [], expectedOutput: 'Page works' }],
+    } });
+    assert.equal(result.status, 'COMPLETED');
+    assert.match(plannerCalls[0].objective, /Next\.js/);
+    assert.match(plannerCalls[0].objective, /preserve the detected workspace stack/);
+    assert.equal(plannerCalls[0].context.existingFiles.includes('frontend/package.json'), true);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
