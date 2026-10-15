@@ -67,9 +67,29 @@ function ensureTestToolsRegistered() {
       name: 'verify_project',
       description: 'Verify project against requirement-level functional acceptance criteria',
       permissions: ['read', 'execute'],
-      execute: async (input) => ({ success: true, verified: true, functionalAcceptanceSatisfied: true })
+      execute: async (input) => ({
+        success: true,
+        checks: [
+          { name: 'requirement_acceptance', requirementId: 'auth', success: true, exitCode: 0 },
+          { name: 'requirement_acceptance', requirementId: 'dashboard', success: true, exitCode: 0 }
+        ],
+        functionalAcceptanceSatisfied: true,
+        satisfiedRequirements: ['auth', 'dashboard']
+      })
     });
   }
+}
+
+function setToolMock(name, executeFn) {
+  const existing = toolRegistry.get(name) || {};
+  toolRegistry.tools.set(name, {
+    ...existing,
+    name,
+    description: existing.description || 'Mock test tool',
+    permissions: existing.permissions || ['read', 'execute'],
+    validateInput: () => ({ valid: true }),
+    execute: executeFn
+  });
 }
 
 async function setupDirectorEnvironment(customVerificationPlanFn) {
@@ -218,11 +238,216 @@ test('VerificationClassifier: Classifies tool names into explicit evidence categ
   assert.equal(classifyTool('run_tests'), EVIDENCE_CATEGORIES.TEST);
   assert.equal(classifyTool('test_project'), EVIDENCE_CATEGORIES.TEST);
 
-  assert.equal(classifyTool('verify_project'), EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE);
+  // verify_project alone without validated execution evidence or explicit requirements defaults safely to INSPECTION
+  assert.equal(classifyTool('verify_project'), EVIDENCE_CATEGORIES.INSPECTION);
   assert.equal(classifyTool('verify_functional_acceptance'), EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE);
+
+  // verify_project with validated execution results classifies according to executed evidence
+  assert.equal(classifyTool('verify_project', {}, { success: true, functionalAcceptanceSatisfied: true }), EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE);
+  assert.equal(classifyTool('verify_project', {}, { success: true, checks: [{ name: 'functional_acceptance', requirementId: 'REQ-1', success: true }] }), EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE);
+  assert.equal(classifyTool('verify_project', {}, { success: true, checks: [] }), EVIDENCE_CATEGORIES.INSPECTION);
+  assert.equal(classifyTool('verify_project', {}, { success: true, checks: [{ name: 'none', stdout: 'No verification scripts found.' }] }), EVIDENCE_CATEGORIES.INSPECTION);
+  assert.equal(classifyTool('verify_project', {}, { success: true, checks: [{ name: 'build', success: true }, { name: 'test', success: true }] }), EVIDENCE_CATEGORIES.TEST);
 
   // Unknown tools default conservatively to INSPECTION, never assumed functional
   assert.equal(classifyTool('unknown_custom_inspector'), EVIDENCE_CATEGORIES.INSPECTION);
+});
+
+// Mandatory Test 1: read_file with input.category = FUNCTIONAL_ACCEPTANCE must not pass acceptance
+test('Mandatory 1: read_file with input.category = FUNCTIONAL_ACCEPTANCE must not pass acceptance', () => {
+  assert.equal(classifyTool('read_file', { category: 'FUNCTIONAL_ACCEPTANCE' }), EVIDENCE_CATEGORIES.INSPECTION);
+
+  const result = evaluateVerificationRun({
+    executedSteps: [
+      { tool: 'read_file', input: { path: 'package.json', category: 'FUNCTIONAL_ACCEPTANCE' }, output: { content: '{"name":"app"}' }, success: true }
+    ]
+  });
+  assert.equal(result.status, 'UNVERIFIED');
+  assert.equal(result.verification_status, 'UNVERIFIED');
+  assert.equal(result.acceptanceStatus, 'NOT_EVALUATED');
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED');
+});
+
+// Mandatory Test 2: An arbitrary tool output containing evidenceCategory: FUNCTIONAL_ACCEPTANCE must not promote it to acceptance
+test('Mandatory 2: Arbitrary tool output with evidenceCategory = FUNCTIONAL_ACCEPTANCE must not promote to acceptance', () => {
+  assert.equal(classifyTool('custom_reporter', {}, { evidenceCategory: 'FUNCTIONAL_ACCEPTANCE' }), EVIDENCE_CATEGORIES.INSPECTION);
+
+  const result = evaluateVerificationRun({
+    executedSteps: [
+      { tool: 'custom_reporter', input: {}, output: { evidenceCategory: 'FUNCTIONAL_ACCEPTANCE', data: 'ok' }, success: true }
+    ]
+  });
+  assert.equal(result.status, 'UNVERIFIED');
+  assert.equal(result.verification_status, 'UNVERIFIED');
+  assert.equal(result.acceptanceStatus, 'NOT_EVALUATED');
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED');
+});
+
+// Mandatory Test 3: verify_project returning { success: true, checks: [] } must not pass acceptance
+test('Mandatory 3: verify_project returning { success: true, checks: [] } must not pass acceptance', () => {
+  assert.equal(classifyTool('verify_project', {}, { success: true, checks: [] }), EVIDENCE_CATEGORIES.INSPECTION);
+
+  const result = evaluateVerificationRun({
+    executedSteps: [
+      { tool: 'verify_project', input: {}, output: { success: true, checks: [] }, success: true }
+    ]
+  });
+  assert.equal(result.status, 'UNVERIFIED');
+  assert.equal(result.verification_status, 'UNVERIFIED');
+  assert.equal(result.acceptanceStatus, 'NOT_EVALUATED');
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED');
+});
+
+// Mandatory Test 4: A none check with success: true and "No verification scripts found." must not pass acceptance
+test('Mandatory 4: A none check with success: true and "No verification scripts found." must not pass acceptance', () => {
+  const noneCheckOutput = {
+    success: true,
+    checks: [{
+      name: 'none',
+      command: 'none',
+      success: true,
+      exitCode: 0,
+      stdout: 'No verification scripts found.',
+      stderr: ''
+    }]
+  };
+  assert.equal(classifyTool('verify_project', {}, noneCheckOutput), EVIDENCE_CATEGORIES.INSPECTION);
+
+  const result = evaluateVerificationRun({
+    executedSteps: [
+      { tool: 'verify_project', input: {}, output: noneCheckOutput, success: true }
+    ]
+  });
+  assert.equal(result.status, 'UNVERIFIED');
+  assert.equal(result.verification_status, 'UNVERIFIED');
+  assert.equal(result.acceptanceStatus, 'NOT_EVALUATED');
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED');
+});
+
+// Mandatory Test 5: verify_project with build/test checks passed but no functional acceptance evidence must remain PARTIAL
+test('Mandatory 5: verify_project with build/test checks passed but no functional acceptance evidence must remain PARTIAL', () => {
+  const buildTestOutput = {
+    success: true,
+    checks: [
+      { name: 'lint', command: 'npm run lint', success: true, exitCode: 0, stdout: 'Lint passed' },
+      { name: 'build', command: 'npm run build', success: true, exitCode: 0, stdout: 'Build passed' },
+      { name: 'test', command: 'npm test', success: true, exitCode: 0, stdout: '12 tests passed' }
+    ]
+  };
+  assert.equal(classifyTool('verify_project', {}, buildTestOutput), EVIDENCE_CATEGORIES.TEST);
+
+  const result = evaluateVerificationRun({
+    executedSteps: [
+      { tool: 'verify_project', input: {}, output: buildTestOutput, success: true }
+    ]
+  });
+  assert.equal(result.status, 'PARTIAL');
+  assert.equal(result.verification_status, 'PARTIAL');
+  assert.equal(result.evidenceLevel, 'TEST_PASSED_ACCEPTANCE_UNTESTED');
+  assert.equal(result.acceptanceStatus, 'NOT_EVALUATED');
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED');
+  assert.match(result.summary, /partial|acceptance/i);
+});
+
+// Mandatory Test 6: Explicit requirement-level checks with validated evidence all passing may return SUCCEEDED
+test('Mandatory 6: Explicit requirement-level checks with validated evidence all passing returns SUCCEEDED and SATISFIED', () => {
+  const passingReqChecksOutput = {
+    success: true,
+    checks: [
+      { name: 'requirement_acceptance', requirementId: 'REQ-AUTH', requirement: 'User login and JWT authentication', success: true, exitCode: 0 },
+      { name: 'requirement_acceptance', requirementId: 'REQ-CHART', requirement: 'Interactive SVG chart rendering', success: true, exitCode: 0 }
+    ],
+    functionalAcceptanceSatisfied: true,
+    satisfiedRequirements: ['REQ-AUTH', 'REQ-CHART']
+  };
+  assert.equal(
+    classifyTool('verify_project', { requirements: ['REQ-AUTH', 'REQ-CHART'] }, passingReqChecksOutput),
+    EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE
+  );
+
+  const result = evaluateVerificationRun({
+    executedSteps: [
+      { tool: 'list_directory', input: {}, output: {}, success: true },
+      { tool: 'sandbox_dev_build', input: {}, output: { success: true }, success: true },
+      { tool: 'verify_project', input: { requirements: ['REQ-AUTH', 'REQ-CHART'] }, output: passingReqChecksOutput, success: true }
+    ]
+  });
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.equal(result.verification_status, 'PASSED');
+  assert.equal(result.evidenceLevel, 'FUNCTIONAL_ACCEPTANCE');
+  assert.equal(result.acceptanceStatus, 'SATISFIED');
+});
+
+// Mandatory Test 7: Missing, malformed, unsuccessful, or incomplete acceptance evidence must never return a green QA status
+test('Mandatory 7: Missing, malformed, unsuccessful, or incomplete acceptance evidence must never return green QA pass', () => {
+  // 7a: Failed requirement check → FAILED
+  const failCheckResult = evaluateVerificationRun({
+    executedSteps: [
+      {
+        tool: 'verify_project',
+        input: { requirements: ['REQ-AUTH'] },
+        output: {
+          success: false,
+          checks: [{ name: 'requirement_acceptance', requirementId: 'REQ-AUTH', success: false, exitCode: 1, stderr: 'Auth returned 401' }]
+        },
+        success: false
+      }
+    ]
+  });
+  assert.equal(failCheckResult.status, 'FAILED');
+  assert.equal(failCheckResult.acceptanceStatus, 'FAILED');
+
+  // 7b: Sub-check failure inside nominal success:true output → FAILED (must not trust nominal wrapper)
+  const wrappedFailResult = evaluateVerificationRun({
+    executedSteps: [
+      {
+        tool: 'verify_project',
+        input: {},
+        output: {
+          success: true,
+          checks: [{ name: 'test', command: 'npm test', success: false, exitCode: 1, stderr: '1 of 5 tests failed' }]
+        },
+        success: true
+      }
+    ]
+  });
+  assert.equal(wrappedFailResult.status, 'FAILED');
+  assert.equal(wrappedFailResult.acceptanceStatus, 'FAILED');
+
+  // 7c: Incomplete requirement coverage → PARTIAL (remains NOT_EVALUATED, never SATISFIED)
+  const incompleteResult = evaluateVerificationRun({
+    executedSteps: [
+      {
+        tool: 'verify_project',
+        input: { requirements: ['REQ-AUTH', 'REQ-BILLING'] },
+        output: {
+          success: true,
+          checks: [
+            { name: 'test', success: true },
+            { name: 'requirement_acceptance', requirementId: 'REQ-AUTH', success: true }
+          ]
+        },
+        success: true
+      }
+    ]
+  });
+  assert.equal(incompleteResult.status, 'PARTIAL');
+  assert.equal(incompleteResult.acceptanceStatus, 'NOT_EVALUATED');
+  assert.notEqual(incompleteResult.acceptanceStatus, 'SATISFIED');
+
+  // 7d: Malformed checks (null / non-array) → UNVERIFIED
+  const malformedResult = evaluateVerificationRun({
+    executedSteps: [
+      {
+        tool: 'verify_project',
+        input: {},
+        output: { success: true, checks: 'malformed_string_not_array' },
+        success: true
+      }
+    ]
+  });
+  assert.equal(malformedResult.status, 'UNVERIFIED');
+  assert.equal(malformedResult.acceptanceStatus, 'NOT_EVALUATED');
 });
 
 test('VerificationClassifier: Evaluation Case 1 — list_directory only → UNVERIFIED', () => {
@@ -505,4 +730,140 @@ test('Director Integration: Verification check fails → verification FAILED (ne
   const finalVerifyEvent = events.filter((e) => e.type === 'director_verification').pop();
   assert.ok(finalVerifyEvent, 'Must emit director_verification event');
   assert.equal(finalVerifyEvent.status, 'FAILED');
+});
+
+test('Director Integration: read_file with input.category = FUNCTIONAL_ACCEPTANCE remains UNVERIFIED', async () => {
+  const events = [];
+  const onEvent = (evt) => events.push(evt);
+
+  const spoofedInputVerification = async () => ({
+    goal: 'Verify outcome',
+    steps: [
+      { id: 'v1', tool: 'read_file', description: 'Read file with spoofed category', input: { path: 'package.json', category: 'FUNCTIONAL_ACCEPTANCE' } }
+    ]
+  });
+
+  const { director, userId, projectId, workspaceManager } = await setupDirectorEnvironment(spoofedInputVerification);
+  const wsDir = workspaceManager.getWorkspacePath(projectId);
+  fs.mkdirSync(wsDir, { recursive: true });
+  fs.writeFileSync(path.join(wsDir, 'package.json'), JSON.stringify({ name: 'app' }));
+
+  const result = await director.run({ userId, projectId, request: 'Build app', onEvent });
+  const finalVerifyEvent = events.filter((e) => e.type === 'director_verification').pop();
+
+  assert.equal(finalVerifyEvent.status, 'UNVERIFIED');
+  assert.equal(result.verification_status, 'UNVERIFIED');
+  assert.notEqual(finalVerifyEvent.status, 'SUCCEEDED');
+});
+
+test('Director Integration: Arbitrary tool returning evidenceCategory = FUNCTIONAL_ACCEPTANCE remains UNVERIFIED', async () => {
+  const events = [];
+  const onEvent = (evt) => events.push(evt);
+
+  setToolMock('untrusted_scanner', async () => ({
+    success: true,
+    evidenceCategory: 'FUNCTIONAL_ACCEPTANCE',
+    info: 'Scan complete'
+  }));
+
+  const untrustedVerification = async () => ({
+    goal: 'Verify outcome',
+    steps: [
+      { id: 'v1', tool: 'untrusted_scanner', description: 'Run untrusted scanner', input: {} }
+    ]
+  });
+
+  const { director, userId, projectId } = await setupDirectorEnvironment(untrustedVerification);
+  const result = await director.run({ userId, projectId, request: 'Run scanner', onEvent });
+  const finalVerifyEvent = events.filter((e) => e.type === 'director_verification').pop();
+
+  assert.equal(finalVerifyEvent.status, 'UNVERIFIED');
+  assert.equal(result.verification_status, 'UNVERIFIED');
+  assert.notEqual(finalVerifyEvent.status, 'SUCCEEDED');
+});
+
+test('Director Integration: verify_project returning checks: [] remains UNVERIFIED', async () => {
+  const events = [];
+  const onEvent = (evt) => events.push(evt);
+
+  setToolMock('verify_project', async () => ({
+    success: true,
+    checks: []
+  }));
+
+  const emptyChecksVerification = async () => ({
+    goal: 'Verify outcome',
+    steps: [
+      { id: 'v1', tool: 'verify_project', description: 'Verify with empty checks', input: {} }
+    ]
+  });
+
+  const { director, userId, projectId } = await setupDirectorEnvironment(emptyChecksVerification);
+  const result = await director.run({ userId, projectId, request: 'Verify project', onEvent });
+  const finalVerifyEvent = events.filter((e) => e.type === 'director_verification').pop();
+
+  assert.equal(finalVerifyEvent.status, 'UNVERIFIED');
+  assert.equal(result.verification_status, 'UNVERIFIED');
+  assert.notEqual(finalVerifyEvent.status, 'SUCCEEDED');
+});
+
+test('Director Integration: verify_project returning none check ("No verification scripts found.") remains UNVERIFIED', async () => {
+  const events = [];
+  const onEvent = (evt) => events.push(evt);
+
+  setToolMock('verify_project', async () => ({
+    success: true,
+    checks: [{
+      name: 'none',
+      command: 'none',
+      success: true,
+      exitCode: 0,
+      stdout: 'No verification scripts found.',
+      stderr: ''
+    }]
+  }));
+
+  const noneCheckVerification = async () => ({
+    goal: 'Verify outcome',
+    steps: [
+      { id: 'v1', tool: 'verify_project', description: 'Verify with none check', input: {} }
+    ]
+  });
+
+  const { director, userId, projectId } = await setupDirectorEnvironment(noneCheckVerification);
+  const result = await director.run({ userId, projectId, request: 'Verify project', onEvent });
+  const finalVerifyEvent = events.filter((e) => e.type === 'director_verification').pop();
+
+  assert.equal(finalVerifyEvent.status, 'UNVERIFIED');
+  assert.equal(result.verification_status, 'UNVERIFIED');
+  assert.notEqual(finalVerifyEvent.status, 'SUCCEEDED');
+});
+
+test('Director Integration: verify_project returning only build/test checks remains PARTIAL', async () => {
+  const events = [];
+  const onEvent = (evt) => events.push(evt);
+
+  setToolMock('verify_project', async () => ({
+    success: true,
+    checks: [
+      { name: 'lint', command: 'npm run lint', success: true, exitCode: 0, stdout: 'Lint passed' },
+      { name: 'build', command: 'npm run build', success: true, exitCode: 0, stdout: 'Build passed' },
+      { name: 'test', command: 'npm test', success: true, exitCode: 0, stdout: 'All tests passed' }
+    ]
+  }));
+
+  const buildTestVerification = async () => ({
+    goal: 'Verify outcome',
+    steps: [
+      { id: 'v1', tool: 'verify_project', description: 'Verify build and test', input: {} }
+    ]
+  });
+
+  const { director, userId, projectId } = await setupDirectorEnvironment(buildTestVerification);
+  const result = await director.run({ userId, projectId, request: 'Verify project build/test', onEvent });
+  const finalVerifyEvent = events.filter((e) => e.type === 'director_verification').pop();
+
+  assert.equal(finalVerifyEvent.status, 'PARTIAL');
+  assert.equal(result.verification_status, 'PARTIAL');
+  assert.notEqual(finalVerifyEvent.status, 'SUCCEEDED');
 });
