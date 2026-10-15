@@ -70,3 +70,26 @@ test('strategy formatting is deterministic JSON with explicit boundaries', () =>
   assert.match(formatted, /END CODE GENERATION STRATEGY/);
   assert.equal(formatted, formatCodeGenerationStrategy(analyzeCodeGenerationRequest('Create a Vue dashboard')));
 });
+
+
+test('greedy, heap, union-find, and string-matching requests receive domain-specific correctness rules', () => {
+  const greedy = analyzeCodeGenerationRequest('Implement greedy interval scheduling');
+  assert.ok(greedy.algorithmRules.some((rule) => /greedy-choice property/.test(rule)));
+
+  const heap = analyzeCodeGenerationRequest('Implement top-k using a priority queue');
+  assert.ok(heap.algorithmRules.some((rule) => /min-heap from max-heap/.test(rule)));
+
+  const dsu = analyzeCodeGenerationRequest('Build a union-find data structure');
+  assert.ok(dsu.algorithmRules.some((rule) => /path compression/.test(rule)));
+
+  const strings = analyzeCodeGenerationRequest('Implement KMP substring search');
+  assert.ok(strings.algorithmRules.some((rule) => /overlapping matches/.test(rule)));
+});
+
+test('Hindi algorithm and performance requests are classified for stronger guidance', () => {
+  const strategy = analyzeCodeGenerationRequest('इस लॉजिक को तेज बनाओ और एल्गोरिदम ऑप्टिमाइज़ करो');
+  assert.equal(strategy.intent.algorithmic, true);
+  assert.equal(strategy.intent.performanceSensitive, true);
+  assert.equal(strategy.intent.complexity, 'high');
+  assert.ok(strategy.algorithmRules.some((rule) => /invariants/.test(rule)));
+});
