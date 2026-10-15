@@ -122,7 +122,7 @@ function escapeControlCharsInStrings(str) {
       } else {
         esc = false;
         if (c === '\n') {
-          out += '\\n';
+          out += '\n';
         } else if (c === '\r') {
           // ignore
         } else if (c === '\t') {
@@ -261,7 +261,7 @@ class CopilotDirector {
     if (!String(request || '').trim()) throw new Error('Director request is required');
     try {
       const strategy = analyzeCodeGenerationRequest(request, context);
-      const prompt = `${DIRECTOR_PLANNER_PROMPT}\\n\\n${formatCodeGenerationStrategy(strategy)}\n\nREQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
+      const prompt = `${DIRECTOR_PLANNER_PROMPT}\n\n${formatCodeGenerationStrategy(strategy)}\n\nREQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
       // P12.4: mode 'planner' (no system prompt) — 'agent' mode's FILE: format
       // instruction fights this prompt's "respond with valid JSON" contract.
       const response = preferredModel && preferredModel !== 'auto'
@@ -306,7 +306,7 @@ class CopilotDirector {
     const codeStrategy = analyzeCodeGenerationRequest(request || task.objective, {
       ...(workspacePackageJson ? { packageJson: workspacePackageJson } : {})
     });
-    const objectiveWithDirective = `${directive}\\n${formatCodeGenerationStrategy(codeStrategy)}\n${task.objective}`;
+    const objectiveWithDirective = `${directive}\n${formatCodeGenerationStrategy(codeStrategy)}\n${task.objective}`;
     
     let attempt = 0;
     let lastResult = null;
