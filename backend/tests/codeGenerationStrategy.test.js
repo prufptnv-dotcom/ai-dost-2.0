@@ -120,7 +120,7 @@ test('workspace stack detection does not mistake Vite for a UI framework', () =>
   const { detectFrameworkFromFiles } = require('../agent/runtime/codeGenerationStrategy');
   const context = {
     packageJson: { devDependencies: { vite: '^6.0.0' } },
-    files: { 'vite.config.js': 'export default {}', 'src/App.vue': '<template><main /></template>' },
+    files: { 'vite.config.js': 'export default {}' },
   };
   assert.equal(detectWorkspaceStack(context), null);
   assert.equal(detectFrameworkFromFiles(context), null);

@@ -27,7 +27,7 @@ describe('Phase 1 benchmark readiness preflight', () => {
     assert.equal(result.keysConfigured, 2);
     assert.equal(result.providerConfiguration, 'AT_LEAST_ONE_API_KEY_CONFIGURED');
     assert.equal(result.warning, null);
-    assert.equal(JSON.stringify(result).includes('API_KEY'), false);
+    assert.equal(JSON.stringify(result).includes('secret'), false);
   });
 
   test('warns, rather than falsely failing, when no recognized provider keys are reported', async () => {

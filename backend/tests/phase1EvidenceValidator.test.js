@@ -117,7 +117,12 @@ describe('Phase 1 runtime evidence package validator', () => {
     const outside = path.join(fixture.root, 'outside-evidence.txt');
     fs.writeFileSync(outside, 'not part of this run');
     const link = path.join(fixture.runDir, 'external-evidence.txt');
-    fs.symlinkSync(outside, link);
+    try {
+      fs.symlinkSync(outside, link);
+    } catch (err) {
+      if (err.code === 'EPERM') return; // Skip on Windows without symlink privileges
+      throw err;
+    }
     assert.equal(safeEvidenceFile(fixture.runDir, 'external-evidence.txt'), false);
   });
 
@@ -140,7 +145,7 @@ describe('Phase 1 runtime evidence package validator', () => {
   test('rejects incomplete screenshots, criterion evidence, or unblinded review', (t) => {
     const fixture = makeRunFixture(t);
     const manifest = validManifest(fixture);
-    manifest.screenshots['768'] = write('screenshots/not-a-real-image.png', 'not a PNG');
+    manifest.screenshots['768'] = fixture.write('screenshots/not-a-real-image.png', 'not a PNG');
     manifest.requirements[0].evidencePaths = ['../../outside.txt'];
     manifest.humanReview.blindReview = false;
     fs.writeFileSync(path.join(fixture.runDir, 'runtime-evidence.json'), JSON.stringify(manifest));
