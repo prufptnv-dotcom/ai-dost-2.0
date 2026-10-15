@@ -52,6 +52,8 @@ const codeContext      = require('../services/codeContext');
 const fixMemory        = require('../services/fixMemory');
 const deterministicCodeGuard = require('../services/DeterministicCodeGuard');
 const { detectCategory, buildFullstackSystemPrompt, generateGoldenScaffold } = require('../agent/fullstackTrainer');
+const { buildAppSpecification, formatAppSpecificationForPrompt, findMissingFeatureSignals } = require('../services/appSpecificationService');
+const { analyzeCodeGenerationRequest, formatCodeGenerationStrategy } = require('../agent/runtime/codeGenerationStrategy');
 const { saveProjectFile, deleteProjectFile, getProjectFiles, onWorkspaceChange } = require('../projectStore');
 const { learnNotes, retrieveNotes, formatNotes, extractRunNotes } = require('../services/copilotMemory');
 const backgroundRuns = require('../services/backgroundRuns'); // P9 background runs
@@ -765,11 +767,21 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
             onProgress({ type: 'step', stepLog: { action: 'Architecting Project', thought: `Selecting specialized ${category} components and REST API schema...` } });
           }
 
-          const systemPrompt = buildFullstackSystemPrompt(prompt, category);
+          const appSpecification = buildAppSpecification(prompt, { force: true });
+          const codeGenerationStrategy = analyzeCodeGenerationRequest(prompt);
+          const specificationContext = [
+            appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '',
+            formatCodeGenerationStrategy(codeGenerationStrategy),
+          ].filter(Boolean).join('\n\n');
+          const systemPrompt = [buildFullstackSystemPrompt(prompt, category), specificationContext].filter(Boolean).join('\n\n');
           
           let parsedData = null;
+          let generationSource = 'llm-output-pending';
+          const featurePreflight = { attempted: false, missingBefore: [], missingAfter: [], repairApplied: false, skippedReason: null };
           try {
-            const scaffoldResult = await callScaffoldLLM(systemPrompt, null, parameters?.headers || {});
+            const scaffoldResult = await callScaffoldLLM(systemPrompt, null, parameters?.headers || {}, (selectedProvider) => {
+              if (onProgress && selectedProvider.fileCount >= 2) onProgress({ type: 'generation_provider', phase: 'initial', ...selectedProvider });
+            });
             if (scaffoldResult && Array.isArray(scaffoldResult.files) && scaffoldResult.files.length >= 2) {
               parsedData = scaffoldResult;
             } else if (typeof scaffoldResult === 'string') {
@@ -780,12 +792,91 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
             logger.info(`[Agent] Scaffold LLM unavailable (${llmErr.message}), activating instant Golden Scaffold`);
           }
 
+          // Phase 1 quality preflight: if explicit known features have no recognizable
+          // source signal, make one bounded, targeted completion attempt before the
+          // generic scaffold is merged. This is a repair trigger, never a correctness pass.
+          if (parsedData && Array.isArray(parsedData.files) && appSpecification) {
+            featurePreflight.missingBefore = findMissingFeatureSignals(appSpecification, parsedData.files);
+            featurePreflight.missingAfter = featurePreflight.missingBefore.slice();
+            if (featurePreflight.missingBefore.length > 0) {
+              featurePreflight.attempted = true;
+              const maxContextChars = 80000;
+              const orderedFiles = parsedData.files.slice().sort((a, b) => {
+                const rank = (file) => /(?:^|\/)App\.[jt]sx?$|(?:^|\/)page\.[jt]sx?$/i.test(file?.path || '') ? 0 : 1;
+                return rank(a) - rank(b);
+              });
+              const repairFiles = [];
+              let contextChars = 0;
+              for (const file of orderedFiles) {
+                if (!file || typeof file.path !== 'string' || typeof file.content !== 'string') continue;
+                const nextChars = file.path.length + file.content.length;
+                if (contextChars + nextChars > maxContextChars) continue;
+                repairFiles.push({ path: file.path, content: file.content });
+                contextChars += nextChars;
+              }
+
+              if (repairFiles.length === 0) {
+                featurePreflight.skippedReason = 'No bounded source context could be assembled for targeted completion.';
+              } else {
+                const missingList = featurePreflight.missingBefore.map((item) =>
+                  `- ${item.requirementId} (${item.featureKey}): ${item.name}. User clause: ${item.sourceText || '(see original request)'}`
+                ).join('\n');
+                const completionPrompt = [
+                  systemPrompt,
+                  '=== FIRST-PASS GENERATED FILES (inspect and preserve valid work) ===',
+                  JSON.stringify(repairFiles, null, 2),
+                  '=== TARGETED REQUIREMENT COMPLETION ===',
+                  'A deterministic source-text preflight found no recognizable implementation signal for these explicitly requested features:',
+                  missingList,
+                  'This diagnostic can be wrong, so inspect the files before changing them. If a feature is already implemented under different names, preserve it and explain that in a concise file comment only if useful. Otherwise implement the missing behavior end-to-end: real state/data flow, event handlers, validation, visible outcomes, and appropriate empty/error states. Do not satisfy this check by adding comments, labels, placeholder functions, or dead code. Preserve the existing stack and unrelated working behavior. Return complete contents for every file you change using the normal FILE/code-block format; do not return a plan or a summary instead of code.',
+                ].join('\n\n');
+
+                try {
+                  const completionResult = await callScaffoldLLM(completionPrompt, null, parameters?.headers || {}, (selectedProvider) => {
+                    if (onProgress && selectedProvider.fileCount >= 1) onProgress({ type: 'generation_provider', phase: 'targeted-completion', ...selectedProvider });
+                  });
+                  let completionFiles = null;
+                  if (completionResult && Array.isArray(completionResult.files)) {
+                    completionFiles = completionResult.files;
+                  } else if (typeof completionResult === 'string') {
+                    completionFiles = extractFiles(completionResult);
+                  }
+                  const usableFiles = Array.isArray(completionFiles)
+                    ? completionFiles.filter((file) => file && typeof file.path === 'string' && typeof file.content === 'string' && file.path.trim())
+                    : [];
+                  if (usableFiles.length > 0) {
+                    const fileMap = new Map(parsedData.files
+                      .filter((file) => file && typeof file.path === 'string' && typeof file.content === 'string')
+                      .map((file) => [file.path, file.content]));
+                    usableFiles.forEach((file) => fileMap.set(file.path, file.content));
+                    parsedData = {
+                      ...parsedData,
+                      files: Array.from(fileMap.entries()).map(([filePath, fileContent]) => ({ path: filePath, content: fileContent })),
+                    };
+                    featurePreflight.repairApplied = true;
+                    logger.info(`[Agent] Targeted completion updated ${usableFiles.length} file(s) after feature-signal preflight.`);
+                  } else {
+                    featurePreflight.skippedReason = 'Targeted completion returned no usable files.';
+                  }
+                } catch (completionErr) {
+                  featurePreflight.skippedReason = `Targeted completion failed: ${completionErr.message}`;
+                  logger.warn('[Agent] Targeted feature completion failed:', completionErr.message);
+                }
+                featurePreflight.missingAfter = findMissingFeatureSignals(appSpecification, parsedData.files);
+              }
+            }
+          }
+
           // ── Guaranteed Base Template Initialization (Vite + React + Express) ──
           const goldenFiles = generateGoldenScaffold(prompt, category);
           if (!parsedData || !Array.isArray(parsedData.files) || parsedData.files.length < 2) {
+            generationSource = 'golden-scaffold-fallback';
             logger.info(`[Agent] Hydrating verified golden archetype for category: ${category}`);
             parsedData = { files: goldenFiles };
           } else {
+            generationSource = featurePreflight.repairApplied
+              ? 'llm-output+targeted-completion+verified-golden-base'
+              : 'llm-output+verified-golden-base';
             // Merge custom LLM files on top of essential base boilerplate
             const fileMap = new Map();
             goldenFiles.forEach(f => fileMap.set(f.path, f.content));
@@ -1108,68 +1199,152 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
             onProgress({ type: 'agent_status', agent: 'Vision QA', message: verdict });
           }
 
-          // All tasks completed
-          todoList.forEach(t => { t.status = 'completed'; });
+          // Build/render smoke is not the same as requirement-level acceptance.
+          // Keep quality status conservative until every AC has real passing evidence.
+          const runtimeSmokePassed = verification?.ok === true
+            && rt.ok === true
+            && !rt.unverified
+            && !rt.unavailable;
+          const acceptanceVerification = (appSpecification?.acceptanceCriteria || []).map((criterion) => ({
+            id: criterion.id,
+            title: criterion.title,
+            requirementIds: Array.isArray(criterion.requirementIds) ? criterion.requirementIds : [],
+            check: criterion.check,
+            status: 'NOT_EVALUATED',
+            evidence: null,
+            note: 'No requirement-specific functional/browser evidence was collected by this generation flow.',
+          }));
+          let qualityStatus;
+          let qualityStatusReason;
+          if (!runtimeSmokePassed) {
+            qualityStatus = rt.unverified || rt.unavailable || !verification ? 'UNVERIFIED' : 'FAILED';
+            qualityStatusReason = qualityStatus === 'UNVERIFIED'
+              ? 'The build/runtime gate did not produce enough evidence to determine application behavior.'
+              : 'The build/runtime gate failed; inspect the captured command and browser evidence.';
+          } else if (generationSource === 'golden-scaffold-fallback') {
+            qualityStatus = 'PARTIAL';
+            qualityStatusReason = 'The fallback scaffold rendered, but it is not proof that the requested application was implemented.';
+          } else if (featurePreflight.missingAfter.length > 0) {
+            qualityStatus = 'PARTIAL';
+            qualityStatusReason = featurePreflight.repairApplied
+              ? 'After the bounded completion attempt, recognizable source signals remain missing for explicit feature requirements. These are diagnostic warnings, not proof of behavior.'
+              : 'The preflight found missing source signals, but targeted completion did not produce usable replacement files. These are diagnostic warnings, not proof of behavior.';
+          } else {
+            qualityStatus = 'UNVERIFIED';
+            qualityStatusReason = 'Build/render smoke passed and no missing source signals were detected, but requirement-level interactions were not executed.';
+          }
+
+          if (onProgress) {
+            onProgress({
+              type: 'output_quality',
+              status: qualityStatus,
+              reason: qualityStatusReason,
+              runtimeVerified: runtimeSmokePassed,
+              acceptanceStatus: 'NOT_EVALUATED',
+            });
+          }
+
+          // Generation tasks may be complete; the final QA task must not be
+          // marked complete when requirement acceptance remains unverified.
+          todoList.forEach((task, index) => {
+            if (index < todoList.length - 1) {
+              task.status = 'completed';
+            } else if (qualityStatus === 'SUCCEEDED') {
+              task.status = 'completed';
+            } else if (qualityStatus === 'FAILED') {
+              task.status = 'error';
+            } else {
+              task.status = 'unverified';
+            }
+          });
           if (onProgress) onProgress({ type: 'plan_tasks', tasks: [...todoList] });
 
-          const titleCase = prompt.slice(0, 40).replace(/(^\w|\s\w)/g, m => m.toUpperCase());
-          const featureList = category === 'calculator' ? [
-            '🧮 **Interactive LCD Display**: Real-time expression parsing, active operator indicator, and dynamic text sizing.',
-            '💾 **Full Memory Registers**: Standard Memory Clear (**MC**), Memory Recall (**MR**), Memory Add (**M+**), Memory Subtract (**M-**), and Memory Store (**MS**) with illuminated memory badge.',
-            '📜 **Calculation History Tape**: Slide-over drawer with timestamped calculations, click-to-recall expressions, and one-click clear.',
-            '⚡ **Keypad Operations**: Arithmetic (+, -, ×, ÷), backspace (⌫), sign toggle (±), percent (%), square root (√x), square (x²), and reciprocal (1/x).',
-            '🎨 **Vibrant Cyberpunk Glassmorphism UI**: High-contrast glowing neon aesthetic with smooth active-press bounce and audio feedback.',
-            '⌨️ **Physical Keyboard Support**: Direct keyboard input for numbers, operations, Enter, Backspace, and Escape.'
-          ] : category === 'crypto_trading' ? [
-            '⚡ **Simulated Live Price Tickers**: High-frequency real-time price ticks for BTC, ETH, SOL, BNB, ADA, AVAX with neon green/red flashes.',
-            '📊 **Interactive SVG Asset Donut Chart**: Hoverable allocation percentages, center portfolio value, and interactive color legend.',
-            '🔄 **Buy / Sell Transaction Modal**: Real-time conversion calculator, slippage tolerance, gas estimation, and instant wallet balance updates.',
-            '📜 **Realized P&L Ledger**: Comprehensive execution history tracking trade status, dollar value, and timestamps.',
-            '💵 **Paper-Trading USDT Deposit**: Quick deposit actions to test trading strategies with simulated buying power.'
-          ] : [
-            '📱 **Responsive Glassmorphic UI**: Tailored modern design tokens with smooth animations.',
-            '🧩 **Modular Architecture**: Clean separation between state stores, UI components, and API client.',
-            '⚡ **Full Stack Integration**: REST API endpoints wired with Express backend and persistence.'
-          ];
+          const projectTitle = String(appSpecification?.archetype?.label || category || 'Generated project')
+            .replace(/(^\w|\s\w)/g, (match) => match.toUpperCase());
+          const generationModeReport = generationSource === 'golden-scaffold-fallback'
+            ? '**Generation mode: GOLDEN SCAFFOLD FALLBACK.** This is a starter baseline, not proof that the user request has been fully implemented.'
+            : '**Generation mode: LLM output merged with the verified base template.** Build/render checks still do not prove every requested feature works.';
+          const specificationRequirements = appSpecification?.requirements || [];
+          const requirementsReport = specificationRequirements.length
+            ? specificationRequirements.map((requirement) =>
+                `- **${requirement.id} — ${requirement.name}**${requirement.sourceText && requirement.id !== 'REQ-001' ? `: ${requirement.sourceText}` : ''}`
+              ).join('\n')
+            : '- Specification extraction was unavailable; the original prompt remains the source of truth.';
+          const acceptanceReport = acceptanceVerification.map((criterion) =>
+            `- **${criterion.id} — ${criterion.title} [${criterion.status}]:** ${criterion.check}`
+          ).join('\n');
+          const featurePreflightReport = [
+            `- Targeted completion attempted: **${featurePreflight.attempted ? 'YES' : 'NO'}**`,
+            `- Missing feature signals before pass: **${featurePreflight.missingBefore.length}**`,
+            `- Missing feature signals after pass: **${featurePreflight.missingAfter.length}**`,
+            ...(featurePreflight.missingAfter.length ? featurePreflight.missingAfter.map((item) => `  - ${item.requirementId} — ${item.name}: source signal not found`) : []),
+            ...(featurePreflight.skippedReason ? [`- Completion-pass note: ${featurePreflight.skippedReason}`] : []),
+            '- This is a static source-text diagnostic only; it does not prove a feature works.',
+          ].join('\n');
+          const clauseCoverageNote = appSpecification?.explicitCoverage?.unrepresentedClauses?.length
+            ? `\n\n**⚠️ Explicit prompt clauses need follow-up:**\n${appSpecification.explicitCoverage.unrepresentedClauses.map((clause) => `- ${clause}`).join('\n')}`
+            : '';
 
-          const finalReport = `### 🚀 Project Generated: **${titleCase || category.toUpperCase()}**
+          const finalReport = `### 🚀 Project Generation Report: **${projectTitle}**
 
-**Prompt:** "${prompt}"
+**Original prompt:** "${prompt}"
 
-#### ✨ Key Features Implemented:
-${featureList.map(f => `- ${f}`).join('\n')}
+#### 🧰 Generation Mode
+${generationModeReport}
 
-#### 📂 Files Created (${writtenFiles.length}):
-${writtenFiles.map(f => `- \`${f.path}\` (${f.size} bytes)`).join('\n')}
+#### 📊 Output Quality Status
+**${qualityStatus}** — ${qualityStatusReason}
 
-#### ⚙️ Dependencies:
+- Build/runtime smoke: **${runtimeSmokePassed ? 'PASS' : (rt.unverified || rt.unavailable ? 'UNVERIFIED' : 'FAIL')}**
+- Requirement-level acceptance: **NOT_EVALUATED** until real user-flow checks produce evidence.
+- The verified field remains the runtime-smoke compatibility field; it must not be interpreted as proof of full feature correctness.
+
+#### 🔎 Feature Completeness Preflight (diagnostic only)
+${featurePreflightReport}
+
+#### 📋 Requirements Tracked (not proof of implementation)
+${requirementsReport}
+${clauseCoverageNote}
+
+#### ✅ Acceptance Criteria to Verify (not pass claims)
+${acceptanceReport || '- No machine-readable acceptance criteria were extracted.'}
+
+#### 📂 Files Created (${writtenFiles.length})
+${writtenFiles.map((file) => `- \`${file.path}\` (${file.size} bytes)`).join('\n')}
+
+#### ⚙️ Dependency Installation
 ${installResult?.skipped
     ? `- Skipped — ${installResult.reason}`
     : `- \`npm install\` exit code **${installResult?.exitCode ?? 'n/a'}**${installResult?.ms ? ` (${Math.round(installResult.ms / 100) / 10}s)` : ''}`}
 
-#### 👁️ Visual & Runtime Verification:
+#### 👁️ Build & Runtime Evidence
 ${runtimeBridge.describeVerification(verification)}
 
-${repairSummary ? `#### 🔧 Repair Attempts (${repairSummary.attempts}/${maxRepairAttempts}):
+${repairSummary ? `#### 🔧 Repair Attempts (${repairSummary.attempts}/${maxRepairAttempts})
 ${repairSummary.attempts === 0
     ? '- No repair was needed.'
-    : repairSummary.repairs.map(r => r.applied?.length
-        ? `- Attempt ${r.attempt}: rewrote \`${r.applied.map(f => f.path).join('`, `')}\` → re-verified${r.unchanged?.length ? ` (${r.unchanged.length} file(s) returned unchanged and were skipped)` : ''}`
-        : `- Attempt ${r.attempt}: no usable repair (${r.reason || 'unknown'})`).join('\n')}
+    : repairSummary.repairs.map((repair) => repair.applied?.length
+        ? `- Attempt ${repair.attempt}: rewrote \`${repair.applied.map((file) => file.path).join('\`, \`')}\` → re-verified${repair.unchanged?.length ? ` (${repair.unchanged.length} file(s) returned unchanged and were skipped)` : ''}`
+        : `- Attempt ${repair.attempt}: no usable repair (${repair.reason || 'unknown'})`).join('\n')}` : ''}
 
-${verification?.ok ? '✅ **Final state: the project builds and renders.**' : '❌ **Final state: still failing after every repair attempt.**'}
-` : ''}
 ${verification?.ok
-    ? 'Click the **Live Preview** tab to interact with your running application.'
-    : '⚠️ **This project was written but did NOT pass verification.** The evidence above is real command output — review the failing step before using it.'}`;
+    ? '✅ **Build/runtime result: PASS.** The generated project builds and renders in the verification environment.'
+    : '❌ **Build/runtime result: FAIL or UNVERIFIED.** Review the evidence above before using this project.'}
 
+**Scope of this result:** Build/render verification does not prove that every requested feature works end-to-end. Each requirement above remains an acceptance target unless it has its own passing test or recorded runtime evidence.`;
           // `success` means "files were generated", which is true and stays true.
           // Whether the code actually WORKS is `verified` — kept separate so the
           // ReAct loop (and the UI) can react to a real failure instead of an
           // optimistic "done".
           return {
             success: true,
-            verified: Boolean(verification?.ok),
+            verified: runtimeSmokePassed,
+            runtimeVerified: runtimeSmokePassed,
+            qualityStatus,
+            qualityStatusReason,
+            acceptanceVerification,
+            featurePreflight,
+            generationSource,
             verification,
             install: installResult,
             repair: repairSummary
@@ -1669,7 +1844,7 @@ function extractFiles(resp) {
 }
 
 // ── Scaffolding LLM (mini-cascade for generate_project_from_prompt) ──────────
-async function callScaffoldLLM(scaffoldPrompt, customKeys = null, reqHeaders = {}) {
+async function callScaffoldLLM(scaffoldPrompt, customKeys = null, reqHeaders = {}, onProviderSelected = null) {
   const isPrivacyMode = reqHeaders['x-privacy-mode'] === 'true';
   // P1: the old predicate accepted any response of ≤5 characters as success,
   // which let `null`, `{}`, `"[DONE]"` etc. stop the cascade and be used as
@@ -1747,6 +1922,9 @@ async function callScaffoldLLM(scaffoldPrompt, customKeys = null, reqHeaders = {
         const files = extractFiles(resp);
         if (files && files.length >= 1) {
           logger.info(`[Agent] Live AI Model ${provider.name} generated/modified ${files.length} custom files`);
+          if (typeof onProviderSelected === 'function') {
+            try { onProviderSelected({ provider: provider.key, providerName: provider.name, model: null, fileCount: files.length }); } catch (_) {}
+          }
           return resp;
         }
       } catch (e) {
@@ -1758,7 +1936,12 @@ async function callScaffoldLLM(scaffoldPrompt, customKeys = null, reqHeaders = {
   try {
     const resp = await callOllamaLocal(scaffoldPrompt);
     const files = extractFiles(resp);
-    if (files && files.length >= 1) return resp;
+    if (files && files.length >= 1) {
+      if (typeof onProviderSelected === 'function') {
+        try { onProviderSelected({ provider: 'ollama', providerName: 'Ollama (local)', model: process.env.OLLAMA_MODEL || null, fileCount: files.length }); } catch (_) {}
+      }
+      return resp;
+    }
   } catch (e) {
     logger.info('[Agent] Scaffold Ollama failed:', e.message || e);
   }
@@ -3053,6 +3236,25 @@ router.post('/scaffold-wizard', async (req, res) => {
 
   const activeFeatures = (wizardConfig.features || []).filter(f => f.enabled !== false).map(f => `${f.name}: ${f.desc || ''}`).join('\n- ');
   const stackInfo = wizardConfig.stack ? JSON.stringify(wizardConfig.stack) : 'React + Vite + Tailwind CSS';
+  const specificationRequest = [
+    wizardConfig.description || userPrompt || wizardConfig.projectTitle || wizardConfig.projectName || 'Build the configured application',
+    activeFeatures ? 'Wizard-selected features:\n- ' + activeFeatures : '',
+    'Selected stack: ' + stackInfo,
+    'Selected theme: ' + (wizardConfig.theme || 'domain-appropriate theme'),
+  ].filter(Boolean).join('\n\n');
+  const appSpecification = buildAppSpecification(specificationRequest, { force: true });
+  const codeGenerationStrategy = analyzeCodeGenerationRequest(specificationRequest, { stack: stackInfo });
+  const specificationContext = [
+    appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '',
+    formatCodeGenerationStrategy(codeGenerationStrategy),
+  ].filter(Boolean).join('\n\n');
+  const callWithTimeout = (promise, timeoutMs, message) => {
+    let timer;
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), timeoutMs); }),
+    ]).finally(() => clearTimeout(timer));
+  };
 
   const scaffoldPrompt = `You are an expert full-stack engineer. Build a COMPLETE, production-ready, beautiful web application based on this interactive specification:
 
@@ -3071,32 +3273,28 @@ ${wizardConfig.customNotes || 'None'}
 REQUIREMENTS:
 1. Write 100% COMPLETE, WORKING code with NO placeholders, NO "TODO" comments, NO truncated sections.
 2. Include all necessary HTML, CSS, JavaScript/React components, and package.json so the app can run immediately.
-3. Apply modern, responsive styling with clean UI components, cards, buttons, and state management.`;
+3. Apply modern, responsive styling with clean UI components, cards, buttons, and state management.
+
+STRUCTURED APP SPECIFICATION AND ACCEPTANCE CHECKS:
+${specificationContext}`;
 
   send({ type: 'wizard_status', step: 'generating', message: '⚡ Generating production-grade code across components...' });
 
   try {
     let files = [];
+    let generationSource = 'llm-output-pending';
     try {
-      const rawResponse = await Promise.race([
-        callScaffoldLLM(scaffoldPrompt, null, req.headers),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('LLM Timeout')), 10000))
-      ]);
-      const stripped = String(rawResponse || '').replace(/```(?:json)?\s*/gi, '').trim();
-      const jsonBlock = stripped.match(/\{[\s\S]*\}/);
-      if (jsonBlock) {
-        try {
-          const parsed = JSON.parse(jsonBlock[0]);
-          if (parsed && Array.isArray(parsed.files) && parsed.files.length > 0) {
-            files = parsed.files;
-          }
-        } catch (err) {
-          try {
-            const repaired = jsonBlock[0].replace(/(?<=:\s*"[\s\S]*?)\r?\n(?=[\s\S]*?")/g, '\\n');
-            const parsed = JSON.parse(repaired);
-            if (parsed && Array.isArray(parsed.files)) files = parsed.files;
-          } catch (_) {}
-        }
+      const rawResponse = await callWithTimeout(
+        callScaffoldLLM(scaffoldPrompt, null, req.headers, (provider) => {
+          send({ type: 'generation_provider', phase: 'wizard-initial', ...provider });
+        }),
+        120000,
+        'LLM generation timed out'
+      );
+      const parsedFiles = extractFiles(rawResponse);
+      if (Array.isArray(parsedFiles) && parsedFiles.length > 0) {
+        files = parsedFiles;
+        generationSource = 'llm-output';
       }
     } catch (llmErr) {
       logger.info('[Wizard] LLM timed out or failed, using autonomous smart generator:', llmErr.message);
@@ -3105,6 +3303,77 @@ REQUIREMENTS:
     if (!files || files.length === 0) {
       logger.info('[Wizard] Generating smart architecture files.');
       files = generateSmartProject(wizardConfig, userPrompt);
+      generationSource = 'heuristic-fallback';
+    }
+
+    const featurePreflight = {
+      attempted: false,
+      missingBefore: [],
+      missingAfter: [],
+      repairApplied: false,
+      skippedReason: null,
+    };
+    if (appSpecification) {
+      featurePreflight.missingBefore = findMissingFeatureSignals(appSpecification, files);
+      featurePreflight.missingAfter = featurePreflight.missingBefore.slice();
+      if (generationSource === 'llm-output' && featurePreflight.missingBefore.length > 0) {
+        featurePreflight.attempted = true;
+        const boundedFiles = [];
+        let contextChars = 0;
+        for (const file of files) {
+          if (!file || typeof file.path !== 'string' || typeof file.content !== 'string') continue;
+          const size = file.path.length + file.content.length;
+          if (contextChars + size > 80000) continue;
+          boundedFiles.push({ path: file.path, content: file.content });
+          contextChars += size;
+        }
+        if (!boundedFiles.length) {
+          featurePreflight.skippedReason = 'No bounded generated source context was available.';
+        } else {
+          const missingList = featurePreflight.missingBefore.map((item) =>
+            '- ' + item.requirementId + ' (' + item.featureKey + '): ' + item.name +
+            '. User clause: ' + (item.sourceText || '(see original request)')
+          ).join('\n');
+          const completionPrompt = [
+            scaffoldPrompt,
+            '=== FIRST-PASS GENERATED FILES ===',
+            JSON.stringify(boundedFiles, null, 2),
+            '=== TARGETED REQUIREMENT COMPLETION ===',
+            'Source-text diagnostics found no recognizable implementation signal for these explicitly requested features:',
+            missingList,
+            'Inspect the actual files; diagnostics may be wrong. Preserve working code. If missing, implement the behavior end-to-end with state/data flow, event handlers, validation, visible outcomes, and useful empty/error states. Do not add comments, labels, placeholders, or dead code merely to satisfy a signal. Return complete contents for changed files using the normal FILE/code-block format.',
+          ].join('\n\n');
+          try {
+            const completionResponse = await callWithTimeout(
+              callScaffoldLLM(completionPrompt, null, req.headers, (provider) => {
+                send({ type: 'generation_provider', phase: 'wizard-targeted-completion', ...provider });
+              }),
+              120000,
+              'Targeted completion timed out'
+            );
+            const completionFiles = extractFiles(completionResponse);
+            if (Array.isArray(completionFiles) && completionFiles.length > 0) {
+              const mergedFiles = new Map(
+                files.filter((file) => file && typeof file.path === 'string' && typeof file.content === 'string')
+                  .map((file) => [file.path, file])
+              );
+              for (const file of completionFiles) {
+                if (file && typeof file.path === 'string' && typeof file.content === 'string' && file.path.trim()) {
+                  mergedFiles.set(file.path, file);
+                }
+              }
+              files = Array.from(mergedFiles.values());
+              featurePreflight.repairApplied = true;
+              generationSource = 'llm-output+targeted-completion';
+              featurePreflight.missingAfter = findMissingFeatureSignals(appSpecification, files);
+            } else {
+              featurePreflight.skippedReason = 'Targeted completion returned no usable files.';
+            }
+          } catch (completionError) {
+            featurePreflight.skippedReason = completionError.message || 'Targeted completion failed.';
+          }
+        }
+      }
     }
 
     send({ type: 'wizard_status', step: 'writing', message: `📂 Writing ${files.length} project files to workspace...` });
@@ -3136,11 +3405,30 @@ REQUIREMENTS:
       await new Promise((res) => exec('git init', { cwd: workspacePath, timeout: 5000 }, res));
     } catch (_) {}
 
+    const qualityStatus = generationSource === 'heuristic-fallback' || featurePreflight.missingAfter.length > 0
+      ? 'PARTIAL'
+      : 'UNVERIFIED';
+    const qualityStatusReason = generationSource === 'heuristic-fallback'
+      ? 'heuristic-fallback-used'
+      : featurePreflight.missingAfter.length > 0
+        ? 'known-feature-signals-still-missing'
+        : 'runtime-and-requirement-checks-not-run';
+    const outputQuality = {
+      status: qualityStatus,
+      reason: qualityStatusReason,
+      generationSource,
+      runtimeVerified: false,
+      acceptanceStatus: 'NOT_EVALUATED',
+      featurePreflight,
+    };
+    send({ type: 'output_quality', ...outputQuality });
     send({
       type: 'done',
-      message: `🎉 ${wizardConfig.projectTitle || wizardConfig.projectName || 'Project'} successfully generated (${writtenFiles.length} files)!`,
+      message: 'Project files created (' + writtenFiles.length + '). Output quality: ' + qualityStatus +
+        '; runtime and requirement-level behavior have not been verified.',
       files: writtenFiles,
-      summary: wizardConfig.description || 'Project is ready to run and customize.'
+      outputQuality,
+      summary: wizardConfig.description || 'Project files are ready for verification.'
     });
     res.end();
   } catch (err) {

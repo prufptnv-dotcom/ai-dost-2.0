@@ -37,6 +37,8 @@ import { IdeFooter } from '../ide/IdeFooter';
 import { generateLiveAppHtml, PREVIEW_TELEMETRY_SCRIPT } from '../ide/PreviewEngine';
 import { syncFileToWebContainer } from '../../lib/webcontainer';
 import { marked } from 'marked';
+import { extractOutputQualityStatus, settlePlanTasks } from '../../lib/outputQualityStatus';
+import { parseScaffoldWizardSse } from '../../lib/scaffoldWizardSse';
 
 function isPathInFolder(filePath, folderPath) {
   const file = normalizePath(filePath).toLowerCase();
@@ -370,6 +372,7 @@ export default function CopilotIDE({ projectId: defaultProjectId = 'copilot-work
     return () => clearInterval(id);
   }, [running]);
   const [planTasks, setPlanTasks] = useState([]);
+  const outputQualityStatusRef = useRef(null);
   // Devin-style agent mode: ask = answer only (no files), plan = review & edit
   // the plan before building, code = autonomous execution (default).
   const [agentMode, setAgentMode] = useState('code');
@@ -1881,15 +1884,61 @@ const animate = () => {
 
     try {
       const res = await api.post('/agent/scaffold-wizard', {
-        spec,
+        userPrompt: spec.description || spec.projectTitle || 'Build the configured application',
+        wizardConfig: spec,
         projectId
-      });
+      }, { responseType: 'text', timeout: 12 * 60 * 1000 });
 
-      if (res.data?.success) {
-        showToast('🎉 Project scaffolded successfully!', 'success');
-        await loadWorkspaceFiles();
-        setWorkspaceMode('preview');
+      const parsed = parseScaffoldWizardSse(res.data);
+      if (parsed.error) {
+        throw new Error(parsed.error.message || 'Scaffolding failed.');
       }
+      if (!parsed.done) {
+        let serverMessage = '';
+        try {
+          const body = JSON.parse(String(res.data || ''));
+          serverMessage = body.error || body.message || '';
+        } catch (_) {}
+        throw new Error(serverMessage || 'Scaffolding ended without a completion event.');
+      }
+      if (!Array.isArray(parsed.done.files) || parsed.done.files.length === 0) {
+        throw new Error(parsed.done.message || 'Scaffolding reported completion without creating project files.');
+      }
+      const generatedFileEvents = parsed.events.filter((event) =>
+        event?.type === 'file_changed' && typeof event.path === 'string' && typeof event.content === 'string'
+      );
+      if (generatedFileEvents.length === 0) {
+        throw new Error('Scaffolding returned file names but no generated file contents. The workspace was not updated.');
+      }
+
+      await loadWorkspaceFiles();
+      const generatedFiles = generatedFileEvents.map((event) => ({
+        path: event.path,
+        content: event.content,
+        lastModified: Date.now(),
+      }));
+      setFiles((previous) => {
+        const byPath = new Map(previous.map((file) => [file.path, file]));
+        generatedFiles.forEach((file) => byPath.set(file.path, { ...byPath.get(file.path), ...file }));
+        return Array.from(byPath.values());
+      });
+      setContents((previous) => ({
+        ...previous,
+        ...Object.fromEntries(generatedFiles.map((file) => [file.path, file.content])),
+      }));
+      setWorkspaceMode('preview');
+      const qualityStatus = parsed.outputQuality?.status || parsed.done.outputQuality?.status || 'UNVERIFIED';
+      if (qualityStatus === 'SUCCEEDED') {
+        showToast(`Project generated and accepted (${parsed.done.files.length} files).`, 'success');
+      } else if (qualityStatus === 'PARTIAL' || qualityStatus === 'FAILED') {
+        showToast(`Project files created (${parsed.done.files.length}), but output quality is ${qualityStatus}. Review the missing requirements before using it.`, 'warning');
+      } else {
+        showToast(`Project files created (${parsed.done.files.length}); runtime and requirement checks are still unverified.`, 'warning');
+      }
+      setCopilotStatus({
+        label: qualityStatus === 'SUCCEEDED' ? 'Project accepted' : `Output quality: ${qualityStatus} — verification needed`,
+        tone: qualityStatus === 'SUCCEEDED' ? 'success' : 'warn',
+      });
     } catch (err) {
       showToast(`Scaffold error: ${err.message}`, 'error');
     } finally {
@@ -2164,6 +2213,21 @@ const animate = () => {
                 });
               }
             }
+            else if (data.type === 'output_quality') {
+              const status = String(data.status || 'UNVERIFIED').toUpperCase();
+              outputQualityStatusRef.current = status;
+              const detail = data.reason || 'Requirement-level acceptance evidence was not collected.';
+              setPlanTasks(prev => settlePlanTasks(prev, `**${status}** — ${detail}`));
+              setCopilotStatus({
+                label: `⚠️ Output quality: ${status}`,
+                tone: status === 'FAILED' ? 'error' : status === 'SUCCEEDED' ? 'success' : 'work',
+              });
+              setCopilotMessages(prev => [...prev, {
+                role: 'assistant',
+                kind: 'thought',
+                content: `Output quality gate: ${status} — ${detail}`,
+              }]);
+            }
             // ── Director Verification: Show verification gate status ──
             else if (data.type === 'director_verification') {
               const vStatus = data.status || 'running';
@@ -2175,8 +2239,14 @@ const animate = () => {
             // ── Director Complete: CRITICAL — Map to done, reset running state ──
             else if (data.type === 'director_complete') {
               const taskCount = data.taskCount || '?';
-              setPlanTasks(prev => prev.map(t => ({ ...t, status: 'completed' })));
-              setCopilotStatus({ label: `✅ Director completed — ${taskCount} tasks`, tone: 'success' });
+              const qualityStatus = extractOutputQualityStatus(data.message) || outputQualityStatusRef.current;
+              setPlanTasks(prev => settlePlanTasks(prev, data.message || (qualityStatus ? `**${qualityStatus}** — output quality gate` : '')));
+              setCopilotStatus({
+                label: qualityStatus && qualityStatus !== 'SUCCEEDED'
+                  ? `⚠️ Director finished; output quality ${qualityStatus}`
+                  : `✅ Director completed — ${taskCount} tasks`,
+                tone: qualityStatus === 'FAILED' ? 'error' : qualityStatus && qualityStatus !== 'SUCCEEDED' ? 'work' : 'success',
+              });
 
               const finalFiles = createdFilesTracker.length > 0 ? createdFilesTracker : files.map(f => f.path);
               setCopilotMessages(prev => [
@@ -2366,8 +2436,14 @@ const animate = () => {
               // P9: live completion — this run needs no reattach anymore.
               clearBgRun(latestRunIdRef.current);
               const stepCount = Array.isArray(data.steps) ? data.steps.length : (data.steps || '?');
-              setPlanTasks(prev => prev.map(t => ({ ...t, status: 'completed' })));
-              setCopilotStatus({ label: `✅ Done — ${stepCount} steps`, tone: 'success' });
+              const qualityStatus = extractOutputQualityStatus(data.message) || outputQualityStatusRef.current;
+              setPlanTasks(prev => settlePlanTasks(prev, data.message || (qualityStatus ? `**${qualityStatus}** — output quality gate` : '')));
+              setCopilotStatus({
+                label: qualityStatus && qualityStatus !== 'SUCCEEDED'
+                  ? `⚠️ Run finished; output quality ${qualityStatus}`
+                  : `✅ Done — ${stepCount} steps`,
+                tone: qualityStatus === 'FAILED' ? 'error' : qualityStatus && qualityStatus !== 'SUCCEEDED' ? 'work' : 'success',
+              });
 
               const finalFiles = createdFilesTracker.length > 0 ? createdFilesTracker : files.map(f => f.path);
 
@@ -2400,6 +2476,7 @@ const animate = () => {
             }
             // ── ReAct-loop events (defensive: non-director run shapes must stay visible) ──
             else if (data.type === 'start') {
+              outputQualityStatusRef.current = null;
               const msg = data.message || 'Analyzing prompt & generating dynamic task plan...';
               setCopilotStatus({ label: `🚀 ${msg}`, tone: 'work' });
               setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: `🚀 ${msg}` }]);

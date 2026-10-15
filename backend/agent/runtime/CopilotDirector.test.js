@@ -126,6 +126,98 @@ function createExecutionHarness({ plan, workerStatuses = ['SUCCEEDED'], verifica
   return director;
 }
 
+test('createPlan forwards an explicit preferred model to the planner cascade', async () => {
+  let callArgs = null;
+  const director = new CopilotDirector({
+    aiService: {
+      chat: async (...args) => {
+        callArgs = args;
+        return JSON.stringify({
+          summary: 'model preference plan',
+          tasks: [{
+            id: 'build-ui',
+            specialty: 'frontend',
+            role: 'CODER',
+            objective: 'Build the requested UI',
+            dependsOn: [],
+            expectedOutput: 'Working UI',
+          }],
+        });
+      },
+    },
+    coordinator: {},
+  });
+
+  const plan = await director.createPlan('Build a dashboard', { projectId: 'project-1' }, 'gemini');
+  assert.equal(callArgs[2], 'planner');
+  assert.match(callArgs[0], /AI-DOST CODE GENERATION STRATEGY/);
+  assert.match(callArgs[0], /preserve the detected workspace stack|Choose a well-supported/i);
+  assert.equal(callArgs[4], 'gemini');
+  assert.equal(plan.tasks.length, 1);
+});
+
+test('createPlan preserves the existing cascade call when preferred model is auto', async () => {
+  let callArgs = null;
+  const director = new CopilotDirector({
+    aiService: {
+      chat: async (...args) => {
+        callArgs = args;
+        return JSON.stringify({
+          summary: 'auto plan',
+          tasks: [{
+            id: 'build-ui',
+            specialty: 'frontend',
+            role: 'CODER',
+            objective: 'Build the requested UI',
+            dependsOn: [],
+            expectedOutput: 'Working UI',
+          }],
+        });
+      },
+    },
+    coordinator: {},
+  });
+
+  await director.createPlan('Build a dashboard', { projectId: 'project-1' }, 'auto');
+  assert.equal(callArgs[2], 'planner');
+  assert.equal(callArgs.length, 3);
+});
+
+test('run propagates explicit preferred model to plan creation and worker execution', async () => {
+  const plan = {
+    summary: 'model propagation',
+    tasks: [{
+      id: 'frontend',
+      specialty: 'frontend',
+      role: 'CODER',
+      objective: 'Build UI',
+      dependsOn: [],
+      expectedOutput: 'Working UI',
+    }],
+  };
+  const director = createExecutionHarness({ plan });
+  let planArgs = null;
+  let workerPreferredModel = null;
+  director.createPlan = async (...args) => {
+    planArgs = args;
+    return plan;
+  };
+  director.executeWorker = async (args) => {
+    workerPreferredModel = args.preferredModel;
+    return { status: 'SUCCEEDED', result: { artifact_refs: [] } };
+  };
+
+  const result = await director.run({
+    userId: 'user-1',
+    projectId: 'project-1',
+    request: 'Build a dashboard',
+    preferredModel: 'groq',
+  });
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(planArgs[2], 'groq');
+  assert.equal(workerPreferredModel, 'groq');
+});
+
 test('run executes dependency-ordered tasks and emits completion events', async () => {
   const order = [];
   const plan = {
@@ -410,4 +502,18 @@ test('run fails closed when a required planned task is skipped after delegation 
     true,
     'the supervisor task must be persisted as FAILED when the plan is incomplete'
   );
+});
+
+
+test('fallbackPlan recognizes Hindi full-app requests and preserves verification work', () => {
+  const plan = fallbackPlan('एक पूरा डैशबोर्ड ऐप बनाओ');
+  assert.equal(plan.tasks.length, 3);
+  assert.match(plan.summary, /multi-specialist/i);
+  assert.equal(plan.tasks[2].specialty, 'testing');
+  assert.deepEqual(plan.tasks[2].dependsOn, ['task-2']);
+});
+
+test('fallbackPlan keeps a small Hinglish code request fast', () => {
+  const plan = fallbackPlan('ek date formatting function likho');
+  assert.equal(plan.tasks.length, 1);
 });
