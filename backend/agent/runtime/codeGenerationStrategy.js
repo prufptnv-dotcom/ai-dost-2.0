@@ -125,6 +125,24 @@ function algorithmFamilyGuidance(text) {
   if (/backtrack|constraint satisfaction|combinatorial/.test(p)) {
     rules.push('For backtracking/search, state pruning conditions and prove they cannot discard valid solutions; test no-solution and many-solution cases.');
   }
+  if (/greedy|activity selection|interval scheduling|minimum spanning tree|\bkruskal\b|\bprim\b/.test(p)) {
+    rules.push('For greedy algorithms, state the greedy-choice property and why each local choice is safe; compare against exhaustive search on small generated inputs when feasible.');
+  }
+  if (/\btree\b|binary tree|bst|binary search tree|trie|segment tree|fenwick|range query/.test(p)) {
+    rules.push('For tree and range-query problems, define node invariants, empty-tree behavior, duplicate-key policy, and recursion-depth risks; test skewed trees and boundary ranges.');
+  }
+  if (/\bheap\b|priority queue|\btop.?k\b/.test(p)) {
+    rules.push('For heap/priority-queue solutions, define ordering and tie-breaking, distinguish min-heap from max-heap, and test duplicate priorities and empty-queue behavior.');
+  }
+  if (/hash map|hash table|dictionary|frequency count|count frequencies|deduplication|\bset\b/.test(p)) {
+    rules.push('For hash-based solutions, define key equality/normalization and expected versus worst-case complexity; test collisions conceptually, duplicate keys, and missing keys.');
+  }
+  if (/union.?find|disjoint set|connected components/.test(p)) {
+    rules.push('For disjoint-set union, implement path compression and union by rank/size when appropriate; test repeated unions, self-unions, and disconnected components.');
+  }
+  if (/\bkmp\b|rabin.?karp|string matching|substring search|prefix function|z.?algorithm/.test(p)) {
+    rules.push('For string-matching algorithms, specify indexing and character semantics, handle empty patterns and overlapping matches, and compare against a simple reference implementation on small inputs.');
+  }
   if (/concurren|race condition|parallel|scheduler/.test(p)) {
     rules.push('For concurrent work, define shared-state ownership, cancellation, idempotency, ordering, and race-condition tests.');
   }
@@ -138,11 +156,11 @@ function analyzeCodeGenerationRequest(request, context = {}) {
   const explicitLanguage = firstMatch(original, STACK_SIGNALS);
   const workspaceStack = detectWorkspaceStack(context);
   const isModification = /\b(fix|debug|repair|refactor|upgrade|modify|change|existing|bug|error)\b/i.test(original);
-  const isAlgorithmic = /\b(algorithm|complexity|big.?o|optimi[sz]|dynamic programming|graph|tree|sort|search|shortest path|dijkstra|bellman.?ford|floyd.?warshall|quick.?sort|merge.?sort|heap.?sort|binary search|breadth.?first|depth.?first|\bbfs\b|\bdfs\b|knapsack|union.?find|path.?finding|scheduler|parser|compiler|constraint|backtrack|recursion|data structure|race condition|concurren|throughput|latency)\b/i.test(original);
+  const isAlgorithmic = /\b(algorithm|complexity|big.?o|optimi[sz]|dynamic programming|graph|tree|sort|search|shortest path|dijkstra|bellman.?ford|floyd.?warshall|quick.?sort|merge.?sort|heap.?sort|binary search|breadth.?first|depth.?first|\bbfs\b|\bdfs\b|knapsack|union.?find|path.?finding|scheduler|parser|compiler|constraint|backtrack|recursion|data structure|race condition|concurren|throughput|latency|greedy|priority queue|hash map|hash table|trie|segment tree|fenwick|substring search|kmp|rabin.?karp)\b|एल्गोरिदम|डेटा स्ट्रक्चर|समय जटिलता|स्पेस जटिलता|लॉजिक|लॉजिकल|कोड को ऑप्टिमाइज़|एल्गोरिथम/i.test(original);
   const isFullStack = /\b(full.?stack|frontend|backend|api|database|authentication|authorization|payment|checkout|webhook|server|deploy|integration)\b/i.test(original);
-  const isUi = /\b(app|application|website|web.?app|dashboard|landing page|portfolio|component|page|ui|ux|interface)\b/i.test(original);
+  const isUi = /\b(app|application|website|web.?app|dashboard|landing page|portfolio|component|page|ui|ux|interface)\b|ऐप|वेबसाइट|डैशबोर्ड|पेज|इंटरफेस/i.test(original);
   const isSecuritySensitive = /\b(auth|authentication|authorization|permission|role|secret|token|password|payment|checkout|personal data|upload|sql|injection|security)\b/i.test(original);
-  const isPerformanceSensitive = /\b(fast|ultra.?fast|performance|scale|scalable|high.?load|latency|throughput|memory|large dataset)\b/i.test(original);
+  const isPerformanceSensitive = /\b(fast|ultra.?fast|performance|scale|scalable|high.?load|latency|throughput|memory|large dataset|optimi[sz]e)\b|तेज|जल्दी|फास्ट|कम समय|कम मेमोरी|परफॉर्मेंस|ऑप्टिमाइज़/i.test(original);
 
   const complexity = isAlgorithmic || isSecuritySensitive || isFullStack
     ? 'high'
