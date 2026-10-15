@@ -44,7 +44,9 @@ function detectWorkspaceStack(context = {}) {
   if (pkg) {
     const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
     for (const [packageName, framework] of FRAMEWORK_PACKAGE_MAP) {
-      if (Object.hasOwn(deps, packageName)) return framework;
+      if (!Object.hasOwn(deps, packageName)) continue;
+      if (packageName === 'vite') break;
+      return framework;
     }
     // Vite is a build tool; do not misclassify it as the UI framework.
   }
@@ -66,6 +68,7 @@ const FRAMEWORK_PACKAGE_MAP = [
   ['django', 'Django'],
   ['flask', 'Flask'],
   ['laravel/framework', 'Laravel'],
+  ['vite', 'Vite'],
 ];
 
 function detectFrameworkFromFiles(context = {}) {
