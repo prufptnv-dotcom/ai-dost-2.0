@@ -93,3 +93,15 @@ test('Hindi algorithm and performance requests are classified for stronger guida
   assert.equal(strategy.intent.complexity, 'high');
   assert.ok(strategy.algorithmRules.some((rule) => /invariants/.test(rule)));
 });
+
+
+test('framework-specific guidance covers SvelteKit, Astro islands, and Remix data mutations', () => {
+  const svelte = analyzeCodeGenerationRequest('Build a Svelte dashboard');
+  assert.ok(svelte.frameworkGuidance.some((rule) => /SvelteKit version/.test(rule)));
+
+  const astro = analyzeCodeGenerationRequest('Build an Astro website');
+  assert.ok(astro.frameworkGuidance.some((rule) => /client: directives/.test(rule)));
+
+  const remix = analyzeCodeGenerationRequest('Build a Remix app');
+  assert.ok(remix.frameworkGuidance.some((rule) => /loaders\/actions/.test(rule)));
+});
