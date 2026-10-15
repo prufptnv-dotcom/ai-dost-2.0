@@ -1,0 +1,129 @@
+{
+  "version": "1.0.0",
+  "created": "2026-10-15",
+  "description": "Fixed, versioned six-case baseline request set for AI Dost / Forge Studio quality evaluation (Phase 0)",
+  "cases": [
+    {
+      "id": "CASE-A-LANDING-PAGE",
+      "name": "Case A — Landing Page",
+      "archetype": "landing_page",
+      "prompt": "Create a modern, responsive product landing page for 'PulseMetrics', an AI-powered developer observability platform. Include: (1) A navigation header with logo, product links, and a 'Get Started' CTA button; (2) A hero section with a compelling headline, value proposition badge, animated metric preview card, and primary/secondary action buttons; (3) A 3-column features grid highlighting real-time tracing, anomaly detection, and automated root-cause analysis with distinct icons and hover states; (4) A dynamic interactive pricing tier selector (Monthly/Annual billing toggle with 20% discount badge, Free/Pro/Enterprise tiers with feature checklist); (5) An interactive FAQ accordion with expandable answers; and (6) A comprehensive footer with category links, newsletter subscription input with validation, and copyright notice. Ensure clean visual hierarchy, coherent color palette, fully responsive mobile/tablet layout, and zero placeholder text.",
+      "explicitRequirements": [
+        "REQ-A-1: Navigation header with responsive links, logo, and active CTA button",
+        "REQ-A-2: Hero section with headline, value badge, metric visual card, and primary/secondary CTAs",
+        "REQ-A-3: 3-column features grid with unique icons, descriptive copy, and interactive hover states",
+        "REQ-A-4: Interactive pricing tier switcher with monthly/annual toggle and functional selection state",
+        "REQ-A-5: Interactive accordion FAQ component with toggleable question/answer items",
+        "REQ-A-6: Responsive footer with functional email validation input and navigation columns",
+        "REQ-A-7: Coherent typography, color tokens, and responsive layout without generic lorem ipsum"
+      ],
+      "verificationChecks": [
+        "CHK-A-1: Component compiles and renders without DOM errors",
+        "CHK-A-2: Billing toggle switches prices and active discount state",
+        "CHK-A-3: FAQ accordion expands and collapses on click",
+        "CHK-A-4: Email subscription form validates email format on submit"
+      ]
+    },
+    {
+      "id": "CASE-B-DASHBOARD",
+      "name": "Case B — SaaS Dashboard",
+      "archetype": "dashboard",
+      "prompt": "Build a SaaS operational metrics dashboard for 'CloudVessel' cluster management. Include: (1) Top summary statistics cards showing Total Nodes, Active Containers, CPU Utilization (%), and Memory Usage (%) with trend indicators (+/- % vs last hour); (2) Real-time search and filter controls allowing filtering by cluster region (US-East, US-West, EU-Central, AP-South) and status (Healthy, Warning, Critical); (3) Interactive SVG or canvas line chart displaying 24-hour CPU/Memory telemetry with hoverable data points; (4) A responsive data table listing cluster nodes with columns for Node ID, Region, Status badge, Pod Count, CPU Load bar, and Action menu; (5) A functional 'Export to CSV' button that generates and downloads a real, formatted CSV file containing the currently filtered node records; (6) Distinct empty state when search filters return no nodes, with a 'Clear Filters' button; and (7) Loading skeleton state during data refresh. Do not return mock static text without working filtering and CSV download logic.",
+      "explicitRequirements": [
+        "REQ-B-1: 4 operational KPI summary cards with trend percentages and status indicators",
+        "REQ-B-2: Interactive filter controls (search query text input + region dropdown + status dropdown)",
+        "REQ-B-3: Interactive telemetry chart with multi-series data display and tooltips",
+        "REQ-B-4: Cluster node data table with status badges and load visualization bars",
+        "REQ-B-5: Real CSV export function that generates a valid downloadable CSV file matching current filters",
+        "REQ-B-6: Meaningful empty state when filters match zero records, including one-click reset action",
+        "REQ-B-7: Loading skeleton / state transition handling"
+      ],
+      "verificationChecks": [
+        "CHK-B-1: Table filters update displayed rows in real time based on search input and dropdowns",
+        "CHK-B-2: Export CSV button triggers browser download of valid CSV content",
+        "CHK-B-3: Clearing filters restores the full dataset"
+      ]
+    },
+    {
+      "id": "Case-C-ECOMMERCE",
+      "name": "Case C — E-Commerce Flow",
+      "archetype": "ecommerce",
+      "prompt": "Develop an e-commerce shopping experience for 'SoundWave Audio' premium headphones. Features must include: (1) Product catalog grid displaying at least 6 distinct audio products with product image, title, category tag (Wireless, Studio, Noise-Cancelling, Earbuds), star rating, price, and 'Add to Cart' button; (2) Category filter chips and price range slider with real-time catalog filtering; (3) Interactive slide-over or floating Cart Drawer showing item list, thumbnail, unit price, quantity increment/decrement controls, item removal with undo option, and subtotal calculation; (4) Automatic shipping calculation ($0 if subtotal > $100, else $15) and tax calculation (8.5%); (5) Promo code input with support for valid code 'SAVE20' granting 20% discount with feedback; (6) Multi-step Checkout modal with form validation (Name, Shipping Address, Email, and 16-digit Card Number) that blocks completion if fields are empty; and (7) Order Confirmation receipt state with unique Order ID, purchased summary, and cart clear. Do not provide a static mock catalog with non-functional cart buttons.",
+      "explicitRequirements": [
+        "REQ-C-1: 6+ item product catalog with category badges, pricing, ratings, and active Add to Cart triggers",
+        "REQ-C-2: Real-time category filtering and dynamic price range slider",
+        "REQ-C-3: Slide-over cart drawer with live item quantity modification, removal, and live subtotal update",
+        "REQ-C-4: Dynamic shipping and tax calculations based on subtotal thresholds",
+        "REQ-C-5: Working coupon code evaluation (SAVE20 = 20% discount) with success/error alerts",
+        "REQ-C-6: Form-validated checkout flow preventing submission with invalid/empty fields",
+        "REQ-C-7: Order confirmation summary screen that resets the cart state"
+      ],
+      "verificationChecks": [
+        "CHK-C-1: Adding an item increments cart badge and updates drawer contents",
+        "CHK-C-2: Quantity increment/decrement recalculates subtotal, tax, and final total correctly",
+        "CHK-C-3: Applying promo code 'SAVE20' reduces total by 20%",
+        "CHK-C-4: Checkout form rejects submission when required inputs are blank"
+      ]
+    },
+    {
+      "id": "CASE-D-EDUCATION-QUIZ",
+      "name": "Case D — Educational Quiz Application",
+      "archetype": "education",
+      "prompt": "Create an interactive educational quiz application titled 'Full-Stack Web Dev Mastery'. Requirements: (1) A question bank containing at least 8 multi-choice questions covering JavaScript, CSS, REST APIs, and Database fundamentals with 4 options each; (2) Topic selection screen allowing the learner to take an All Topics quiz or focus on a specific category; (3) Quiz play interface displaying current question counter (e.g. 'Question 3 of 8'), visual progress bar, question text, code snippet block where applicable, and 4 selectable answer buttons; (4) Immediate or end-of-quiz feedback showing correct vs incorrect choices with brief explanations; (5) Scoring engine tracking score, percentage, time elapsed, and pass/fail verdict (threshold >= 75%); (6) LocalStorage persistence preserving in-progress session state so page reload does not lose current question or answers; (7) Review screen showing all questions with selected vs correct answers; and (8) 'Restart Quiz' button that resets session and score. Controls must be fully functional.",
+      "explicitRequirements": [
+        "REQ-D-1: 8+ structured multi-choice questions with code snippets and 4 options each",
+        "REQ-D-2: Category/topic selector and quiz initialization view",
+        "REQ-D-3: Active question interface with progress bar, question counter, and choice selection",
+        "REQ-D-4: Immediate feedback or explanation for answer selection",
+        "REQ-D-5: Score calculation with percentage, time tracking, and grade threshold",
+        "REQ-D-6: Session state persistence via localStorage or explicit session store",
+        "REQ-D-7: Complete quiz review screen and reset/restart functionality"
+      ],
+      "verificationChecks": [
+        "CHK-D-1: Selecting an answer records the choice and advances progress",
+        "CHK-D-2: Reloading mid-quiz recovers saved progress without reset",
+        "CHK-D-3: Final screen displays correct score percentage and review details",
+        "CHK-D-4: Restart quiz resets score and state back to question 1"
+      ]
+    },
+    {
+      "id": "CASE-E-API-CRUD",
+      "name": "Case E — API-Backed CRUD Application",
+      "archetype": "crud_fullstack",
+      "prompt": "Build a complete Task & Project Management application with real REST API endpoints and data persistence. Requirements: (1) Express.js backend server with RESTful endpoints: GET /api/tasks (list with optional status filter), POST /api/tasks (create task with title, description, priority, dueDate, assignee), PUT /api/tasks/:id (update task fields or status), and DELETE /api/tasks/:id (remove task); (2) Request validation rejecting POST/PUT if title is missing or priority is not 'low'|'medium'|'high'; (3) File-based JSON or SQLite persistence ensuring data survives server restart; (4) React frontend interface with a creation modal/form, task list/kanban columns (To Do, In Progress, Done), and inline status editing; (5) Visual loading states during fetch/save operations and graceful error banners on network failure; and (6) Delete confirmation dialog. Do not return a mock frontend that only stores items in React useState without real backend HTTP API calls.",
+      "explicitRequirements": [
+        "REQ-E-1: Express backend providing GET, POST, PUT, DELETE /api/tasks endpoints",
+        "REQ-E-2: Backend input validation rejecting invalid status/priority and missing titles with 400 Bad Request",
+        "REQ-E-3: Persistent data storage via SQLite or file-backed storage surviving server restarts",
+        "REQ-E-4: Frontend React UI interacting with backend via fetch/axios HTTP calls",
+        "REQ-E-5: Status column transitions (To Do -> In Progress -> Done) mapped to PUT requests",
+        "REQ-E-6: Loading spinners / optimistic UI updates with rollback on API error",
+        "REQ-E-7: Delete confirmation with DELETE request execution and state refresh"
+      ],
+      "verificationChecks": [
+        "CHK-E-1: POST /api/tasks creates task and returns 201 with generated ID",
+        "CHK-E-2: POST /api/tasks with empty title returns 400 with validation message",
+        "CHK-E-3: PUT /api/tasks/:id updates task status",
+        "CHK-E-4: DELETE /api/tasks/:id removes task from database"
+      ]
+    },
+    {
+      "id": "CASE-F-MULTI-STEP-REPAIR",
+      "name": "Case F — Multi-Step Repair",
+      "archetype": "repair",
+      "prompt": "In an existing React project fixture where `src/App.jsx` has a broken import (`import { NonExistentComponent } from './components/NonExistentComponent'`) causing build failure `Rollup failed to resolve import`, and an unhandled click handler `onClick={handleClick}` where `handleClick` is undefined causing runtime crash on button click: Analyze the build error, locate the broken import and missing function in `src/App.jsx`, apply surgical diff fixes to replace the missing import with an inline working component and define `handleClick` to toggle state, and verify that the project builds clean without regenerating or wiping unrelated project files.",
+      "explicitRequirements": [
+        "REQ-F-1: Identify root-cause build failure from compiler output",
+        "REQ-F-2: Apply surgical patch to src/App.jsx removing broken import and providing working component",
+        "REQ-F-3: Implement missing handleClick event handler in src/App.jsx",
+        "REQ-F-4: Preserve existing package.json, configuration, styling, and unrelated source files without full rewrite",
+        "REQ-F-5: Verify build succeeds with exit code 0 post-repair"
+      ],
+      "verificationChecks": [
+        "CHK-F-1: Project builds cleanly with exit code 0 after repair",
+        "CHK-F-2: Button click executes handleClick without throwing ReferenceError",
+        "CHK-F-3: Unrelated files in workspace remain identical before and after repair"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+{
+  "version": "1.0.0",
+  "baselineDate": "2026-10-15",
+  "environment": {
+    "gitBranch": "audit/phase-0-execution-path-baseline-2026-10",
+    "baseSha": "76efa666d809c381d61579de5fa7c9d31f6a5a53",
+    "nodeVersion": "v24.20.0",
+    "platform": "win32",
+    "providerConfigured": {
+      "groq": "configured",
+      "gemini": "configured",
+      "ollama": "local_fallback"
+    }
+  },
+  "summary": {
+    "totalCases": 6,
+    "completedLiveRuns": 0,
+    "notEvaluatedRuns": 6,
+    "reproducedDefectCount": 3,
+    "safetyDefectsConfirmed": 1
+  },
+  "honestyDisclosure": "In accordance with Roadmap Ground Rules 4, 5, 7, and 9: No simulated success is reported. Because live automated end-to-end cloud generation across the 6 cases requires local backend loopback execution with authenticated provider quotas and browser execution, these 6 generation outputs are preserved as NOT_EVALUATED until the Phase 1/Phase 6 live capture harness is run. The underlying structural defects are proven through static and unit runtime tracing.",
+  "caseEvaluations": [
+    {
+      "id": "CASE-A-LANDING-PAGE",
+      "archetype": "landing_page",
+      "status": "NOT_EVALUATED",
+      "observedExecutionPath": "Forge Studio Copilot -> CopilotDirector -> TaskPlanner -> structuredAgentPlanner",
+      "expectedRequirementsCount": 7,
+      "verifiedRequirementsCount": 0,
+      "buildResult": "PENDING_LIVE_HARNESS",
+      "runtimeResult": "PENDING_LIVE_HARNESS",
+      "knownRiskOnMain": "Planner generates single App.jsx without structured section breakdown; verification runs list_directory only"
+    },
+    {
+      "id": "CASE-B-DASHBOARD",
+      "archetype": "dashboard",
+      "status": "NOT_EVALUATED",
+      "observedExecutionPath": "Forge Studio Copilot -> CopilotDirector -> TaskPlanner -> structuredAgentPlanner",
+      "expectedRequirementsCount": 7,
+      "verifiedRequirementsCount": 0,
+      "buildResult": "PENDING_LIVE_HARNESS",
+      "runtimeResult": "PENDING_LIVE_HARNESS",
+      "knownRiskOnMain": "CSV export and real-time filtering omitted; fallback template provides static 3-item array (System Analytics Module, User Access Control, Database Replication Pipeline)"
+    },
+    {
+      "id": "CASE-C-ECOMMERCE",
+      "archetype": "ecommerce",
+      "status": "NOT_EVALUATED",
+      "observedExecutionPath": "Forge Studio Copilot -> CopilotDirector -> TaskPlanner -> structuredAgentPlanner",
+      "expectedRequirementsCount": 7,
+      "verifiedRequirementsCount": 0,
+      "buildResult": "PENDING_LIVE_HARNESS",
+      "runtimeResult": "PENDING_LIVE_HARNESS",
+      "knownRiskOnMain": "Cart drawer state transitions and promo code calculation omitted; fallback template injects hardcoded mock product items"
+    },
+    {
+      "id": "CASE-D-EDUCATION-QUIZ",
+      "archetype": "education",
+      "status": "NOT_EVALUATED",
+      "observedExecutionPath": "Forge Studio Copilot -> CopilotDirector -> TaskPlanner -> structuredAgentPlanner",
+      "expectedRequirementsCount": 7,
+      "verifiedRequirementsCount": 0,
+      "buildResult": "PENDING_LIVE_HARNESS",
+      "runtimeResult": "PENDING_LIVE_HARNESS",
+      "knownRiskOnMain": "Session persistence and scoring thresholds omitted; treated as generic UI application without algorithm or state persistence gates"
+    },
+    {
+      "id": "CASE-E-API-CRUD",
+      "archetype": "crud_fullstack",
+      "status": "NOT_EVALUATED",
+      "observedExecutionPath": "Forge Studio Copilot -> CopilotDirector -> TaskPlanner -> structuredAgentPlanner",
+      "expectedRequirementsCount": 7,
+      "verifiedRequirementsCount": 0,
+      "buildResult": "PENDING_LIVE_HARNESS",
+      "runtimeResult": "PENDING_LIVE_HARNESS",
+      "knownRiskOnMain": "Director planner prompt focuses on frontend code files (src/App.jsx); Express server.js endpoints and SQLite persistence frequently omitted or replaced with in-memory useState"
+    },
+    {
+      "id": "CASE-F-MULTI-STEP-REPAIR",
+      "archetype": "repair",
+      "status": "NOT_EVALUATED",
+      "observedExecutionPath": "Forge Studio Copilot -> CopilotDirector -> TaskPlanner -> structuredAgentPlanner (repair mode)",
+      "expectedRequirementsCount": 5,
+      "verifiedRequirementsCount": 0,
+      "buildResult": "PENDING_LIVE_HARNESS",
+      "runtimeResult": "PENDING_LIVE_HARNESS",
+      "knownRiskOnMain": "Specialist repair may attempt whole-file write_file, hitting WRITE_FORBIDDEN_ON_EXISTING, or hallucinate SEARCH blocks when existing file content is not verbatim in context"
+    }
+  ]
+}
