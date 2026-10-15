@@ -772,7 +772,7 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
           const specificationContext = [
             appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '',
             formatCodeGenerationStrategy(codeGenerationStrategy),
-          ].filter(Boolean).join('\\n\\n');
+          ]].filter(Boolean).join('\n\n');
           const systemPrompt = [buildFullstackSystemPrompt(prompt, category), specificationContext].filter(Boolean).join('\n\n');
           
           let parsedData = null;
@@ -3247,7 +3247,7 @@ router.post('/scaffold-wizard', async (req, res) => {
   const specificationContext = [
     appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '',
     formatCodeGenerationStrategy(codeGenerationStrategy),
-  ].filter(Boolean).join('\\n\\n');
+  ]].filter(Boolean).join('\n\n');
   const callWithTimeout = (promise, timeoutMs, message) => {
     let timer;
     return Promise.race([
