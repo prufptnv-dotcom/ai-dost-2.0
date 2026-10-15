@@ -240,10 +240,13 @@ test('VerificationClassifier: Classifies tool names into explicit evidence categ
 
   // verify_project alone without validated execution evidence or explicit requirements defaults safely to INSPECTION
   assert.equal(classifyTool('verify_project'), EVIDENCE_CATEGORIES.INSPECTION);
-  assert.equal(classifyTool('verify_functional_acceptance'), EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE);
+  // SECURITY: verify_functional_acceptance by name alone (no output/checks) is now INSPECTION, not FUNCTIONAL_ACCEPTANCE.
+  // A tool name is not evidence of acceptance — output.checks with real sub-checks are required.
+  assert.equal(classifyTool('verify_functional_acceptance'), EVIDENCE_CATEGORIES.INSPECTION);
 
   // verify_project with validated execution results classifies according to executed evidence
-  assert.equal(classifyTool('verify_project', {}, { success: true, functionalAcceptanceSatisfied: true }), EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE);
+  // SECURITY: functionalAcceptanceSatisfied:true without checks array is now INSPECTION (flag alone is not proof)
+  assert.equal(classifyTool('verify_project', {}, { success: true, functionalAcceptanceSatisfied: true }), EVIDENCE_CATEGORIES.INSPECTION);
   assert.equal(classifyTool('verify_project', {}, { success: true, checks: [{ name: 'functional_acceptance', requirementId: 'REQ-1', success: true }] }), EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE);
   assert.equal(classifyTool('verify_project', {}, { success: true, checks: [] }), EVIDENCE_CATEGORIES.INSPECTION);
   assert.equal(classifyTool('verify_project', {}, { success: true, checks: [{ name: 'none', stdout: 'No verification scripts found.' }] }), EVIDENCE_CATEGORIES.INSPECTION);
@@ -526,7 +529,19 @@ test('VerificationClassifier: Evaluation Case 6 — Explicit functional acceptan
     executedSteps: [
       { tool: 'list_directory', input: {}, output: {}, success: true },
       { tool: 'sandbox_dev_build', input: {}, output: { success: true }, success: true },
-      { tool: 'verify_project', input: { requirements: ['charts', 'export'] }, output: { success: true, satisfied: true }, success: true }
+      {
+        tool: 'verify_project',
+        input: { requirements: ['charts', 'export'] },
+        output: {
+          success: true,
+          checks: [
+            { name: 'requirement_acceptance', requirementId: 'charts', success: true, exitCode: 0 },
+            { name: 'requirement_acceptance', requirementId: 'export', success: true, exitCode: 0 }
+          ],
+          satisfiedRequirements: ['charts', 'export']
+        },
+        success: true
+      }
     ]
   });
   assert.equal(result.status, 'SUCCEEDED');
@@ -866,4 +881,264 @@ test('Director Integration: verify_project returning only build/test checks rema
   assert.equal(finalVerifyEvent.status, 'PARTIAL');
   assert.equal(result.verification_status, 'PARTIAL');
   assert.notEqual(finalVerifyEvent.status, 'SUCCEEDED');
+});
+
+// =============================================================================
+// REGRESSION SUITE: P0 — Reject Unverified Acceptance Claims (8 scenarios)
+// =============================================================================
+
+// Regression 1: Requirements specified but output only has satisfied:true and no coverage evidence.
+// Boolean flag must NOT satisfy per-requirement coverage check.
+test('Regression 1: satisfied:true with no coverage evidence and no checks must not satisfy requirements', () => {
+  // hasValidRequirementCoverage: reqs present, no coveredSet entries, flag alone ignored
+  const { hasValidRequirementCoverage } = require('../agent/runtime/VerificationClassifier');
+  const covered = hasValidRequirementCoverage(
+    { requirements: ['auth', 'billing'] },
+    { satisfied: true, allRequirementsSatisfied: true, verified: true },
+    []
+  );
+  assert.equal(covered, false, 'satisfied/verified/allRequirementsSatisfied flags must not substitute for per-requirement coverage');
+
+  // Full evaluation path: verify_project returns only satisfied flag, no checks
+  const result = evaluateVerificationRun({
+    executedSteps: [
+      {
+        tool: 'verify_project',
+        input: { requirements: ['auth', 'billing'] },
+        output: { success: true, satisfied: true, allRequirementsSatisfied: true, verified: true },
+        success: true
+      }
+    ]
+  });
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED', 'Boolean flags must not produce SATISFIED');
+  assert.equal(result.status, 'UNVERIFIED');
+  assert.equal(result.acceptanceStatus, 'NOT_EVALUATED');
+});
+
+// Regression 2: Partial requirement items — verified:true shortcut must not cover requirements that have no matching evidence.
+test('Regression 2: verified:true shortcut must not cover requirements missing from evidence', () => {
+  const { hasValidRequirementCoverage } = require('../agent/runtime/VerificationClassifier');
+
+  // Only 'auth' is covered in satisfiedRequirements; 'billing' is not
+  const covered = hasValidRequirementCoverage(
+    { requirements: ['auth', 'billing'] },
+    { verified: true, satisfiedRequirements: ['auth'] },
+    []
+  );
+  assert.equal(covered, false, 'Partial requirement coverage must not pass even when verified:true is set');
+
+  // Evaluation path confirms UNVERIFIED / NOT_EVALUATED
+  const result = evaluateVerificationRun({
+    executedSteps: [
+      {
+        tool: 'verify_project',
+        input: { requirements: ['auth', 'billing'] },
+        output: {
+          success: true,
+          verified: true,
+          satisfiedRequirements: ['auth'],
+          checks: [{ name: 'requirement_acceptance', requirementId: 'auth', success: true, exitCode: 0 }]
+        },
+        success: true
+      }
+    ]
+  });
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED');
+  // Partial requirements with only auth covered → falls back to INSPECTION (no full coverage)
+  assert.notEqual(result.status, 'SUCCEEDED');
+});
+
+// Regression 3: Empty or null requirement entries must fail closed (not skip), never SATISFIED.
+test('Regression 3: Empty or null requirement entries fail closed to UNVERIFIED, never SATISFIED', () => {
+  const { hasValidRequirementCoverage } = require('../agent/runtime/VerificationClassifier');
+
+  // Empty string requirement — can never be matched → must return false
+  const emptyStringReq = hasValidRequirementCoverage(
+    { requirements: [''] },
+    { satisfiedRequirements: [] },
+    []
+  );
+  assert.equal(emptyStringReq, false, 'Empty string requirement must fail closed');
+
+  // Null requirement object with no identity fields
+  const nullIdentityReq = hasValidRequirementCoverage(
+    { requirements: [{ id: null, name: null, requirementId: undefined }] },
+    { satisfiedRequirements: [] },
+    []
+  );
+  assert.equal(nullIdentityReq, false, 'Null-identity requirement must fail closed');
+
+  // Evaluation path: requirement with empty string
+  const result = evaluateVerificationRun({
+    executedSteps: [
+      {
+        tool: 'verify_project',
+        input: { requirements: [''] },
+        output: { success: true, satisfied: true },
+        success: true
+      }
+    ]
+  });
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED');
+  assert.equal(result.status, 'UNVERIFIED');
+});
+
+// Regression 4: verify_functional_acceptance returning a string (not an object with checks)
+// must be classified as INSPECTION, never FUNCTIONAL_ACCEPTANCE.
+test('Regression 4: verify_functional_acceptance returning a string must be INSPECTION, never FUNCTIONAL_ACCEPTANCE', () => {
+  // With a string output (not an object with checks)
+  const classified = classifyTool('verify_functional_acceptance', {}, 'Acceptance verified');
+  assert.equal(classified, EVIDENCE_CATEGORIES.INSPECTION,
+    'String output from verify_functional_acceptance must not promote to FUNCTIONAL_ACCEPTANCE');
+
+  // With no output at all (plan-time, no requirements scoped)
+  const noOutNoReq = classifyTool('verify_functional_acceptance', {});
+  assert.equal(noOutNoReq, EVIDENCE_CATEGORIES.INSPECTION,
+    'verify_functional_acceptance without output or requirements must be INSPECTION');
+
+  // Evaluation path
+  const result = evaluateVerificationRun({
+    executedSteps: [
+      { tool: 'verify_functional_acceptance', input: {}, output: 'Acceptance verified', success: true }
+    ]
+  });
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED');
+  assert.equal(result.status, 'UNVERIFIED');
+});
+
+// Regression 5: Arbitrary verify_acceptance_custom returning { success: true } must be INSPECTION.
+// No tool name matching verify_acceptance* prefix can produce FUNCTIONAL_ACCEPTANCE without checks.
+test('Regression 5: verify_acceptance_custom returning { success: true } without checks must be INSPECTION', () => {
+  const classifiedNoOut = classifyTool('verify_acceptance_custom', {});
+  assert.equal(classifiedNoOut, EVIDENCE_CATEGORIES.INSPECTION,
+    'verify_acceptance_custom with no output must be INSPECTION');
+
+  const classifiedSuccessOnly = classifyTool('verify_acceptance_custom', {}, { success: true });
+  assert.equal(classifiedSuccessOnly, EVIDENCE_CATEGORIES.INSPECTION,
+    'verify_acceptance_custom with only success:true and no checks must be INSPECTION');
+
+  const classifiedFlagOnly = classifyTool('verify_acceptance_custom', {}, { success: true, functionalAcceptanceSatisfied: true });
+  assert.equal(classifiedFlagOnly, EVIDENCE_CATEGORIES.INSPECTION,
+    'verify_acceptance_custom with functionalAcceptanceSatisfied:true but no checks must be INSPECTION');
+
+  const result = evaluateVerificationRun({
+    executedSteps: [
+      { tool: 'verify_acceptance_custom', input: {}, output: { success: true }, success: true }
+    ]
+  });
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED');
+  assert.equal(result.status, 'UNVERIFIED');
+});
+
+// Regression 6: Missing requirement identity or evidence: checks that pass but have no
+// requirementId/requirement/feature/criteria fields must NOT count toward requirement coverage.
+test('Regression 6: Passing checks with no requirement identity must not count toward coverage', () => {
+  const { hasValidRequirementCoverage } = require('../agent/runtime/VerificationClassifier');
+
+  // Passing check with no identity fields
+  const covered = hasValidRequirementCoverage(
+    { requirements: ['auth'] },
+    {},
+    [{ name: 'some_check', success: true, exitCode: 0 }] // no requirementId/requirement/feature/criteria
+  );
+  assert.equal(covered, false, 'Checks without requirement identity must not satisfy coverage');
+
+  const result = evaluateVerificationRun({
+    executedSteps: [
+      {
+        tool: 'verify_project',
+        input: { requirements: ['auth'] },
+        output: {
+          success: true,
+          checks: [
+            { name: 'requirement_acceptance', success: true, exitCode: 0 } // no requirementId
+          ]
+        },
+        success: true
+      }
+    ]
+  });
+  // Has a functional check but no coverage proof for 'auth' → not SATISFIED
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED');
+});
+
+// Regression 7: Genuine passing evidence with matched identities must return SUCCEEDED and SATISFIED.
+// This test proves the hardened path still allows legitimate acceptance to pass through.
+test('Regression 7: Genuine requirement checks with matched identities return SUCCEEDED and SATISFIED', () => {
+  const { hasValidRequirementCoverage } = require('../agent/runtime/VerificationClassifier');
+
+  // Direct coverage check
+  const covered = hasValidRequirementCoverage(
+    { requirements: ['login', 'checkout'] },
+    { satisfiedRequirements: ['login', 'checkout'] },
+    [
+      { name: 'requirement_acceptance', requirementId: 'login', success: true, exitCode: 0 },
+      { name: 'requirement_acceptance', requirementId: 'checkout', success: true, exitCode: 0 }
+    ]
+  );
+  assert.equal(covered, true, 'All requirements with matched evidence must pass coverage check');
+
+  // Full evaluation path
+  const result = evaluateVerificationRun({
+    executedSteps: [
+      { tool: 'sandbox_dev_build', input: {}, output: { success: true }, success: true },
+      {
+        tool: 'verify_project',
+        input: { requirements: ['login', 'checkout'] },
+        output: {
+          success: true,
+          checks: [
+            { name: 'requirement_acceptance', requirementId: 'login', success: true, exitCode: 0 },
+            { name: 'requirement_acceptance', requirementId: 'checkout', success: true, exitCode: 0 }
+          ],
+          satisfiedRequirements: ['login', 'checkout']
+        },
+        success: true
+      }
+    ]
+  });
+  assert.equal(result.status, 'SUCCEEDED', 'Genuine acceptance must still reach SUCCEEDED');
+  assert.equal(result.acceptanceStatus, 'SATISFIED');
+  assert.equal(result.evidenceLevel, 'FUNCTIONAL_ACCEPTANCE');
+});
+
+// Regression 8: Failed required checks must propagate to FAILED, never green.
+// Ensures failed required checks are not swallowed by any shortcut in the classification path.
+test('Regression 8: Failed required checks must produce FAILED status, never green', () => {
+  // 8a: verify_project sub-check fails → FAILED
+  const withSubCheckFail = evaluateVerificationRun({
+    executedSteps: [
+      {
+        tool: 'verify_project',
+        input: { requirements: ['auth'] },
+        output: {
+          success: true,
+          allRequirementsSatisfied: true, // flag lies; sub-check actually failed
+          satisfied: true,
+          checks: [{ name: 'requirement_acceptance', requirementId: 'auth', success: false, exitCode: 1, stderr: 'Login returned 403' }]
+        },
+        success: true
+      }
+    ]
+  });
+  assert.equal(withSubCheckFail.status, 'FAILED', 'Failed sub-check must produce FAILED even when output flags claim satisfied');
+  assert.equal(withSubCheckFail.acceptanceStatus, 'FAILED');
+  assert.notEqual(withSubCheckFail.acceptanceStatus, 'SATISFIED');
+
+  // 8b: verify_acceptance_criteria with failing checks → FAILED
+  const withVerifyAccFail = evaluateVerificationRun({
+    executedSteps: [
+      {
+        tool: 'verify_acceptance_criteria',
+        input: {},
+        output: {
+          success: false,
+          checks: [{ name: 'requirement_acceptance', requirementId: 'billing', success: false, exitCode: 1 }]
+        },
+        success: false
+      }
+    ]
+  });
+  assert.equal(withVerifyAccFail.status, 'FAILED');
+  assert.equal(withVerifyAccFail.acceptanceStatus, 'FAILED');
 });

@@ -93,33 +93,45 @@ function hasValidRequirementCoverage(input = {}, output = {}, checks = []) {
     return true;
   }
 
+  // SECURITY: Boolean flags like satisfied/verified/allRequirementsSatisfied are NOT proof of
+  // per-requirement coverage. They may be planner-generated or set by tool output without backing
+  // evidence. Only explicit, matched requirement identities in executed checks or named coverage
+  // lists count toward coverage.
   const coveredSet = new Set();
-  const outputCovered = output?.satisfiedRequirements || output?.verifiedRequirements || output?.coveredRequirements || output?.requirements;
+
+  // Named coverage lists from output (array of strings or objects with identity fields)
+  const outputCovered = output?.satisfiedRequirements || output?.verifiedRequirements || output?.coveredRequirements;
   if (Array.isArray(outputCovered)) {
     outputCovered.forEach((r) => {
-      if (typeof r === 'string') coveredSet.add(r.trim().toLowerCase());
-      else if (r && typeof r === 'object' && (r.id || r.requirementId || r.name)) {
-        coveredSet.add(String(r.id || r.requirementId || r.name).trim().toLowerCase());
+      if (typeof r === 'string' && r.trim()) {
+        coveredSet.add(r.trim().toLowerCase());
+      } else if (r && typeof r === 'object') {
+        const id = r.id || r.requirementId || r.name;
+        if (id && String(id).trim()) {
+          coveredSet.add(String(id).trim().toLowerCase());
+        }
       }
     });
   }
 
+  // Executed checks that passed and carry an explicit requirement identity
   if (Array.isArray(checks)) {
     checks.forEach((c) => {
       if (c && !isDummyCheck(c) && (c.success === true || c.exitCode === 0)) {
         const id = c.requirementId || c.requirement || c.feature || c.criteria;
-        if (id) coveredSet.add(String(id).trim().toLowerCase());
+        if (id && String(id).trim()) {
+          coveredSet.add(String(id).trim().toLowerCase());
+        }
       }
     });
   }
 
-  if (output?.functionalAcceptanceSatisfied === true || output?.allRequirementsSatisfied === true || output?.satisfied === true || output?.verified === true) {
-    return true;
-  }
-
+  // Every explicitly requested requirement must have matching coverage evidence
   for (const r of reqs) {
-    const target = (typeof r === 'string' ? r : (r?.id || r?.requirementId || r?.name || '')).trim().toLowerCase();
-    if (!target) continue;
+    const rawTarget = typeof r === 'string' ? r : (r?.id || r?.requirementId || r?.name || '');
+    const target = String(rawTarget).trim().toLowerCase();
+    // Empty or missing identity = unverifiable → fail closed
+    if (!target) return false;
     let found = false;
     for (const covered of coveredSet) {
       if (covered.includes(target) || target.includes(covered)) {
@@ -138,14 +150,9 @@ function hasValidRequirementCoverage(input = {}, output = {}, checks = []) {
  */
 function classifyExecutedChecks(checks = [], input = {}, output = {}) {
   const realChecks = Array.isArray(checks) ? checks.filter((c) => c && !isDummyCheck(c)) : [];
+  // SECURITY: No real checks = no functional acceptance, regardless of output flags.
+  // Boolean flags (satisfied/verified) in output cannot substitute for executed check evidence.
   if (realChecks.length === 0) {
-    if (output && typeof output === 'object') {
-      if (output.functionalAcceptanceSatisfied === true || output.acceptanceCriteriaSatisfied === true || output.satisfied === true || output.verified === true) {
-        if (hasValidRequirementCoverage(input, output, [])) {
-          return EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE;
-        }
-      }
-    }
     return EVIDENCE_CATEGORIES.INSPECTION;
   }
 
@@ -178,13 +185,13 @@ function classifyExecutedChecks(checks = [], input = {}, output = {}) {
     } else if (name === 'build' || name === 'lint' || type === 'build' || /build|compile|lint/.test(cmd)) {
       hasBuild = true;
     }
+    // SECURITY: c.type/c.category from tool output cannot self-promote to functional acceptance;
+    // only explicit structural fields (requirementId/requirement/criteria) are trusted.
   }
 
-  if (output && typeof output === 'object') {
-    if (output.functionalAcceptanceSatisfied === true || output.acceptanceCriteriaSatisfied === true || output.satisfied === true || output.verified === true) {
-      hasFunctional = true;
-    }
-  }
+  // SECURITY: Output-level boolean flags (satisfied/verified/functionalAcceptanceSatisfied) must
+  // not boost hasFunctional. Only executed check structure (above) determines this. Flags may be
+  // set by planner input or tool output without real backing evidence.
 
   if (hasFunctional) {
     if (!hasValidRequirementCoverage(input, output, realChecks)) {
@@ -214,31 +221,25 @@ function classifyTool(toolName, input = {}, output = null, options = {}) {
   if (VISUAL_TOOLS.has(name)) return EVIDENCE_CATEGORIES.VISUAL;
   if (TEST_TOOLS.has(name)) return EVIDENCE_CATEGORIES.TEST;
 
-  // Functional acceptance tools (verify_project, verify_functional_acceptance, etc.)
+  // Functional acceptance tools require actual executed output evidence, not just a tool name.
+  // SECURITY: A tool name alone — whether in FUNCTIONAL_ACCEPTANCE_TOOLS or matching verify_*
+  // prefixes — does NOT prove functional acceptance. Only validated sub-check execution evidence
+  // (output.checks with real check entries) establishes acceptance.
   if (FUNCTIONAL_ACCEPTANCE_TOOLS.has(name)) {
     if (output && typeof output === 'object') {
       if (Array.isArray(output.checks)) {
+        // Delegate to executed-checks classifier — boolean flags inside output are ignored there
         return classifyExecutedChecks(output.checks, input, output);
       }
-      if (output.functionalAcceptanceSatisfied === true || output.acceptanceCriteriaSatisfied === true || output.satisfied === true || output.verified === true) {
-        if (hasValidRequirementCoverage(input, output, [])) {
-          return EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE;
-        }
-      }
+      // Output present but no checks array → no executed evidence regardless of flags
       return EVIDENCE_CATEGORIES.INSPECTION;
     }
-
-    // Static plan classification (before execution) or dedicated acceptance tool capability
-    if (name !== 'verify_project') {
+    // No output at all: plan-time classification. All tools (including verify_functional_acceptance)
+    // can only claim FUNCTIONAL_ACCEPTANCE in plan mode if explicit requirements are scoped.
+    // SECURITY: No tool name alone promotes to FUNCTIONAL_ACCEPTANCE without requirement scope.
+    if (options.isPlan && (input?.requirements?.length || input?.features?.length || input?.acceptanceCriteria?.length)) {
       return EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE;
     }
-
-    if (options.isPlan || (input && (input.requirements || input.features || input.acceptanceCriteria))) {
-      if (input?.requirements?.length || input?.features?.length) {
-        return EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE;
-      }
-    }
-    // verify_project tool name alone without executed evidence or requirement scope cannot assume acceptance
     return EVIDENCE_CATEGORIES.INSPECTION;
   }
 
@@ -247,12 +248,14 @@ function classifyTool(toolName, input = {}, output = null, options = {}) {
   if (/^(build|compile)/i.test(name)) return EVIDENCE_CATEGORIES.BUILD;
   if (/^(screenshot|snapshot)/i.test(name)) return EVIDENCE_CATEGORIES.VISUAL;
   if (/^(test|run_test)/i.test(name)) return EVIDENCE_CATEGORIES.TEST;
+  // SECURITY: verify_acceptance/verify_functional name prefixes cannot self-promote to
+  // FUNCTIONAL_ACCEPTANCE by name alone. Require actual checks output just like any other tool.
   if (/^(verify_acceptance|verify_functional|assert_requirement)/i.test(name)) {
-    if (output && typeof output === 'object') {
-      if (Array.isArray(output.checks)) return classifyExecutedChecks(output.checks, input, output);
-      if (output.functionalAcceptanceSatisfied === true) return EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE;
+    if (output && typeof output === 'object' && Array.isArray(output.checks)) {
+      return classifyExecutedChecks(output.checks, input, output);
     }
-    return EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE;
+    // No checks array present → treat as INSPECTION; name is insufficient proof
+    return EVIDENCE_CATEGORIES.INSPECTION;
   }
 
   // Terminal tool inspection: check command
