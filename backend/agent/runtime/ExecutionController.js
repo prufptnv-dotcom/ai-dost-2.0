@@ -1,0 +1,394 @@
+const crypto = require('crypto');
+const logger = require('../../logger');
+
+function createExecutionError(message, code, metadata = {}) {
+  const error = new Error(message);
+  error.code = code;
+  Object.assign(error, metadata);
+  return error;
+}
+
+function resolveToolTimeoutMs(context = {}) {
+  const configured = context.toolTimeoutMs ?? process.env.AGENT_TOOL_TIMEOUT_MS;
+  const timeoutMs = Number(configured ?? 120000);
+  return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 120000;
+}
+
+class ExecutionController {
+  constructor({ db, agentRunDao, agentStepDao, toolCallDao, observationDao, verificationResultDao, workspaceManager, gatekeeper } = {}) {
+    this.db = db;
+    this.agentRunDao = agentRunDao;
+    this.agentStepDao = agentStepDao;
+    this.toolCallDao = toolCallDao;
+    this.observationDao = observationDao;
+    this.verificationResultDao = verificationResultDao;
+    this.workspaceManager = workspaceManager;
+    this.gatekeeper = gatekeeper !== undefined ? gatekeeper : require('../policy/CapabilityGatekeeper').capabilityGatekeeper;
+
+    this.VALID_TRANSITIONS = {
+      'PENDING': ['RUNNING', 'CANCELLED', 'FAILED'],
+      'RUNNING': ['WAITING', 'VERIFYING', 'SUCCEEDED', 'FAILED', 'CANCELLED'],
+      'WAITING': ['RUNNING', 'CANCELLED', 'FAILED'],
+      'VERIFYING': ['RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'],
+      'SUCCEEDED': [],
+      'FAILED': [],
+      'CANCELLED': []
+    };
+  }
+
+  generateId(prefix) {
+    return prefix + '_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
+  }
+
+  async startRun(runId) {
+    const run = this.agentRunDao.getById(runId);
+    if (!run) throw new Error(`Run ${runId} not found`);
+
+    if (run.status !== 'PENDING' && run.status !== 'WAITING' && run.status !== 'VERIFYING') {
+      throw new Error(`Invalid state transition: Cannot start run from ${run.status}`);
+    }
+
+    this.agentRunDao.updateStatus(runId, 'RUNNING', null, new Date().toISOString(), null);
+    return this.agentRunDao.getById(runId);
+  }
+
+  async verifyRun(runId) {
+    const run = this.agentRunDao.getById(runId);
+    if (!run) throw new Error(`Run ${runId} not found`);
+
+    if (!this.VALID_TRANSITIONS[run.status].includes('VERIFYING')) {
+      throw new Error(`Invalid state transition: ${run.status} -> VERIFYING`);
+    }
+
+    this.agentRunDao.updateStatus(runId, 'VERIFYING', null, null, null);
+    return this.agentRunDao.getById(runId);
+  }
+
+  async completeRun(runId, status, errorInfo = null) {
+    if (!['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(status)) {
+      throw new Error(`Invalid completion status: ${status}`);
+    }
+
+    const run = this.agentRunDao.getById(runId);
+    if (!run) throw new Error(`Run ${runId} not found`);
+
+    if (!this.VALID_TRANSITIONS[run.status].includes(status)) {
+      throw new Error(`Invalid state transition: ${run.status} -> ${status}`);
+    }
+
+    this.agentRunDao.updateStatus(runId, status, errorInfo, null, new Date().toISOString());
+    return this.agentRunDao.getById(runId);
+  }
+
+  async saveCheckpoint(runId, state) {
+    const run = this.agentRunDao.getById(runId);
+    if (!run) throw new Error(`Run ${runId} not found`);
+    return this.agentRunDao.updateMetadata(runId, state);
+  }
+
+  async loadCheckpoint(runId) {
+    const run = this.agentRunDao.getById(runId);
+    if (!run) throw new Error(`Run ${runId} not found`);
+    if (!run.runtime_metadata) return null;
+    try {
+      return JSON.parse(run.runtime_metadata);
+    } catch (err) {
+      throw new Error(`Checkpoint corruption for run ${runId}: Invalid JSON format`);
+    }
+  }
+
+  async recoverStaleSteps(runId) {
+    const existingSteps = this.agentStepDao.listByRun(runId);
+    let recoveredCount = 0;
+    for (const step of existingSteps) {
+      if (step.status === 'RUNNING') {
+        await this.completeStep(step.id, 'FAILED', null, 'Process crashed during execution');
+        recoveredCount++;
+      }
+    }
+    return recoveredCount;
+  }
+
+  async recordStep(runId, stepType, input) {
+    const run = this.agentRunDao.getById(runId);
+    if (!run) throw new Error(`Run ${runId} not found`);
+    if (run.status !== 'RUNNING' && run.status !== 'VERIFYING') throw new Error(`Cannot record step while run is ${run.status}`);
+
+    const existingSteps = this.agentStepDao.listByRun(runId);
+    const sequence = existingSteps.length + 1;
+
+    const id = this.generateId('step');
+    return this.agentStepDao.create({
+      id,
+      runId,
+      sequence,
+      stepType,
+      status: 'PENDING',
+      input
+    });
+  }
+
+  async startStep(stepId) {
+    const step = this.agentStepDao.getById(stepId);
+    if (!step) throw new Error(`Step ${stepId} not found`);
+    return this.agentStepDao.update(stepId, { status: 'RUNNING', startedAt: new Date().toISOString() });
+  }
+
+  async completeStep(stepId, status, output = null, errorInfo = null) {
+    const step = this.agentStepDao.getById(stepId);
+    if (!step) throw new Error(`Step ${stepId} not found`);
+    return this.agentStepDao.update(stepId, {
+      status,
+      output,
+      errorInfo,
+      completedAt: new Date().toISOString()
+    });
+  }
+
+  async recordToolCall(stepId, toolName, input) {
+    const id = this.generateId('toolcall');
+    return this.toolCallDao.create({ id, stepId, toolName, input, status: 'PENDING' });
+  }
+
+  async completeToolCall(toolCallId, status, output = null, errorInfo = null, timingMeta = null) {
+    return this.toolCallDao.update(toolCallId, { status, output, errorInfo, timingMeta });
+  }
+
+  async executeTool(stepId, toolName, input, context = {}, toolRegistry) {
+    const tool = toolRegistry.get(toolName);
+    if (!tool) {
+      throw new Error(`Unknown tool: ${toolName}`);
+    }
+
+    if (this.gatekeeper && typeof this.gatekeeper.evaluate === 'function') {
+      const toolToCapMap = {
+        'run_terminal': 'devops.terminal',
+        'terminal': 'devops.terminal',
+        'exec_command': 'devops.terminal',
+        'apply_diff': 'coding.production_code',
+        'write_file': 'coding.production_code',
+        'read_file': 'coding.code_explanation',
+        'list_directory': 'coding.code_explanation',
+        'list_files': 'coding.code_explanation',
+        'load_skill': 'autonomy.skill_loading',
+        'web_search': 'autonomy.web_acquisition',
+        'fetch_webpage': 'autonomy.web_acquisition',
+        'create_assessment': 'autonomy.skill_loading'
+      };
+
+      const capId = tool.capabilityId || toolToCapMap[toolName] || null;
+      if (capId) {
+        const evalCtx = {
+          user: (context && context.user) || (context && context.userId ? { id: context.userId, role: context.role || 'developer' } : null),
+          project_id: context && context.projectId,
+          permissions: (context && context.permissions) !== undefined ? context.permissions : null
+        };
+        const evaluation = typeof this.gatekeeper.evaluateWithLevel === 'function'
+          ? this.gatekeeper.evaluateWithLevel([capId], evalCtx, context && context.permissionLevel ? context.permissionLevel : 'auto')
+          : this.gatekeeper.evaluate([capId], evalCtx);
+
+        if (evaluation.decision === 'BLOCK') {
+          const reason = (evaluation.capabilities || []).map(c => c.reason).join(', ') || 'Blocked by security policy';
+          throw new Error(`Execution blocked by CapabilityGatekeeper: ${reason}`);
+        }
+
+        if (['REQUIRE_EXPLICIT_APPROVAL', 'REQUIRE_CONFIRMATION'].includes(evaluation.decision)) {
+          const token = context && (context.approvalToken || context.approval_token);
+          if (!token) {
+            const err = new Error(`Action requires user approval (${evaluation.decision}): ${capId}`);
+            err.code = 'APPROVAL_REQUIRED';
+            err.decision = evaluation.decision;
+            err.approvalToken = evaluation.approval_token;
+            err.capabilities = evaluation.capabilities;
+            err.capabilityId = capId;
+            throw err;
+          }
+
+          const validation = this.gatekeeper.validateApproval({
+            token,
+            requestId: context && (context.requestId || context.request_id),
+            planId: context && (context.planId || context.taskId),
+            user: context && (context.user || { id: context.userId }),
+            capabilityIds: [capId]
+          });
+
+          if (!validation.valid) {
+            // P12.6 (E2E run #12): a 10-min TTL blew mid-run — non-gated steps
+            // plus slow cascade walks stretched an approved run past 10 minutes,
+            // so the FIRST terminal step died with "Approval token has expired"
+            // → plain error → 3 repair retries → Max repairs → run failed. The
+            // user approved THIS run; expiry mid-run is an artifact of run
+            // duration, not a security event (a never-approved token is
+            // TOKEN_NOT_FOUND, not expired). Continue the approved scope with
+            // the fresh token this step's evaluation already minted — same rule
+            // as the single-use rotation below (TTL, capability scope and live
+            // re-evaluation still apply to that minted token at every later step).
+            if (validation.code === 'TOKEN_EXPIRED' && evaluation.approval_token) {
+              logger.info(`[ExecutionController] Approval token expired mid-run — rotating fresh token (run already approved, cap=${capId})`);
+              context.approvalToken = evaluation.approval_token;
+            } else {
+              throw new Error(`Invalid or expired approval token: ${validation.reason}`);
+            }
+          }
+          // P12.3: approval tokens are single-use by design (replay protection),
+          // but the user approved THIS run — a multi-step run (install, build…)
+          // died at its second gated step with TOKEN_ALREADY_USED. Continue the
+          // approved scope with the fresh token this step's evaluation already
+          // minted: every later gated step still runs the full validateApproval
+          // (TTL, capability scope, live re-evaluation) against an unconsumed token.
+          if (evaluation.approval_token) {
+            context.approvalToken = evaluation.approval_token;
+          }
+        }
+      }
+    }
+
+    const toolCall = await this.recordToolCall(stepId, toolName, input);
+    const startTime = Date.now();
+    const timeoutMs = resolveToolTimeoutMs(context);
+    const parentSignal = context && context.signal;
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    let timeoutHandle;
+    let removeParentAbortListener = null;
+    let settled = false;
+
+    const timeoutError = () => createExecutionError(
+      `Tool execution timed out after ${timeoutMs}ms`,
+      'TOOL_TIMEOUT',
+      { timeoutMs, toolName, stepId }
+    );
+
+    const cancellationError = () => createExecutionError(
+      'Tool execution cancelled',
+      'TOOL_CANCELLED',
+      { toolName, stepId }
+    );
+
+    try {
+      if (parentSignal && parentSignal.aborted) {
+        throw cancellationError();
+      }
+
+      if (controller && parentSignal) {
+        const onParentAbort = () => controller.abort(parentSignal.reason);
+        parentSignal.addEventListener('abort', onParentAbort, { once: true });
+        removeParentAbortListener = () => parentSignal.removeEventListener('abort', onParentAbort);
+      }
+
+      const toolContext = controller ? { ...context, signal: controller.signal } : context;
+      const executionPromise = Promise.resolve().then(() => tool.execute(toolContext, input));
+      const guardedExecution = new Promise((resolve, reject) => {
+        timeoutHandle = setTimeout(() => {
+          if (settled) return;
+          if (controller) controller.abort(timeoutError());
+          reject(timeoutError());
+        }, timeoutMs);
+
+        executionPromise.then(
+          value => {
+            if (settled) return;
+            resolve(value);
+          },
+          error => {
+            if (settled) return;
+            reject(error);
+          }
+        );
+
+        if (parentSignal) {
+          const onCancel = () => {
+            if (settled) return;
+            if (controller) controller.abort(parentSignal.reason);
+            reject(cancellationError());
+          };
+          if (parentSignal.aborted) onCancel();
+          else parentSignal.addEventListener('abort', onCancel, { once: true });
+          const previousCleanup = removeParentAbortListener;
+          removeParentAbortListener = () => {
+            previousCleanup?.();
+            parentSignal.removeEventListener('abort', onCancel);
+          };
+        }
+      });
+
+      const output = await guardedExecution;
+      settled = true;
+      clearTimeout(timeoutHandle);
+      removeParentAbortListener?.();
+      const duration = Date.now() - startTime;
+
+      // P12.4: a MUTATION that did not apply is a FAILED step, not a silent
+      // success. write_file/apply_diff/run_terminal answering success:false
+      // (WRITE_FORBIDDEN_ON_EXISTING, guard rejection, non-zero exit code) used
+      // to resolve normally — the loop marked the step "done", skipped the
+      // file_written event, never entered repair, and the run still reported
+      // SUCCEEDED while nothing was written (E2E run #5: 3 files, claimed done).
+      // Throwing routes it into the planner loop's repair path exactly like a
+      // tool that rejects. Read tools keep returning success:false as an
+      // observation (a missing file is information, not an exception).
+      const isMutationTool = toolName === 'write_file' || toolName === 'apply_diff' || toolName === 'run_terminal';
+      if (output && typeof output === 'object' && output.success === false && isMutationTool) {
+        const message = `${toolName} did not apply: ${output.error || output.code || 'operation failed'}`;
+        await this.completeToolCall(toolCall.id, 'FAILED', output, message, { duration, errorCode: output.code || 'MUTATION_FAILED' });
+        const mutationErr = new Error(message);
+        mutationErr.code = output.code || 'MUTATION_FAILED';
+        mutationErr.mutationFailure = true;
+        throw mutationErr;
+      }
+
+      // P12.x (E2E forensics for runs #10/#11): read tools answering
+      // success:false (read_file "File not found") were recorded as SUCCEEDED
+      // — the status column only distinguished throw vs return, which sent my
+      // own diagnosis down a wrong path (apparently impossible same-second
+      // read-OK/apply-missing contradictions). Record what the tool reported.
+      const toolReportedFailure = !!(output && typeof output === 'object' && output.success === false);
+      await this.completeToolCall(
+        toolCall.id,
+        toolReportedFailure ? 'FAILED' : 'SUCCEEDED',
+        output,
+        toolReportedFailure ? (output.error || output.message || 'tool reported success:false') : null,
+        { duration }
+      );
+
+      if (output && output.success && (toolName === 'write_file' || toolName === 'apply_diff')) {
+        if (context && typeof context.onEvent === 'function') {
+          context.onEvent({
+            type: 'file_written',
+            path: input?.path,
+            content: input?.content || output?.newContent || output?.content || '',
+            isNew: toolName === 'write_file'
+          });
+        }
+      }
+
+      return output;
+    } catch (err) {
+      settled = true;
+      clearTimeout(timeoutHandle);
+      removeParentAbortListener?.();
+      const duration = Date.now() - startTime;
+      // P12.4: the mutation-failure branch above already recorded this tool
+      // call as FAILED — do not double-record it here.
+      if (!err.mutationFailure) {
+        await this.completeToolCall(toolCall.id, 'FAILED', null, err.message, {
+          duration,
+          errorCode: err.code || 'TOOL_EXECUTION_FAILED',
+          ...(err.code === 'TOOL_TIMEOUT' ? { timeoutMs } : {})
+        });
+      }
+      throw err;
+    }
+  }
+
+  async recordObservation(stepId, observationType, payload) {
+    const id = this.generateId('obs');
+    return this.observationDao.create({ id, stepId, observationType, payload });
+  }
+
+  async recordVerificationResult(stepId, status, reason = null, evidence = null) {
+    const id = this.generateId('verify');
+    return this.verificationResultDao.create({ id, stepId, status, reason, evidence });
+  }
+}
+
+module.exports = ExecutionController;

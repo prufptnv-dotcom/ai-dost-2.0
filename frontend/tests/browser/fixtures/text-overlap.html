@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fixture B — Text Overlap</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: sans-serif; position: relative; }
+    .text-a {
+      position: absolute;
+      top: 50px;
+      left: 50px;
+      width: 200px;
+      background: rgba(255, 107, 107, 0.8);
+      color: white;
+      padding: 10px;
+      font-size: 16px;
+    }
+    .text-b {
+      position: absolute;
+      top: 80px;
+      left: 100px;
+      width: 200px;
+      background: rgba(78, 205, 196, 0.8);
+      color: white;
+      padding: 10px;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <p>Two text elements intentionally overlapping:</p>
+  <p class="text-a">Text element A — positioned absolutely</p>
+  <p class="text-b">Text element B — overlaps with A</p>
+</body>
+</html>

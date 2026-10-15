@@ -1,0 +1,32 @@
+# Secrets — never bake into the image (#179)
+.env
+.env.*
+!.env.example
+
+# Python caches / tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# VCS / logs
+.git/
+.gitignore
+*.log
+
+# Tests are not part of the runtime image
+tests/
+
+# Repo-root scratch / demo files (entrypoint is app.main:app only)
+alarm.py
+hello_dost.py
+hello_world.py
+hello_dost.txt
+refactor.py
+index.html
+style.css
+styles.css
+todo_list.html
+todo_list/

@@ -1,0 +1,17 @@
+{
+  "id": "admin-added-local-example",
+  "kind": "mcp-template",
+  "transport": "stdio",
+  "command": "__EXACT_ADMIN_REVIEWED_EXECUTABLE__",
+  "args": [],
+  "envSecretRefs": ["vault://workspace/connector/secret"],
+  "workingDirectory": "__SANDBOXED_WORKSPACE_ROOT__",
+  "network": "deny-by-default",
+  "allowedTools": [],
+  "approval": "show_exact_command_and_require_explicit_consent_before_start",
+  "memberMayEditDefinition": false,
+  "memberMayDeleteDefinition": false,
+  "managedBy": "admin",
+  "connected": false,
+  "notes": "Do not run this template as-is. Review the binary, arguments, permissions, and network policy first."
+}

@@ -1,0 +1,2115 @@
+const fs = require('fs');
+const DiffEngine = require('./diffEngine');
+const path = require('path');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+const execPromise = promisify(exec);
+const os = require('os');
+const OpenAIService = require('../services/openaiService');
+const GroqService = require('../services/groqService');
+const GeminiService = require('../services/geminiService');
+const CerebrasService = require('../services/cerebrasService');
+const NvidiaService = require('../services/nvidiaService');
+const TogetherService = require('../services/togetherService');
+const DeepSeekService = require('../services/deepseekService');
+const MistralService = require('../services/mistralService');
+const HuggingFaceService = require('../services/huggingfaceService');
+const OpenRouterService = require('../services/openrouterService');
+const DependencyGraph = require('./dependency/DependencyGraph');
+const TaskScheduler = require('./concurrency/TaskScheduler');
+const ArbitratorAgent = require('./arbitration/ArbitratorAgent');
+const CodebaseIndexer = require('./codebaseIndexer');
+const ContextRetriever = require('./contextRetriever');
+const visualVerifier = require('./verification/VisualVerifier');
+const devServerManager = require('../sandbox/devServerManager');
+const logger = require('../logger');
+const deterministicCodeGuard = require('../services/DeterministicCodeGuard');
+const { createProductionOperationExecutor } = require('./security/ProductionRuntimeIntegration');
+
+class AgentOrchestrator {
+
+  getFileHash(filePath) {
+    if (!require('fs').existsSync(filePath)) return null;
+    const content = require('fs').readFileSync(filePath);
+    return require('crypto').createHash('sha256').update(content).digest('hex');
+  }
+
+  resolveSafePath(workspacePath, targetPath) {
+    const { resolveSafePath: safePathResolver } = require('../services/pathSecurity');
+    return safePathResolver(workspacePath, targetPath);
+  }
+
+  constructor(options = {}) {
+    this.projectPath = options.projectPath || require('../services/workspaceManager').getWorkspacePath('default');
+    this.customKeys = options.customKeys || {};
+    this.diagnosticManager = new (require('./diagnostics/DiagnosticManager'))();
+    this.dependencyGraph = new DependencyGraph();
+    this.taskScheduler = new TaskScheduler();
+    this.arbitrator = options.arbitrator || ArbitratorAgent.shared;
+    this.agentId = options.agentId || `orchestrator-${process.pid}`;
+    this.codebaseIndexer = options.codebaseIndexer || new CodebaseIndexer();
+    this.productionExecutor = options.productionExecutor || createProductionOperationExecutor({
+      gatekeeper: options.gatekeeper,
+      workspaceManager: options.workspaceManager || require('../services/workspaceManager'),
+      audit: options.audit,
+      limits: options.limits,
+      correlationId: options.correlationId
+    });
+    this.contextRetriever = options.contextRetriever || new ContextRetriever({ 
+      codebaseIndexer: this.codebaseIndexer,
+      legacySearch: async (query) => await this.executeTool('search_codebase', { query, projectPath: this.projectPath })
+    });
+    this.agentSystemPrompt = `You are the Lead Autonomous Systems Architect & Principal Engineer of AI-Dost Copilot.
+You build production-grade, enterprise-ready full-stack applications with 100% autonomy (Brain + Hands + Eyes).
+
+### 1. AUTONOMOUS REASONING & EXECUTION LAWS
+- **Zero Hallucination Imports:** Never import a module without ensuring it exists in package.json or executing \`run_terminal("npm install <pkg>")\`.
+- **Atomic File Operations:** Write complete, runnable code. Do NOT output truncated placeholders, \`// TODO\`, or \`/* Implement logic here */\`.
+- **Modular Chunking (No Monolithic Dumps):** Never dump all application logic into a single monolithic file. Always deconstruct UI into modular components (\`src/components/\`), API clients into (\`src/services/api.js\`), and backend services into (\`server.js\`).
+- **Dependency Graph Planning:**
+  1. Define schema & data models (\`models/\`, \`db/\\).
+  2. Implement backend routes, auth middleware, and validation (\`server.js\`, \`routes/\`).
+  3. Construct state stores and API client hooks (\`src/services/api.js\`, \`src/store/\`).
+  4. Build modular UI views with glassmorphic tokens (\`src/components/\`, \`src/App.jsx\`).
+  5. Run build/test verification and compile preview.
+
+### 2. RECURSIVE SELF-CORRECTION (HEALING LOOP)
+- When a terminal error (e.g. \`Module not found\`, \`SyntaxError\`, \`Vite build failed\`) occurs:
+  1. Intercept stderr logs.
+  2. Locate the root cause file & line number.
+  3. Execute surgical patch (create missing files or fix syntax via \`write_file\` or \`apply_diff\`).
+  4. Rerun verification automatically without asking the user.
+
+MULTILINGUAL PROMPT UNDERSTANDING:
+- User prompts may be in English, Hindi, Hinglish, or mixed phrasing.
+- ALWAYS extract core intent and convert directly into concrete tool actions.
+
+TOOLS AVAILABLE:
+1. write_file(path, content) — Create or completely overwrite a file
+2. apply_diff(path, search, replace) — Surgically replace a code block in a file (PREFERRED for edits)
+3. read_file(path) — Read a file's full content
+4. run_terminal(command) / execute_command(command) — Execute a shell command, get stdout+stderr
+5. list_directory(path) / read_file_tree() — List all files in a folder
+6. search_codebase(query) — Semantic keyword search across all project files
+7. run_tests(framework) — Auto-detect and execute unit tests and return report
+8. take_screenshot(url) / inspect_visual_dom() — Capture full-page screenshot of running app for visual inspection
+9. generate_project_from_prompt(prompt, targetDir) — Plan and create a complete full-stack project from a single prompt
+10. resume_from_chat(prompt) — Generate a structured resume from a user prompt
+
+STRICT OUTPUT FORMAT — Respond ONLY with valid JSON, nothing else:
+
+Shape 1 (Tool Call):
+{
+  "thought": "Step-by-step reasoning explaining why this tool is called",
+  "action": "tool_name",
+  "parameters": {
+    "path": "filename.ext",
+    "content": "code or file content string"
+  }
+}
+
+Shape 2 (Final Answer):
+{
+  "thought": "Task is complete.",
+  "action": "FINAL_ANSWER",
+  "answer": "Summary of what was done and what files were changed."
+}
+`;
+    
+    this.services = {
+      openai: options.openaiService || OpenAIService,
+      groq: options.groqService || GroqService,
+      gemini: options.geminiService || GeminiService,
+      openrouter: options.openrouterService || OpenRouterService,
+      nvidia: options.nvidiaService || NvidiaService,
+      together: options.togetherService || TogetherService,
+      deepseek: options.deepseekService || DeepSeekService,
+      mistral: options.mistralService || MistralService,
+      huggingface: options.huggingfaceService || HuggingFaceService,
+      cerebras: options.cerebrasService || CerebrasService
+    };
+  }
+
+  // ── Force Base Template Boilerplate Injection ─────────────────────────────
+  injectBaseBoilerplate(targetPath = this.projectPath, projectFiles = []) {
+    const defaultPackageJson = JSON.stringify({
+      name: 'ai-dost-fullstack-app',
+      version: '1.0.0',
+      private: true,
+      type: 'module',
+      scripts: {
+        dev: 'vite',
+        build: 'vite build',
+        server: 'node server.js',
+        start: 'vite'
+      },
+      dependencies: {
+        react: '^18.2.0',
+        'react-dom': '^18.2.0',
+        '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0',
+        express: '^4.18.2',
+        cors: '^2.8.5'
+      },
+      devDependencies: {
+        '@vitejs/plugin-react': '^4.2.1',
+        vite: '^5.1.4'
+      }
+    }, null, 2);
+
+    const defaultViteConfig = `import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5173,
+    host: '0.0.0.0',
+    proxy: {
+      '/api': 'http://localhost:5000'
+    }
+  }
+});
+`;
+
+    const defaultIndexHtml = `<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI-Dost Fullstack App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-[#090a0f] text-neutral-100 font-sans antialiased min-h-screen">
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
+`;
+
+    const defaultMainJsx = `import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App.jsx';
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+`;
+
+    const boilerplate = [
+      { path: 'package.json', content: defaultPackageJson },
+      { path: 'vite.config.js', content: defaultViteConfig },
+      { path: 'index.html', content: defaultIndexHtml },
+      { path: 'src/main.jsx', content: defaultMainJsx }
+    ];
+
+    boilerplate.forEach(b => {
+      try {
+        const full = path.join(targetPath, b.path);
+        if (!fs.existsSync(full)) {
+          fs.mkdirSync(path.dirname(full), { recursive: true });
+          fs.writeFileSync(full, b.content, 'utf-8');
+        }
+      } catch (_) {}
+
+      if (Array.isArray(projectFiles)) {
+        if (!projectFiles.some(f => f.path === b.path)) {
+          projectFiles.push({ path: b.path, content: b.content });
+        }
+      }
+    });
+  }
+
+  // Execute a single tool action via the production runtime security boundary
+  async executeTool(action, parameters = {}, context = {}) {
+    const projectFiles = parameters.projectFiles || [];
+    const executionContext = {
+      requestId: parameters.requestId || context.requestId || this.requestId,
+      taskId: parameters.taskId || context.taskId || this.taskId,
+      runId: parameters.runId || context.runId || this.runId,
+      projectId: parameters.projectId || context.projectId || this.projectId,
+      userId: parameters.userId || context.userId || this.userId,
+      workspacePath: parameters.projectPath || this.projectPath,
+      capabilities: context.capabilities || parameters.capabilities,
+      user: context.user || parameters.user,
+      approvalToken: parameters.approvalToken || context.approvalToken,
+      ...context
+    };
+
+    const SENSITIVE_OPERATIONS = new Set([
+      'read_file',
+      'write_file',
+      'apply_diff',
+      'run_terminal',
+      'execute_command',
+      'terminal',
+      'delete_file',
+      'list_directory',
+      'read_file_tree'
+    ]);
+
+    if (this.productionExecutor && SENSITIVE_OPERATIONS.has(action)) {
+      try {
+        return await this.productionExecutor.executeProductionOperation(
+          action,
+          parameters,
+          executionContext,
+          async (scope, input) => {
+            return this._dispatchTool(action, input, scope, projectFiles);
+          }
+        );
+      } catch (err) {
+        return {
+          success: false,
+          code: err.code || 'SECURITY_BLOCKED',
+          error: err.message,
+          evaluation: err.evaluation
+        };
+      }
+    }
+
+    return this._dispatchTool(action, parameters, executionContext, projectFiles);
+  }
+
+  async _dispatchTool(action, parameters = {}, scope = {}, projectFiles = []) {
+    const currentWorkspace = parameters.projectPath || scope.workspacePath || this.projectPath;
+    
+    switch (action) {
+      case 'read_file': {
+        try {
+          const filePath = this.resolveSafePath(currentWorkspace, parameters.path);
+          if (!filePath) return { success: false, error: 'Access denied: Invalid or unsafe path' };
+          const guard = deterministicCodeGuard.guard(parameters.path, parameters.content || '');
+          if (!guard.accepted) return { success: false, error: `Code rejected before persistence: ${deterministicCodeGuard.rejectionDetail(guard)}`, diagnostics: guard.diagnostics };
+          
+          if (!fs.existsSync(filePath)) {
+            const inMem = projectFiles.find(f => f.path === parameters.path);
+            if (inMem) return { success: true, content: (inMem.content || '').substring(0, 8000), note: 'Loaded from memory' };
+            return { success: false, error: `File not found: ${parameters.path}` };
+          }
+          const content = fs.readFileSync(filePath, 'utf-8');
+          // P12.6: legitimate expectedSourceHash source (models were inventing
+          // hashes because nothing ever returned one) + truncation flag.
+          const sourceHash = require('crypto').createHash('sha256').update(content).digest('hex');
+          return {
+            success: true,
+            content: content.substring(0, 8000),
+            ...(content.length > 8000 ? { truncated: true, totalLength: content.length } : {}),
+            sourceHash
+          };
+        } catch (e) {
+          return { success: false, error: e.message };
+        }
+      }
+
+      case 'write_file': {
+        try {
+          this.injectBaseBoilerplate(currentWorkspace, projectFiles);
+          
+          const filePath = this.resolveSafePath(currentWorkspace, parameters.path);
+          if (!filePath) return { success: false, error: 'Access denied: Invalid or unsafe path' };
+          
+          const existsOnDisk = fs.existsSync(filePath);
+          const inMem = projectFiles && Array.isArray(projectFiles) ? projectFiles.find(f => f.path === parameters.path) : null;
+          const exists = existsOnDisk || Boolean(inMem);
+
+          // P12.6 (E2E run #12): directory target (e.g. "src/") — existsSync is
+          // true for dirs, which used to answer "Use apply_diff on src/"
+          // (impossible advice; the model retried the same dead end 7 times).
+          const isDirTarget = /[\\/]\s*$/.test(String(parameters.path)) ||
+            (existsOnDisk && fs.statSync(filePath).isDirectory());
+          if (isDirTarget) {
+            const dirLabel = String(parameters.path).replace(/[\\/]+$/, '');
+            // P12.7 (E2E run #13): empty content = "create this directory"
+            // ({"path":"src/","content":""}) → satisfy via <dir>/.gitkeep so the
+            // step succeeds; run #13 died on a bare-dir retry once the worker's
+            // repair budget was spent. Non-empty content still gets PATH_IS_DIRECTORY.
+            if (!String(parameters.content || '').trim()) {
+              try {
+                fs.mkdirSync(filePath, { recursive: true });
+                const keepRel = `${dirLabel}/.gitkeep`;
+                const keepAbs = require('path').join(filePath, '.gitkeep');
+                if (!fs.existsSync(keepAbs)) fs.writeFileSync(keepAbs, '', 'utf-8');
+                if (projectFiles && Array.isArray(projectFiles) && !projectFiles.find(f => f.path === keepRel)) {
+                  projectFiles.push({ path: keepRel, content: '' });
+                }
+                return { success: true, message: `Directory created: ${dirLabel}/ (via ${keepRel})`, changedFile: keepRel, newContent: '' };
+              } catch (e) {
+                return { success: false, code: 'PATH_IS_DIRECTORY', error: `Failed to create directory "${parameters.path}": ${e.message}` };
+              }
+            }
+            return {
+              success: false,
+              code: 'PATH_IS_DIRECTORY',
+              error: `"${parameters.path}" is a directory, not a file. write_file writes FILE content — give a path inside it, e.g. "${dirLabel}/App.jsx" (parent directories are created automatically). To create an empty directory, send empty content with the trailing slash (path: "${dirLabel}/").`
+            };
+          }
+
+  // Phase 1: Existing-file write enforcement
+  // P2 #59: parameters.allowOverwrite was LLM-controlled (bypassable) — removed.
+  if (exists) {
+            // P12.8 (E2E run #14): model read the file and still sent an
+            // apply_diff SEARCH from its imagination — embed the REAL bytes
+            // (disk first, else in-mem) so the repair planner copies SEARCH
+            // verbatim instead of guessing (same P12.5 pattern as diffEngine).
+            let currentExcerpt = '';
+            try {
+              const MAXC = 8000;
+              let current = null;
+              if (existsOnDisk) current = fs.readFileSync(filePath, 'utf-8');
+              else if (inMem && typeof inMem.content === 'string') current = inMem.content;
+              if (current !== null) {
+                currentExcerpt = current.length > MAXC
+                  ? `${current.slice(0, 6000)}\n… [truncated — file is ${current.length} chars — use a SMALLER unique SEARCH block] …\n${current.slice(-400)}`
+                  : current;
+              }
+            } catch (_) {}
+            return {
+              success: false,
+              code: 'WRITE_FORBIDDEN_ON_EXISTING',
+              error: `Full-file replacement is forbidden for existing project files. Use apply_diff with a validated SEARCH/REPLACE patch on ${parameters.path}. read_file it first: SEARCH must be text that is ACTUALLY in the file (for a whole-file rewrite, SEARCH = the file's entire current content), REPLACE = your new text.` +
+                (currentExcerpt ? `\n--- CURRENT FILE CONTENT ---\n${currentExcerpt}\n--- END FILE CONTENT ---` : '')
+            };
+          }
+
+          const guard = deterministicCodeGuard.guard(parameters.path, parameters.content || '');
+          if (!guard.accepted) {
+            return { success: false, error: `Code rejected before persistence: ${deterministicCodeGuard.rejectionDetail(guard)}`, diagnostics: guard.diagnostics };
+          }
+          
+          fs.mkdirSync(require('path').dirname(filePath), { recursive: true });
+          fs.writeFileSync(filePath, parameters.content || '', 'utf-8');
+          
+          if (projectFiles && Array.isArray(projectFiles)) {
+            if (inMem) inMem.content = parameters.content || '';
+            else projectFiles.push({ path: parameters.path, content: parameters.content || '' });
+          }
+          return { success: true, message: `File written: ${parameters.path}`, changedFile: parameters.path, newContent: parameters.content || '' };
+        } catch (e) {
+          return { success: false, error: e.message };
+        }
+      }
+
+      case 'apply_diff': {
+        try {
+          const search = parameters.search !== undefined ? parameters.search : (parameters.search_block !== undefined ? parameters.search_block : (parameters.find !== undefined ? parameters.find : parameters.old_code));
+          const replace = parameters.replace !== undefined ? parameters.replace : (parameters.new_code !== undefined ? parameters.new_code : (parameters.replacement !== undefined ? parameters.replacement : parameters.replace_block));
+
+          if (!parameters.path || typeof parameters.path !== 'string') {
+            return { success: false, code: 'INVALID_PATCH_CONTRACT', error: 'Missing or invalid path in apply_diff' };
+          }
+          if (!search || typeof search !== 'string' || !search.trim()) {
+            return { success: false, code: 'INVALID_PATCH_CONTRACT', error: 'Non-empty search block is required for apply_diff' };
+          }
+          if (replace === undefined || typeof replace !== 'string') {
+            return { success: false, code: 'INVALID_PATCH_CONTRACT', error: 'Replace block must be a string in apply_diff' };
+          }
+          if (parameters.expectedSourceHash !== undefined && typeof parameters.expectedSourceHash !== 'string') {
+            return { success: false, code: 'INVALID_PATCH_CONTRACT', error: 'expectedSourceHash must be a string if provided' };
+          }
+
+          const filePath = this.resolveSafePath(currentWorkspace, parameters.path);
+          if (!filePath) return { success: false, error: 'Access denied: Invalid or unsafe path' };
+          
+          let content;
+          try {
+            content = fs.readFileSync(filePath, 'utf-8');
+          } catch (_) {
+            const inMem = projectFiles.find(f => f.path === parameters.path);
+            if (!inMem) return { success: false, error: `File not found: ${parameters.path}. The file does not exist yet — verify the path with list_directory, or create it with write_file (apply_diff works only on existing files).` };
+            content = inMem.content || '';
+          }
+          
+          const expectedSourceHash = parameters.expectedSourceHash || parameters.sourceHash || parameters.beforeHash;
+          
+          const diffResult = DiffEngine.apply(content, search, replace, { expectedSourceHash });
+          
+          if (!diffResult.success) {
+            return { 
+              success: false, 
+              code: diffResult.code,
+              error: diffResult.error 
+            };
+          }
+          
+          const newContent = diffResult.newContent;
+          const guard = deterministicCodeGuard.guard(parameters.path, newContent);
+          if (!guard.accepted) return { success: false, error: `Code rejected before persistence: ${deterministicCodeGuard.rejectionDetail(guard)}`, diagnostics: guard.diagnostics };
+          
+          const priorContent = content;
+          try {
+            fs.mkdirSync(require('path').dirname(filePath), { recursive: true });
+            fs.writeFileSync(filePath, newContent, 'utf-8');
+          } catch (writeErr) {
+            try { fs.writeFileSync(filePath, priorContent, 'utf-8'); } catch (_) {}
+            return { success: false, code: 'WRITE_ERROR', error: `Failed to persist patch: ${writeErr.message}` };
+          }
+
+          const vReport = guard.verification;
+          if (vReport && vReport.valid === false) {
+            try { fs.writeFileSync(filePath, priorContent, 'utf-8'); } catch (_) {}
+            return {
+              success: false,
+              code: 'VERIFICATION_FAILED_ROLLED_BACK',
+              error: `Code failed verification (${vReport.repairSuggestion || 'syntax error'}). Automatically rolled back.`,
+              diagnostics: guard.diagnostics
+            };
+          }
+          
+          if (projectFiles && Array.isArray(projectFiles)) {
+            const inMem = projectFiles.find(f => f.path === parameters.path);
+            if (inMem) inMem.content = newContent;
+            else projectFiles.push({ path: parameters.path, content: newContent });
+          }
+          return { 
+            success: true, 
+            message: `Diff applied to ${parameters.path} (Strategy: ${diffResult.strategy}, Confidence: ${diffResult.confidence})`, 
+            changedFile: parameters.path,
+            strategy: diffResult.strategy,
+            confidence: diffResult.confidence,
+            newContent 
+          };
+        } catch (e) {
+          return { success: false, error: e.message };
+        }
+      }
+
+        case 'execute_command':
+      case 'run_terminal': {
+        return (async () => {
+          const cmd = parameters.command || '';
+          // P3 #35: the old 5-string BLOCKED list let nearly every destructive
+          // escape through — use the shared SandboxManager policy (extended
+          // denylist) that already gates exec().
+          const policy = require('../sandbox/SandboxManager').validateCommandPolicy(cmd);
+          if (!policy.allowed) {
+            return { success: false, error: policy.reason || 'Command blocked for safety.', exit_code: 1 };
+          }
+          try {
+            const sandboxMgr = require('../sandbox/SandboxManager');
+            if (!this.sandboxId) {
+              const sb = await sandboxMgr.createSandbox(this.projectId || 'orchestrator-task', { workdir: this.projectPath });
+              this.sandboxId = sb.id;
+            }
+            const r = await sandboxMgr.exec(this.sandboxId, cmd, { timeout: 30000 });
+            return {
+              success: r.success,
+              stdout: (r.stdout || '').substring(0, 3000),
+              stderr: (r.stderr || '').substring(0, 3000),
+              exit_code: r.exitCode,
+              selfHealingHint: !r.success
+                ? `Command failed with exit code ${r.exitCode}. Stderr: ${(r.stderr || '').substring(0, 500)}.`
+                : null
+            };
+          } catch (err) {
+            return { success: false, error: err.message, exit_code: 1 };
+          }
+        })();
+      }
+
+      case 'search_codebase': {
+        const query = parameters.query || '';
+        // Lightweight TF-IDF search
+        const chunks = [];
+        for (const file of projectFiles) {
+          const content = file.content || '';
+          const lines = content.split('\n');
+          for (let i = 0; i < lines.length; i += 20) {
+            const chunk = lines.slice(i, i + 25).join('\n');
+            if (chunk.trim().length > 20) {
+              chunks.push({ file: file.path, startLine: i + 1, text: chunk });
+            }
+          }
+        }
+        const scored = chunks.map(c => ({
+          ...c,
+          score: (c.text.toLowerCase().includes(query.toLowerCase()) ? 3 : 0) + (c.file.toLowerCase().includes(query) ? 5 : 0)
+        }))
+          .filter(c => c.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 5);
+
+        if (scored.length === 0) {
+          return { success: true, results: [], message: 'No matching code found for query.' };
+        }
+
+        const results = scored.map(c => ({
+          file: c.file,
+          startLine: c.startLine,
+          snippet: c.text.substring(0, 600),
+          score: c.score
+        }));
+
+        return { success: true, results };
+      }
+
+      case 'search_codebase_index': {
+        const query = parameters.query || '';
+        const ws = parameters.workspacePath || this.projectPath;
+        try {
+          await this.codebaseIndexer.indexWorkspace(ws);
+          const matches = this.codebaseIndexer.searchFiles(ws, query);
+          const symbols = this.codebaseIndexer.findSymbol(ws, query);
+          return {
+            success: true,
+            matches: matches.slice(0, 10),
+            symbols: symbols.slice(0, 10),
+            count: matches.length + symbols.length
+          };
+        } catch (err) {
+          return { success: false, error: err.message };
+        }
+      }
+
+      case 'get_relevant_context': {
+        const query = parameters.query || '';
+        const ws = parameters.workspacePath || this.projectPath;
+        const topK = parseInt(parameters.topK, 10) || 12;
+        try {
+          if (!this.contextRetriever) return { success: false, error: 'ContextRetriever not initialized.' };
+          const result = await this.contextRetriever.retrieve(ws, query, { topK });
+          const compact = result.context.map(c => ({
+             path: c.path,
+             symbols: c.symbols,
+             preview: c.preview.substring(0, 2000)
+          }));
+          return {
+             success: true,
+             stats: result.stats,
+             context: compact
+          };
+        } catch (err) {
+          return { success: false, error: err.message };
+        }
+      }
+
+      case 'run_tests': {
+        return (async () => {
+          try {
+            let cmd = 'python -m unittest discover';
+            const hasPackageJson = projectFiles.some(f => f.path === 'package.json') || fs.existsSync(require('path').join(this.projectPath, 'package.json'));
+            if (hasPackageJson) {
+              cmd = 'npm test';
+            } else if (parameters.framework === 'pytest') {
+              cmd = 'pytest';
+            }
+            const sandboxMgr = require('../sandbox/SandboxManager');
+            if (!this.sandboxId) {
+              const sb = await sandboxMgr.createSandbox(this.projectId || 'orchestrator-task', { workdir: this.projectPath });
+              this.sandboxId = sb.id;
+            }
+            const r = await sandboxMgr.exec(this.sandboxId, cmd, { timeout: 45000 });
+            return {
+              success: r.success,
+              command: cmd,
+              stdout: (r.stdout || '').substring(0, 3000),
+              stderr: (r.stderr || '').substring(0, 3000),
+              exit_code: r.exitCode,
+              summary: r.success ? '✅ All tests passed' : '❌ Tests failed'
+            };
+          } catch (err) {
+            return { success: false, error: err.message, exit_code: 1 };
+          }
+        })();
+      }
+
+      case 'verify_project': {
+        return (async () => {
+          const ws = parameters.workspacePath || this.projectPath;
+          const scope = parameters.scope || 'all';
+          const checks = [];
+          let success = true;
+
+          try {
+            const sandboxMgr = require('../sandbox/SandboxManager');
+            if (!this.sandboxId && process.env.DOCKER_ENABLED === 'true') {
+              try {
+                const sb = await sandboxMgr.createSandbox(this.projectId || 'orchestrator-task', { workdir: this.projectPath });
+                this.sandboxId = sb.id;
+              } catch (_) {}
+            }
+
+            const runCmd = async (name, cmd) => {
+              if (this.sandboxId) {
+                const r = await sandboxMgr.exec(this.sandboxId, cmd, { timeout: 60000 });
+                return {
+                  name,
+                  command: cmd,
+                  success: r.success,
+                  exitCode: r.exitCode,
+                  stdout: (r.stdout || '').substring(0, 3000),
+                  stderr: (r.stderr || '').substring(0, 3000)
+                };
+              }
+              // Host fallback
+              const { exec } = require('child_process');
+              return new Promise((resolve) => {
+                exec(cmd, { cwd: ws, timeout: 60000 }, (err, stdout, stderr) => {
+                  resolve({
+                    name,
+                    command: cmd,
+                    success: !err,
+                    exitCode: err ? (err.code || 1) : 0,
+                    stdout: (stdout || '').substring(0, 3000),
+                    stderr: (stderr || err?.message || '').substring(0, 3000)
+                  });
+                });
+              });
+            };
+
+            const pkgPath = require('path').join(ws, 'package.json');
+            if (fs.existsSync(pkgPath)) {
+              let pkg = {};
+              try { pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')); } catch (_) {}
+              const scripts = pkg.scripts || {};
+              if ((scope === 'all' || scope === 'lint') && scripts.lint) {
+                const res = await runCmd('lint', 'npm run lint');
+                checks.push(res);
+                if (!res.success) success = false;
+              }
+              if ((scope === 'all' || scope === 'build') && scripts.build) {
+                const res = await runCmd('build', 'npm run build');
+                checks.push(res);
+                if (!res.success) success = false;
+              }
+              if ((scope === 'all' || scope === 'tests') && scripts.test) {
+                const res = await runCmd('test', 'npm test');
+                checks.push(res);
+                if (!res.success) success = false;
+              }
+            } else {
+               const hasPytest = fs.existsSync(require('path').join(ws, 'pytest.ini')) || fs.existsSync(require('path').join(ws, 'conftest.py'));
+               const cmd = hasPytest ? 'pytest' : 'python -m unittest discover';
+               const res = await runCmd('test', cmd);
+               checks.push(res);
+               if (!res.success) success = false;
+            }
+
+            // 2. Playwright Visual Verification (if web project or dev server active/requested)
+            if (scope === 'all' || scope === 'visual') {
+              const projectId = this.projectId || path.basename(ws);
+              const server = devServerManager.getServerByProject(projectId);
+              let targetUrl = server?.url;
+              let hostPort = server?.hostPort;
+
+              if (targetUrl) {
+                const vResult = await visualVerifier.verify(targetUrl, {
+                  projectId,
+                  projectPath: ws,
+                  allowedPorts: hostPort ? [hostPort, 3000, 5173, 8080, 4321, 5000] : []
+                });
+
+                checks.push({
+                  name: 'visual_verification',
+                  command: `playwright verify ${vResult.url}`,
+                  success: vResult.success,
+                  status: vResult.status,
+                  exitCode: vResult.success ? 0 : 1,
+                  stdout: vResult.success ? `Visual Verification PASSED. Page "${vResult.pageTitle}" loaded cleanly with 0 fatal errors.` : '',
+                  stderr: vResult.failureReason || '',
+                  screenshotPath: vResult.screenshotPath,
+                  consoleErrors: vResult.consoleErrors,
+                  pageErrors: vResult.pageErrors
+                });
+
+                if (!vResult.success) success = false;
+              }
+            }
+
+            if (checks.length === 0) {
+              checks.push({
+                 name: 'none',
+                 command: 'none',
+                 success: true,
+                 exitCode: 0,
+                 stdout: 'No verification scripts found.',
+                 stderr: ''
+              });
+            }
+
+            return { success, checks };
+          } catch (err) {
+            return { success: false, error: err.message };
+          }
+        })();
+      }
+
+      case 'generate_project_from_prompt': {
+        try {
+          const prompt = parameters.prompt || '';
+          // P0 FIX (#1-2): targetDir must resolve INSIDE the workspace. The raw
+          // client value previously became the write target + git/npm cwd →
+          // write-anywhere and host RCE via crafted package.json.
+          const requestedDir = parameters.targetDir || this.projectPath;
+          const targetDir = this.resolveSafePath(currentWorkspace, requestedDir);
+          if (!targetDir) {
+            return { success: false, error: 'Access denied: targetDir escapes the workspace boundary' };
+          }
+
+          const cleanPrompt = prompt.toLowerCase();
+          const projectType = this.detectProjectType(cleanPrompt);
+          const projectFiles = await this.generateProjectFiles(projectType, prompt, targetDir);
+
+          // Files are written to HOST targetDir — run git/npm there, not in a
+          // separate empty sandbox container (was: mismatch → empty node_modules)
+          const { execFile } = require('child_process');
+          const run = (args, timeout = 15000) => new Promise((resolve) => {
+            execFile('git', args, { cwd: targetDir, timeout, shell: false }, (err, stdout, stderr) => {
+              resolve({ err, stdout, stderr });
+            });
+          });
+
+          await run(['init']);
+
+          if (projectFiles.some(f => f.path === 'package.json')) {
+            await new Promise((resolve) => {
+              const { spawn } = require('child_process');
+              const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+              // P0 FIX: --ignore-scripts stops package.json lifecycle scripts
+              // (preinstall/install/postinstall) from running on the host.
+              //
+              // P0 (runtime): `shell:false` + a .cmd binary throws EINVAL on
+              // Node >=18.20.2/20.12.2/22 (CVE-2024-27980), so this install
+              // never ran on Windows at all — the `error` handler swallowed it
+              // and resolve() reported success. resolveInvocation routes through
+              // cmd.exe instead, which makes the install actually happen.
+              const { resolveInvocation } = require('../services/runtimeBridge');
+              const inv = resolveInvocation(npmCmd, ['install', '--ignore-scripts']);
+              const child = spawn(inv.command, inv.args, {
+                cwd: targetDir,
+                shell: false,
+                windowsHide: true,
+                timeout: 120000,
+                env: { ...process.env, NODE_ENV: 'development' }
+              });
+              child.on('close', () => resolve());
+              child.on('error', () => resolve());
+            });
+          }
+            
+            return { 
+              success: true, 
+              message: `Project generated: ${projectType}`, 
+              generatedFiles: projectFiles.map(f => ({ path: f.path, size: Buffer.from(f.content).length })),
+              targetDir: targetDir
+            };
+          } catch (e) {
+            return { success: false, error: `Project generation failed: ${e.message}` };
+          }
+      }
+
+      case 'read_file_tree':
+      case 'list_directory': {
+        try {
+          const targetPath = parameters.path ? this.resolveSafePath(currentWorkspace, parameters.path) : currentWorkspace;
+          if (!targetPath) return { success: false, error: 'Access denied: Invalid or unsafe path' };
+          
+          if (!fs.existsSync(targetPath)) {
+            const inMemPaths = projectFiles.map(f => f.path);
+            return { success: true, files: inMemPaths, count: inMemPaths.length, note: 'In-memory workspace list' };
+          }
+          const diskFiles = fs.readdirSync(targetPath, { recursive: true });
+          const filtered = diskFiles.filter(f => !f.includes('node_modules') && !f.includes('.git') && !f.includes('.env') && !f.includes('.pem'));
+          return { success: true, files: filtered, count: filtered.length };
+        } catch (e) {
+          return { success: false, error: e.message };
+        }
+      }
+
+      case 'inspect_visual_dom':
+      case 'take_screenshot': {
+        try {
+          const ws = parameters.workspacePath || this.projectPath;
+          const projectId = this.projectId || path.basename(ws);
+          let targetUrl = parameters.url;
+          if (!targetUrl) {
+            const server = devServerManager.getServerByProject(projectId);
+            targetUrl = server?.url || `http://127.0.0.1:3000`;
+          }
+          const vResult = await visualVerifier.verify(targetUrl, {
+            projectId,
+            projectPath: ws,
+            includeBase64: true
+          });
+          return {
+            success: vResult.success,
+            screenshot: vResult.screenshotBase64,
+            screenshotPath: vResult.screenshotPath,
+            url: vResult.url,
+            pageTitle: vResult.pageTitle,
+            status: vResult.status,
+            failureReason: vResult.failureReason,
+            consoleErrors: vResult.consoleErrors,
+            pageErrors: vResult.pageErrors,
+            message: vResult.success
+              ? `Screenshot captured successfully from ${vResult.url}`
+              : `Visual verification failed: ${vResult.failureReason}`
+          };
+        } catch (e) {
+          return { success: false, error: `Screenshot failed: ${e.message}` };
+        }
+      }
+
+      case 'resume_from_chat': {
+        try {
+          const prompt = parameters.prompt || '';
+          return { success: true, message: 'Resume generation endpoint called', resumeData: null };
+        } catch (e) {
+          return { success: false, error: `Resume generation failed: ${e.message}` };
+        }
+      }
+
+      default:
+        return { success: false, error: `Unknown tool: ${action}. Available: read_file, write_file, apply_diff, run_terminal, list_directory, search_codebase, run_tests, generate_project_from_prompt, resume_from_chat` };
+    }
+  }
+
+  detectProjectType(cleanPrompt) {
+    if (cleanPrompt.includes('todo') || cleanPrompt.includes('task') || cleanPrompt.includes('dolist')) return 'todo';
+    if (cleanPrompt.includes('calc') || cleanPrompt.includes('calculator') || cleanPrompt.includes('math')) return 'calculator';
+    if (cleanPrompt.includes('web') || cleanPrompt.includes('website') || cleanPrompt.includes('portfolio')) return 'web';
+    if (cleanPrompt.includes('api') || cleanPrompt.includes('backend') || cleanPrompt.includes('server')) return 'api';
+    if (cleanPrompt.includes('react') || cleanPrompt.includes('next') || cleanPrompt.includes('vue')) return 'react';
+    if (cleanPrompt.includes('python') || cleanPrompt.includes('flask') || cleanPrompt.includes('django')) return 'python';
+    if (cleanPrompt.includes('chrome') || cleanPrompt.includes('extension') || cleanPrompt.includes('browser')) return 'extension';
+    return 'general';
+  }
+
+  async generateProjectFiles(projectType, prompt, targetDir) {
+    const files = [];
+    const sanitizedDir = path.normalize(targetDir);
+    const projectDir = `${sanitizedDir}/${this.getProjectNameFromType(projectType)}`;
+    
+    try { fs.mkdirSync(projectDir, { recursive: true }); } catch (_) {}
+    
+    switch (projectType) {
+      case 'todo': {
+        files.push(...await this.generateTodoProject(projectDir, prompt));
+        break;
+      }
+      case 'calculator': {
+        files.push(...await this.generateCalculatorProject(projectDir, prompt));
+        break;
+      }
+      case 'web': {
+        files.push(...await this.generateWebProject(projectDir, prompt));
+        break;
+      }
+      case 'api': {
+        files.push(...await this.generateApiProject(projectDir, prompt));
+        break;
+      }
+      case 'react': {
+        files.push(...await this.generateReactProject(projectDir, prompt));
+        break;
+      }
+      case 'python': {
+        files.push(...await this.generatePythonProject(projectDir, prompt));
+        break;
+      }
+      case 'extension': {
+        files.push(...await this.generateExtensionProject(projectDir, prompt));
+        break;
+      }
+      default: {
+        files.push(...await this.generateGeneralProject(projectDir, prompt));
+        break;
+      }
+    }
+    
+    return files;
+  }
+
+  getProjectNameFromType(type) {
+    const names = { todo: 'todo-app', calculator: 'calculator', web: 'web-app', api: 'api-project', react: 'react-app', python: 'python-project', extension: 'chrome-extension', general: 'project' };
+    return names[type] || 'project';
+  }
+
+  // Generate Todo App project
+  async generateTodoProject(targetDir, prompt) {
+    const files = [];
+    files.push({
+      path: `${targetDir}/index.html`,
+      content: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Todo App - AI Generated</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>📝 Todo App</h1>
+    <input type="text" id="new-task" placeholder="Add a task...">
+    <button onclick="addTask()">Add</button>
+    <ul id="task-list"></ul>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>`,
+    });
+    files.push({
+      path: `${targetDir}/style.css`,
+      content: `body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: #f0f2f5;
+  margin: 0;
+  padding: 2rem;
+}
+
+.container {
+  max-width: 500px;
+  margin: 0 auto;
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+input[type="text"] {
+  width: 70%;
+  padding: 0.5rem;
+  margin-right: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+button {
+  padding: 0.5rem 1rem;
+  background: #06b6d4;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #0891b2;
+}
+
+ul {
+  margin-top: 1rem;
+  list-style: none;
+}
+
+li {
+  background: #f8f9fa;
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  border-radius: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}`,
+    });
+    files.push({
+      path: `${targetDir}/script.js`,
+      content: `const taskList = JSON.parse(localStorage.getItem('tasks') || '[]');
+const taskListEl = document.getElementById('task-list');
+const inputEl = document.getElementById('new-task');
+
+function renderTasks() {
+  taskListEl.innerHTML = '';
+  taskList.forEach((task, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = \`<span>\${task}</span><button onclick="deleteTask(\${i})">✕</button>\`;
+    taskListEl.appendChild(li);
+  });
+}
+
+function addTask() {
+  const task = inputEl.value.trim();
+  if (task) {
+    taskList.push(task);
+    localStorage.setItem('tasks', JSON.stringify(taskList));
+    renderTasks();
+    inputEl.value = '';
+  }
+}
+
+function deleteTask(i) {
+  taskList.splice(i, 1);
+  localStorage.setItem('tasks', JSON.stringify(taskList));
+  renderTasks();
+}
+
+// Render on load
+renderTasks();`,
+    });
+    files.push({
+      path: `${targetDir}/package.json`,
+      content: `{
+  "name": "todo-app",
+  "version": "1.0.0",
+  "description": "Todo application generated by AI-Dost",
+  "main": "script.js",
+  "scripts": {
+    "start": "node -e \"console.log('Starting dev server...)\""
+  },
+  "dependencies": {}`,
+    });
+    return files;
+  }
+
+  // Generate Calculator project
+  async generateCalculatorProject(targetDir, prompt) {
+    const files = [];
+    files.push({
+      path: `${targetDir}/index.html`,
+      content: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Calculator - AI Generated</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="calculator">
+    <input type="text" id="display" disabled>
+    <div class="keys">
+      <button onclick="clearDisplay()">AC</button>
+      <button onclick="appendDisplay('/')">/</button>
+      <button onclick="appendDisplay('*')">*</button>
+      <button onclick="appendDisplay('-')">-</button>
+      <button onclick="calculate()">=</button>
+    </div>
+    <input type="text" id="history" disabled>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>`,
+    });
+    files.push({
+      path: `${targetDir}/style.css`,
+      content: `body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #1a1a2e;
+  color: #e94560;
+  margin: 0;
+  padding: 2rem;
+  display: flex;
+  justify-content: center;
+}
+
+.calculator {
+  background: #16213e;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+  width: 300px;
+}
+
+#display {
+  width: 100%;
+  height: 40px;
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+  padding: 0.5rem;
+  background: #2a3548;
+  color: #e94560;
+  border: none;
+  border-radius: 4px;
+  text-align: right;
+}
+
+.keys {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+}
+
+.keys button {
+  background: #06b6d4;
+  color: white;
+  border: none;
+  padding: 1rem;
+  border-radius: 6px;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.keys button:hover {
+  background: #0891b2;
+}`,
+    });
+    files.push({
+      path: `${targetDir}/script.js`,
+      content: `const display = document.getElementById('display');
+const history = document.getElementById('history');
+
+function appendDisplay(val) {
+  display.value += val;
+}
+
+function clearDisplay() {
+  display.value = '';
+}
+
+function calculate() {
+  try {
+    display.value = eval(display.value);
+    history.value = display.value;
+  } catch (e) {
+    display.value = 'Error';
+    setTimeout(() => display.value = '', 1000);
+  }
+}`,
+    });
+    files.push({
+      path: `${targetDir}/package.json`,
+      content: `{
+  "name": "calculator",
+  "version": "1.0.0",
+  "description": "Calculator app generated by AI-Dost",
+  "main": "script.js",
+  "scripts": {
+    "start": "echo 'Calculator running'"
+  },
+  "dependencies": {}`,
+    });
+    return files;
+  }
+
+  // Generate general web project
+  async generateWebProject(targetDir, prompt) {
+    const files = [];
+    files.push({
+      path: `${targetDir}/index.html`,
+      content: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI-Generated Web App</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>👋 Welcome to AI-Dost Generated App</h1>
+  </header>
+  <main>
+    <section class="hero">
+      <h2>Created with AI assistance</h2>
+      <p>This project was generated from your prompt.</p>
+    </section>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>`,
+    });
+    files.push({
+      path: `${targetDir}/style.css`,
+      content: `body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 0;
+  padding: 0;
+  background: #0a0a0f;
+  color: #f8fafc;
+  min-height: 100vh;
+}
+
+header {
+  background: #16213e;
+  padding: 1rem 2rem;
+  text-align: center;
+}
+
+.hero {
+  padding: 3rem;
+  text-align: center;
+}
+
+h1 { color: #06b6d4; }
+h2 { color: #67e8f9; }
+p { color: #a0aec0; }`,
+    });
+    files.push({
+      path: `${targetDir}/script.js`,
+      content: `// General Web App
+console.log('AI-Dost generated web application');
+
+// Add your custom JavaScript here`,
+    });
+    files.push({
+      path: `${targetDir}/package.json`,
+      content: `{
+  "name": "web-app",
+  "version": "1.0.0",
+  "description": "Web application generated by AI-Dost",
+  "main": "script.js",
+  "scripts": {
+    "start": "echo 'Web app running'"
+  },
+  "dependencies": {}`,
+    });
+    return files;
+  }
+
+  // Generate Python project
+  async generatePythonProject(targetDir, prompt) {
+    const files = [];
+    files.push({
+      path: `${targetDir}/main.py`,
+      content: `#!/usr/bin/env python3
+\"\"\"\nGenerated Python Project by AI-Dost\n\"\"\"
+
+import sys
+import os
+
+def main():
+    print("🐍 AI-Dost Generated Python Project")
+    print(f\"Project: {prompt[:50] if prompt else 'General'}\")
+    
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    print(f\"Working in: {current_dir}\")
+    
+    try:
+        files = os.listdir(current_dir)
+        print("Files:")
+        for f in files:
+            print(f\"  - {f}\")
+    except Exception as e:
+        print(f\"Error listing files: {e}\")
+
+if __name__ == \"__main__\":
+    main()`,
+    });
+    files.push({
+      path: `${targetDir}/requirements.txt`,
+      content: `# AI-Dost Generated Python Project\n# Add your dependencies here\n`,
+    });
+    files.push({
+      path: `${targetDir}/README.md`,
+      content: `# AI-Dost Generated Python Project\n\nGenerated from prompt: ${prompt}\n\n## Usage\n\nRun with: python main.py\n\n## Description\n\nThis project was automatically generated by AI-Dost.`,
+    });
+    files.push({
+      path: `${targetDir}/package.json`,
+      content: `{
+  "name": "python-project",
+  "version": "1.0.0",
+  "description": "Python project generated by AI-Dost",
+  "main": "main.py",
+  "scripts": {
+    "start": "python main.py"
+  },
+  "dependencies": {}`,
+    });
+    return files;
+  }
+
+  // Generate Chrome extension project
+  async generateExtensionProject(targetDir, prompt) {
+    const files = [];
+    files.push({
+      path: `${targetDir}/manifest.json`,
+      content: `{
+  \"manifest_version\": 3,
+  \"name\": \"AI-Dost Extension\",
+  \"version\": \"1.0.0\",
+  \"description\": \"Generated by AI-Dost\",
+  \"permissions\": [\"activeTab\", \"storage\"],
+  \"content_scripts\": [
+    {
+      \"matches\": [\"<all_urls>\"],
+      \"js\": [\"content.js\"]
+    }
+  ]}`,
+    });
+    files.push({
+      path: `${targetDir}/content.js`,
+      content: `// AI-Dost Content Script\nconsole.log('AI-Dost extension loaded');
+
+// Your content script code here
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === \"getSelection\") {
+    sendResponse({ text: window.getSelection().toString() });
+  }
+});`,
+    });
+    return files;
+  }
+
+  // Generate general project
+  async generateGeneralProject(targetDir, prompt) {
+    const files = [];
+    files.push({
+      path: `${targetDir}/index.html`,
+      content: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI-Dost Project</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="content">
+    <h1>🎯 AI-Dost Project</h1>
+    <p>Generated from your natural language prompt.</p>
+    <div id=\"content\">
+      <!-- Content will be filled based on prompt -->
+    </div>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>`,
+    });
+    files.push({
+      path: `${targetDir}/style.css`,
+      content: `body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: #0a0a0f;
+  color: #f8fafc;
+  margin: 0;
+  padding: 2rem;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.content { text-align: center; }
+h1 { color: #06b6d4; margin-bottom: 1rem; }
+p { color: #64748b; }`,
+    });
+    files.push({
+      path: `${targetDir}/script.js`,
+      content: `// General project script\nconsole.log('AI-Dost project loaded');
+// Add your custom logic here`,
+    });
+    files.push({
+      path: `${targetDir}/package.json`,
+      content: `{
+  "name": "project",
+  "version": "1.0.0",
+  "description": "Project generated by AI-Dost",
+  "main": "script.js",
+  "scripts": {
+    "start": "echo 'Project running'"
+  },
+  "dependencies": {}`,
+    });
+    return files;
+  }
+
+  // ── MULTI-AGENT AUTONOMOUS PIPELINE ─────────────────────────────────────────
+  
+  // 1. Architect Agent: Determine stack and design architecture blueprint
+  async planArchitecture(prompt) {
+    const { detectCategory } = require('./fullstackTrainer');
+    const category = detectCategory(prompt);
+    const p = (prompt || '').toLowerCase();
+    let framework = 'react-vite';
+    let language = 'javascript';
+
+    if (/\b(python|fastapi|flask|django|streamlit)\b/i.test(p)) {
+      framework = 'python-fastapi';
+      language = 'python';
+    } else if (/\b(next|nextjs|next\.js|app router)\b/i.test(p)) {
+      framework = 'nextjs';
+      language = 'typescript';
+    } else if (/\b(vue|nuxt)\b/i.test(p)) {
+      framework = 'vue-vite';
+      language = 'javascript';
+    } else if (/\b(svelte|sveltekit)\b/i.test(p)) {
+      framework = 'sveltekit';
+      language = 'javascript';
+    } else if (/\b(go|golang|gin)\b/i.test(p)) {
+      framework = 'go-gin';
+      language = 'go';
+    }
+
+    const categoryFeatures = {
+      ecommerce: ['Product Catalog & Search Filters', 'Interactive Shopping Cart Drawer', 'Order Checkout REST API', 'Responsive Dark Mode Grid'],
+      dashboard: ['Real-Time KPI Metric Cards', 'Interactive Revenue & Growth Charts', 'Customer & Transaction Tables', 'Export & Filter Tools'],
+      chat_social: ['Message Threads & User Feeds', 'Real-Time Interactivity', 'Profile & Reaction Handlers', 'REST Messaging API'],
+      kanban: ['Agile Columns (Todo, In-Progress, Done)', 'Task Creation & Priority Badges', 'Drag/Move Status Handlers', 'Local Persistence API'],
+      ai_studio: ['Prompt Synthesis & Code Runner', 'Interactive Playground & Copy Tools', 'Model Selector & Output History', 'Clean Monospace Dark UI'],
+      general: ['Responsive Modern UI Layout', 'State Management & Interactivity', 'Backend REST API & Seed Data', 'Error Boundaries & Input Validation']
+    };
+
+    return {
+      category,
+      framework,
+      language,
+      name: prompt.slice(0, 30).replace(/[^a-zA-Z0-9]/g, '-').toLowerCase() || 'ai-dost-app',
+      features: categoryFeatures[category] || categoryFeatures.general
+    };
+  }
+
+  // 2. Task Manager Agent: Generate structured 6-phase TODO tasks
+  async createTodoList(prompt, architecture) {
+    const tasks = [];
+    const cat = architecture.category || 'general';
+
+    tasks.push({
+      id: 'task-1',
+      title: '1. Initialize Baseline Vite & React Architecture',
+      description: `Scaffold ${architecture.framework} with Tailwind CSS, Font Awesome icons, and modern Vite build config.`,
+      status: 'pending',
+      files: ['package.json', 'index.html', 'vite.config.js', 'src/main.jsx']
+    });
+
+    tasks.push({
+      id: 'task-2',
+      title: '2. Configure Data Models & Initial State Store',
+      description: 'Define application state management, data models, and realistic seed data records.',
+      status: 'pending',
+      files: ['src/data/mockData.js', 'src/context/AppContext.jsx']
+    });
+
+    tasks.push({
+      id: 'task-3',
+      title: '3. Implement Backend REST API & Server Endpoints',
+      description: 'Create Express server.js with REST CRUD endpoints, CORS headers, and seed handlers.',
+      status: 'pending',
+      files: ['server.js', 'src/services/api.js']
+    });
+
+    tasks.push({
+      id: 'task-4',
+      title: `4. Construct ${cat.toUpperCase()} Core UI Components`,
+      description: `Implement ${architecture.features.slice(0, 2).join(' & ')} with sleek dark Linear glassmorphic styling.`,
+      status: 'pending',
+      files: ['src/App.jsx', 'src/components/Header.jsx', 'src/index.css']
+    });
+
+    tasks.push({
+      id: 'task-5',
+      title: '5. Wire Interactive Features & Client-Side CRUD',
+      description: 'Connect form submissions, dynamic state changes, filter search, and responsive drawers.',
+      status: 'pending',
+      files: ['src/App.jsx', 'src/services/api.js']
+    });
+
+    tasks.push({
+      id: 'task-6',
+      title: '6. Live Preview Verification & Visual QA Inspection',
+      description: 'Perform visual layout checks, inspect console output, and auto-correct any runtime anomalies.',
+      status: 'pending',
+      files: []
+    });
+
+    return tasks;
+  }
+
+  // ── Workspace Summary Helper ──────────────────────────────────────────────
+  getWorkspaceSummary(targetPath = this.projectPath) {
+    try {
+      if (!fs.existsSync(targetPath)) return 'Workspace is empty (new directory).';
+      const entries = fs.readdirSync(targetPath, { withFileTypes: true });
+      const files = [];
+      for (const entry of entries) {
+        if (['node_modules', '.git', '.next', 'dist', 'build', '.cache'].includes(entry.name)) continue;
+        if (entry.isDirectory()) {
+          files.push(`${entry.name}/`);
+          try {
+            const subEntries = fs.readdirSync(path.join(targetPath, entry.name), { withFileTypes: true });
+            for (const sub of subEntries.slice(0, 10)) {
+              if (!['node_modules', '.git'].includes(sub.name)) {
+                files.push(`  ${entry.name}/${sub.name}${sub.isDirectory() ? '/' : ''}`);
+              }
+            }
+          } catch (_) {}
+        } else {
+          files.push(entry.name);
+        }
+      }
+      return files.length > 0 ? files.join('\n') : 'Workspace is currently empty.';
+    } catch (_) {
+      return 'Workspace initialized.';
+    }
+  }
+
+  // ── Initial Context Builder ───────────────────────────────────────────────
+  buildInitialContext(prompt, workspacePath = this.projectPath) {
+    const summary = this.getWorkspaceSummary(workspacePath);
+    return [
+      {
+        role: 'user',
+        content: `TARGET PROJECT PATH: ${workspacePath}\nEXISTING WORKSPACE FILES:\n${summary}\n\nUSER OBJECTIVE:\n${prompt}\n\nPlease inspect the workspace and begin generating the necessary code files step-by-step using JSON tool actions.`
+      }
+    ];
+  }
+
+  // ── Model Invocation Cascade ──────────────────────────────────────────────
+  async callModel(messages) {
+    const contextBlock = messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
+    const agentPrompt = `${this.agentSystemPrompt}\n\n---\n\n${contextBlock}\n\nASSISTANT (respond with valid JSON only):`;
+
+    const isErrorResp = (r) => !r || 
+      typeof r !== 'string' ||
+      r.includes('API key set nahi') || 
+      r.includes('API error') || 
+      r.includes('service me error') || 
+      r.includes('Rate limit') || 
+      r.includes('rate_limit_exceeded') || 
+      r.includes('Credit limit') ||
+      r.includes('Quota exceeded') ||
+      r.includes('429') || 
+      r.trim().length <= 5;
+
+    // 1. OpenAI (GPT-4o / GPT-4o-mini)
+    try {
+      if (this.services.openai && typeof this.services.openai.chat === 'function') {
+        const resp = await this.services.openai.chat(agentPrompt, [], 'agent', this.customKeys?.openai);
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 2. Groq (Ultra-Fast)
+    try {
+      if (this.services.groq && typeof this.services.groq.chat === 'function') {
+        const resp = await this.services.groq.chat(agentPrompt, [], 'agent', this.customKeys?.groq);
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 3. Gemini
+    try {
+      if (this.services.gemini && typeof this.services.gemini.chat === 'function') {
+        const resp = await this.services.gemini.chat(agentPrompt, [], null, 'agent', this.customKeys?.gemini);
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 4. Cerebras
+    try {
+      if (this.services.cerebras && typeof this.services.cerebras.chat === 'function') {
+        const resp = await this.services.cerebras.chat(agentPrompt, [], 'agent', this.customKeys?.cerebras);
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 5. NVIDIA
+    try {
+      if (this.services.nvidia && typeof this.services.nvidia.chat === 'function') {
+        const resp = await this.services.nvidia.chat(agentPrompt, [], this.customKeys?.nvidia, 'agent');
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 6. Together
+    try {
+      if (this.services.together && typeof this.services.together.chat === 'function') {
+        const resp = await this.services.together.chat(agentPrompt, [], this.customKeys?.together);
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 7. DeepSeek
+    try {
+      if (this.services.deepseek && typeof this.services.deepseek.chat === 'function') {
+        const resp = await this.services.deepseek.chat(agentPrompt, [], this.customKeys?.deepseek);
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 8. Mistral
+    try {
+      if (this.services.mistral && typeof this.services.mistral.chat === 'function') {
+        const resp = await this.services.mistral.chat(agentPrompt, [], this.customKeys?.mistral, 'agent');
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 9. HuggingFace
+    try {
+      if (this.services.huggingface && typeof this.services.huggingface.chat === 'function') {
+        const resp = await this.services.huggingface.chat(agentPrompt);
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 10. OpenRouter
+    try {
+      if (this.services.openrouter && typeof this.services.openrouter.chat === 'function') {
+        const resp = await this.services.openrouter.chat(agentPrompt, [], this.customKeys?.openrouter, 'agent');
+        if (!isErrorResp(resp)) return resp;
+      }
+    } catch (_) {}
+
+    // 11. Local Ollama Fallback
+    try {
+      const res = await fetch('http://127.0.0.1:11434/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: process.env.OLLAMA_MODEL || 'qwen2.5-coder:7b', prompt: agentPrompt, stream: false }),
+        signal: AbortSignal.timeout(30000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.response && data.response.trim().length > 5) return data.response;
+      }
+    } catch (_) {}
+
+    throw new Error('All AI providers in cascade are unavailable.');
+  }
+
+  // ── Agent Response Parser ─────────────────────────────────────────────────
+  parseAgentResponse(raw) {
+    if (!raw || typeof raw !== 'string') {
+      return [{ thought: 'No output received.', action: 'FINAL_ANSWER', answer: 'No response from model.' }];
+    }
+
+    let parsed = null;
+    const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*$/gi, '').trim();
+    const jsonMatch = cleaned.match(/[\[\{][\s\S]*[\]\}]/);
+
+    if (jsonMatch) {
+      try {
+        parsed = JSON.parse(jsonMatch[0]);
+      } catch (_) {
+        try {
+          const repaired = jsonMatch[0].replace(/(?<=:\s*"[\s\S]*?)\r?\n(?=[\s\S]*?")/g, '\\n');
+          parsed = JSON.parse(repaired);
+        } catch (_) {}
+      }
+    }
+
+    const processAction = (p) => {
+      if (p && typeof p.action === 'string') {
+        const params = p.parameters || {};
+        const normalizedParams = {
+          path:      params.path || params.filepath || params.file_path || params.file || params.filename || params.name || params.target,
+          content:   params.content !== undefined ? params.content : (params.code !== undefined ? params.code : (params.body !== undefined ? params.body : (params.text !== undefined ? params.text : params.file_content))),
+          search:    params.search || params.target || params.old_code || params.find || params.search_block,
+          replace:   params.replace || params.new_code || params.replacement || params.replace_block,
+          command:   params.command || params.cmd || params.terminal_command || params.exec,
+          query:     params.query || params.search || params.term || params.text,
+          framework: params.framework,
+          prompt:    params.prompt || params.description || params.project_prompt || params.user_prompt,
+          targetDir: params.targetDir || params.target_dir || params.directory || params.dir,
+          url:       params.url
+        };
+
+        let action = p.action;
+        if (action === 'execute_command') action = 'run_terminal';
+        if (action === 'read_file_tree') action = 'list_directory';
+        if (action === 'inspect_visual_dom') action = 'take_screenshot';
+
+        const ALLOWED = [
+          'read_file', 'write_file', 'apply_diff', 'run_terminal', 'execute_command',
+          'list_directory', 'read_file_tree', 'search_codebase', 'search_codebase_index', 'get_relevant_context', 'run_tests', 'verify_project',
+          'take_screenshot', 'inspect_visual_dom', 'generate_project_from_prompt',
+          'resume_from_chat', 'FINAL_ANSWER'
+        ];
+
+        if (!ALLOWED.includes(action)) {
+          action = 'FINAL_ANSWER';
+        }
+
+        return {
+          thought: p.thought || 'Executing step...',
+          action,
+          parameters: normalizedParams,
+          answer: p.answer
+        };
+      }
+      return null;
+    };
+
+    if (Array.isArray(parsed)) {
+      const results = parsed.map(processAction).filter(Boolean);
+      if (results.length > 0) return results;
+    } else {
+      const result = processAction(parsed);
+      if (result) return [result];
+    }
+
+    const codeBlockMatch = raw.match(/```(?:[a-zA-Z]+)?\r?\n([\s\S]+?)```/);
+    const fileMentionMatch = raw.match(/([\w\-\.\/]+\.(?:html|css|js|jsx|ts|tsx|py|json|md|sql|go|c|cpp|rs))/i);
+    if (codeBlockMatch && fileMentionMatch) {
+      return [{
+        thought: `Writing code into ${fileMentionMatch[1]}`,
+        action: 'write_file',
+        parameters: { path: fileMentionMatch[1], content: codeBlockMatch[1] }
+      }];
+    }
+
+    return [{
+      thought: 'Task completed.',
+      action: 'FINAL_ANSWER',
+      answer: raw.trim()
+    }];
+  }
+  // ── Step Sanitization for Client Callback ─────────────────────────────────
+  sanitizeStepForClient(step, action, parameters = {}, result = null, status = 'completed') {
+    return {
+      step,
+      action,
+      parameters: {
+        path: parameters?.path,
+        command: parameters?.command,
+        query: parameters?.query,
+        targetDir: parameters?.targetDir
+      },
+      result: result?.success !== undefined ? { success: result.success, message: result.message || result.error || 'Executed' } : result,
+      status
+    };
+  }
+
+  getStateInstruction(state, stateObj) {
+     switch (state) {
+       case 'INSPECT':
+         return "State: INSPECT. Inspect the codebase using get_relevant_context, search_codebase, or read_file to understand the current implementation. Do not modify files. Output FINAL_ANSWER when inspection is complete.";
+       case 'PLAN':
+         return "State: PLAN. Create a structured implementation plan. Store it internally or write it down. Output FINAL_ANSWER when the plan is ready.";
+       case 'IMPLEMENT':
+         return "State: IMPLEMENT. Execute your plan using write_file, apply_diff, and run_terminal. Output FINAL_ANSWER when implementation is complete.";
+       case 'VERIFY':
+         return "State: VERIFY. Run the verify_project tool to check if the project builds and passes tests. Output FINAL_ANSWER after running it.";
+       case 'DIAGNOSE':
+         return "State: DIAGNOSE. Verification failed. Use get_relevant_context or read_file to locate the cause of the failure based on the verification output. Output FINAL_ANSWER when you have identified the problem.";
+       case 'REPAIR':
+         return `State: REPAIR. Attempt ${stateObj.repairs + 1} of ${stateObj.maxRepairs}. Fix the identified issues using write_file or apply_diff. Output FINAL_ANSWER when fixes are applied.`;
+       case 'REVIEW':
+         return "State: REVIEW. Perform a final review of the changes. Output FINAL_ANSWER starting with 'Acceptable' if everything is perfect, or 'Problems' if further repair is needed.";
+       default:
+         return "";
+     }
+  }
+
+  advanceState(stateObj, transition, onStepUpdate) {
+     const s = stateObj.state;
+     if (s === 'INSPECT') transition('PLAN');
+     else if (s === 'PLAN') transition('IMPLEMENT');
+     else if (s === 'IMPLEMENT') transition('VERIFY');
+     else if (s === 'VERIFY') {
+        if (stateObj.verification && stateObj.verification.success) transition('REVIEW');
+        else transition('DIAGNOSE');
+     }
+     else if (s === 'DIAGNOSE') transition('REPAIR');
+     else if (s === 'REPAIR') {
+        stateObj.repairs++;
+        if (stateObj.repairs >= stateObj.maxRepairs) transition('FAILED');
+        else transition('VERIFY');
+     }
+     else if (s === 'REVIEW') {
+        if (stateObj.answer && stateObj.answer.toLowerCase().includes('problem')) transition('REPAIR');
+        else transition('DONE');
+     }
+  }
+
+  async executePlan(prompt, workspacePath = this.projectPath, onStepUpdate = null) {
+    const targetWorkspace = typeof workspacePath === 'string' ? workspacePath : this.projectPath;
+    this.projectPath = targetWorkspace;
+
+    // 1. Always ensure base boilerplate exists before custom generation
+    this.injectBaseBoilerplate(targetWorkspace);
+
+    // 2. Ensure codebase index is up to date for the target workspace
+    try {
+      if (this.codebaseIndexer && typeof this.codebaseIndexer.indexWorkspace === 'function') {
+        await this.codebaseIndexer.indexWorkspace(targetWorkspace);
+      }
+    } catch (_) {}
+
+    // 2.5 Hybrid Context Retrieval
+    let systemContext = '';
+    try {
+      if (this.contextRetriever) {
+         const retrievalResult = await this.contextRetriever.retrieve(targetWorkspace, prompt, { topK: 12 });
+         if (retrievalResult && retrievalResult.context && retrievalResult.context.length > 0) {
+            systemContext = "\n\nRELEVANT REPOSITORY CONTEXT:\n" + JSON.stringify(
+               retrievalResult.context.map(c => ({
+                 path: c.path,
+                 symbols: c.symbols,
+                 imports: c.imports,
+                 preview: c.preview
+               })), null, 2
+            );
+         }
+      }
+    } catch (_) {}
+
+    const internalState = {
+      state: "INIT",
+      step: 0,
+      task: prompt,
+      workspacePath: targetWorkspace,
+      plan: [],
+      currentTask: null,
+      changedFiles: [],
+      verification: { checks: null, success: null },
+      failures: [],
+      repairs: 0,
+      maxRepairs: 5,
+      completed: false,
+      answer: ''
+    };
+
+    const emitState = (st, stepData = {}) => {
+       if (typeof onStepUpdate === 'function') {
+          onStepUpdate({
+            type: "state",
+            state: st.state,
+            step: st.step,
+            ...stepData
+          });
+       }
+    };
+
+    const transition = (nextState, metadata = {}) => {
+      const allowed = {
+        'INIT': ['INSPECT', 'FAILED'],
+        'INSPECT': ['PLAN', 'FAILED'],
+        'PLAN': ['IMPLEMENT', 'FAILED'],
+        'IMPLEMENT': ['VERIFY', 'FAILED'],
+        'VERIFY': ['REVIEW', 'DIAGNOSE', 'FAILED'],
+        'DIAGNOSE': ['REPAIR', 'FAILED'],
+        'REPAIR': ['VERIFY', 'FAILED'],
+        'REVIEW': ['DONE', 'REPAIR', 'FAILED']
+      };
+
+      if (allowed[internalState.state] && allowed[internalState.state].includes(nextState)) {
+        internalState.state = nextState;
+        emitState(internalState, metadata);
+      } else {
+        internalState.failures.push(`Invalid transition from ${internalState.state} to ${nextState}`);
+        internalState.state = 'FAILED';
+        emitState(internalState, { error: `Invalid transition to ${nextState}` });
+      }
+    };
+
+    transition('INSPECT');
+
+    const messages = this.buildInitialContext(prompt + systemContext, targetWorkspace);
+    const steps = [];
+    const MAX_STEPS = 50;
+
+    for (let step = 0; step < MAX_STEPS; step++) {
+      internalState.step++;
+      if (internalState.state === 'DONE' || internalState.state === 'FAILED') break;
+
+      const stateInstruction = this.getStateInstruction(internalState.state, internalState);
+      messages.push({ role: 'user', content: `[STATE: ${internalState.state}]\n${stateInstruction}` });
+
+      try {
+        const rawResp = await this.callModel(messages);
+        const parsedList = this.parseAgentResponse(rawResp);
+
+        const finalAnswerItem = parsedList.find(p => p.action === 'FINAL_ANSWER');
+        if (finalAnswerItem) {
+           internalState.answer = finalAnswerItem.answer || 'Task processed.';
+           const finalStep = this.sanitizeStepForClient(internalState.step, 'FINAL_ANSWER', {}, { success: true, message: internalState.answer }, 'completed');
+           steps.push(finalStep);
+           
+           if (internalState.state === 'VERIFY' && !internalState.verification.checks) {
+               internalState.failures.push("Verification bypassed by LLM.");
+               transition('DIAGNOSE');
+           } else {
+               this.advanceState(internalState, transition, onStepUpdate);
+           }
+           continue;
+        }
+
+        let batchResults = [];
+        let hasErrors = false;
+        
+        const writes = parsedList.filter(p => ['write_file', 'apply_diff'].includes(p.action));
+        if (writes.length > 0) {
+            const results = await this.taskScheduler.schedule(parsedList, async (action, parameters) => {
+                let beforeHash = null;
+                let targetFilePath = null;
+                if (parameters && parameters.path) {
+                    targetFilePath = this.resolveSafePath(targetWorkspace, parameters.path);
+                    if (targetFilePath && ['write_file', 'apply_diff'].includes(action)) beforeHash = this.getFileHash(targetFilePath);
+                }
+
+                const res = await this.executeTool(action, { ...parameters, projectPath: targetWorkspace });
+
+                if (['write_file', 'apply_diff'].includes(action) && res.success && targetFilePath) {
+                    const afterHash = this.getFileHash(targetFilePath);
+                    if (beforeHash !== afterHash) {
+                        internalState.changedFiles.push({
+                            path: require('path').relative(targetWorkspace, targetFilePath).replace(/\\/g, '/'),
+                            operation: action,
+                            beforeHash,
+                            afterHash
+                        });
+                        
+                        let content = '';
+                        try { content = require('fs').readFileSync(targetFilePath, 'utf8'); } catch(_) {}
+                        this.dependencyGraph.addOrUpdate(targetFilePath, content);
+                    }
+                } else if (action === 'read_file' && res.success && targetFilePath) {
+                    this.dependencyGraph.addOrUpdate(targetFilePath, res.content);
+                }
+                
+                return { action, parameters, result: res, targetFilePath, afterHash: targetFilePath ? this.getFileHash(targetFilePath) : null };
+            }, {
+              arbitrator: this.arbitrator,
+              workspacePath: targetWorkspace,
+              agentId: this.agentId,
+            });
+
+            for (let i = 0; i < parsedList.length; i++) {
+                const parsed = parsedList[i];
+                const schedResult = results[i] || { success: false, error: 'Task aborted' };
+                const res = schedResult.result || { success: false, error: schedResult.error };
+
+                if (['write_file', 'apply_diff'].includes(parsed.action) && res.success && schedResult.targetFilePath) {
+                   if (this.diagnosticManager) {
+                       try {
+                           if (!this.sandboxId) {
+                               const sandboxMgr = require('../sandbox/SandboxManager');
+                               const available = await sandboxMgr.isDockerAvailable();
+                               if (available) {
+                                   const sb = await sandboxMgr.createSandbox(this.projectId || 'orchestrator-task', { workdir: targetWorkspace });
+                                   this.sandboxId = sb.id;
+                               }
+                           }
+                           if (this.sandboxId) {
+                               const diagResult = await this.diagnosticManager.runDiagnostics(this.sandboxId, targetWorkspace, schedResult.targetFilePath, schedResult.afterHash);
+                               if (diagResult && diagResult.hasErrors) {
+                                   res.success = false;
+                                   res.error = `Action applied, but produced DIAGNOSTICS ERRORS:\n\n${diagResult.formattedErrors}`;
+                                   if (internalState.state !== 'REPAIR' && internalState.state !== 'DIAGNOSE') {
+                                       internalState.state = 'DIAGNOSE';
+                                   }
+                               }
+                           }
+                       } catch (diagErr) {
+                           console.error('[Diagnostics] Failed to run diagnostics:', diagErr.message);
+                       }
+                   }
+                }
+                batchResults.push({ parsed, result: res });
+            }
+        } else {
+            for (const parsed of parsedList) {
+                let targetFilePath = null;
+                if (parsed.parameters && parsed.parameters.path) {
+                    targetFilePath = this.resolveSafePath(targetWorkspace, parsed.parameters.path);
+                }
+                const res = await this.executeTool(parsed.action, { ...parsed.parameters, projectPath: targetWorkspace });
+                
+                if (parsed.action === 'read_file' && res.success && targetFilePath) {
+                    this.dependencyGraph.addOrUpdate(targetFilePath, res.content);
+                }
+                if (parsed.action === 'verify_project') {
+                   internalState.verification = res;
+                   if (typeof onStepUpdate === 'function') {
+                      onStepUpdate({ type: "verification", success: res.success, checks: res.checks });
+                   }
+                }
+                batchResults.push({ parsed, result: res });
+            }
+        }
+
+        let assistantContent = [];
+        let obsContent = [];
+        for (const { parsed, result } of batchResults) {
+            const stepRecord = this.sanitizeStepForClient(
+              internalState.step,
+              parsed.action,
+              parsed.parameters,
+              result,
+              result.success ? 'completed' : 'failed'
+            );
+            steps.push(stepRecord);
+            if (typeof onStepUpdate === 'function') onStepUpdate(stepRecord);
+            
+            assistantContent.push(JSON.stringify({ thought: parsed.thought, action: parsed.action, parameters: parsed.parameters }));
+            obsContent.push(`OBSERVATION from ${parsed.action}:\n${JSON.stringify(result).substring(0, 5000)}`);
+            if (!result.success) hasErrors = true;
+        }
+
+        messages.push({ role: 'assistant', content: assistantContent.join('\n') });
+        messages.push({
+          role: 'user',
+          content: `${obsContent.join('\n\n')}\n\n${
+            !hasErrors
+              ? 'Continue. Output FINAL_ANSWER when the current state objectives are fully achieved.'
+              : 'Tool action(s) failed. Analyze the error, self-correct, and retry.'
+          }`
+        });
+
+      } catch (err) {
+        internalState.failures.push(err.message);
+        const errStep = this.sanitizeStepForClient(internalState.step, 'error_recovery', {}, { success: false, error: err.message }, 'failed');
+        steps.push(errStep);
+        if (typeof onStepUpdate === 'function') {
+          onStepUpdate(errStep);
+        }
+
+        // Self-healing attempt
+        messages.push({
+          role: 'user',
+          content: `ERROR at step ${internalState.step}: ${err.message}. Please recover and issue the next valid JSON tool call.`
+        });
+      }
+    }
+
+    if (internalState.state !== 'DONE' && internalState.state !== 'FAILED') {
+       internalState.state = 'FAILED';
+       internalState.failures.push('Reached maximum execution limit of 50 steps.');
+    }
+
+    internalState.completed = (internalState.state === 'DONE');
+    
+    return {
+      success: internalState.completed,
+      completed: internalState.completed,
+      state: internalState.state,
+      answer: internalState.answer || 'All planned engineering tasks have been completed.',
+      changedFiles: internalState.changedFiles,
+      verification: internalState.verification,
+      failures: internalState.failures,
+      repairs: internalState.repairs,
+      steps
+    };
+  }
+}
+
+// Standalone helper for direct boilerplate injection
+async function injectBaseBoilerplate(workspace) {
+  const defaultPackageJson = JSON.stringify({
+    name: 'ai-dost-app',
+    version: '1.0.0',
+    type: 'module',
+    scripts: { dev: 'vite', build: 'vite build', start: 'vite' },
+    dependencies: { react: '^18.2.0', 'react-dom': '^18.2.0', '@fortawesome/fontawesome-svg-core': '^7.3.1', '@fortawesome/free-solid-svg-icons': '^7.3.1', '@fortawesome/free-regular-svg-icons': '^7.3.1', '@fortawesome/free-brands-svg-icons': '^7.3.1', '@fortawesome/react-fontawesome': '^3.5.0' },
+    devDependencies: { vite: '^5.1.4', '@vitejs/plugin-react': '^4.2.1', tailwindcss: '^3.4.1' }
+  }, null, 2);
+
+  const defaultIndexHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><script src="https://cdn.tailwindcss.com"></script><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"></head><body class="bg-[#090a0f] text-white"><div id="root"></div><script type="module" src="/src/main.jsx"></script></body></html>`;
+  const defaultViteConfig = `import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\n\nexport default defineConfig({ plugins: [react()], server: { port: 5173, host: '0.0.0.0' } });`;
+  const defaultMainJsx = `import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App.jsx';\n\nReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>);`;
+
+  const files = [
+    { path: 'package.json', content: defaultPackageJson },
+    { path: 'index.html', content: defaultIndexHtml },
+    { path: 'vite.config.js', content: defaultViteConfig },
+    { path: 'src/main.jsx', content: defaultMainJsx }
+  ];
+
+  for (const f of files) {
+    if (workspace && typeof workspace.write_file === 'function') {
+      await workspace.write_file(f.path, f.content);
+    } else if (typeof workspace === 'string') {
+      try {
+        const full = path.join(workspace, f.path);
+        if (!fs.existsSync(full)) {
+          fs.mkdirSync(path.dirname(full), { recursive: true });
+          fs.writeFileSync(full, f.content, 'utf-8');
+        }
+      } catch (_) {}
+    }
+  }
+}
+
+async function runAutonomousCopilotLoop({ prompt, workspace, onStepUpdate, onLogStream }) {
+  await injectBaseBoilerplate(workspace);
+  if (onLogStream) onLogStream('📦 System: Base React+Vite template injected to prevent compilation crash.');
+  const orchestrator = new AgentOrchestrator({ projectPath: typeof workspace === 'string' ? workspace : require('../services/workspaceManager').getWorkspacePath('default') });
+  return orchestrator.executePlan(prompt, typeof workspace === 'string' ? workspace : require('../services/workspaceManager').getWorkspacePath('default'), onStepUpdate);
+}
+
+module.exports = AgentOrchestrator;
+module.exports.AgentOrchestrator = AgentOrchestrator;
+module.exports.injectBaseBoilerplate = injectBaseBoilerplate;
+module.exports.runAutonomousCopilotLoop = runAutonomousCopilotLoop;

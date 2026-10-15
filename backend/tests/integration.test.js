@@ -1,0 +1,1107 @@
+/**
+ * AI-Dost Backend Integration Tests (node:test, zero external LLM calls)
+ *
+ * Boots the real Express app on an ephemeral port and verifies the HTTP
+ * contract: status codes, error envelopes, deterministic routes only.
+ * LLM-dependent routes (chat reply, agent run, eval run) are covered by
+ * their own live harness scripts (tests/eval_harness.js etc.).
+ *
+ * Run: node --test tests/integration.test.js  (or: npm run test:integration)
+ */
+const { test, before, after } = require('node:test');
+const assert = require('node:assert/strict');
+const { app, server, db, io } = require('../server.js');
+const { getWorkflowEngine } = require('../services/workflowEngine');
+const cacheService = require('../services/cacheService');
+const sandboxManager = require('../sandbox/SandboxManager');
+
+let base = '';
+
+before(async () => {
+  await new Promise((resolve) => server.listen(0, resolve));
+  base = `http://127.0.0.1:${server.address().port}`;
+});
+
+after(async () => {
+  try { getWorkflowEngine()?.stop(); } catch {}
+  try { io?.close(); } catch {}
+  // Drop keep-alive sockets from fetch so server.close() can finish
+  try { server.closeAllConnections?.(); } catch {}
+  await new Promise((resolve) => {
+    server.close(() => resolve());
+    setTimeout(resolve, 2000);
+  });
+  try { cacheService.redis?.disconnect(); } catch {}
+  try { db.close(); } catch {}
+});
+
+/** Minimal fetch helper returning { status, body } */
+async function req(method, path, body, headers = {}) {
+  const hasBody = body !== undefined && body !== null;
+  const res = await fetch(base + path, {
+    method,
+    headers: { ...(hasBody ? { 'Content-Type': 'application/json' } : {}), ...headers },
+    body: hasBody ? JSON.stringify(body) : undefined,
+  });
+  let parsed = null;
+  try { parsed = await res.json(); } catch {}
+  return { status: res.status, body: parsed, raw: res };
+}
+
+// ── Health & system ─────────────────────────────────────────────────────
+test('GET /health -> 200 OK', async () => {
+  const { status, body } = await req('GET', '/health');
+  assert.equal(status, 200);
+  assert.equal(body.status, 'OK');
+  assert.ok(body.timestamp);
+});
+
+test('GET /api/circuit-breaker -> 200 alias (circuitBreakers map)', async () => {
+  const { status, body } = await req('GET', '/api/circuit-breaker');
+  assert.equal(status, 200);
+  assert.ok(body.circuitBreakers, 'should expose circuitBreakers map');
+  assert.ok(Object.keys(body.circuitBreakers).length >= 1);
+});
+
+test('GET /api/quota-status -> 200 alias (circuitBreakers map)', async () => {
+  const { status, body } = await req('GET', '/api/quota-status');
+  assert.equal(status, 200);
+  assert.ok(body.circuitBreakers, 'should expose circuitBreakers map');
+});
+
+// ── Error envelope ──────────────────────────────────────────────────────
+test('unknown /api route -> 404 Endpoint not found', async () => {
+  const { status, body } = await req('GET', '/api/does-not-exist');
+  assert.equal(status, 404);
+  assert.equal(body.error, 'Endpoint not found');
+});
+
+test('malformed JSON body -> 400 BAD_JSON envelope', async () => {
+  const res = await fetch(base + '/api/chat/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{not valid json',
+  });
+  const body = await res.json();
+  assert.equal(res.status, 400);
+  assert.equal(body.code, 'BAD_JSON');
+});
+
+// ── Chat ────────────────────────────────────────────────────────────────
+test('POST /api/chat/ empty message -> 400 MISSING_MESSAGE', async () => {
+  const { status, body } = await req('POST', '/api/chat/', { message: '   ' });
+  assert.equal(status, 400);
+  assert.equal(body.code, 'MISSING_MESSAGE');
+});
+
+test('GET /api/chat/history -> 200 (session list, no LLM)', async () => {
+  const { status, body } = await req('GET', '/api/chat/history');
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.ok(Array.isArray(body.messages));
+});
+
+test('POST /api/chat/save + GET round-trips messages (no LLM)', async () => {
+  const { status, body: saveBody } = await req('POST', '/api/chat/save', {
+    session_id: 'test-session',
+    messages: [{ role: 'user', content: 'integration test message' }],
+  });
+  if (status !== 200) console.log("SAVE ERROR:", saveBody);
+  assert.equal(status, 200, JSON.stringify(saveBody));
+  const { body } = await req('GET', '/api/chat/history?session_id=test-session');
+  assert.ok(body.messages.some((m) => m.content === 'integration test message'));
+});
+
+// ── P1 #12/#13: identity + conversation ownership ─────────────────────────
+// The test client connects from loopback, which Express trusts as a proxy
+// (trust proxy = 'loopback'), so an X-Forwarded-For header here simulates a
+// request forwarded by the Next.js proxy from a LAN/remote browser — exactly
+// how identity is derived in production. Direct (non-loopback) clients'
+// XFF is ignored by Express and cannot spoof (verified live: BUG_REPORT #11-#14).
+const ANON_XFF = { 'X-Forwarded-For': '10.99.88.77' };
+
+test('P1#12 anonIdentity mints an ad_uid cookie on API responses', async () => {
+  const { raw } = await req('GET', '/health');
+  const setCookie = raw.headers.get('set-cookie') || '';
+  assert.match(setCookie, /ad_uid=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  assert.match(setCookie, /HttpOnly/i);
+});
+
+test('P1#13 conversation ownership: proxied non-local identity is isolated', async () => {
+  const sid = `p13_it_${Date.now()}`;
+
+  // Local caller (no XFF → loopback → local-user) saves
+  const save = await req('POST', '/api/chat/save', {
+    session_id: sid,
+    messages: [{ role: 'user', content: 'local-only-secret' }],
+  });
+  assert.equal(save.status, 200, JSON.stringify(save.body));
+
+  // Non-local identity (XFF from trusted loopback = forwarded by proxy) → 403
+  const anonRead = await req('GET', `/api/chat/history?session_id=${sid}`, undefined, ANON_XFF);
+  assert.equal(anonRead.status, 403);
+
+  // Non-local identity cannot delete the conversation
+  const anonDelete = await req('DELETE', `/api/chat/history?session_id=${sid}`, undefined, ANON_XFF);
+  assert.equal(anonDelete.status, 403);
+
+  // Local caller still reads it (legacy continuity)
+  const localRead = await req('GET', `/api/chat/history?session_id=${sid}`);
+  assert.equal(localRead.status, 200);
+  assert.ok(localRead.body.messages.some((m) => m.content === 'local-only-secret'));
+
+  // 'all' listing: non-local identity sees no local content
+  const anonAll = await req('GET', '/api/chat/history?session_id=all', undefined, ANON_XFF);
+  assert.equal(anonAll.status, 200);
+  assert.ok(!JSON.stringify(anonAll.body).includes('local-only-secret'),
+    "anon 'all' listing must not leak local-user messages");
+
+  // Local caller owns it → cleanup
+  const del = await req('DELETE', `/api/chat/history?session_id=${sid}`);
+  assert.equal(del.status, 200);
+});
+
+test('P1#12 assessment history identity: loopback=local-user, XFF=anon-<uuid>', async () => {
+  const local = await req('GET', '/api/assessment/history');
+  assert.equal(local.status, 200);
+  assert.equal(local.body.userId, 'local-user');
+
+  const anon = await req('GET', '/api/assessment/history', undefined, ANON_XFF);
+  assert.equal(anon.status, 200);
+  assert.match(anon.body.userId, /^anon-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+});
+
+// ── Agent ───────────────────────────────────────────────────────────────
+test('POST /api/agent/plan empty prompt -> 400', async () => {
+  const { status } = await req('POST', '/api/agent/plan', { userPrompt: '' });
+  assert.equal(status, 400);
+});
+
+test('GET /api/agent/tasks -> 200 { success, tasks }', async () => {
+  const { status, body } = await req('GET', '/api/agent/tasks');
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.ok(Array.isArray(body.tasks));
+});
+
+// ── Eval harness ────────────────────────────────────────────────────────
+test('GET /api/eval/status -> 200, count matches the real catalog (P12.2: 50)', async () => {
+  const { EVAL_SCENARIOS } = require('../tests/eval_scenarios');
+  const { status, body } = await req('GET', '/api/eval/status');
+  assert.equal(status, 200);
+  assert.equal(body.status, 'ok');
+  assert.equal(body.scenariosAvailable, EVAL_SCENARIOS.length);
+  assert.ok(EVAL_SCENARIOS.length >= 50, `expected >=50 scenarios, got ${EVAL_SCENARIOS.length}`);
+  assert.ok(body.byEndpoint.agent >= 1 && body.byEndpoint.chat >= 1, 'both endpoints represented');
+});
+
+test('POST /api/eval unknown scenario id -> 400', async () => {
+  const { status, body } = await req('POST', '/api/eval', { scenarios: ['nope'] });
+  assert.equal(status, 400);
+  assert.match(body.error || '', /Unknown scenario/i);
+});
+
+// ── Documents ───────────────────────────────────────────────────────────
+test('POST /api/document/generate bad type -> 400', async () => {
+  const { status, body } = await req('POST', '/api/document/generate', { type: 'bogus', topic: 'x' });
+  assert.equal(status, 400);
+  assert.match(body.error || '', /docx|pptx|csv|pdf|xlsx/i);
+});
+
+test('POST /api/document/generate missing topic -> 400', async () => {
+  const { status } = await req('POST', '/api/document/generate', { type: 'csv' });
+  assert.equal(status, 400);
+});
+
+// ── Figma ───────────────────────────────────────────────────────────────
+test('GET /api/figma/health without key -> 503 FIGMA_NO_KEY or 200', async () => {
+  const { status } = await req('GET', '/api/figma/health');
+  assert.ok(status === 503 || status === 200, `got ${status}`);
+  if (status === 503) {
+    const { body } = await req('GET', '/api/figma/health');
+    assert.equal(body.code, 'FIGMA_NO_KEY');
+  }
+});
+
+// ── Deploy ──────────────────────────────────────────────────────────────
+test('GET /api/deploy/targets -> 200 with vercel/netlify/cloudflare/static', async () => {
+  const { status, body } = await req('GET', '/api/deploy/targets');
+  assert.equal(status, 200);
+  const names = (body.targets || []).map((t) => String(t.id || t.name || t).toLowerCase());
+  for (const expect of ['vercel', 'netlify', 'cloudflare', 'static']) {
+    assert.ok(names.some((n) => n.includes(expect)), `missing target: ${expect}`);
+  }
+});
+
+// ── Sandbox ─────────────────────────────────────────────────────────────
+test('GET /api/sandbox unknown id -> 404', async () => {
+  const { status } = await req('GET', '/api/sandbox/does-not-exist');
+  assert.equal(status, 404);
+});
+
+test('POST /api/sandbox/:id/exec unknown id -> 404', async () => {
+  const { status } = await req('POST', '/api/sandbox/does-not-exist/exec', { command: 'ls' });
+  assert.equal(status, 404);
+});
+
+test('GET /api/sandbox files unknown id -> 404', async () => {
+  const { status } = await req('GET', '/api/sandbox/does-not-exist/files/read?path=app.js');
+  assert.equal(status, 404);
+});
+
+// ── Project memory (workspace load must never 404-noise the console) ─────
+// CopilotIDE calls GET /memory/project/<sessionId> on every mount. Session ids
+// like 'copilot-session-<ts>' are not auto-created (anti-DoS: only
+// 'default'/'copilot-workspace' are), so this used to 404 on every load.
+test('GET /api/v1/memory/project unknown session id -> 200 with empty files', async () => {
+  const { status, body } = await req('GET', '/api/v1/memory/project/copilot-session-000000000000');
+  assert.equal(status, 200, 'workspace load is a read, missing project = empty workspace');
+  assert.ok(body, 'should return a JSON body');
+  assert.deepEqual(body.files, [], 'no files yet');
+  assert.equal(body.project_id, 'copilot-session-000000000000');
+});
+
+test('GET /api/v1/memory/project/default -> 200 (auto-created shared workspace)', async () => {
+  const { status, body } = await req('GET', '/api/v1/memory/project/default');
+  assert.equal(status, 200);
+  assert.ok(Array.isArray(body.files), 'files must be an array');
+});
+
+test('DELETE /api/v1/memory/project unknown session id -> still reports an error envelope', async () => {
+  // Use a unique ID: CI databases can retain rows from previous runs, and a
+  // fixed copilot-session ID may already exist from a local/manual workspace.
+  // Writes must preserve 404 semantics; only GET reads may return an empty view.
+  const missingId = `missing-delete-it-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const { status, body } = await req('DELETE', `/api/v1/memory/project/${missingId}`);
+  assert.equal(status, 404, `expected unknown project to return 404, got ${status}`);
+  assert.ok(body && (body.error || body.success === false), 'error envelope preserved');
+});
+
+// ── JSON body parsing round-trip ────────────────────────────────────────
+test('deep JSON body parses correctly (chat validation fires, not parser)', async () => {
+  const { status, body } = await req('POST', '/api/chat/', { message: 'hi', history: [{ role: 'user', content: 'x' }] });
+  // No key -> cascade may 500/503 or reply; anything but BAD_JSON proves parser OK.
+  assert.notEqual(body && body.code, 'BAD_JSON');
+  assert.ok(status === 400 || status === 200 || status === 500 || status === 503);
+});
+
+// ── Static file serving ─────────────────────────────────────────────────
+test('GET / redirects to frontend (FRONTEND_URL)', async () => {
+  const res = await fetch(base + '/', { redirect: 'manual' });
+  assert.equal(res.status, 302);
+  const loc = res.headers.get('location') || '';
+  assert.match(loc, /localhost:\d+/);
+  await res.body?.cancel?.();
+});
+
+// ── Copilot Agent Diffs, Rollback & Revert ───────────────────────────────
+test('GET /api/agent/run-diffs missing runId -> 400', async () => {
+  const { status, body } = await req('GET', '/api/agent/run-diffs');
+  assert.equal(status, 400);
+  assert.ok(body.error);
+});
+
+test('GET /api/agent/run-diffs unknown runId -> 200 with empty diffs', async () => {
+  const { status, body } = await req('GET', '/api/agent/run-diffs?runId=unknown-run-123');
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.deepEqual(body.diffs, []);
+});
+
+test('POST /api/agent/rollback missing checkpoint -> 400', async () => {
+  const { status, body } = await req('POST', '/api/agent/rollback', {});
+  assert.equal(status, 400);
+  assert.ok(body.error);
+});
+
+test('POST /api/agent/rollback valid empty checkpoint -> 200', async () => {
+  const { status, body } = await req('POST', '/api/agent/rollback', {
+    checkpoint: { files: [] },
+    projectId: 'test-project'
+  });
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.equal(body.restoredFiles, 0);
+});
+
+// ── Phase 1c: pre-run checkpoint + file-rollback contract ────────────────────
+test('POST /api/agent/checkpoint unknown projectId workspace -> success:false (no git needed)', async () => {
+  const { status, body } = await req('POST', '/api/agent/checkpoint', {
+    projectId: `it-ck-nope-${Date.now()}`,
+    message: 'pre-run test'
+  });
+  assert.equal(status, 200);
+  assert.equal(body.success, false);
+  assert.match(body.error, /does not exist/);
+});
+
+test('POST /api/agent/checkpoint workDir outside allowed roots -> 400', async () => {
+  const { status, body } = await req('POST', '/api/agent/checkpoint', { workDir: '/definitely/not/allowed' });
+  assert.equal(status, 400);
+  assert.ok(body.error);
+});
+
+test('POST /api/agent/checkpoint projectId escaping tmp root -> 400', async () => {
+  // 'agent-ws-' prefix swallows one '..' segment, so we need three to escape.
+  const { status, body } = await req('POST', '/api/agent/checkpoint', { projectId: '../../../evil' });
+  assert.equal(status, 400);
+  assert.match(body.error, /tmp root/);
+});
+
+test('POST /api/agent/rollback file payload restores files to disk (Phase 1c contract)', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const projectId = `it-ck-rollback-${Date.now()}`;
+  const wsDir = path.join(os.tmpdir(), `agent-ws-${projectId}`);
+  try {
+    const { status, body } = await req('POST', '/api/agent/rollback', {
+      checkpoint: { files: [{ path: 'src/hello.js', content: 'console.log(1)' }] },
+      projectId
+    });
+    assert.equal(status, 200);
+    assert.equal(body.success, true);
+    assert.equal(body.restoredFiles, 1);
+    const disk = fs.readFileSync(path.join(wsDir, 'src', 'hello.js'), 'utf8');
+    assert.equal(disk, 'console.log(1)');
+  } finally {
+    fs.rmSync(wsDir, { recursive: true, force: true });
+  }
+});
+
+test('POST /api/agent/revert-file missing parameters -> 400', async () => {
+  const { status } = await req('POST', '/api/agent/revert-file', { runId: 'test-run' });
+  assert.equal(status, 400);
+});
+
+test('POST /api/agent/revert-all missing runId -> 400', async () => {
+  const { status } = await req('POST', '/api/agent/revert-all', {});
+  assert.equal(status, 400);
+});
+
+test('POST /api/agent/rag-sync -> responds with success or warning', async () => {
+  const { status, body } = await req('POST', '/api/agent/rag-sync', { directory: 'test-workspace' });
+  assert.equal(status, 200);
+  assert.ok(body.success !== undefined);
+});
+
+test('POST /api/agent/heal missing parameters -> 400', async () => {
+  const { status, body } = await req('POST', '/api/agent/heal', {});
+  assert.equal(status, 400);
+  assert.ok(body.error);
+});
+
+// ── Resume Endpoints (Validation & Error Handling) ───────────────────────
+test('POST /api/v1/resume/regenerate-section missing body -> 400', async () => {
+  const { status, body } = await req('POST', '/api/v1/resume/regenerate-section', {});
+  assert.equal(status, 400);
+  assert.ok(body.error);
+});
+
+test('POST /api/v1/resume/ats-analyze missing resumeData or jobDescription -> 400', async () => {
+  const { status, body } = await req('POST', '/api/v1/resume/ats-analyze', {});
+  assert.equal(status, 400);
+  assert.ok(body.error);
+});
+
+test('POST /api/v1/resume/auto-tailor missing resumeData or jobDescription -> 400', async () => {
+  const { status, body } = await req('POST', '/api/v1/resume/auto-tailor', {});
+  assert.equal(status, 400);
+  assert.ok(body.error);
+});
+
+// ── Workflow Endpoints (Milestone 2 P8 Automations) ─────────────────────
+test('GET /api/workflows -> 200 with workflows array', async () => {
+  const { status, body } = await req('GET', '/api/workflows');
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.ok(Array.isArray(body.workflows));
+});
+
+test('POST /api/workflows missing name or actionType -> 400', async () => {
+  const { status, body } = await req('POST', '/api/workflows', { name: 'Test' });
+  assert.equal(status, 400);
+  assert.equal(body.success, false);
+});
+
+test('POST /api/workflows valid workflow -> 201 and lifecycle roundtrip', async () => {
+  // 1. Create
+  const { status: createStatus, body: createBody } = await req('POST', '/api/workflows', {
+    name: 'CI Integration Test Watcher',
+    description: 'Automated test watcher',
+    triggerType: 'schedule',
+    triggerConfig: { intervalMinutes: 60 },
+    actionType: 'repo_health_check',
+    actionConfig: { checks: ['git_status'] },
+    notifyChannels: ['in_app']
+  });
+  assert.equal(createStatus, 201);
+  assert.equal(createBody.success, true);
+  assert.ok(createBody.workflow?.id);
+
+  const wfId = createBody.workflow.id;
+
+  // 2. Get details
+  const { status: getStatus, body: getBody } = await req('GET', `/api/workflows/${wfId}`);
+  assert.equal(getStatus, 200);
+  assert.equal(getBody.workflow.name, 'CI Integration Test Watcher');
+  assert.ok(Array.isArray(getBody.runs));
+
+  // 3. Update status to paused
+  const { status: updateStatus, body: updateBody } = await req('PUT', `/api/workflows/${wfId}`, {
+    status: 'paused'
+  });
+  assert.equal(updateStatus, 200);
+  assert.equal(updateBody.workflow.status, 'paused');
+
+  // 4. Manual execution
+  const { status: runStatus, body: runBody } = await req('POST', `/api/workflows/${wfId}/run`);
+  assert.equal(runStatus, 200);
+  assert.equal(runBody.success, true);
+  assert.equal(runBody.run.status, 'success');
+
+  // 5. Recent runs
+  const { status: recentStatus, body: recentBody } = await req('GET', '/api/workflows/recent-runs');
+  assert.equal(recentStatus, 200);
+  assert.ok(Array.isArray(recentBody.runs));
+  assert.ok(recentBody.runs.some(r => r.workflow_id === wfId));
+
+  // 6. Delete
+  const { status: delStatus } = await req('DELETE', `/api/workflows/${wfId}`);
+  assert.equal(delStatus, 200);
+});
+
+// ── Sandbox Hardening, Health & Self-Test (P0.2) ─────────────────────────
+test('GET /api/sandbox/health -> 200 with engine and resource quotas', async () => {
+  const { status, body } = await req('GET', '/api/sandbox/health');
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.ok(body.engine);
+  assert.ok(body.resourceQuotas);
+  assert.equal(body.resourceQuotas.pidsLimit, 512);
+});
+
+test('POST /api/sandbox/test -> 200 with probe success', async () => {
+  const { status, body } = await req('POST', '/api/sandbox/test');
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.equal(body.probe, 'passed');
+  assert.ok(typeof body.latencyMs === 'number');
+});
+
+test('POST /api/sandbox/create with local fallback -> 200 and lifecycle roundtrip', async () => {
+  const { status, body } = await req('POST', '/api/sandbox/create', {
+    projectId: 'ci-sandbox-test',
+    options: { allowFallback: true }
+  });
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.ok(body.sandbox?.id);
+  const sbId = body.sandbox.id;
+
+  // File write
+  const { status: writeStatus, body: writeBody } = await req('POST', `/api/sandbox/${sbId}/files/write`, {
+    filePath: 'test.js',
+    content: 'console.log("hello sandbox");'
+  });
+  assert.equal(writeStatus, 200, `Sandbox file write failed: ${JSON.stringify(writeBody)}`);
+
+  // File read
+  const { status: readStatus, body: readBody } = await req('GET', `/api/sandbox/${sbId}/files/read?path=test.js`);
+  assert.equal(readStatus, 200);
+  assert.equal(readBody.content, 'console.log("hello sandbox");');
+
+  // Command exec
+  const { status: execStatus, body: execBody } = await req('POST', `/api/sandbox/${sbId}/exec`, {
+    command: 'node test.js'
+  });
+  assert.equal(execStatus, 200);
+  assert.equal(execBody.success, true);
+  const sandboxInstance = sandboxManager.getSandbox(sbId);
+  let mountInfo = [];
+  try {
+    const dockerInfo = sandboxInstance?.container ? await sandboxInstance.container.inspect() : null;
+    mountInfo = (dockerInfo?.Mounts || []).map(({ Type, Source, Destination, RW }) => ({ Type, Source, Destination, RW }));
+  } catch (_) {
+    // Diagnostics must never turn an otherwise valid fallback sandbox into a test failure.
+  }
+  assert.match(
+    execBody.result.stdout,
+    /hello sandbox/,
+    `Sandbox exec did not return expected stdout. isolation=${body.sandbox.isolation}; hostPath=${body.sandbox.path}; mounts=${JSON.stringify(mountInfo)}; result=${JSON.stringify(execBody.result)}`
+  );
+
+  // Destroy
+  const { status: delStatus } = await req('DELETE', `/api/sandbox/${sbId}`);
+  assert.equal(delStatus, 200);
+});
+
+// ── Verifier Endpoints (Milestone 4 / P0.3) ─────────────────────────────
+test('GET /api/verify/health -> 200 OK with capabilities', async () => {
+  const { status, body } = await req('GET', '/api/verify/health');
+  assert.equal(status, 200);
+  assert.equal(body.status, 'OK');
+  assert.equal(body.engine, 'ActionVerifier');
+  assert.ok(Array.isArray(body.capabilities));
+});
+
+test('POST /api/verify/code -> verifies syntax and passes clean code', async () => {
+  const { status, body } = await req('POST', '/api/verify/code', {
+    filePath: 'index.js',
+    code: 'const a = 10; const b = 20; console.log(a + b);'
+  });
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.equal(body.result.valid, true);
+  assert.equal(body.result.diagnostics.length, 0);
+});
+
+test('POST /api/verify/code -> detects syntax error and secret leak', async () => {
+  const { status, body } = await req('POST', '/api/verify/code', {
+    filePath: 'auth.js',
+    code: 'const token = "AIzaSyDummySecretTokenForTesting123456";\nconst bad = {;'
+  });
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.equal(body.result.valid, false);
+  assert.equal(body.result.secretLeaks.length > 0, true);
+});
+
+test('POST /api/verify/document -> verifies CSV document integrity', async () => {
+  const csvContent = Buffer.from('name,score,status\nAlice,100,pass\nBob,90,pass').toString('base64');
+  const { status, body } = await req('POST', '/api/verify/document', {
+    fileName: 'grades.csv',
+    contentBase64: csvContent,
+    fileType: 'csv'
+  });
+  assert.equal(status, 200);
+  assert.equal(body.success, true);
+  assert.equal(body.result.valid, true);
+  assert.equal(body.result.metadata.rowCount, 2);
+});
+
+// ── P2 #15/#16/#17: database routes (containment, HMAC approval, handles) ────
+const path = require('node:path');
+const fs = require('node:fs');
+const os = require('node:os');
+
+const p2DestructivePlan = {
+  engine: 'sqlite',
+  tables: [{ name: 'p2_users', columns: [{ name: 'id', type: 'INTEGER', primaryKey: true }] }],
+  destructiveOperations: ['DROP TABLE legacy_users'],
+};
+
+test('P2 #15: migration/apply dbPath outside allowed roots -> 400 DBPATH_FORBIDDEN', async () => {
+  const { status, body } = await req('POST', '/api/database/migration/apply', {
+    plan: { engine: 'sqlite', tables: [{ name: 'p2_t', columns: [{ name: 'id', type: 'INTEGER', primaryKey: true }] }] },
+    dbPath: path.join(os.homedir(), 'p2-evil.db'),
+  });
+  assert.equal(status, 400);
+  assert.equal(body.error?.code, 'DBPATH_FORBIDDEN');
+});
+
+test('P2 #16: migration/history dbPath outside allowed roots -> 400 DBPATH_FORBIDDEN', async () => {
+  const outside = encodeURIComponent(path.join(os.homedir(), 'p2-evil.db'));
+  const { status, body } = await req('GET', `/api/database/migration/history?dbPath=${outside}`);
+  assert.equal(status, 400);
+  assert.equal(body.error?.code, 'DBPATH_FORBIDDEN');
+});
+
+test('P2 #16: schema/drift dbPath outside allowed roots -> 400 DBPATH_FORBIDDEN', async () => {
+  const outside = encodeURIComponent(path.join(os.homedir(), 'p2-evil.db'));
+  const { status, body } = await req('GET', `/api/database/schema/drift?dbPath=${outside}`);
+  assert.equal(status, 400);
+  assert.equal(body.error?.code, 'DBPATH_FORBIDDEN');
+});
+
+test('P2 #15: destructive apply without/garbage token -> 403 + plan-bound approvalToken', async () => {
+  const noToken = await req('POST', '/api/database/migration/apply', { plan: p2DestructivePlan });
+  assert.equal(noToken.status, 403);
+  assert.ok(noToken.body.approvalToken, '403 response must issue an approval token');
+
+  const garbage = await req('POST', '/api/database/migration/apply', {
+    plan: p2DestructivePlan,
+    approvalToken: 'i-am-not-an-hmac',
+  });
+  assert.equal(garbage.status, 403, 'arbitrary non-empty token must be rejected');
+});
+
+test('P2 #15: dry-run issues token; apply accepts it and executes', async () => {
+  const dry = await req('POST', '/api/database/migration/dry-run', { plan: p2DestructivePlan });
+  assert.equal(dry.status, 200);
+  assert.ok(dry.body.approvalToken, 'destructive dry-run must issue an approval token');
+
+  const applied = await req('POST', '/api/database/migration/apply', {
+    plan: p2DestructivePlan,
+    approvalToken: dry.body.approvalToken,
+  });
+  assert.equal(applied.status, 200, JSON.stringify(applied.body));
+  assert.equal(applied.body.success, true);
+});
+
+test('P2 #15: non-destructive apply succeeds without any token', async () => {
+  const plan = {
+    engine: 'sqlite',
+    tables: [{ name: 'p2_plain', columns: [{ name: 'id', type: 'INTEGER', primaryKey: true }] }],
+  };
+  const { status, body } = await req('POST', '/api/database/migration/apply', { plan });
+  assert.equal(status, 200, JSON.stringify(body));
+  assert.equal(body.success, true);
+});
+
+test('P2 #17: query endpoint gates SQL, opens read-only for SELECT, stays usable after errors', async () => {
+  const workspaceManager = require('../services/workspaceManager');
+  const wsDir = workspaceManager.getWorkspacePath('p2-db-query');
+  fs.mkdirSync(wsDir, { recursive: true });
+  const dbFile = path.join(wsDir, 'app.db');
+  const { DatabaseSync } = require('node:sqlite');
+  const setup = new DatabaseSync(dbFile);
+  setup.exec('CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT)');
+  setup.exec("INSERT INTO items(name) VALUES ('one')");
+  setup.close();
+
+  try {
+    const ok = await req('POST', '/api/database/p2-db-query/query', { sql: 'SELECT name FROM items' });
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    assert.equal(ok.body.count, 1);
+
+    const multi = await req('POST', '/api/database/p2-db-query/query', { sql: 'SELECT 1; DROP TABLE items' });
+    assert.equal(multi.status, 400);
+
+    const attach = await req('POST', '/api/database/p2-db-query/query', { sql: "ATTACH DATABASE 'x.db' AS x" });
+    assert.equal(attach.status, 400);
+
+    // Error path (old code returned 400 while leaking the read-write handle)
+    const bad = await req('POST', '/api/database/p2-db-query/query', { sql: 'SELECT * FROM does_not_exist' });
+    assert.equal(bad.status, 400);
+
+    const again = await req('POST', '/api/database/p2-db-query/query', { sql: 'SELECT name FROM items' });
+    assert.equal(again.status, 200, 'route must remain usable after a query error');
+    assert.equal(again.body.count, 1);
+  } finally {
+    try { fs.rmSync(wsDir, { recursive: true, force: true }); } catch {}
+  }
+});
+
+test('P2 #9: static deploy validate rejects targetDir outside allowed roots', async () => {
+  const outside = await req('POST', '/api/deploy/validate', {
+    target: 'static',
+    options: { targetDir: path.join(os.homedir(), 'evil-static') },
+  });
+  assert.equal(outside.status, 200);
+  assert.equal(outside.body.valid, false);
+
+  const inside = await req('POST', '/api/deploy/validate', {
+    target: 'static',
+    options: { targetDir: path.join(os.tmpdir(), 'ai-dost-static-ok') },
+  });
+  assert.equal(inside.status, 200);
+  assert.equal(inside.body.valid, true);
+});
+
+// -- Phase 3b: watch mode SSE (workspace change stream) ------------------
+test('GET /api/agent/watch/:projectId streams watch_started + file_changed', async () => {
+  const { saveProjectFile, deleteProjectFile } = require('../projectStore');
+  const projectId = 'proj_watch_sse_test';
+  const ac = new AbortController();
+  const withTimeout = (p, ms, label) => Promise.race([
+    p,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout: ${label}`)), ms)),
+  ]);
+
+  const res = await withTimeout(
+    fetch(base + `/api/agent/watch/${projectId}`, { signal: ac.signal }),
+    5000, 'watch connect'
+  );
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type') || '', /text\/event-stream/);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  const readData = async (label) => withTimeout((async () => {
+    for (;;) {
+      const idx = buf.indexOf('\n\n');
+      if (idx !== -1) {
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const line = frame.split('\n').find((l) => l.startsWith('data: '));
+        if (line) return JSON.parse(line.slice(6));
+        continue; // keepalive comment frames
+      }
+      const { value, done } = await reader.read();
+      if (done) throw new Error('stream ended before ' + label);
+      buf += decoder.decode(value, { stream: true });
+    }
+  })(), 5000, label);
+
+  try {
+    const started = await readData('watch_started');
+    assert.equal(started.type, 'watch_started');
+    assert.equal(started.projectId, projectId);
+
+    // Write through the same module instance the app subscribes to.
+    assert.equal(saveProjectFile(projectId, 'watch-probe.txt', 'hello watch'), true);
+    const evt = await readData('file_changed');
+    assert.equal(evt.type, 'file_changed');
+    assert.equal(evt.path, 'watch-probe.txt');
+    assert.equal(evt.action, 'write');
+    assert.equal(typeof evt.at, 'number');
+  } finally {
+    try { ac.abort(); } catch {}
+    try { deleteProjectFile(projectId, 'watch-probe.txt'); } catch {}
+    try { db.prepare('DELETE FROM projects WHERE id = ?').run(projectId); } catch {}
+  }
+});
+
+test('GET /api/agent/watch/:projectId rejects a blank projectId', async () => {
+  const { status } = await req('GET', '/api/agent/watch/%20');
+  assert.equal(status, 400);
+});
+
+// -- Self-learning memory API (user-level durable notes) -----------------
+test('POST /api/copilot/memory/learn -> list -> dedupe -> delete -> clear', async () => {
+  const learn = await req('POST', '/api/copilot/memory/learn', {
+    notes: [{ kind: 'lesson', content: 'integration lesson: keep sqlite pragmas', tags: ['sqlite'] }],
+    projectId: 'proj_note_api',
+    source: 'manual',
+  });
+  assert.equal(learn.status, 200);
+  assert.equal(learn.body.success, true);
+  assert.equal(learn.body.saved, 1);
+
+  const list = await req('GET', '/api/copilot/memory/list?projectId=proj_note_api');
+  assert.equal(list.status, 200);
+  const note = (list.body.notes || []).find(n => n.content.includes('keep sqlite pragmas'));
+  assert.ok(note, 'saved note visible in list');
+  assert.deepEqual(note.tags, ['sqlite']);
+
+  const dup = await req('POST', '/api/copilot/memory/learn', {
+    notes: [{ content: 'integration lesson: keep sqlite pragmas' }],
+  });
+  assert.equal(dup.body.deduped, 1);
+  assert.equal(dup.body.saved, 0);
+
+  const del = await req('DELETE', `/api/copilot/memory/${note.id}`);
+  assert.equal(del.status, 200);
+  assert.equal(del.body.success, true);
+
+  const missing = await req('DELETE', '/api/copilot/memory/note_does_not_exist');
+  assert.equal(missing.status, 404);
+
+  const clear = await req('DELETE', '/api/copilot/memory/clear', { projectId: 'proj_note_api' });
+  assert.equal(clear.status, 200);
+  assert.ok(typeof clear.body.removed === 'number');
+});
+
+test('copilot notes survive project deletion (user-level memory, no FK)', async () => {
+  const projectId = 'proj_del_notes_test';
+  db.prepare(
+    "INSERT OR IGNORE INTO projects (id, user_id, name, slug, created_at, updated_at) VALUES (?, 'local-user', ?, ?, datetime('now'), datetime('now'))"
+  ).run(projectId, projectId, projectId);
+  const learn = await req('POST', '/api/copilot/memory/learn', {
+    notes: [{ kind: 'lesson', content: 'durable lesson: project deletion must not erase me' }],
+    projectId,
+  });
+  assert.equal(learn.body.success, true);
+
+  db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
+
+  const list = await req('GET', '/api/copilot/memory/list?q=durable%20lesson');
+  assert.equal(list.status, 200);
+  assert.ok(
+    (list.body.notes || []).some(n => n.content.includes('project deletion must not erase me')),
+    'note outlives its deleted project'
+  );
+});
+
+test('GET /api/copilot/memory/retrieve returns ranked notes for a prompt', async () => {
+  await req('POST', '/api/copilot/memory/learn', {
+    notes: [{ kind: 'lesson', content: 'nextjs app router lesson: use server components', tags: ['nextjs'] }],
+    projectId: 'proj_retrieve_test',
+  });
+  const r = await req('GET', '/api/copilot/memory/retrieve?prompt=build%20a%20nextjs%20app&projectId=proj_retrieve_test');
+  assert.equal(r.status, 200);
+  assert.equal(r.body.success, true);
+  assert.ok(r.body.notes.length >= 1);
+  assert.match(r.body.formatted, /nextjs app router lesson/);
+});
+
+// -- P6 � Instant in-browser (WebContainer wrapper + FileSystemTree) ----------
+test('P6: /instant/:projectId serves an isolated wrapper (COOP/COEP, no API key)', async () => {
+  const page = await fetch(base + '/instant/p6-test-proj');
+  const html = await page.text();
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get('content-type') || '', /text\/html/);
+  assert.equal(page.headers.get('cross-origin-opener-policy'), 'same-origin');
+  assert.equal(page.headers.get('cross-origin-embedder-policy'), 'require-corp');
+  assert.match(html, /WebContainer/);
+  assert.match(html, /crossOriginIsolated/);
+  // files URL is composed at runtime from the injected project id
+  assert.match(html, /const PROJECT = "p6-test-proj"/);
+  assert.match(html, /'\/api\/instant\/' \+ encodeURIComponent\(PROJECT\) \+ '\/files'/);
+  // engine preflight: boot must NOT start before the reachability probe
+  assert.match(html, /\/api\/instant\/engine-status/);
+  assert.match(html, /WebContainer engine UNREACHABLE/);
+
+  // invalid project ids never reach the wrapper
+  const bad = await fetch(base + '/instant/bad..id');
+  assert.equal(bad.status, 400);
+  await bad.text();
+});
+
+test('P6: /api/instant/:projectId/files builds a FileSystemTree from the workspace', async () => {
+  const projectStore = require('../projectStore');
+  projectStore.saveProjectFile('instant-ut', 'package.json', JSON.stringify({ name: 'instant-ut', scripts: { dev: 'vite' } }));
+  projectStore.saveProjectFile('instant-ut', 'src/App.jsx', 'export default function App() { return null; }');
+  try {
+    const r = await req('GET', '/api/instant/instant-ut/files');
+    assert.equal(r.status, 200);
+    assert.ok(r.body.files, 'files tree present');
+    assert.ok(r.body.files['package.json'], 'package.json mounted');
+    assert.match(r.body.files['package.json'].file.contents, /instant-ut/);
+    assert.ok(r.body.files['src/App.jsx'], 'source file mounted');
+    assert.ok(r.body.count >= 2);
+    assert.match(r.body.source, /fs:|db:/);
+  } finally {
+    projectStore.clearProjectFiles('instant-ut');
+  }
+});
+
+test('P6: files endpoint is honest 404 without package.json (never a fake run)', async () => {
+  const projectStore = require('../projectStore');
+  projectStore.saveProjectFile('instant-empty', 'notes.txt', 'no manifest here');
+  try {
+    const r = await req('GET', '/api/instant/instant-empty/files');
+    assert.equal(r.status, 404);
+    assert.equal(r.body.error, 'no-package-json');
+    assert.match(r.body.message, /Live mode/);
+  } finally {
+    projectStore.clearProjectFiles('instant-empty');
+  }
+});
+
+test('P6: vendored /wc/* runtime serves JS; path traversal is blocked', async () => {
+  const ok = await fetch(base + '/wc/index.js');
+  const js = await ok.text();
+  assert.equal(ok.status, 200);
+  assert.match(ok.headers.get('content-type') || '', /javascript/);
+  assert.match(js, /WebContainer/);
+
+  const evil = await fetch(base + '/wc/..%2f..%2fserver.js');
+  assert.ok(evil.status >= 400, 'traversal must not escape the dist dir, got ' + evil.status);
+  await evil.text();
+});
+
+test('P6: engine-status probe returns honest shape (network-safe, 30s cache)', async () => {
+  const r = await req('GET', '/api/instant/engine-status');
+  assert.equal(r.status, 200);
+  assert.equal(typeof r.body.ok, 'boolean', 'ok must be a boolean whatever the network does');
+  assert.equal(typeof r.body.status, 'number');
+  assert.ok(Number.isFinite(r.body.at), 'timestamp present');
+  const r2 = await req('GET', '/api/instant/engine-status');
+  assert.equal(r2.body.cached, true, 'second hit within 30s is served from cache');
+});
+
+// -- P9: background run status + SSE replay -------------------------------
+test('P9: run status + SSE replay streams persisted events in order', async () => {
+  const backgroundRuns = require('../services/backgroundRuns');
+  const runId = `run-itest-${Date.now().toString(36)}`;
+  backgroundRuns.begin({ runId, projectId: 'itest-p9', prompt: 'integration replay', background: true });
+  backgroundRuns.record(runId, { type: 'start', message: 'begin' });
+  backgroundRuns.record(runId, { type: 'step', message: 'work' });
+  backgroundRuns.record(runId, { type: 'done', message: 'all good', completed: true });
+  backgroundRuns.finish(runId, 'done', 'all good');
+
+  const st = await req('GET', `/api/agent/runs/${runId}`);
+  assert.equal(st.status, 200);
+  assert.equal(st.body.status, 'done');
+  assert.equal(st.body.background, true);
+  assert.equal(st.body.seq, 3);
+  assert.equal(st.body.running, false);
+  assert.equal(st.body.live, false);
+  assert.equal(st.body.finalMessage, 'all good');
+
+  // full replay � raw fetch (SSE never parses through req()'s JSON path);
+  // a finished run streams history then closes (no orphaned socket).
+  const resp = await fetch(`${base}/api/agent/runs/${runId}/events`);
+  assert.equal(resp.status, 200);
+  const text = await resp.text();
+  const dataLines = text.split('\n').filter(l => l.startsWith('data: ')).map(l => l.slice(6));
+  assert.equal(dataLines.length, 3, 'all persisted events replayed');
+  assert.equal(JSON.parse(dataLines[0]).type, 'start');
+  assert.equal(JSON.parse(dataLines[1]).type, 'step');
+  assert.equal(JSON.parse(dataLines[2]).message, 'all good');
+
+  // cursor: ?after=2 returns only what follows seq 2
+  const resp2 = await fetch(`${base}/api/agent/runs/${runId}/events?after=2`);
+  const text2 = await resp2.text();
+  const lines2 = text2.split('\n').filter(l => l.startsWith('data: ')).map(l => l.slice(6));
+  assert.equal(lines2.length, 1);
+  assert.equal(JSON.parse(lines2[0]).type, 'done');
+});
+
+test('P9: unknown run -> 404 on status and replay endpoints', async () => {
+  const a = await req('GET', '/api/agent/runs/run-never-existed');
+  assert.equal(a.status, 404);
+  assert.equal(a.body.error, 'unknown run');
+  const b = await fetch(`${base}/api/agent/runs/run-never-existed/events`);
+  assert.equal(b.status, 404);
+});
+
+// ── P8: Yjs collaboration (/yws/:projectId) ─────────────────────────────
+test('P8: /yws/:projectId accepts a WebSocket and starts Yjs sync (step 1 frame)', async () => {
+  const WebSocket = require('ws');
+  const ws = new WebSocket(`${base.replace(/^http/, 'ws')}/yws/itest-p8-handshake`);
+  const first = await new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('no sync frame within 5s')), 5000);
+    ws.once('message', (d) => { clearTimeout(t); resolve(d); });
+    ws.once('error', (e) => { clearTimeout(t); reject(e); });
+  });
+  assert.ok(first.length >= 2, 'frame has at least two varuints');
+  assert.equal(first[0], 0, 'MESSAGE_SYNC');
+  assert.equal(first[1], 0, 'SYNC_STEP_1');
+  ws.close();
+});
+
+test('P8: client update -> server doc, agent write -> client receives it (real sockets)', async () => {
+  const WebSocket = require('ws');
+  const Y = require('yjs');
+  const syncProtocol = require('y-protocols/sync');
+  const encoding = require('lib0/encoding');
+  const decoding = require('lib0/decoding');
+  const collabDoc = require('../services/collabDoc');
+
+  const ws = new WebSocket(`${base.replace(/^http/, 'ws')}/yws/itest-p8-sync`);
+  await new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('ws open timeout')), 5000);
+    ws.once('open', () => { clearTimeout(t); resolve(); });
+    ws.once('error', (e) => { clearTimeout(t); reject(e); });
+  });
+
+  // 1) Client applies its local doc to the server (sync update frame).
+  const clientDoc = new Y.Doc();
+  clientDoc.getText('file:src/App.jsx').insert(0, 'hello from client');
+  const enc = encoding.createEncoder();
+  encoding.writeVarUint(enc, collabDoc.MESSAGE_SYNC);
+  encoding.writeVarUint(enc, syncProtocol.messageYjsUpdate);
+  encoding.writeVarUint8Array(enc, Y.encodeStateAsUpdate(clientDoc));
+  ws.send(encoding.toUint8Array(enc));
+
+  // server runs in-process -> poll the room directly for the applied text
+  let applied = null;
+  for (let i = 0; i < 50 && applied === null; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+    applied = collabDoc.peekText('itest-p8-sync', 'src/App.jsx');
+  }
+  assert.equal(applied, 'hello from client', 'client update landed in the server doc');
+
+  // 2) Agent writes through applyFile -> connected client gets the frame.
+  const frames = [];
+  ws.on('message', (d) => frames.push(d));
+  collabDoc.applyFile('itest-p8-sync', 'src/App.jsx', 'agent wrote this');
+
+  let synced = null;
+  const localDoc = new Y.Doc();
+  Y.applyUpdate(localDoc, Y.encodeStateAsUpdate(clientDoc)); // client's known state
+  for (let i = 0; i < 60 && synced === null; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+    for (const frame of frames) {
+      if (frame[0] !== 0 || frame[1] !== 2) continue; // keep only sync/update frames
+      try {
+        const decoder = decoding.createDecoder(new Uint8Array(frame));
+        decoding.readVarUint(decoder); // MESSAGE_SYNC
+        decoding.readVarUint(decoder); // update subtype
+        Y.applyUpdate(localDoc, decoding.readVarUint8Array(decoder));
+      } catch (_) { /* partial frame */ }
+    }
+    const t = localDoc.getText('file:src/App.jsx').toString();
+    if (t === 'agent wrote this') synced = t;
+  }
+  assert.equal(synced, 'agent wrote this', 'agent write pushed to the connected client');
+  ws.close();
+
+  // cleanup: drop test rooms + their persisted rows (never leave fixtures in app.db)
+  collabDoc._resetForTests();
+  try {
+    db.prepare("DELETE FROM collab_docs WHERE project_id LIKE 'itest-p8%'").run();
+  } catch (_) { /* table missing (old db) — migration creates it on boot */ }
+});
+
+
+// ── Sandbox isolation policy regressions ──────────────────────────────────
+test('sandbox policy rejects host networking, binds dev ports to loopback, and sanitizes project paths', () => {
+  assert.equal(sandboxManager._resolveNetwork('bridge'), 'bridge');
+  assert.equal(sandboxManager._resolveNetwork('none'), 'none');
+  assert.equal(sandboxManager._resolveNetwork('host'), 'bridge');
+  assert.equal(sandboxManager._resolveNetwork('arbitrary-network'), 'bridge');
+
+  assert.deepEqual(sandboxManager._buildPortBindings([5173, '8080', 0, 65536, 'invalid']), {
+    '5173/tcp': [{ HostIp: '127.0.0.1', HostPort: '' }],
+    '8080/tcp': [{ HostIp: '127.0.0.1', HostPort: '' }],
+  });
+
+  const safeSegment = sandboxManager._safeProjectSegment('../../etc/ssh/keys');
+  assert.match(safeSegment, /^[A-Za-z0-9_-]+$/);
+  assert.ok(safeSegment.length <= 64);
+});
+
+test('sandbox workdir resolver rejects symlink escapes outside os.tmpdir', async (t) => {
+  const fs = require('node:fs/promises');
+  const path = require('node:path');
+  const os = require('node:os');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-dost-sandbox-workdir-test-'));
+  const link = path.join(root, 'outside-link');
+  try {
+    try {
+      await fs.symlink(await fs.realpath(os.homedir()), link, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch (err) {
+      if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes(err.code)) {
+        t.skip('symlink creation is not permitted in this Windows environment');
+        return;
+      }
+      throw err;
+    }
+    assert.equal(sandboxManager._resolveWorkdir(link), null);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test('dev-server workspace resolver rejects traversal and symlink escapes', async (t) => {
+  const fs = require('node:fs/promises');
+  const path = require('node:path');
+  const os = require('node:os');
+  const devServerManager = require('../sandbox/devServerManager');
+  const originalWorkspaceDir = devServerManager._workspaceDir;
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-dost-workspace-path-test-'));
+  try {
+    const safeDir = path.join(root, 'safe-project');
+    await fs.mkdir(safeDir);
+    devServerManager._workspaceDir = () => root;
+    assert.equal(await devServerManager._resolveWorkspacePath('test-project', 'safe-project'), await fs.realpath(safeDir));
+    assert.equal(await devServerManager._resolveWorkspacePath('test-project', '../../'), null);
+
+    const escapeLink = path.join(root, 'external-link');
+    try {
+      await fs.symlink(await fs.realpath(os.homedir()), escapeLink, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch (err) {
+      if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes(err.code)) {
+        t.skip('symlink creation is not permitted in this Windows environment');
+        return;
+      }
+      throw err;
+    }
+    assert.equal(await devServerManager._resolveWorkspacePath('test-project', 'external-link'), null);
+  } finally {
+    devServerManager._workspaceDir = originalWorkspaceDir;
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test('dev-server path guard rejects null bytes', () => {
+  const devServerManager = require('../sandbox/devServerManager');
+  assert.equal(devServerManager._safeProjectPath('\0'), null);
+});

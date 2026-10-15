@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI-Dost — Landing Concept</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root {
+    --bg:#090a0f; --s1:#0f1119; --s2:#141724; --s3:#1a1e30;
+    --line:rgba(255,255,255,.07); --line2:rgba(255,255,255,.13);
+    --txt:#f5f7fb; --mut:#9aa4b8; --dim:#67708a;
+    --acc:#6366f1; --acc2:#818cf8;
+    --grad:linear-gradient(96deg,#38bdf8 0%,#6366f1 52%,#a855f7 100%);
+    --ok:#10b981; --warn:#f59e0b; --err:#f43f5e;
+    --r-s:10px; --r-m:14px; --r-l:20px;
+    --sh:0 8px 24px -6px rgba(0,0,0,.55);
+  }
+  html,body { background:var(--bg); color:var(--txt); font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+  body { min-height:900px; overflow-x:hidden; position:relative; }
+  body::before { content:''; position:absolute; inset:0;
+    background:
+      radial-gradient(900px 420px at 50% -8%, rgba(99,102,241,.16), transparent 65%),
+      radial-gradient(700px 380px at 86% 12%, rgba(168,85,247,.10), transparent 60%),
+      radial-gradient(640px 400px at 10% 20%, rgba(56,189,248,.07), transparent 60%);
+    pointer-events:none; }
+  .wrap { position:relative; z-index:1; max-width:1200px; margin:0 auto; padding:0 32px; }
+
+  /* NAV */
+  nav { display:flex; align-items:center; justify-content:space-between; height:76px; }
+  .brand { display:flex; align-items:center; gap:14px; }
+  .logo { width:34px; height:34px; border-radius:9px; background:var(--grad); display:grid; place-items:center;
+    font-family:'Sora'; font-weight:700; font-size:16px; color:#fff; box-shadow:0 4px 14px -4px rgba(99,102,241,.55); }
+  .brand b { font-family:'Sora'; font-size:18px; font-weight:600; letter-spacing:-.01em; }
+  .tag { font-family:'JetBrains Mono'; font-size:10.5px; color:var(--mut); border:1px solid var(--line2);
+    padding:5px 10px; border-radius:999px; display:flex; gap:7px; align-items:center; background:rgba(255,255,255,.03); }
+  .tag i { color:var(--acc2); font-size:9px; }
+  .links { display:flex; gap:4px; background:rgba(255,255,255,.035); border:1px solid var(--line); padding:5px; border-radius:999px; }
+  .links a { color:var(--mut); text-decoration:none; font-size:13px; font-weight:500; padding:8px 15px; border-radius:999px; }
+  .links a.on { color:var(--txt); background:rgba(255,255,255,.07); }
+  .nav-r { display:flex; gap:14px; align-items:center; }
+  .gear { width:38px; height:38px; border-radius:50%; border:1px solid var(--line2); background:rgba(255,255,255,.03);
+    color:var(--mut); display:grid; place-items:center; font-size:14px; }
+  .btn { border:none; cursor:pointer; font-family:'Inter'; font-weight:600; }
+  .btn-p { background:var(--grad); color:#fff; font-size:14px; padding:11px 22px; border-radius:999px;
+    display:flex; align-items:center; gap:9px; box-shadow:0 6px 22px -8px rgba(99,102,241,.7); }
+  .btn-o { background:transparent; color:var(--txt); font-size:14px; padding:11px 22px; border-radius:999px;
+    border:1px solid var(--line2); display:flex; align-items:center; gap:9px; }
+
+  /* HERO */
+  .hero { text-align:center; padding:104px 0 0; }
+  .badge { display:inline-flex; gap:9px; align-items:center; font-family:'JetBrains Mono'; font-size:11.5px;
+    color:var(--mut); border:1px solid var(--line2); background:rgba(255,255,255,.04); padding:8px 16px; border-radius:999px; }
+  .badge i { color:var(--acc2); font-size:10px; }
+  h1 { font-family:'Sora'; font-weight:700; font-size:57px; line-height:1.1; letter-spacing:-.03em; margin:30px 0 0; }
+  .g { background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .sub { max-width:640px; margin:26px auto 0; color:var(--mut); font-size:16.5px; line-height:1.65; }
+  .cta { display:flex; gap:16px; justify-content:center; margin-top:40px; }
+  .trust { display:flex; gap:34px; justify-content:center; margin-top:46px; font-family:'JetBrains Mono'; font-size:12px; color:var(--mut); }
+  .trust span { display:flex; gap:9px; align-items:center; }
+  .trust i.fa-circle-check { color:var(--ok); font-size:12px; }
+  .trust i.fa-lock { color:#38bdf8; font-size:11px; }
+
+  /* BENTO STRIP */
+  .bento { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; margin-top:76px; padding-bottom:56px; }
+  .card { background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.015)); border:1px solid var(--line);
+    border-radius:var(--r-l); padding:26px 24px 24px; text-align:left; box-shadow:var(--sh); }
+  .ic { width:40px; height:40px; border-radius:11px; display:grid; place-items:center; font-size:15px; margin-bottom:16px;
+    background:rgba(99,102,241,.14); border:1px solid rgba(99,102,241,.3); color:var(--acc2); }
+  .card h3 { font-family:'Sora'; font-size:16.5px; font-weight:600; letter-spacing:-.01em; margin-bottom:8px; }
+  .card p { color:var(--mut); font-size:13.5px; line-height:1.6; }
+  .k { font-family:'JetBrains Mono'; color:var(--acc2); font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <div class="brand">
+      <div class="logo">D</div><b>AI-Dost</b>
+      <div class="tag"><i class="fa-solid fa-sparkles"></i> Autonomous AI Workspace</div>
+    </div>
+    <div class="links"><a class="on">Product</a><a>Capabilities</a><a>How It Works</a><a>Security</a><a>Docs</a></div>
+    <div class="nav-r">
+      <div class="gear"><i class="fa-solid fa-gear"></i></div>
+      <button class="btn btn-p">Launch Workspace <i class="fa-solid fa-arrow-right" style="font-size:12px"></i></button>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <div class="badge"><i class="fa-solid fa-wave-square"></i> AUTONOMOUS AI WORKSPACE&nbsp; •&nbsp; VERSION 3.0</div>
+    <h1>Tell AI-Dost what you need.<br><span class="g">Let it figure out the work.</span></h1>
+    <p class="sub">An autonomous developer workspace designed for outcomes. Describe a project, bug, research topic, or document — AI-Dost plans, executes, verifies and self-heals in your local workstation.</p>
+    <div class="cta">
+      <button class="btn btn-p">Launch Workspace <i class="fa-solid fa-arrow-right" style="font-size:12px"></i></button>
+      <button class="btn btn-o"><i class="fa-solid fa-circle-play" style="color:#38bdf8"></i> See How It Works</button>
+    </div>
+    <div class="trust">
+      <span><i class="fa-solid fa-circle-check"></i> Free Tier First</span>
+      <span><i class="fa-solid fa-circle-check"></i> Local-First SQLite</span>
+      <span><i class="fa-solid fa-lock"></i> 100% Private Workspace</span>
+    </div>
+  </section>
+
+  <section class="bento">
+    <div class="card">
+      <div class="ic"><i class="fa-solid fa-list-check"></i></div>
+      <h3>Plan</h3>
+      <p>Every task becomes an editable checklist — you approve the strategy before a single file changes.</p>
+    </div>
+    <div class="card">
+      <div class="ic" style="background:rgba(16,185,129,.12);border-color:rgba(16,185,129,.3);color:#34d399"><i class="fa-solid fa-gears"></i></div>
+      <h3>Execute &amp; Verify</h3>
+      <p>Runs in an isolated sandbox, screenshots the result, and vision-checks its own UI before handing over.</p>
+    </div>
+    <div class="card">
+      <div class="ic" style="background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.3);color:#fbbf24"><i class="fa-solid fa-shield-halved"></i></div>
+      <h3>Self-Heal</h3>
+      <p>Errors are analysed and repaired automatically — with a checkpoint you can roll back to, anytime.</p>
+    </div>
+  </section>
+</div>
+</body>
+</html>

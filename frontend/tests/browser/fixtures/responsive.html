@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fixture — Responsive Breakpoints</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: sans-serif; overflow-x: hidden; }
+    .responsive-element {
+      width: 800px;
+      height: 60px;
+      background: lightgreen;
+      line-height: 60px;
+    }
+    /* Media query genuinely exercised by the browser on resize */
+    @media (max-width: 767px) {
+      .responsive-element {
+        width: 100%;
+        background: lightblue;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>Responsive Fixture</h1>
+  <div class="responsive-element">I am 100% wide on mobile, 800px on desktop</div>
+  <!-- Deliberately 1300px wide: overflows 375px and 768px viewports, fits 1440px -->
+  <div class="wide-element" style="width: 1300px; height: 50px; background: lightcoral;">
+    Fixed 1300px wide element
+  </div>
+</body>
+</html>

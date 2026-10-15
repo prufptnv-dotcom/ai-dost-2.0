@@ -1,0 +1,784 @@
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import dynamic from 'next/dynamic';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  MessageSquare, FolderOpen, Code2, Bot, Mic, Image as ImageIcon,
+  FileText, History, Settings, CornerDownLeft, Sparkles, X, Loader2, Zap, BarChart3,
+  Move3d, Building2, MapPinned, PenTool, Calendar, Languages, Scale, ShieldCheck
+} from 'lucide-react';
+import AppShell from '../components/layout/AppShell';
+import ProjectsView from '../components/views/ProjectsView';
+import ArtifactsView from '../components/views/ArtifactsView';
+import VoiceView from '../components/views/VoiceView';
+const VoiceAssistant = dynamic(() => import('../components/VoiceAssistant'), { ssr: false, loading: () => null });
+import ResearchView from '../components/views/ResearchView';
+import ImageView from '../components/views/ImageView';
+import ResumeView from '../components/views/ResumeView';
+import HistoryView from '../components/views/HistoryView';
+import SettingsView from '../components/views/SettingsView';
+import McpPanel from '../components/McpPanel';
+import AgentView from '../components/views/AgentView';
+import AutomationsView from '../components/views/AutomationsView';
+import SkillsView from '../components/views/SkillsView';
+import IDEErrorBoundary from '../components/views/IDEErrorBoundary';
+import DataAnalyticsView from '../components/views/DataAnalyticsView';
+import { fetchProjects, createProject } from '../services/api';
+import { useMode } from '../context/ModeContext';
+import { useRouter } from 'next/router';
+import ViewSkeletonLoader from '../components/ui/ViewSkeletonLoader';
+
+const ForgeCopilot = dynamic(() => import('../components/forge/ForgeCopilot'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="ide" />,
+});
+
+const ChatView = dynamic(() => import('../components/views/ChatView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="chat" />,
+});
+
+const AnimationStudioView = dynamic(() => import('../components/views/AnimationStudioView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
+});
+
+const BharatHubView = dynamic(() => import('../components/views/BharatHubView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
+});
+
+const WritingStudioView = dynamic(() => import('../components/views/WritingStudioView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
+});
+
+const ProductivityPlannerView = dynamic(() => import('../components/views/ProductivityPlannerView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
+});
+
+const TravelAssistantView = dynamic(() => import('../components/views/TravelAssistantView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
+});
+
+const LanguageHubView = dynamic(() => import('../components/views/LanguageHubView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
+});
+
+const DecisionSupportView = dynamic(() => import('../components/views/DecisionSupportView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
+});
+
+const SecurityHubView = dynamic(() => import('../components/views/SecurityHubView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
+});
+
+const MasterCapabilitiesView = dynamic(() => import('../components/views/MasterCapabilitiesView'), {
+  ssr: false,
+  loading: () => <ViewSkeletonLoader type="studio" />,
+});
+
+const PALETTE_ACTIONS = [
+  { id: 'chat', label: 'Open Chat', hint: 'Ctrl+1', icon: MessageSquare },
+  { id: 'capabilities', label: '50-Domain Master Hub', hint: '50 Skills & Standards', icon: Sparkles },
+  { id: 'agent', label: 'Open Agent Workbench', hint: 'Ctrl+2', icon: Bot },
+  { id: 'copilot', label: 'Open Forge Studio', hint: 'Ctrl+3', icon: Code2 },
+  { id: 'animations', label: 'Anime.js 3D Motion Studio', hint: '3D/Motion', icon: Move3d },
+  { id: 'bharat', label: 'Bharat Hub (Free India APIs)', hint: 'Pincode/IFSC/ISRO', icon: Building2 },
+  { id: 'analytics', label: 'Open Data Analytics', hint: 'Charts/Insights', icon: BarChart3 }, // P3 #88: no Ctrl+A — reserved for native Select All
+  { id: 'projects', label: 'Open Projects', hint: 'Ctrl+4', icon: FolderOpen },
+  { id: 'artifacts', label: 'Open Artifacts', hint: 'Ctrl+5', icon: FileText },
+  { id: 'voice', label: 'Open Voice Assistant', hint: 'Ctrl+6', icon: Mic },
+  { id: 'settings', label: 'Open Settings', hint: 'Ctrl+7', icon: Settings },
+  { id: 'writing', label: 'Writing Studio', hint: 'Copy/Email/Articles', icon: PenTool },
+  { id: 'planner', label: 'Planner & Habits', hint: 'Timetable/Routines', icon: Calendar },
+  { id: 'automations', label: 'Open Automations & Watchers', hint: 'Ctrl+8', icon: Zap },
+  { id: 'travel', label: 'Travel & Places', hint: 'Restaurants/Hotels/Trips', icon: MapPinned },
+  { id: 'language', label: 'Language & Translation Hub', hint: 'Translate/Grammar/Spoken', icon: Languages },
+  { id: 'decision', label: 'Decision Matrix & Trade-offs', hint: 'Laptop/Stack/Cloud/DB', icon: Scale },
+  { id: 'security', label: 'Security & Cybersecurity Hub', hint: 'OWASP/Audit/Headers/STRIDE', icon: ShieldCheck },
+  { id: 'new-chat', label: 'Start New Conversation', hint: 'Ctrl+N', icon: Sparkles },
+];
+
+export default function Dashboard() {
+  const { mode } = useMode();
+  const router = useRouter();
+  const [view, setView] = useState('chat');
+  const [theme, setTheme] = useState('dark');
+  const [projects, setProjects] = useState([]);
+  const [activeProject, setActiveProject] = useState(null);
+  const [model, setModel] = useState('auto');
+  const [chatKey, setChatKey] = useState(0);
+  const [resumeData, setResumeData] = useState(null);
+  const [toasts, setToasts] = useState([]);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState('');
+  const [paletteIndex, setPaletteIndex] = useState(0);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectDesc, setNewProjectDesc] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [voiceAssistantOpen, setVoiceAssistantOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  const paletteRef = useRef(null);
+  const paletteInputRef = useRef(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Load preferences
+  useEffect(() => {
+    let savedTheme = 'dark';
+    try {
+      savedTheme = localStorage.getItem('ai_dost_theme') || localStorage.getItem('theme') || 'dark';
+    } catch (_) {}
+    setTheme(savedTheme);
+    
+    // Remove all possible theme classes
+    document.body.classList.remove('light-theme', 'dark-theme', 'hacker-theme', 'ocean-theme');
+    document.documentElement.classList.remove('light-theme', 'dark-theme', 'hacker-theme', 'ocean-theme');
+    
+    // Add current theme class
+    if (savedTheme !== 'dark') {
+      document.body.classList.add(`${savedTheme}-theme`);
+      document.documentElement.classList.add(`${savedTheme}-theme`);
+    }
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    try {
+      setModel(localStorage.getItem('ai_dost_model') || 'auto');
+    } catch (_) {
+      setModel('auto');
+    }
+  }, []);
+
+  const handleToggleTheme = useCallback(() => {
+    setTheme((prevTheme) => {
+      const nextTheme = prevTheme === 'dark' ? 'light' : 'dark';
+      try {
+        localStorage.setItem('ai_dost_theme', nextTheme);
+        localStorage.setItem('theme', nextTheme);
+      } catch (_) {}
+      
+      document.body.classList.remove('light-theme', 'dark-theme', 'hacker-theme', 'ocean-theme');
+      document.documentElement.classList.remove('light-theme', 'dark-theme', 'hacker-theme', 'ocean-theme');
+      
+      if (nextTheme !== 'dark') {
+        document.body.classList.add(`${nextTheme}-theme`);
+        document.documentElement.classList.add(`${nextTheme}-theme`);
+      }
+      document.documentElement.setAttribute('data-theme', nextTheme);
+      // Smooth 300ms theme crossfade (transient forced color transitions)
+      document.body.classList.add('theme-transitioning');
+      window.setTimeout(() => document.body.classList.remove('theme-transitioning'), 340);
+      return nextTheme;
+    });
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('ai-dost-toggle-theme', handleToggleTheme);
+    return () => window.removeEventListener('ai-dost-toggle-theme', handleToggleTheme);
+  }, [handleToggleTheme]);
+
+  // Load projects
+  useEffect(() => {
+    (async () => {
+      try {
+        const userId = localStorage.getItem('ai_dost_user_id') || 'demo_user_id';
+        const data = await fetchProjects(userId);
+        const projs = Array.isArray(data) ? data : [];
+        setProjects(projs);
+        if (projs.length > 0) {
+          setActiveProject((prev) => prev || projs[0]);
+        }
+      } catch (e) {
+        setProjects([]);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    const handleProjectChanged = (e) => {
+      if (e.detail) {
+        setActiveProject(e.detail);
+      }
+    };
+    window.addEventListener('ai_dost_project_changed', handleProjectChanged);
+    return () => window.removeEventListener('ai_dost_project_changed', handleProjectChanged);
+  }, []);
+
+  useEffect(() => {
+    if (router.query?.view && typeof router.query.view === 'string') {
+      setView(router.query.view);
+    }
+  }, [router.query?.view]);
+
+  // P3 #116: track toast timers so unmount clears them (no setState after unmount)
+  const toastTimersRef = useRef([]);
+  const showToast = useCallback((message, type = 'success') => {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, message, type }]);
+    const timer = setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3500);
+    toastTimersRef.current.push(timer);
+  }, []);
+
+  useEffect(() => {
+    const timers = toastTimersRef.current;
+    return () => { timers.forEach((t) => clearTimeout(t)); };
+  }, []);
+
+  // P3 #87: ToastContext (global provider) already listens to ai_dost_toast
+  // and renders the shared toast UI — this second listener produced a
+  // duplicate toast for every global event. Direct showToast() calls above
+  // still render the dashboard's own stack.
+
+  const [activeSessionId, setActiveSessionId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        return localStorage.getItem('ai_dost_session_id') || 'default';
+      } catch (_) {}
+    }
+    return 'default';
+  });
+
+  useEffect(() => {
+    const handleSwitchSession = (e) => {
+      const targetId = e?.detail;
+      if (targetId && typeof targetId === 'string') {
+        setActiveSessionId(targetId);
+      }
+    };
+    const handleNewChatEvent = (e) => {
+      const targetId = e?.detail;
+      if (targetId && typeof targetId === 'string') {
+        setActiveSessionId(targetId);
+      }
+    };
+    window.addEventListener('ai_dost_switch_session', handleSwitchSession);
+    window.addEventListener('ai_dost_new_chat', handleNewChatEvent);
+    return () => {
+      window.removeEventListener('ai_dost_switch_session', handleSwitchSession);
+      window.removeEventListener('ai_dost_new_chat', handleNewChatEvent);
+    };
+  }, []);
+
+  const activeChatTitle = useMemo(() => {
+    if (typeof window === 'undefined') return 'Forge Studio Workspace';
+    try {
+      const stored = localStorage.getItem('ai_dost_chat_sessions');
+      if (stored) {
+        const list = JSON.parse(stored);
+        const current = list.find((s) => s.id === activeSessionId);
+        if (current && (current.title || current.name)) return current.title || current.name;
+      }
+    } catch (_) {}
+    return 'Forge Studio Workspace';
+  }, [activeSessionId]);
+
+  const [initialChatPrompt, setInitialChatPrompt] = useState('');
+
+  const go = useCallback((v, opts) => {
+    if (v === 'chat' && opts?.initialPrompt) {
+      setInitialChatPrompt(opts.initialPrompt);
+    }
+    setView(v);
+    setPaletteOpen(false);
+  }, []);
+
+  const handleNewChat = useCallback(() => {
+    const newSessionId = 'chat_' + Date.now().toString(36);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('ai_dost_session_id', newSessionId);
+        localStorage.setItem('copilot_current_session_id', newSessionId);
+
+        // Pre-initialize clean copilot session
+        const storedSessions = localStorage.getItem('copilot_sessions_v2');
+        let parsed = storedSessions ? JSON.parse(storedSessions) : [];
+        if (!Array.isArray(parsed)) parsed = [];
+        const freshSession = {
+          id: newSessionId,
+          title: 'New conversation',
+          promptSummary: '',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          messages: [],
+          files: [],
+          contents: {},
+          openTabs: [],
+          activePath: null,
+          workspaceMode: 'split',
+          previewDevice: 'desktop',
+          planTasks: [],
+          snapshots: []
+        };
+        localStorage.setItem('copilot_sessions_v2', JSON.stringify([freshSession, ...parsed.filter(s => s.id !== newSessionId)]));
+        window.dispatchEvent(new CustomEvent('ai_dost_new_chat', { detail: newSessionId }));
+        window.dispatchEvent(new CustomEvent('ai_dost_switch_session', { detail: newSessionId }));
+      } catch (_) {}
+    }
+    setActiveSessionId(newSessionId);
+    setChatKey((k) => k + 1);
+    setInitialChatPrompt('');
+    go('chat');
+    showToast('New conversation initialized', 'success');
+  }, [go, showToast]);
+
+  const handleOpenResumeWithData = useCallback((data) => {
+    setResumeData(data);
+    go('resume');
+  }, [go]);
+
+  const handleOpenVoice = useCallback(() => go('voice'), [go]);
+  const handleOpenSettings = useCallback(() => go('settings'), [go]);
+
+  const handleVoiceTranscript = useCallback((text) => {
+    const t = text.toLowerCase();
+    if (/(resume|cv)/.test(t)) { go('resume'); return; }
+    if (/(project|projects)/.test(t)) { go('projects'); return; }
+    if (/(agent|workbench|task)/.test(t)) { go('agent'); return; }
+    if (/(copilot|ide|editor)/.test(t)) { go('copilot'); return; }
+    if (/(history)/.test(t)) { go('history'); return; }
+    if (/(settings)/.test(t)) { go('settings'); return; }
+  }, [go]);
+
+  const handleOpenPalette = useCallback(() => {
+    setPaletteOpen(true);
+    setPaletteQuery('');
+    setPaletteIndex(0);
+    setTimeout(() => paletteInputRef.current?.focus(), 60);
+  }, []);
+
+  useEffect(() => {
+    setPaletteIndex(0);
+  }, [paletteQuery]);
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handler = (e) => {
+      const isMod = e.metaKey || e.ctrlKey;
+      if (isMod && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((p) => !p);
+      }
+      if (isMod && e.shiftKey && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        setVoiceAssistantOpen((v) => !v);
+      }
+      if (isMod && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('ai_dost_toggle_sidebar'));
+      }
+      if (isMod && e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('ai_dost_toggle_sidebar'));
+      }
+      // P3 #89: exclude shift so Ctrl+Shift+N (new window) is not hijacked
+      if (isMod && !e.shiftKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        handleNewChat();
+      }
+      if (isMod && e.key === '1') { e.preventDefault(); go('chat'); }
+      if (isMod && e.key === '2') { e.preventDefault(); go('agent'); }
+      if (isMod && e.key === '3') { e.preventDefault(); go('copilot'); }
+      if (isMod && e.key === '4') { e.preventDefault(); go('projects'); }
+      if (isMod && e.key === '5') { e.preventDefault(); go('artifacts'); }
+      // P3 #88: implement the 6/7/8 shortcuts the palette advertises
+      // (Ctrl+A deliberately NOT bound — it must stay native Select All)
+      if (isMod && e.key === '6') { e.preventDefault(); go('voice'); }
+      if (isMod && e.key === '7') { e.preventDefault(); go('settings'); }
+      if (isMod && e.key === '8') { e.preventDefault(); go('automations'); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [go, handleNewChat]);
+
+  const handleCreateProject = async (e) => {
+    e.preventDefault();
+    if (!newProjectName.trim() || creating) return;
+    setCreating(true);
+    try {
+      const userId = localStorage.getItem('ai_dost_user_id') || 'demo_user_id';
+      const created = await createProject(newProjectName.trim(), newProjectDesc.trim(), userId);
+      setProjects((prev) => [created, ...prev]);
+      setActiveProject(created);
+      setShowCreateModal(false);
+      setNewProjectName('');
+      setNewProjectDesc('');
+      // P2 #78: backend returns { project_name } (server.js /memory/project) —
+      // created.name was undefined → toast showed Project "undefined" created.
+      showToast(`Project "${created.project_name || created.name || 'Untitled'}" created`, 'success');
+      go('projects');
+    } catch (err) {
+      showToast(err.message || 'Project creation failed', 'error');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const filteredActions = PALETTE_ACTIONS.filter(
+    (a) => a.label.toLowerCase().includes(paletteQuery.toLowerCase()) || a.id.includes(paletteQuery.toLowerCase())
+  );
+
+  const runPaletteAction = (actionId) => {
+    if (actionId === 'new-chat') handleNewChat();
+    else go(actionId);
+  };
+
+  return (
+    <AppShell
+      currentView={view}
+      onSelectView={go}
+      onNewChat={handleNewChat}
+      theme={theme}
+      onToggleTheme={handleToggleTheme}
+      onOpenCommandPalette={handleOpenPalette}
+      activeProject={activeProject}
+    >
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={view + chatKey}
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          transition={{ duration: 0.12 }}
+          className="h-full w-full"
+        >
+          {view === 'chat' && (
+            <ChatView
+              key={chatKey}
+              model={model}
+              initialPrompt={initialChatPrompt}
+              onModelChange={setModel}
+              onOpenResumeWithData={handleOpenResumeWithData}
+              onOpenVoice={handleOpenVoice}
+              onNavigate={go}
+            />
+          )}
+          {view === 'agent' && (
+            <AgentView
+              onToast={showToast}
+              onOpenFile={(filePath) => {
+                // P3 #118: persist the clicked file so Forge Studio (mounted after
+                // the view switch) opens it instead of dropping the request.
+                try {
+                  if (filePath && typeof window !== 'undefined') {
+                    localStorage.setItem('ai_dost_copilot_open', JSON.stringify({ path: filePath, at: Date.now() }));
+                  }
+                } catch (_) {}
+                go('copilot');
+              }}
+            />
+          )}
+          {view === 'copilot' && (
+            <IDEErrorBoundary>
+              <ForgeCopilot
+                key={activeProject?.id || 'copilot-workspace'}
+                projectId={activeProject?.id || 'copilot-workspace'}
+                projectName={activeProject?.name || 'Forge Studio Workspace'}
+                onToast={showToast}
+              />
+            </IDEErrorBoundary>
+          )}
+          {view === 'analytics' && (
+            <DataAnalyticsView onToast={showToast} />
+          )}
+          {view === 'projects' && (
+            <ProjectsView
+              onOpenProject={(id) => router.push(`/project/${id}`)}
+              onToast={showToast}
+              onNavigate={go}
+            />
+          )}
+          {view === 'artifacts' && (
+            <ArtifactsView onToast={showToast} />
+          )}
+          {view === 'writing' && (
+            <WritingStudioView onToast={showToast} />
+          )}
+          {view === 'planner' && (
+            <ProductivityPlannerView onToast={showToast} />
+          )}
+          {view === 'travel' && (
+            <TravelAssistantView onToast={showToast} />
+          )}
+          {view === 'language' && (
+            <LanguageHubView onToast={showToast} />
+          )}
+          {view === 'decision' && (
+            <DecisionSupportView onToast={showToast} />
+          )}
+          {view === 'security' && (
+            <SecurityHubView onToast={showToast} />
+          )}
+          {view === 'capabilities' && (
+            <MasterCapabilitiesView onToast={showToast} onNavigate={go} />
+          )}
+          {view === 'research' && (
+            <ResearchView onToast={showToast} onNavigate={go} />
+          )}
+          {view === 'voice' && (
+            <VoiceView
+              onToast={showToast}
+              onTranscript={handleVoiceTranscript}
+              onNavigate={go}
+              onClose={() => go('chat')}
+            />
+          )}
+          {view === 'images' && <ImageView onToast={showToast} />}
+          {view === 'resume' && (
+            <ResumeView
+              initialResume={resumeData}
+              onToast={showToast}
+              onClose={() => go('chat')}
+            />
+          )}
+          {view === 'history' && (
+            <HistoryView
+              onToast={showToast}
+              onOpenSession={(sessId) => {
+                if (typeof window !== 'undefined') {
+                  try {
+                    localStorage.setItem('ai_dost_session_id', sessId);
+                  } catch (_) {}
+                }
+                go('chat');
+                // P3 #119: handshake instead of a fixed 50ms mount race —
+                // ChatView dispatches 'ai_dost_chat_ready' once its switch
+                // listener is attached; then we emit the actual switch.
+                let fallbackTimer = null;
+                const fireSwitch = () => {
+                  if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
+                  window.removeEventListener('ai_dost_chat_ready', fireSwitch);
+                  window.dispatchEvent(new CustomEvent('ai_dost_switch_session', { detail: sessId }));
+                };
+                window.addEventListener('ai_dost_chat_ready', fireSwitch);
+                fallbackTimer = setTimeout(fireSwitch, 2000); // safety net
+              }}
+            />
+          )}
+          {view === 'settings' && (
+            <SettingsView
+              onToast={showToast}
+              onModelChange={setModel}
+            />
+          )}
+          {view === 'automations' && (
+            <AutomationsView onToast={showToast} onNavigate={go} />
+          )}
+          {view === 'animations' && (
+            <AnimationStudioView onToast={showToast} onOpenIDE={() => go('copilot')} />
+          )}
+          {view === 'bharat' && (
+            <BharatHubView onToast={showToast} />
+          )}
+          {view === 'skills' && (
+            <SkillsView onToast={showToast} />
+          )}
+          {view === 'mcp' && <McpPanel />}
+        </motion.div>
+      </AnimatePresence>
+
+      {/* Toasts */}
+      <div className="fixed bottom-4 right-4 z-[100] space-y-2">
+        <AnimatePresence>
+          {toasts.map((t) => (
+            <motion.div
+              key={t.id}
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xs text-xs font-medium shadow-md border ${
+                t.type === 'error'
+                  ? 'bg-signal-error-subtle border-signal-error text-signal-error'
+                  : t.type === 'warning'
+                  ? 'bg-signal-warning-subtle border-signal-warning text-signal-warning'
+                  : 'bg-signal-success-subtle border-signal-success text-signal-success'
+              }`}
+            >
+              {t.message}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
+      {/* Command Palette Modal */}
+      <AnimatePresence>
+        {paletteOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-xs"
+              onClick={() => setPaletteOpen(false)}
+            />
+            <motion.div
+              ref={paletteRef}
+              initial={{ opacity: 0, scale: 0.98, y: -8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98, y: -8 }}
+              transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
+              className="fixed left-1/2 top-20 -translate-x-1/2 z-[95] w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl bg-canvas-surface/95 backdrop-blur-xl border border-border"
+            >
+              <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+                <Sparkles className="w-4 h-4 text-accent shrink-0" />
+                <input
+                  ref={paletteInputRef}
+                  value={paletteQuery}
+                  onChange={(e) => setPaletteQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setPaletteIndex((prev) => (filteredActions.length > 0 ? (prev + 1) % filteredActions.length : 0));
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setPaletteIndex((prev) => (filteredActions.length > 0 ? (prev - 1 + filteredActions.length) % filteredActions.length : 0));
+                    } else if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (filteredActions[paletteIndex]) runPaletteAction(filteredActions[paletteIndex].id);
+                    } else if (e.key === 'Escape') {
+                      setPaletteOpen(false);
+                    }
+                  }}
+                  placeholder="Type a command or jump to workspace view..."
+                  role="combobox"
+                  aria-expanded={paletteOpen}
+                  aria-controls="palette-actions-list"
+                  className="flex-1 bg-transparent text-sm text-paper-100 placeholder:text-ink-muted focus:outline-none font-sans"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPaletteOpen(false);
+                    handleOpenVoice();
+                  }}
+                  className="p-1.5 rounded-lg hover:bg-canvas-elevated text-ink-muted hover:text-accent transition-fast cursor-pointer flex items-center justify-center mr-1"
+                  aria-label="Voice Input (Ctrl+Shift+V)"
+                  title="Voice Input (Ctrl+Shift+V)"
+                >
+                  <Mic className="w-4 h-4" />
+                </button>
+                <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-canvas-elevated border border-border text-ink-muted hidden sm:inline-block">
+                  ESC
+                </kbd>
+              </div>
+              <div id="palette-actions-list" role="listbox" aria-label="Commands" className="max-h-72 overflow-y-auto p-1.5 space-y-0.5">
+                {filteredActions.length === 0 && (
+                  <div className="px-4 py-8 text-center text-xs text-ink-muted">No commands found</div>
+                )}
+                {filteredActions.map((a, i) => {
+                  const isSelected = paletteIndex === i;
+                  return (
+                    <button
+                      key={a.id}
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      onMouseEnter={() => setPaletteIndex(i)}
+                      onClick={() => runPaletteAction(a.id)}
+                      className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-xl text-left transition-all duration-150 cursor-pointer ${
+                        isSelected
+                          ? 'bg-canvas-elevated text-paper-100 shadow-xs'
+                          : 'text-paper-200 hover:bg-canvas-elevated/60 hover:text-paper-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className={`p-1.5 rounded-lg border transition-colors shrink-0 ${isSelected ? 'bg-accent/15 border-accent/30 text-accent' : 'bg-canvas-base border-border text-ink-muted'}`}>
+                          <a.icon className="w-3.5 h-3.5" />
+                        </div>
+                        <span className={`text-xs truncate ${isSelected ? 'font-semibold text-paper-100' : 'text-paper-200'}`}>{a.label}</span>
+                      </div>
+                      <kbd className="text-[10px] font-mono text-ink-muted px-1.5 py-0.5 rounded-md bg-canvas-base border border-border shrink-0">{a.hint}</kbd>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex items-center justify-between px-3.5 py-2 border-t border-border bg-canvas-subtle/50 text-[11px] text-ink-muted select-none">
+                <div className="flex items-center gap-3">
+                  <span><kbd className="font-mono bg-canvas-elevated px-1 py-0.5 rounded text-[10px] border border-border">↑↓</kbd> Navigate</span>
+                  <span><kbd className="font-mono bg-canvas-elevated px-1 py-0.5 rounded text-[10px] border border-border">↵</kbd> Select</span>
+                </div>
+                <span><kbd className="font-mono bg-canvas-elevated px-1 py-0.5 rounded text-[10px] border border-border">Esc</kbd> Close</span>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Create Project Modal */}
+      <AnimatePresence>
+        {showCreateModal && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-xs"
+              onClick={() => setShowCreateModal(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.98 }}
+              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[95] w-full max-w-sm rounded-sm p-5 shadow-modal bg-canvas-surface border border-border"
+            >
+              <div className="flex items-center justify-between mb-3 border-b border-border-subtle pb-2">
+                <h3 className="text-sm font-semibold text-paper-100 font-display">New Project</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="p-1 text-ink-muted hover:text-paper-100 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <form onSubmit={handleCreateProject} className="space-y-3">
+                <input
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  placeholder="Project name (e.g. auth-service)"
+                  className="w-full px-3 py-2 rounded-xs text-xs bg-canvas-base border border-border text-paper-100 placeholder:text-ink-muted focus:outline-none focus:border-accent-primary"
+                />
+                <textarea
+                  value={newProjectDesc}
+                  onChange={(e) => setNewProjectDesc(e.target.value)}
+                  placeholder="Description (optional)"
+                  rows={2}
+                  className="w-full px-3 py-2 rounded-xs text-xs bg-canvas-base border border-border text-paper-100 placeholder:text-ink-muted focus:outline-none focus:border-accent-primary resize-none"
+                />
+                <button
+                  type="submit"
+                  disabled={!newProjectName.trim() || creating}
+                  className="w-full py-2 rounded-xs text-xs font-medium bg-accent-primary hover:bg-accent-primary-strong text-paper-100 transition-fast cursor-pointer disabled:opacity-40"
+                >
+                  {creating ? <Loader2 className="w-3.5 h-3.5 inline animate-spin" /> : 'Create Project'}
+                </button>
+              </form>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+      {/* Voice Assistant Modal */}
+      {mounted && voiceAssistantOpen && (
+        <VoiceAssistant
+          isOpen={voiceAssistantOpen}
+          onClose={() => setVoiceAssistantOpen(false)}
+          onNavigate={go}
+          onToggleTheme={handleToggleTheme}
+          onNewChat={handleNewChat}
+          onOpenPalette={handleOpenPalette}
+          theme={theme}
+          onTranscript={(text) => {
+            // Additional handling if needed
+          }}
+        />
+      )}
+    </AppShell>
+  );
+}

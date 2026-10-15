@@ -1,0 +1,92 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.*
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Build & Cache Directories
+.next/
+out/
+build/
+dist/
+.pytest_cache/
+__pycache__/
+*.pyc
+chroma_data/
+# P3 #199: the dirs that are ACTUALLY tracked (chroma_data/ matched nothing) —
+# vector-DB binaries must never be committed or touched by every run.
+chroma_db/
+
+# Local Configs & Keys
+.env
+.env.bak
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+*.key
+
+# System & Temp Files
+.DS_Store
+Thumbs.db
+backend/temp/
+frontend/public/downloads/*.pdf
+frontend/public/downloads/*.json
+scratch/
+test_*.pdf
+test_*.json
+test_mangal.pdf
+test_mangal_bold.pdf
+
+# Logs
+*.log
+artifacts/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Database
+.data/
+backend/data/*.db*
+# Server-side secret store (#101-#103) — never commit keys
+backend/data/local-settings.json
+# P7 runtime artifacts — downloaded tunnel binary + dev-server registry
+backend/data/bin/
+backend/data/live-servers.json
+# P3 #218: this line was one malformed concatenation of two paths
+# (memory-brain/.data/ + frontend/public/downloads/) and matched nothing.
+memory-brain/.data/
+frontend/public/downloads/
+
+# Generated document downloads
+frontend/public/downloads/*
+
+# Test Artifacts & Reports
+frontend/coverage/
+frontend/test-results/
+frontend/playwright-report/
+backend/test-results/
+backend/playwright-report/
+/test-results/
+temp-jest*.json
+backend/tests/chat_test_report.json
+
+# Editor & Scratch
+.opencode/
+scratch/
+test_*.png
+# Debug scripts only (real suites live in *.test.js) — scoped so future
+# tests named test_*.js outside these dirs are NOT ignored.
+/backend/test_*.js
+/backend/tests/test_*.js
+*.png
+# PWA/app icons must stay committable despite the blanket *.png rule
+!frontend/public/icons/*.png
+!frontend/public/**/*.png
+!**/icons/*.png

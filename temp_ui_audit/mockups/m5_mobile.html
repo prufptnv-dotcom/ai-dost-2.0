@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI-Dost — Mobile Chat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { width:1600px; height:1000px; background:
+    radial-gradient(900px 500px at 18% 0%, rgba(99,102,241,.14), transparent 60%),
+    radial-gradient(800px 500px at 85% 100%, rgba(168,85,247,.1), transparent 60%),
+    #090a0f;
+    font-family:'Inter',system-ui,sans-serif; color:#e2e8f0; display:flex; align-items:center; justify-content:center; gap:70px; -webkit-font-smoothing:antialiased; }
+
+  .caption { position:absolute; }
+  .c-wrap { display:flex; flex-direction:column; align-items:center; gap:26px; }
+  .c-title { font-family:'Sora',sans-serif; font-size:20px; font-weight:700; color:#fff; text-align:center; letter-spacing:-.01em; }
+  .c-sub { font-size:13.5px; color:#94a3b8; text-align:center; margin-top:-16px; }
+
+  .phone { width:390px; height:844px; background:#090a0f; border-radius:46px; border:1px solid rgba(255,255,255,.14); box-shadow:0 50px 100px -30px rgba(0,0,0,.9), 0 0 0 11px #0d0f18, 0 0 0 12.5px rgba(255,255,255,.09); overflow:hidden; position:relative; display:flex; flex-direction:column; }
+
+  .notch { position:absolute; top:11px; left:50%; transform:translateX(-50%); width:112px; height:30px; background:#0d0f18; border-radius:20px; z-index:5; }
+  .status-os { height:52px; display:flex; align-items:flex-end; justify-content:space-between; padding:0 26px 7px; font-size:13.5px; font-weight:600; color:#fff; }
+  .status-os .r { display:flex; gap:6px; align-items:center; font-size:12px; }
+
+  .m-head { display:flex; align-items:center; gap:12px; padding:10px 16px 13px; border-bottom:1px solid rgba(255,255,255,.07); }
+  .m-head .back { color:#94a3b8; font-size:20px; }
+  .m-av { width:34px; height:34px; border-radius:11px; background:linear-gradient(135deg,#6366f1,#38bdf8); display:flex; align-items:center; justify-content:center; }
+  .m-av svg { width:16px; height:16px; color:#fff; }
+  .m-title .t { font-size:15px; font-weight:600; color:#fff; }
+  .m-title .s { font-size:11.5px; color:#10b981; display:flex; align-items:center; gap:5px; margin-top:1px; }
+  .m-title .s .d { width:6px; height:6px; border-radius:50%; background:#10b981; box-shadow:0 0 6px #10b981; }
+  .m-head .more { margin-left:auto; color:#94a3b8; font-size:19px; }
+
+  .m-thread { flex:1; padding:18px 16px; display:flex; flex-direction:column; gap:16px; overflow:hidden; }
+  .u-b { align-self:flex-end; max-width:78%; background:#1e2547; border:1px solid rgba(99,102,241,.4); padding:11px 14px; border-radius:16px 16px 5px 16px; font-size:14.5px; line-height:1.55; color:#eef2ff; }
+  .a-row { align-self:flex-start; max-width:88%; display:flex; gap:10px; }
+  .a-av { width:27px; height:27px; border-radius:9px; background:linear-gradient(135deg,#6366f1,#a855f7); flex:none; display:flex; align-items:center; justify-content:center; }
+  .a-av svg { width:13px; height:13px; color:#fff; }
+  .a-b { background:#131622; border:1px solid rgba(255,255,255,.07); padding:12px 14px; border-radius:5px 16px 16px 16px; font-size:14.5px; line-height:1.6; color:#cbd5e1; }
+  .a-b b { color:#fff; }
+
+  .plan-m { background:#131622; border:1px solid rgba(255,255,255,.07); border-radius:13px; padding:12px 14px; align-self:stretch; }
+  .plan-m .ph { display:flex; align-items:center; gap:8px; font-size:12.5px; color:#94a3b8; margin-bottom:9px; }
+  .plan-m .ph .ok { width:16px; height:16px; border-radius:50%; background:rgba(16,185,129,.16); color:#10b981; font-size:10px; display:flex; align-items:center; justify-content:center; }
+  .plan-m .ph b { color:#fff; }
+  .plan-m .tags { display:flex; gap:7px; flex-wrap:wrap; }
+  .plan-m .tg2 { font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#a5b4fc; background:rgba(99,102,241,.13); border:1px solid rgba(99,102,241,.28); padding:4px 8px; border-radius:6px; }
+
+  .art-m { align-self:stretch; display:flex; align-items:center; gap:12px; background:linear-gradient(135deg,rgba(99,102,241,.12),rgba(168,85,247,.06)); border:1px solid rgba(99,102,241,.35); border-radius:13px; padding:12px 14px; }
+  .art-m .th { width:46px; height:38px; border-radius:8px; background:#0d0f18; border:1px solid rgba(255,255,255,.1); display:flex; align-items:center; justify-content:center; font-size:16px; flex:none; }
+  .art-m .n { font-size:13px; font-weight:600; color:#fff; }
+  .art-m .s { font-size:11.5px; color:#94a3b8; margin-top:2px; }
+  .art-m .go { margin-left:auto; font-size:17px; color:#a5b4fc; }
+
+  .m-composer { padding:10px 14px 6px; border-top:1px solid rgba(255,255,255,.07); background:#0d0f18; }
+  .m-input { background:#131622; border:1px solid rgba(255,255,255,.11); border-radius:18px; padding:12px 14px; display:flex; align-items:center; gap:11px; }
+  .m-input .ph { flex:1; font-size:14px; color:#64748b; }
+  .m-input .ic { color:#94a3b8; font-size:16px; }
+  .m-input .send { width:32px; height:32px; border-radius:50%; background:#6366f1; color:#fff; display:flex; align-items:center; justify-content:center; font-size:15px; flex:none; }
+  .m-hint { text-align:center; font-size:10.5px; color:#475569; padding:8px 0 4px; }
+  .home-bar { width:134px; height:5px; background:rgba(255,255,255,.35); border-radius:5px; margin:6px auto 9px; }
+
+  .legend { width:380px; display:flex; flex-direction:column; gap:16px; }
+  .lg-card { background:rgba(19,22,34,.75); border:1px solid rgba(255,255,255,.08); border-radius:16px; padding:20px 22px; backdrop-filter:blur(8px); }
+  .lg-card h3 { font-family:'Sora',sans-serif; font-size:16px; font-weight:700; color:#fff; margin-bottom:12px; }
+  .lg-item { display:flex; gap:11px; font-size:13.5px; color:#cbd5e1; line-height:1.65; padding:7px 0; }
+  .lg-item .b { width:20px; height:20px; border-radius:7px; background:rgba(99,102,241,.16); color:#a5b4fc; display:flex; align-items:center; justify-content:center; font-size:11px; flex:none; margin-top:1px; }
+  .lg-item .b.g { background:rgba(16,185,129,.14); color:#6ee7b7; }
+</style>
+</head>
+<body>
+
+  <div class="c-wrap">
+    <div>
+      <div class="c-title">AI-Dost · Mobile</div>
+    </div>
+    <div class="phone">
+      <div class="notch"></div>
+      <div class="status-os">
+        <span>9:41</span>
+        <span class="r">▮▮▮ ⌁ 87%</span>
+      </div>
+
+      <div class="m-head">
+        <span class="back">‹</span>
+        <div class="m-av"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z"/></svg></div>
+        <div class="m-title">
+          <div class="t">Todo app with login</div>
+          <div class="s"><span class="d"></span>AI-Dost · ready</div>
+        </div>
+        <span class="more">⋯</span>
+      </div>
+
+      <div class="m-thread">
+        <div class="u-b">Todo app banao with login aur Express backend</div>
+
+        <div class="a-row">
+          <div class="a-av"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z"/></svg></div>
+          <div class="a-b">Ban gaya! <b>React + Express + MongoDB</b> wala todo app, JWT login ke saath. Plan aur preview neeche 👇</div>
+        </div>
+
+        <div class="plan-m">
+          <div class="ph"><span class="ok">✓</span><span><b>Plan complete</b> — 5/5 steps · 42s</span></div>
+          <div class="tags">
+            <span class="tg2">8 files</span>
+            <span class="tg2">build ✓</span>
+            <span class="tg2">0 errors</span>
+          </div>
+        </div>
+
+        <div class="art-m">
+          <div class="th">📱</div>
+          <div>
+            <div class="n">Live preview — Todo App</div>
+            <div class="s">login + 4 screens working</div>
+          </div>
+          <span class="go">›</span>
+        </div>
+
+        <div class="a-row">
+          <div class="a-av"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z"/></svg></div>
+          <div class="a-b" style="color:#94a3b8;font-size:13.5px">Aur kuch chahiye to bolo — deploy bhi kar sakta hoon.</div>
+        </div>
+      </div>
+
+      <div class="m-composer">
+        <div class="m-input">
+          <span class="ph">Reply karo…</span>
+          <span class="ic">＋</span>
+          <span class="ic">🎤</span>
+          <span class="send">↑</span>
+        </div>
+        <div class="m-hint">AI-Dost galti kar sakta hai — verify kar lein</div>
+        <div class="home-bar"></div>
+      </div>
+    </div>
+
+    <div class="c-title" style="font-size:15px;color:#94a3b8;font-weight:500;font-family:'Inter'">Responsive — desktop jaisa hi structure, sahi priorities</div>
+  </div>
+
+</body>
+</html>

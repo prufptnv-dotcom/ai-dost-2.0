@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phase 2 Case C — Multiple Independent Safe Fixes</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: sans-serif; }
+    .container { width: 100%; border: 2px solid #333; padding: 10px; margin-bottom: 12px; }
+    .wide-a {
+      width: 2000px;
+      height: 40px;
+      background: #ff6b6b;
+      color: white;
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+    }
+    .wide-b {
+      width: 1800px;
+      height: 40px;
+      background: #c44569;
+      color: white;
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+    }
+    .wide-c {
+      width: 2500px;
+      height: 40px;
+      background: #574b90;
+      color: white;
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <p>Three INDEPENDENT viewport overflows — all must be fixed in one batch pass.</p>
+    <div class="wide-a">Fixed element A — 2000px</div>
+    <div class="wide-b">Fixed element B — 1800px</div>
+    <div class="wide-c">Fixed element C — 2500px</div>
+  </div>
+</body>
+</html>

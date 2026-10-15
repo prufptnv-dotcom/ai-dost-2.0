@@ -1,0 +1,174 @@
+import React from 'react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
+import ArtifactsView from '../components/views/ArtifactsView';
+import HistoryView from '../components/views/HistoryView';
+import SettingsView from '../components/views/SettingsView';
+import VoiceView from '../components/views/VoiceView';
+import McpPanel from '../components/McpPanel';
+import api from '../services/api';
+
+jest.mock('../services/api');
+
+const flushSettingsInitialEffects = async () => {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+};
+
+describe('Phase 3.7 — Secondary Product Surfaces Rebuild', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('ArtifactsView', () => {
+    it('renders empty state when no artifacts stored', () => {
+      localStorage.setItem('ai_dost_generated_artifacts', '[]');
+      render(<ArtifactsView />);
+      expect(screen.getByText(/Document & Artifact Shelf/i)).toBeInTheDocument();
+      expect(screen.getByText(/No generated artifacts yet/i)).toBeInTheDocument();
+    });
+
+    it('renders archived artifact items from localStorage', () => {
+      const mockArtifacts = [
+        { id: 'art_1', title: 'Q3 Financial Report.pdf', type: 'PDF', url: '/downloads/q3.pdf', created_at: Date.now() },
+      ];
+      localStorage.setItem('ai_dost_generated_artifacts', JSON.stringify(mockArtifacts));
+      render(<ArtifactsView />);
+      expect(screen.getByText('Q3 Financial Report.pdf')).toBeInTheDocument();
+      expect(screen.getAllByText('PDF').length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('HistoryView', () => {
+    it('renders conversation history timeline from API', async () => {
+      api.get.mockResolvedValueOnce({
+        data: [
+          { session_id: 'default', message: 'How do I configure SQLite?', role: 'user', created_at: Date.now() },
+          { session_id: 'default', message: 'You can use Universal Project Store DAO.', role: 'assistant', created_at: Date.now() },
+        ],
+      });
+
+      render(<HistoryView />);
+      expect(screen.getByText(/Conversation & Task History/i)).toBeInTheDocument();
+
+      await waitFor(() => {
+        expect(screen.getAllByText(/How do I configure SQLite/i).length).toBeGreaterThan(0);
+      });
+    });
+  });
+
+  describe('SettingsView', () => {
+    it('renders model options, API key fields, and saves preferences', async () => {
+      const onToast = jest.fn();
+      const onModelChange = jest.fn();
+
+      render(<SettingsView onToast={onToast} onModelChange={onModelChange} />);
+      await flushSettingsInitialEffects();
+      expect(screen.getByText(/Workspace Settings/i)).toBeInTheDocument();
+      expect(screen.getByText(/AI Model Cascade/i)).toBeInTheDocument();
+      expect(screen.getByText(/API Keys & Providers/i)).toBeInTheDocument();
+
+      const saveBtn = screen.getByText('Save Changes');
+      fireEvent.click(saveBtn);
+      // #102: keys now save to the server store, prefs stay local — copy updated
+      expect(onToast).toHaveBeenCalledWith('Settings saved', 'success');
+    });
+
+    it('renders sandbox security card and triggers diagnostic health check', async () => {
+      api.get.mockResolvedValueOnce({
+        data: {
+          dockerAvailable: false,
+          engine: 'local-hardened-fallback',
+          resourceQuotas: {
+            memoryLimit: '1GB (Capped max 2GB)',
+            cpuQuota: '1.0 Core',
+            pidsLimit: 100,
+            pathTraversalDefense: 'Active (_resolveSafe enforced)',
+            commandPolicy: 'Active (Destructive shell commands filtered)'
+          }
+        }
+      });
+      api.post.mockResolvedValueOnce({
+        data: {
+          success: true,
+          isolation: 'local-fallback',
+          latencyMs: 38,
+          probe: 'passed'
+        }
+      });
+
+      const onToast = jest.fn();
+      render(<SettingsView onToast={onToast} />);
+      await flushSettingsInitialEffects();
+
+      expect(screen.getByText(/Sandbox & Security Isolation/i)).toBeInTheDocument();
+      expect(screen.getByText(/Memory Cap/i)).toBeInTheDocument();
+      expect(screen.getByText(/Anti-Fork Limit/i)).toBeInTheDocument();
+
+      const testBtn = screen.getByText('Run Health Check');
+      fireEvent.click(testBtn);
+
+      await waitFor(() => {
+        expect(api.post).toHaveBeenCalledWith('/sandbox/test');
+        expect(onToast).toHaveBeenCalledWith(expect.stringContaining('Sandbox probe passed'), 'success');
+      });
+    });
+  });
+
+  describe('VoiceView', () => {
+    it('renders flat waveform, status indicators, and handles text input fallback', async () => {
+      const encoder = new TextEncoder();
+      const originalFetch = global.fetch;
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        body: {
+          getReader() {
+            let sent = false;
+            return {
+              async read() {
+                if (sent) return { done: true, value: undefined };
+                sent = true;
+                return {
+                  done: false,
+                  value: encoder.encode('data: {"chunk":"Handshake acknowledged"}\n\n')
+                };
+              },
+              async cancel() {},
+            };
+          },
+        },
+      });
+      const onTranscript = jest.fn();
+      try {
+        render(<VoiceView onTranscript={onTranscript} />);
+        expect(screen.getByText(/Voice Assistant/i)).toBeInTheDocument();
+        expect(screen.getByText(/Microphone Idle/i)).toBeInTheDocument();
+
+        const input = screen.getByPlaceholderText(/Type your message/i);
+        fireEvent.change(input, { target: { value: 'Explain coordinator handshake' } });
+        fireEvent.click(screen.getByText('Send'));
+
+        expect(onTranscript).toHaveBeenCalledWith('Explain coordinator handshake');
+        await screen.findByText('Handshake acknowledged');
+        expect(fetchSpy).toHaveBeenCalledWith('/api/chat/stream', expect.objectContaining({ method: 'POST' }));
+      } finally {
+        fetchSpy.mockRestore();
+        global.fetch = originalFetch;
+      }
+    });
+  });
+
+  describe('McpPanel', () => {
+    it('renders technical connector table and triggers add modal', () => {
+      render(<McpPanel />);
+      expect(screen.getByText(/Model Context Protocol/i)).toBeInTheDocument();
+      expect(screen.getByText('SQLite DB Server')).toBeInTheDocument();
+
+      const addBtn = screen.getByText('Add Connector');
+      fireEvent.click(addBtn);
+      expect(screen.getByText('Add MCP Server')).toBeInTheDocument();
+    });
+  });
+});

@@ -1,0 +1,22 @@
+{
+  "id": "admin-added-example",
+  "kind": "mcp-template",
+  "transport": "streamable-http",
+  "endpoint": "https://mcp.example.invalid/mcp",
+  "auth": {
+    "type": "oauth",
+    "scopes": ["minimum.required.read.scope"],
+    "secretRef": "vault://workspace/connector/oauth-token"
+  },
+  "allowedTools": ["read_only_tool"],
+  "approval": {
+    "read": "after_connection_consent",
+    "write": "per_action",
+    "destructive": "per_action_explicit"
+  },
+  "memberMayEditDefinition": false,
+  "memberMayDeleteDefinition": false,
+  "managedBy": "admin",
+  "connected": false,
+  "notes": "Placeholder only; replace with a reviewed, verified server and actual least-privilege scopes."
+}

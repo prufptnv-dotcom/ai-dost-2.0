@@ -1,0 +1,268 @@
+:root {
+  /* ─── Obsidian Dark Palette (AI-Dost) ─── */
+  --bg-void: #090a0f;
+  --bg-card: #131622;
+  --bg-card-elevated: #1a1e30;
+  --bg-card-hover: #1f2438;
+
+  --ink-950: #090a0f;
+  --ink-900: #131622;
+  --ink-850: #1a1e30;
+  --ink-800: #1f2438;
+  --ink-700: #2a314d;
+  --ink-500: #64748b;
+
+  --paper-100: #f8fafc;
+  --paper-200: #cbd5e1;
+  --paper-300: #94a3b8;
+  --paper-400: #64748b;
+
+  /* ─── AI-Dost Signature Palette ─── */
+  --gemini-blue: #38bdf8;
+  --gemini-blue-core: #6366f1;
+  --gemini-indigo: #4f46e5;
+  --gemini-purple: #818cf8;
+  --gemini-violet: #8b5cf6;
+  --gemini-lilac: #a78bfa;
+  --gemini-rose: #fb7185;
+  --gemini-coral: #f43f5e;
+  --gemini-yellow: #f59e0b;
+
+  --gemini-gradient: linear-gradient(90deg, #6366f1 0%, #38bdf8 50%, #8b5cf6 100%);
+  --gemini-gradient-subtle: linear-gradient(135deg, rgba(99, 102, 241, 0.16) 0%, rgba(56, 189, 248, 0.12) 50%, rgba(139, 92, 246, 0.1) 100%);
+  --gemini-gradient-text: linear-gradient(74deg, #6366f1 0%, #38bdf8 50%, #8b5cf6 100%);
+  --gemini-gradient-card: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.01) 100%);
+  --gemini-gradient-border: linear-gradient(135deg, rgba(99, 102, 241, 0.55) 0%, rgba(56, 189, 248, 0.4) 50%, rgba(139, 92, 246, 0.35) 100%);
+  --gemini-glow-blue: rgba(99, 102, 241, 0.24);
+  --gemini-glow-purple: rgba(139, 92, 246, 0.22);
+
+  /* ─── Primary Accent (Indigo) ─── */
+  --primary-lime: #6366f1;
+  --primary-lime-glow: rgba(99, 102, 241, 0.22);
+  --accent-primary: #6366f1;
+  --accent-primary-strong: #4f46e5;
+  --accent-subtle: rgba(99, 102, 241, 0.14);
+  --accent-border: rgba(99, 102, 241, 0.38);
+
+  /* ─── Cyber Coral / Rose (Secondary Accent / Alerts) ─── */
+  --secondary-rust: #f43f5e;
+  --secondary-rust-glow: rgba(244, 63, 94, 0.25);
+  --signal-error: #ef4444;
+  --signal-error-subtle: rgba(239, 68, 68, 0.15);
+
+  /* ─── Vivid Operational Signals ─── */
+  --signal-success: #10b981;
+  --signal-success-subtle: rgba(16, 185, 129, 0.15);
+  --signal-warning: #f59e0b;
+  --signal-warning-subtle: rgba(245, 158, 11, 0.15);
+  --signal-info: #38bdf8;
+  --signal-info-subtle: rgba(56, 189, 248, 0.15);
+  --signal-purple: #8b5cf6;
+  --signal-purple-subtle: rgba(139, 92, 246, 0.15);
+
+  /* ─── Semantic Aliases (Obsidian Dark) ─── */
+  --color-canvas-base: #090a0f;
+  --color-canvas-subtle: #0f121d;
+  --color-canvas-surface: #131622;
+  --color-canvas-elevated: #1a1e30;
+  --color-canvas-overlay: #1f2438;
+
+  --color-border-subtle: rgba(255, 255, 255, 0.06);
+  --color-border-default: rgba(255, 255, 255, 0.1);
+  --color-border-strong: rgba(255, 255, 255, 0.18);
+  --color-border-focus: #6366f1;
+
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #94a3b8;
+  --color-text-disabled: #475569;
+
+  --color-accent: var(--accent-primary);
+  --color-accent-hover: var(--accent-primary-strong);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-accent-border: var(--accent-border);
+
+  --color-status-success: var(--signal-success);
+  --color-status-success-subtle: var(--signal-success-subtle);
+  --color-status-warning: var(--signal-warning);
+  --color-status-warning-subtle: var(--signal-warning-subtle);
+  --color-status-error: var(--signal-error);
+  --color-status-error-subtle: var(--signal-error-subtle);
+  --color-status-info: var(--signal-info);
+  --color-status-info-subtle: var(--signal-info-subtle);
+
+  /* ─── Bento Geometry & Elevation Scale ─── */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* ─── Bento Shadows & Indigo Glows ─── */
+  --shadow-sm: 0 2px 8px -2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 8px 24px -6px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--color-border-subtle);
+  --shadow-lg: 0 12px 32px -4px rgba(0, 0, 0, 0.65), 0 0 0 1px var(--color-border-default);
+  --shadow-lime: 0 0 20px rgba(99, 102, 241, 0.18);
+  --shadow-rust: 0 0 20px rgba(99, 102, 241, 0.24);
+  --shadow-modal: 0 20px 50px -10px rgba(0, 0, 0, 0.8), 0 0 0 1px var(--color-border-strong);
+
+  /* ─── Motion Timings & Curves ─── */
+  --motion-fast: 120ms;
+  --motion-normal: 200ms;
+  --motion-slow: 300ms;
+  --motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ─── Light Theme System Variables (Indigo, mirrors dark theme identity) ─── */
+body.light-theme, html.light-theme, .light-theme, [data-theme="light"] {
+  /* Surfaces & Canvas */
+  --color-canvas-base: #f7f8fb;
+  --color-canvas-subtle: #eef1f6;
+  --color-canvas-surface: #ffffff;
+  --color-canvas-elevated: #ffffff;
+  --color-canvas-overlay: rgba(255, 255, 255, 0.96);
+
+  --bg-void: #f7f8fb;
+  --bg-card: #ffffff;
+  --bg-card-elevated: #ffffff;
+  --bg-card-hover: #eef1f6;
+
+  /* Typography / Paper Palette (Dark ink on light canvas) */
+  --paper-100: #0b1020;
+  --paper-200: #1e293b;
+  --paper-300: #475569;
+  --paper-400: #64748b;
+
+  --color-text-primary: #0b1020;
+  --color-text-secondary: #1e293b;
+  --color-text-muted: #64748b;
+  --color-text-disabled: #94a3b8;
+
+  /* Inks (Inverted for light mode) */
+  --ink-950: #ffffff;
+  --ink-900: #f7f8fb;
+  --ink-850: #eef1f6;
+  --ink-800: #e2e8f0;
+  --ink-700: #cbd5e1;
+  --ink-500: #64748b;
+
+  /* Borders */
+  --color-border: rgba(15, 23, 42, 0.1);
+  --color-border-subtle: rgba(15, 23, 42, 0.06);
+  --color-border-default: rgba(15, 23, 42, 0.1);
+  --color-border-strong: rgba(15, 23, 42, 0.16);
+  --color-border-focus: #4f46e5;
+
+  /* Accent (Indigo, darkened for light contrast) */
+  --color-primary: #4f46e5;
+  --color-primary-hover: #4338ca;
+  --color-secondary: #0d904f;
+  --color-accent: #4f46e5;
+  --color-accent-hover: #4338ca;
+  --color-accent-subtle: rgba(79, 70, 229, 0.08);
+  --color-accent-border: rgba(79, 70, 229, 0.28);
+  --primary-lime: #4f46e5;
+  --primary-lime-glow: rgba(79, 70, 229, 0.2);
+  --accent-primary: #4f46e5;
+  --accent-primary-strong: #4338ca;
+  --accent-subtle: rgba(79, 70, 229, 0.08);
+  --accent-border: rgba(79, 70, 229, 0.28);
+
+  /* Shadows (Light Elevation) */
+  --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 4px 16px -2px rgba(15, 23, 42, 0.07), 0 0 0 1px rgba(15, 23, 42, 0.05);
+  --shadow-lg: 0 10px 28px -4px rgba(15, 23, 42, 0.09), 0 0 0 1px rgba(15, 23, 42, 0.06);
+  --shadow-modal: 0 20px 48px -8px rgba(15, 23, 42, 0.16), 0 0 0 1px rgba(15, 23, 42, 0.08);
+  --shadow-lime: 0 0 20px rgba(79, 70, 229, 0.14);
+  --shadow-rust: 0 0 20px rgba(79, 70, 229, 0.16);
+}
+
+/* ─── Typography Utility Classes ─── */
+.text-display-xl {
+  font-family: var(--font-display, 'Sora', sans-serif);
+  font-size: 1.625rem;
+  line-height: 2.125rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.text-display-lg {
+  font-family: var(--font-display, 'Sora', sans-serif);
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.text-heading-md {
+  font-family: var(--font-sans, 'Inter', sans-serif);
+  font-size: 0.9375rem;
+  line-height: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.text-body-default {
+  font-family: var(--font-sans, 'Inter', sans-serif);
+  font-size: 0.875rem;
+  line-height: 1.375rem;
+  font-weight: 400;
+}
+
+.text-body-strong {
+  font-family: var(--font-sans, 'Inter', sans-serif);
+  font-size: 0.875rem;
+  line-height: 1.375rem;
+  font-weight: 500;
+}
+
+.text-ui-default {
+  font-family: var(--font-sans, 'Inter', sans-serif);
+  font-size: 0.8125rem;
+  line-height: 1.125rem;
+  font-weight: 500;
+}
+
+.text-ui-caption {
+  font-family: var(--font-sans, 'Inter', sans-serif);
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+
+.text-code-sm {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 0.78125rem;
+  line-height: 1.25rem;
+  font-weight: 400;
+}
+
+/* ─── Motion & Transition Classes ─── */
+.transition-fast {
+  transition: all var(--motion-fast) var(--motion-ease);
+}
+
+.transition-normal {
+  transition: all var(--motion-normal) var(--motion-ease);
+}
+
+.transition-slow {
+  transition: all var(--motion-slow) var(--motion-ease);
+}
+
+/* ─── Focus & Accessibility ─── */
+.focus-ring:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

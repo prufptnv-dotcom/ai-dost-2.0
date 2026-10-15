@@ -1,0 +1,758 @@
+यह एक AI प्रोजेक्ट प्लान के PDF पेजों का विस्तृत विश्लेषण है, जिसमें प्रत्येक पेज के कंटेंट को हिंदी और अंग्रेजी दोनों में, सुविधाओं, आर्किटेक्चर और अन्य प्रासंगिक विवरणों के साथ समझाया गया है। चूंकि मूल PDF में कोई डायग्राम या कोड उदाहरण सीधे तौर पर प्रदान नहीं किए गए हैं, इसलिए आर्किटेक्चर और फीचर्स को टूल के विवरण और सामान्य कार्यक्षमता के आधार पर वर्णित किया गया है।
+
+---
+
+### **पेज 1 का कंटेंट**
+
+यह पेज SEO (Search Engine Optimization) और Analytics (विश्लेषण) से संबंधित विभिन्न टूल्स और APIs को सूचीबद्ध करता है।
+
+**तालिका: SEO और Analytics टूल्स**
+
+| श्रेणी (Category) | ऐप/मॉडल का नाम (App/Model Name) | वेबसाइट/रिपोजिटरी URL (Website/Repository URL) | प्रकार (Type) | लिमिट/एक्सेस (Limit/Access) | विवरण (Description) |
+|---|---|---|---|---|---|
+| SEO | Analyzer | [sethblack/python-seo-analyzer](https://github.com/sethblack/python-seo-analyzer) | analysis. | | eo-analyzer |
+| SEO | Google Search Console | [https://search.google.com/search-console](https://search.google.com/search-console) | API | Free | Search performance data. |
+| SEO | Seokar | [https://github.com/saijadakbari/seokar](https://github.com/saijadakbari/seokar) | Library | MIT | On-page SEO analysis. |
+| Analytics | Matomo | [https://matomo.org](https://matomo.org) | Platform | GPL | GA alternative. |
+| Analytics | Plausible | [https://plausible.io](https://plausible.io) | Platform | AGPL-3.0 | Privacy-friendly analytics. |
+| Analytics | Umami | [https://umami.is](https://umami.is) | Platform | MIT | Simple web analytics. |
+| Analytics | Google Analytics API | [https://developers.google.com/analytics](https://developers.google.com/analytics) | API | Free | Web traffic analytics. |
+
+**प्रत्येक एंट्री का विस्तृत विवरण:**
+
+1.  **Analyzer**
+    *   **ऐप/मॉडल का नाम:** Analyzer
+    *   **वेबसाइट/रिपोजिटरी URL:** [sethblack/python-seo-analyzer](https://github.com/sethblack/python-seo-analyzer)
+    *   **प्रकार:** Analysis (विश्लेषण)
+    *   **विवरण:** यह एक SEO एनालाइज़र है।
+    *   **मुख्य सुविधाएँ (Features):** यह एक पायथन लाइब्रेरी है जिसका उपयोग SEO-संबंधित विश्लेषण करने के लिए किया जाता है, जैसे किसी वेबसाइट की सामग्री का मूल्यांकन, कीवर्ड घनत्व, मेटा टैग की जाँच आदि।
+    *   **आर्किटेक्चर (Architecture):** एक पायथन-आधारित लाइब्रेरी या स्क्रिप्ट जो वेबसाइटों को क्रॉल करके और SEO मापदंडों का विश्लेषण करके कार्य करती है। यह आमतौर पर स्थानीय रूप से या एक सर्वर-साइड एप्लिकेशन के हिस्से के रूप में चलती है।
+
+2.  **Google Search Console**
+    *   **ऐप/मॉडल का नाम:** Google Search Console
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://search.google.com/search-console](https://search.google.com/search-console)
+    *   **प्रकार:** API
+    *   **लिमिट/एक्सेस:** Free (निःशुल्क)
+    *   **विवरण:** खोज प्रदर्शन डेटा प्रदान करता है।
+    *   **मुख्य सुविधाएँ (Features):** वेबसाइट के सर्च प्रदर्शन की निगरानी करने, इंडेक्सिंग समस्याओं का पता लगाने, क्रॉल त्रुटियों को देखने, साइटमैप सबमिट करने और संरचित डेटा त्रुटियों की जाँच करने में मदद करता है। वेबमास्टरों के लिए महत्वपूर्ण टूल।
+    *   **आर्किटेक्चर (Architecture):** Google द्वारा प्रदान की गई एक वेब-आधारित सेवा और API। वेबसाइट के डेटा को Google के सर्च इंजन के साथ एकीकृत किया जाता है, जिससे उपयोगकर्ता अपनी साइट के प्रदर्शन को सीधे Google के डेटा से देख सकत��� हैं।
+
+3.  **Seokar**
+    *   **ऐप/मॉडल का नाम:** Seokar
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://github.com/saijadakbari/seokar](https://github.com/saijadakbari/seokar)
+    *   **प्रकार:** Library (लाइब्रेरी)
+    *   **लिमिट/एक्सेस:** MIT (लाइसेंस)
+    *   **विवरण:** ऑन-पेज SEO विश्लेषण प्रदान करता है।
+    *   **मुख्य सुविधाएँ (Features):** यह भी एक पायथन लाइब्रेरी है जो वेबपेजों के ऑन-पेज SEO तत्वों (जैसे शीर्षक टैग, मेटा विवरण, हेडिंग, सामग्री) का विश्लेषण करने पर केंद्रित है।
+    *   **आर्किटेक्चर (Architecture):** पायथन में विकसित एक सॉफ्टवेयर लाइब्रेरी, जिसे अन्य एप्लिकेशन में एकीकृत किया जा सकता है ताकि स्वचालि��� ऑन-पेज SEO ऑडिट किया जा सके।
+
+4.  **Matomo**
+    *   **ऐप/मॉडल का नाम:** Matomo
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://matomo.org](https://matomo.org)
+    *   **प्रकार:** Platform (प्लेटफ़ॉर्म)
+    *   **लिमिट/एक्सेस:** GPL (लाइसेंस)
+    *   **विवरण:** गूगल एनालिटिक्स का एक विकल्प।
+    *   **मुख्य सुविधाएँ (Features):** व्यापक वेब एनालिटिक्स प्रदान करता है, जिसमें विज़िटर ट्रैकिंग, गोल ट्रैकिंग, ई-कॉमर्स एनालिटिक्स और रियल-टाइम रिपोर्टिंग शामिल है। यह अपनी गोपनीयता-केंद्रित दृष्टिकोण और डेटा स्वामित्व के लिए जाना जाता है।
+    *   **आर्किटेक्चर (Architecture):** एक PHP/MySQL-आधारित ओपन-सोर्स ���ेब एनालिटिक्स प्लेटफ़ॉर्म जिसे सेल्फ-होस्ट किया जा सकता है या क्लाउड सेवा के रूप में उपयोग किया जा सकता है। यह ट्रैकिंग कोड के माध्यम से डेटा एकत्र करता है।
+
+5.  **Plausible**
+    *   **ऐप/मॉडल का नाम:** Plausible
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://plausible.io](https://plausible.io)
+    *   **प्रकार:** Platform (प्लेटफ़ॉर्म)
+    *   **लिमिट/एक्सेस:** AGPL-3.0 (लाइसेंस)
+    *   **विवरण:** गोपनीयता-अनुकूल एनालिटिक्स।
+    *   **मुख्य सुविधाएँ (Features):** एक सरल, हल्का और गोपनीयता-केंद्रित वेब एनालिटिक्स समाधान। यह व्यक्तिगत रूप से पहचान योग्य जानकारी एकत्र नहीं करता है और GDPR, CCPA, ePrivacy के अनुरूप है।
+    *   **आर्किटेक्चर (Architecture):** एक ओपन-सोर्स SaaS प्लेटफ़ॉर्म जिसे स्वयं होस्ट किया जा सकता है। यह एक छोटा JavaScript स्निपेट उपयोग करता है जो आपकी वेबसाइट पर डेटा एकत्र करता है और इसे एक साफ-सुथरे डैशबोर्ड में प्रस्तुत करता है।
+
+6.  **Umami**
+    *   **ऐप/मॉडल का नाम:** Umami
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://umami.is](https://umami.is)
+    *   **प्रकार:** Platform (प्लेटफ़ॉर्म)
+    *   **लिमिट/एक्सेस:** MIT (लाइसेंस)
+    *   **विवरण:** सरल वेब एनालिटिक्स।
+    *   **मुख्य सुविधाएँ (Features):** Google Analytics का एक और सरल, फास्ट, और गोपनीयता-केंद्रित विकल्प। यह एक साफ डैशबोर्ड प्रदान करता है और आपकी वेबसाइट के प्रदर्शन को ट्रैक करना आसान बनाता है।
+    *   **आर्किटेक्चर (Architecture):** एक ओपन-सोर्स, सेल्फ-होस्टेड एनालिटिक्स समाधान जो एक छोटा ट्रैकिंग कोड उपयोग करता है। यह अक्सर Node.js और एक SQL डेटाबेस (जैसे PostgreSQL या MySQL) पर आधारित होता है।
+
+7.  **Google Analytics API**
+    *   **ऐप/मॉडल का नाम:** Google Analytics API
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://developers.google.com/analytics](https://developers.google.com/analytics)
+    *   **प्रकार:** API
+    *   **लिमिट/एक्सेस:** Free (निःशुल्क)
+    *   **विवरण:** वेब ट्रैफिक एनालिटिक्स प्रदान करता है।
+    *   **मुख्य सुविधाएँ (Features):** प्रोग्रा��ेटिक रूप से Google Analytics डेटा तक पहुँचने की अनुमति देता है, जिससे डेवलपर्स कस्टम रिपोर्ट, डैशबोर्ड या अन्य एप्लिकेशन बना सकते हैं जो Google Analytics के डेटा का उपयोग करते हैं।
+    *   **आर्किटेक्चर (Architecture):** Google Cloud Platform का एक हिस्सा, यह RESTful API के माध्यम से डेटा प्रदान करता है। एप्लिकेशन API कुंजी या OAuth 2.0 का उपयोग करके प्रमाणीकृत होते हैं और विशिष्ट प्रश्नों के साथ डेटा का अनुरोध करते हैं।
+
+---
+
+### **पेज 2 का कंटेंट**
+
+यह पेज CMS (Content Management System) से संबंधित कुछ टूल्स को सूचीबद्ध करता है और "Full Stack Infrastructure" और "Backend & Hosting" का परिचय देता है��
+
+**तालिका: CMS टूल्स**
+
+| श्रेणी (Category) | ऐप/मॉडल का नाम (App/Model Name) | वेबसाइट/रिपोजिटरी URL (Website/Repository URL) | प्रकार (Type) | लिमिट/एक्सेस (Limit/Access) | विवरण (Description) |
+|---|---|---|---|---|---|
+| CMS | Ghost | [https://ghost.org](https://ghost.org) | CMS | MIT | Headless CMS for publishing. |
+| CMS | Strapi | [https://strapi.io](https://strapi.io) | CMS | MIT | Headless CMS. |
+| CMS | Directus | [https://directus.io](https://directus.io) | CMS | GPL | Headless CMS & API. |
+| CMS | WordPress API | [https://wordpress.org](https://wordpress.org) | CMS | GPL | WP REST API. |
+
+**प्रत्येक एंट्री का विस्तृत विवरण:**
+
+1.  **Ghost**
+    *   **ऐप/मॉडल का नाम:** Ghost
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://ghost.org](https://ghost.org)
+    *   **प्रकार:** CMS
+    *   **लिमिट/एक्सेस:** MIT (लाइसेंस)
+    *   **विवरण:** प्रकाशन के लिए एक हेडलेस CMS।
+    *   **मुख्य सुविधाएँ (Features):** एक ओपन-सोर्स, हेडलेस CMS जो मुख्य रूप से ब्लॉगिंग और कंटेंट प्रकाशन के लिए डिज़ाइन किया गया है। यह Markdown सपोर्ट, SEO ऑप्टिमाइजेशन, सदस्यता प्रबंधन और एक शक्तिशाली API प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** Node.js पर निर्मित एक हेडलेस CMS, जिसका अर्थ है कि यह कंटेंट को एक API के माध्यम से प्रस्तुत करता है, जिसे किसी भी फ्रंटएंड (जैसे React, Vue, Angular) के साथ जोड़ा जा सकता है। यह एक आधुनिक, API-फर्स्ट दृष्टिकोण का पालन करता है।
+
+2.  **Strapi**
+    *   **ऐप/मॉडल का नाम:** Strapi
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://strapi.io](https://strapi.io)
+    *   **प्रकार:** CMS
+    *   **लिमिट/एक्सेस:** MIT (लाइसेंस)
+    *   **विवरण:** हेडलेस CMS।
+    *   **मुख्य सुविधाएँ (Features):** एक ओपन-सोर्स हेडलेस CMS जो किसी भी प्रकार के डेटा को प्रबंधित करने के लिए कस्टम API बनाने की अनुमति देता है। इसमें एक रिच एडमिन पैनल, ऑथेंटिकेशन, परमिशन, और प्लगइन सिस्टम शामिल हैं।
+    *   **आर्किटेक्चर (Architecture):** Node.js पर आधारित एक हेडलेस CMS। यह आपके डेटाबेस को एक API के माध्यम से उजागर करता है, जिससे आप विभिन्न प्रकार के फ्रंटएंड्स (वेब, मोबाइल, IoT) के लिए कंटेंट को पावर कर सकते हैं। यह REST और GraphQL API दोनों को सपोर्ट करता है।
+
+3.  **Directus**
+    *   **ऐप/मॉडल का नाम:** Directus
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://directus.io](https://directus.io)
+    *   **प्रकार:** CMS
+    *   **लिमिट/एक्सेस:** GPL (लाइसेंस)
+    *   **विवरण:** हेडलेस CMS और API।
+    *   **मुख्य सुविधाएँ (Features):** यह आपकी SQL डेटाबेस को तुरंत एक हेडलेस CMS और API में बदल देता है। यह डेटाबेस से सीधे जुड़ता है और एक एडमिन इंटरफ़ेस के साथ-साथ REST और GraphQL API प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** यह एक डेटाबेस-फर्स्ट हेडलेस CMS है जो आपकी मौजूदा SQL डेटाबेस (PostgreSQL, MySQL, SQLite, Oracle, SQL Server) के ऊपर एक लेयर के रूप में काम करता है, जिससे डेटा को एक सहज UI ��र शक्तिशाली API के माध्यम से प्रबंधित किया जा सके।
+
+4.  **WordPress API**
+    *   **ऐप/मॉडल का नाम:** WordPress API
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://wordpress.org](https://wordpress.org)
+    *   **प्रकार:** CMS
+    *   **लिमिट/एक्सेस:** GPL (लाइसेंस)
+    *   **विवरण:** WP REST API।
+    *   **मुख्य सुविधाएँ (Features):** WordPress की अंतर्निहित RESTful API है जो डेवलपर्स को WordPress के कोर डेटा (पोस्ट, पेज, यूजर्स, श्रेणियां) के साथ प्रोग्रामेटिक रूप से इंटरैक्ट करने की अनुमति देती है। यह WordPress को एक हेडलेस CMS के रूप में उपयोग करने में सक्षम बनाता है।
+    *   **आर्किटेक्चर (Architecture):** WordPress कोर का एक हिस्सा, यह JSON फ़ॉर्मेट में डेटा के साथ RESTful HTTP अनुरोधों का उपयोग करता है। यह PHP पर निर्मित WordPress के ऊपर एक API लेयर प्रदान करता है।
+
+---
+
+### **5. फुल स्टैक इंफ्रास्ट्रक्चर: फाउंडेशन (Full Stack Infrastructure: Foundation)**
+
+**हिंदी:** इन सभी एजेंटों और उपकरणों को चलाने के लिए एक मजबूत, स्केलेबल और अविश्वसनीय मूलभूत बुनियादी ढांचे की आवश्यकता होती है।
+
+**English:** A robust, scalable, and reliable fundamental infrastructure is required to run all these agents and tools.
+
+**स्पष्टीकरण:**
+यह खंड एक AI प्रोजेक्ट के लिए आवश्यक मूलभूत आईटी इन्फ्रास्ट्रक्चर के महत्व को रेखांकित करता है। "फुल स्टैक" का अर्थ है कि इसमें फ्रं��एंड (यूजर इंटरफ़ेस), बैकएंड (सर्वर-साइड लॉजिक, डेटाबेस), और डिप्लॉयमेंट (होस्टिंग, DevOps) सभी शामिल हैं। प्रोजेक्ट की सफलता के लिए एक ऐसा इन्फ्रास्ट्रक्चर महत्वपूर्ण है जो उच्च ट्रैफिक को संभाल सके, आवश्यकतानुसार स्केल कर सके, और लगातार उपलब्ध रहे।
+
+---
+
+### **5.1. बैकएंड और होस्टिंग (Backend & Hosting)**
+
+**हिंदी:** Supabase (फायरबेस का विकल्प) एक उत्कृष्ट BaaS है जो Postgres डेटाबेस, प्रमाणीकरण और एज फंक्शंस प्रदान करता है। इसका वेक्टर समर्थन (pgvector) इसे AI प्रोजेक्टों के लिए एक आदर्श मेमोरी स्टोर बनाता है।
+Render और Railway क्लाउड होस्टिंग (PaaS) प्रदान करते हैं जो डोकर कंटेनरों (जैसे पायथन स्क्रिप्ट) और वेब सेवाओं को तैनात करने के लिए भी बहुत अच्छा है। Render का फ्री टियर और Railway का $5 ट्रैवल क्रेडिट डेवलपर्स को बिना किसी अग्रिम लागत के शुरू करने की अनुमति देता है।
+
+**English:** Supabase (a Firebase alternative) is an excellent BaaS that provides Postgres database, authentication, and edge functions. Its vector support (pgvector) makes it an ideal memory store for AI projects.
+Render and Railway provide cloud hosting (PaaS) which is also great for deploying Docker containers (like Python scripts) and web services. Render's free tier and Railway's $5 travel credit allow developers to get started without any upfront cost.
+
+**स्पष्टीकरण:**
+यह खंड विशेष रूप से बैकएंड सेवाओं और होस्टिंग समाधानों पर के��द्रित है।
+*   **Supabase:** यह एक BaaS (Backend as a Service) है जो Firebase के समान कार्यक्षमता प्रदान करता है लेकिन PostgreSQL डेटाबेस पर आधारित है। AI प्रोजेक्ट्स के लिए इसका `pgvector` सपोर्ट एक महत्वपूर्ण विशेषता है क्योंकि यह वेक्टर एम्बेडिंग को स्टोर और क्वेरी करने की अनुमति देता है, जो LLM (लार्ज लैंग्वेज मॉडल) और RAG (रिट्रीवल ऑगमेंटेड जेनरेशन) जैसी AI एप्लीकेशन में महत्वपूर्ण है।
+*   **Render और Railway:** ये PaaS (Platform as a Service) प्रदाता हैं। PaaS डेवलपर्स को इंफ्रास्ट्रक्चर प्रबंधित किए बिना एप्लिकेशन को डिप्लॉय, रन और स्केल करने की अनुमति देता है। Docker कंटेनरों को डिप्लॉय करने की क्षमता पायथन-आधारित AI स्क्रिप्ट और वेब सेवाओं के लिए आदर्श है। उनके फ्री टियर या क्रेडिट नए प्रोजेक्ट्स के लिए एक कम लागत वाला शुरुआती बिंदु प्रदान करते हैं।
+
+---
+
+### **तालिका 5.1: डेवऑप्स और इंफ्रास्ट्रक्चर (DevOps & Infrastructure)**
+
+यह तालिका विभिन्न बैकएंड और होस्टिंग समाधानों को सूचीबद्ध करती है।
+
+**तालिका:**
+
+| श्रेणी (Category) | ऐप/मॉडल का नाम (App/Model Name) | वेबसाइट/रिपोजिटरी URL (Website/Repository URL) | प्रकार (Type) | लिमिट/एक्सेस (Limit/Access) | विवरण (Description) |
+|---|---|---|---|---|---|
+| Backend | Supabase | [https://supabase.com](https://supabase.com) | BaaS | Free Tier | Firebase alternative. |
+
+**Supabase का विस्तृत विवरण (पहले से पेज 2 पर कवर किया गया है):**
+
+*   **मुख्य सुविधाएँ (Features):** PostgreSQL डेटाबेस, ऑथेंटिकेशन, रियलटाइम सब्सक्रिप्शन, स्टोरेज, एज फंक्शंस (सर्वरलेस), और `pgvector` एक्सटेंशन के साथ वेक्टर डेटाबेस सपोर्ट। यह AI प्रोजेक्ट्स के लिए एक पूर्ण-विशेषताओं वाला बैकएंड प्रदान करता है।
+*   **आर्किटेक्चर (Architecture):** Supabase एक क्लाउड-आधारित BaaS है जो PostgreSQL को अपने मुख्य डेटाबेस के रूप में उपयोग करता है। यह विभिन्न माइक्रोसेर्विसेज का एक सूट है जो एक एकीकृत प्लेटफॉर्म के रूप में कार्य करता है�� इसका आर्किटेक्चर इसे अत्यधिक स्केलेबल और AI/LLM वर्कलोड के लिए उपयुक्त बनाता है।
+
+---
+
+### **पेज 3 का कंटेंट**
+
+यह पेज बैकएंड और होस्टिंग समाधानों की सूची जारी रखता है।
+
+**तालिका: बैकएंड और होस्टिंग (जारी)**
+
+| श्रेणी (Category) | ऐप/मॉडल का नाम (App/Model Name) | वेबसाइट/रिपोजिटरी URL (Website/Repository URL) | प्रकार (Type) | लिमिट/एक्सेस (Limit/Access) | विवरण (Description) |
+|---|---|---|---|---|---|
+| Backend | Appwrite | [https://appwrite.io](https://appwrite.io) | BaaS | Open Source | Self-hosted backend. |
+| Backend | PocketBase | [https://pocketbase.io](https://pocketbase.io) | BaaS | Open Source | SQLite backend in 1 file. |
+| Backend | Firebase | [https://firebase.google.com](https://firebase.google.com) | BaaS | Free Tier | Google's app platform. |
+| Hosting | Render | [https://render.com](https://render.com) | PaaS | Free Tier | Web services hosting. |
+| Hosting | Railway | [https://railway.app](https://railway.app) | PaaS | Trial | Full-stack deployment. |
+| Hosting | Fly.io | [https://fly.io](https://fly.io) | PaaS | Free Allowance | Global app platform. |
+| Hosting | Vercel | [https://vercel.com](https://vercel.com) | Frontend | Free Tier | Static/Serverless. |
+| Hosting | Netlify | [https://netlify.com](https://netlify.com) | Frontend | Free Tier | Web automation. |
+| Hosting | PythonAnywhere | [https://www.pythonanywhere.com](https://www.pythonanywhere.com) | PaaS | Free Tier | Python hosting. |
+| Hosting | Oracle Cloud | [https://www.oracle.com/cloud](https://www.oracle.com/cloud) | Cloud | Always Free | 4 ARM CPUs, 24GB RAM. |
+| Hosting | Google Cloud Run | [https://cloud.google.com/run](https://cloud.google.com/run) | Serverless | Free Tier | Container hosting. |
+
+**प्रत्येक एंट्री का विस्तृत विवरण:**
+
+1.  **Appwrite**
+    *   **ऐप/मॉडल का नाम:** Appwrite
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://appwrite.io](https://appwrite.io)
+    *   **प्रकार:** BaaS
+    *   **लिमिट/एक्सेस:** Open Source (ओपन सोर्स)
+    *   **विवरण:** सेल्फ-होस्टेड बैकएंड।
+    *   **मुख्य सुविधाएँ (Features):** प्रमाणीकरण, डेटाबेस, स्टोरेज, फंक्शंस (सर्वरलेस), और इमेज प्रोसेसिंग सहित वेब, मोबाइल और फ़्लटर ऐप्स के लिए एक पूर्ण बैकएंड समाधान प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** डॉकर कंटेनरों का उपयोग करके सेल्फ-होस्टेड होने के लिए डिज़ाइन किया गया एक BaaS। यह एक API-फर्स्ट अप्रोच का पालन करता है और विभिन्न एसडीके प्रदान करता है।
+
+2.  **PocketBase**
+    *   **ऐप/मॉडल का नाम:** PocketBase
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://pocketbase.io](https://pocketbase.io)
+    *   **प्रकार:** BaaS
+    *   **लिमिट/एक्सेस:** Open Source (ओपन सोर्स)
+    *   **विवरण:** एक फाइल में SQLite बैकएंड।
+    *   **मुख्य सुविधाएँ (Features):** एक सिंगल फाइल (SQLite) में एक BaaS प्रदान करता है जिसमें एक एम्बेडेड डेटाबेस, रियलटाइम सब्सक्रिप्शन, प्रमाणीकरण और एक एडमिन डैशबोर्ड शामिल है। यह Go में लिखा गया है।
+    *   **आर्किटेक्चर (Architecture):** Go भाषा में लिखा गया एक एकल बाइनरी निष्पादन योग्य जिसमें SQLite डेटाबेस एम्बेडेड होता है। यह सर्वर-साइड Go कोड के साथ-साथ एक JavaScript SDK भी प्रदान करता है।
+
+3.  **Firebase**
+    *   **ऐप/मॉडल का नाम:** Firebase
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://firebase.google.com](https://firebase.google.com)
+    *   **प्रकार:** BaaS
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **विवरण:** Google का ऐप प्लेटफ़ॉर्म।
+    *   **मुख्य सुविधाएँ (Features):** डेटाबेस (Firestore, Realtime DB), प्रमाणीकरण, होस्टिंग, स्टोरेज, क्लाउड फंक्शंस, मशीन लर्निंग के लिए एमएल किट और अन्य कई सेवाओं सहित मोबाइल और वेब ऐप्स के लिए Google का व्यापक BaaS।
+    *   **आर्किटेक्चर (Architecture):** Google Cloud Platform पर निर्मित एक BaaS जो क्लाइंट-साइड SDK के माध्यम से सीधे डेटाबेस और अन्य सेवाओं से जुड़ने की अनुमति देता है, जिससे सर्वर-साइड कोड की आवश्यकता कम हो जाती है।
+
+4.  **Render**
+    *   **ऐप/मॉडल का नाम:** Render
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://render.com](https://render.com)
+    *   **प्रकार:** PaaS
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **विवरण:** वेब सेवाओं की होस्टिंग।
+    *   **मुख्य सुविधाएँ (Features):** वेब ऐप्स, API, स्टेटिक साइट्स, बैकग्राउंड ���र्कर्स और डेटाबेस को होस्ट करने के लिए एक सरल और एकीकृत PaaS। Git इंटीग्रेशन के साथ स्वचालित डिप्लॉयमेंट प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** एक PaaS जो डॉकर कंटेनरों का उपयोग करता है और CI/CD पाइपलाइन को स्वचालित करता है। यह विभिन्न प्रोग्रामिंग भाषाओं और फ्रेमवर्क को सपोर्ट करता है।
+
+5.  **Railway**
+    *   **ऐप/मॉडल का नाम:** Railway
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://railway.app](https://railway.app)
+    *   **प्रकार:** PaaS
+    *   **लिमिट/एक्सेस:** Trial (ट्रायल)
+    *   **विवरण:** फुल-स्टैक डिप्लॉयमेंट।
+    *   **मुख्य सुविधाएँ (Features):** किसी भी एप्लिकेशन या डेटाबेस को डिप्लॉय करने के लिए एक PaaS। यह GitHub इंटीग्रेशन और एक सहज ज्ञान युक्त CLI (कमांड लाइन इंटरफ़ेस) के साथ त्वरित डिप्लॉयमेंट प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** एक आधुनिक PaaS जो डॉकर के ऊपर निर्मित है, जिससे डेवलपर्स किसी भी सर्विस को डिप्लॉय कर सकते हैं जो डॉकर इमेज में पैक की जा सकती है।
+
+6.  **Fly.io**
+    *   **ऐप/मॉडल का नाम:** Fly.io
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://fly.io](https://fly.io)
+    *   **प्रकार:** PaaS
+    *   **लिमिट/एक्सेस:** Free Allowance (फ्री अलाउंस)
+    *   **विवरण:** ग्लोबल ऐप प्लेटफ़ॉर्म।
+    *   **मुख्य सुविधाएँ (Features):** अपने ऐप्स को उपयोगकर्ताओं के करीब (एज पर) चलाने की अनुमति देता है, जिससे कम विलंबता और तेज प्रदर्शन होता है। यह डॉकर कंटेनर, डेटाबेस और अन्य सेवाओं को होस्ट करता है।
+    *   **आर्किटेक्चर (Architecture):** एक ग्लोबल PaaS जो अपने वर्ल्डवाइड नेटवर्क का लाभ उठाता है ताकि एप्लिकेशन को कई क्षेत्रों में डिप्लॉय किया जा सके, जिससे भौगोलिक रूप से वितरित उपयोगकर्ताओं के लिए प्रदर्शन बेहतर हो सके।
+
+7.  **Vercel**
+    *   **ऐप/मॉडल का नाम:** Vercel
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://vercel.com](https://vercel.com)
+    *   **प्रकार:** Frontend (फ्रंटएंड)
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **विवरण:** स्टेटिक/सर्वरलेस।
+    *   **मुख्य सुविधाएँ (Features):** नेक्स्ट.जेएस (Next.js) जैसे मॉडर्न फ्रंटएंड फ्रेमवर्क के लिए डिप्लॉयमेंट प्लेटफॉर्म। यह स्टेटिक साइट्स, सर्वरलेस फंक्शंस और CDN (कंटेंट डिलीवरी नेटवर्क) के साथ तेज प्रदर्शन प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** एक क्लाउड प्लेटफॉर्म जो सर्वरलेस फंक्शंस और ग्लोबल CDN का उपयोग करके आधुनिक फ्रंटएंड एप्लीकेशन (खासकर React, Next.js, Vue, Svelte) को होस्ट करता है।
+
+8.  **Netlify**
+    *   **ऐप/मॉडल का नाम:** Netlify
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://netlify.com](https://netlify.com)
+    *   **प्रकार:** Frontend (फ्रंटएंड)
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **विवरण:** वेब ऑटोमेशन।
+    *   **मुख्य सुविधाएँ (Features):** आधुनिक वेब प्रोजेक्ट्स के लिए एक डिप्लॉयमेंट प्लेटफॉर्म। यह स्टेटिक साइट्स, सर्वरलेस फंक्शंस (नेटलिफाई फंक्शंस), फॉर्म हैंडलिंग, और CDN के माध्यम से तेज़ होस्टिंग प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** Vercel के समान एक PaaS/JAMstack प्लेटफॉर्म, जो Git रिपोजिटरी से सीधे डिप्लॉयमेंट, बिल्ड पाइपलाइन और सर्वरलेस फंक्शंस के लिए सपोर्ट प्रदान करता है।
+
+9.  **PythonAnywhere**
+    *   **ऐप/मॉडल का नाम:** PythonAnywhere
+    *   **वेबस��इट/रिपोजिटरी URL:** [https://www.pythonanywhere.com](https://www.pythonanywhere.com)
+    *   **प्रकार:** PaaS
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **विवरण:** Python होस्टिंग।
+    *   **मुख्य सुविधाएँ (Features):** वेब ऐप्स (Flask, Django), स्क्रिप्ट्स और Jupyter नोटबुक सहित Python कोड को होस्ट करने के लिए एक क्लाउड-आधारित PaaS। इसमें एक ब्राउज़र-आधारित डेवलपमेंट एनवायरनमेंट भी शामिल है।
+    *   **आर्किटेक्चर (Architecture):** एक PaaS जो Python-विशिष्ट होस्टिंग वातावरण प्रदान करता है, जिसमें वेब सर्वर (WSGI), डेटाबेस (MySQL, PostgreSQL) और एक कमांड-लाइन एक्सेस (bash कंसोल) शामिल हैं।
+
+10. **Oracle Cloud**
+    *   **ऐप/मॉडल का नाम:** Oracle Cloud
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://www.oracle.com/cloud](https://www.oracle.com/cloud)
+    *   **प्रकार:** Cloud (क्लाउड)
+    *   **लिमिट/एक्सेस:** Always Free (हमेशा निःशुल्क)
+    *   **विवरण:** 4 ARM CPUs, 24GB RAM।
+    *   **मुख्य सुविधाएँ (Features):** IaaS (Infrastructure as a Service), PaaS (Platform as a Service), और SaaS (Software as a Service) सहित क्लाउड सेवाओं का एक व्यापक सूट। "हमेशा निःशुल्क" टियर में वर्चुअल मशीन, डेटाबेस और स्टोरेज शामिल हैं।
+    *   **आर्किटेक्चर (Architecture):** एक पूर्ण-विशेषताओं वाला क्लाउड प्लेटफॉर्म जिसमें कंप्यूट, स्टोरेज, नेटवर्किंग, डेटाबेस, और AI/ML सेवाएं शामिल हैं, जो डेटा सेंटरों के एक वैश्विक नेटवर्क पर चल रही हैं।
+
+11. **Google Cloud Run**
+    *   **ऐप/मॉडल का नाम:** Google Cloud Run
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://cloud.google.com/run](https://cloud.google.com/run)
+    *   **प्रकार:** Serverless (सर्वरलेस)
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **विवरण:** कंटेनर होस्टिंग।
+    *   **मुख्य सुविधाएँ (Features):** स्टेटलेस कंटेनरों को सर्वरलेस तरीके से चलाने के लिए एक प्रबंधित कंप्यूट प्लेटफॉर्म। यह किसी भी भाषा में लिखे गए ऐप्स को सपोर्ट करता है, डॉकर इमेज से डिप्लॉय होता है, और अनुरोधों के आधार पर स्वचालित रूप से स्केल करता है।
+    *   **आर्किटेक्चर (Architecture):** Google Cloud Platform पर निर्मित एक ���र्वरलेस PaaS जो Knative के आधार पर डॉकर कंटेनरों को चलाता है। यह केवल तभी शुल्क लेता है जब आपका कोड चलता है और शून्य तक स्केल कर सकता है।
+
+---
+
+### **पेज 4 का कंटेंट**
+
+यह पेज DevOps, डेटाबेस और प्रमाणीकरण (Auth) समाधानों को सूचीबद्ध करता है।
+
+**तालिका: DevOps, डेटाबेस और Auth**
+
+| श्रेणी (Category) | ऐप/मॉडल का नाम (App/Model Name) | वेबसाइट/रिपोजिटरी URL (Website/Repository URL) | प्रकार (Type) | लिमिट/एक्सेस (Limit/Access) | विवरण (Description) |
+|---|---|---|---|---|---|
+| DevOps | Docker | [https://www.docker.com](https://www.docker.com) | Tool | Open Source | Containerization. |
+| DevOps | GitLab CI | [https://about.gitlab.com](https://about.gitlab.com) | CI/CD | Free Tier | Automated pipelines. |
+| DevOps | GitHub Actions | [https://github.com/features/actions](https://github.com/features/actions) | CI/CD | Free Tier | Workflow automation. |
+| Networking | Ngrok | [https://ngrok.com](https://ngrok.com) | Tool | Free Tier | Localhost exposure. |
+| Networking | Traefik | [https://traefik.io](https://traefik.io) | Tool | Open Source | Reverse proxy. |
+| Database | MongoDB Atlas | [https://www.mongodb.com](https://www.mongodb.com) | NoSQL | Free Tier | Document database. |
+| Database | Neon | [https://neon.tech](https://neon.tech) | SQL | Free Tier | Serverless Postgres. |
+| Database | PlanetScale | [https://planetscale.com](https://planetscale.com) | SQL | Free Tier | MySQL platform. |
+| Auth | Clerk | [https://clerk.com](https://clerk.com) | Auth | Free Tier | User management. |
+| Auth | Auth0 | [https://auth0.com](https://auth0.com) | Auth | Free Tier | Identity platform. |
+| Auth | Keycloak | [https://www.keycloak.org](https://www.keycloak.org) | Auth | Open Source | IAM solution. |
+| Auth | SuperTokens | [https://supertokens.com](https://supertokens.com) | Auth | Open Source | Auth solution. |
+
+**प्रत्येक एंट्री का विस्तृत विवरण:**
+
+1.  **Docker**
+    *   **ऐप/मॉडल का नाम:** Docker
+    *   **वेबसाइ��/रिपोजिटरी URL:** [https://www.docker.com](https://www.docker.com)
+    *   **प्रकार:** Tool (टूल)
+    *   **लिमिट/एक्सेस:** Open Source (ओपन सोर्स)
+    *   **विवरण:** कंटेनराइजेशन।
+    *   **मुख्य सुविधाएँ (Features):** डेवलपर्स को एप्लिकेशन को पैकेज करने और उन्हें कंटेनरों में चलाने की अनुमति देता है। ये कंटेनर लाइटवेट, पोर्टेबल होते हैं और विभिन्न वातावरणों में लगातार चलते हैं।
+    *   **आर्किटेक्चर (Architecture):** डॉकर इंजन एक क्लाइंट-सर्वर आर्किटेक्चर का उपयोग करता है। डॉकर क्लाइंट डॉकर डीमॉन (सर्वर) से बात करता है, जो कंटेनरों को बनाता, चलाता और प्रबंधित करता है।
+
+2.  **GitLab CI**
+    *   **ऐप/मॉडल का नाम:** GitLab CI
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://about.gitlab.com](https://about.gitlab.com)
+    *   **प्रकार:** CI/CD (कंटीन्यूअस इंटीग्रेशन/कंटीन्यूअस डिप्लॉयमेंट)
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **विवरण:** स्वचालित पाइपलाइन।
+    *   **मुख्य सुविधाएँ (Features):** GitLab का एकीकृत CI/CD समाधान जो कोड परिवर्तनों पर स्वचालित रूप से टेस्ट, बिल्ड और डिप्लॉयमेंट चलाता है। यह `.gitlab-ci.yml` फाइल द्वारा कॉन्फ़िगर किया जाता है।
+    *   **आर्किटेक्चर (Architecture):** GitLab प्लेटफॉर्म का एक हिस्सा, जिसमें GitLab रनर (एजेंट जो जॉब्स चलाता है) और GitLab सर्वर (जो पा��पलाइन को ऑर्केस्ट्रेट करता है) शामिल हैं।
+
+3.  **GitHub Actions**
+    *   **ऐप/मॉडल का नाम:** GitHub Actions
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://github.com/features/actions](https://github.com/features/actions)
+    *   **प्रकार:** CI/CD
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **विवरण:** वर्कफ़्लो ऑटोमेशन।
+    *   **मुख्य सुविधाएँ (Features):** GitHub रिपोजिटरी के भीतर से ही कस्टम सॉफ्टवेयर डेवलपमेंट वर्कफ़्लो को स्वचालित करने की अनुमति देता है। इसमें बिल्ड, टेस्ट, डिप्लॉयमेंट और कोई अन्य कस्टम ऑटोमेशन कार्य शामिल हो सकते हैं।
+    *   **आर्किटेक्चर (Architecture):** GitHub प्लेटफॉर्म में एकीकृत, यह इवेंट-संचालित वर्कफ़्लो (जैसे कोड पुश, पुल रिक्वेस्ट) का उपयोग करता है और YAML-आधारित कॉन्फ़िगरेशन के साथ चलता है।
+
+4.  **Ngrok**
+    *   **ऐप/मॉडल का नाम:** Ngrok
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://ngrok.com](https://ngrok.com)
+    *   **प्रकार:** Tool (टूल)
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **विवरण:** Localhost exposure (लोकलहोस्ट एक्सपोज़र)।
+    *   **मुख्य सुविधाएँ (Features):** लोकलहोस्ट सर्वर को इंटरनेट पर सुरक्षित रूप से उजागर करने की अनुमति देता है, जिससे डेवलपर्स अपनी लोकल मशीन पर चल रहे वेबहुक, API या वेब ऐप्स का परीक्षण कर सकते हैं।
+    *   **आर्किटेक्चर (Architecture):** एक क���लाइंट-सर्वर टूल। Ngrok क्लाइंट एक लोकल मशीन पर चलता है और एक सुरक्षित टनल को Ngrok सर्वर से जोड़ता है, जो इंटरनेट से आने वाले ट्रैफिक को लोकलहोस्ट पर फॉरवर्ड करता है।
+
+5.  **Traefik**
+    *   **ऐप/मॉडल का नाम:** Traefik
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://traefik.io](https://traefik.io)
+    *   **प्रकार:** Tool (टूल)
+    *   **लिमिट/एक्सेस:** Open Source (ओपन सोर्स)
+    *   **विवरण:** Reverse proxy (रिवर्स प्रॉक्सी)।
+    *   **मुख्य सुविधाएँ (Features):** एक क्लाउड-नेटिव रिवर्स प्रॉक्सी और लोड बैलेंसर जो स्वचालित सेवा खोज के साथ आता है। यह डॉकर, कुबेरनेट्स और अन्य माइक्रोसेर्विसेज वातावर�� के लिए डिज़ाइन किया गया है।
+    *   **आर्किटेक्चर (Architecture):** एक एज राउटर जो इनकमिंग अनुरोधों को सही सर्विस पर रूट करता है। यह गतिशील कॉन्फ़िगरेशन का समर्थन करता है, जिसका अर्थ है कि यह सेवाओं के जुड़ने या हटने पर स्वयं को अपडेट करता है।
+
+6.  **MongoDB Atlas**
+    *   **ऐप/मॉडल का नाम:** MongoDB Atlas
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://www.mongodb.com](https://www.mongodb.com)
+    *   **प्रकार:** NoSQL
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **विवरण:** डॉक्यूमेंट डेटाबेस।
+    *   **मुख्य सुविधाएँ (Features):** MongoDB का पूरी तरह से प्रबंधित क्लाउड डेटाबेस सेवा। यह स्केलेबिलिटी, उच��च उपलब्धता और सुरक्षा प्रदान करता है। इसमें रियल-टाइम एनालिटिक्स, सर्च और डेटा लेक्स भी शामिल हैं।
+    *   **आर्किटेक्चर (Architecture):** एक वैश्विक क्लाउड सेवा जो AWS, Google Cloud और Azure पर MongoDB क्लस्टर्स को होस्ट करती है। यह एक वितरित डॉक्यूमेंट डेटाबेस है जो JSON-जैसी संरचनाओं में डेटा स्टोर करता है।
+
+7.  **Neon**
+    *   **ऐप/मॉडल का नाम:** Neon
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://neon.tech](https://neon.tech)
+    *   **प्रकार:** SQL
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **विवरण:** Serverless Postgres (सर्वरलेस पोस्टग्रेस)।
+    *   **मुख्य सुविधाएँ (Features):** PostgreSQL के लिए एक सर्वरलेस ��र स्केलेबल प्लेटफॉर्म। यह ब्रांचिंग, टाइम ट्रैवल (डेटा के पिछले स्टेट्स को देखने के लिए) और स्वचालित स्केलिंग जैसी आधुनिक सुविधाएँ प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** क्लाउड-नेटिव PostgreSQL जो कंप्यूट और स्टोरेज को अलग करता है, जिससे स्वतंत्र रूप से स्केल करना संभव होता है और सर्वरलेस मॉडल में कुशल होता है।
+
+8.  **PlanetScale**
+    *   **ऐप/मॉडल का नाम:** PlanetScale
+    *   **वेबसाइट/रिपोजिटory URL:** [https://planetscale.com](https://planetscale.com)
+    *   **प्रकार:** SQL
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **विवरण:** MySQL platform (MySQL प्लेटफॉर्म)।
+    *   **मुख्य सुवि��ाएँ (Features):** MySQL के लिए एक स्केलेबल और सर्वरलेस डेटाबेस प्लेटफॉर्म। यह डेटाबेस ब्रांचिंग, डिप्लॉय रिक्वेस्ट्स (जैसे Git में) और गैर-अवरुद्ध स्कीमा परिवर्तनों जैसी सुविधाएँ प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** Vitess पर निर्मित एक क्लाउड-नेटिव MySQL सेवा जो असीमित स्केलेबिलिटी और उच्च उपलब्धता प्रदान करती है, जबकि पारंपरिक MySQL के साथ संगतता बनाए रखती है।
+
+9.  **Clerk**
+    *   **ऐप/मॉडल का नाम:** Clerk
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://clerk.com](https://clerk.com)
+    *   **प्रकार:** Auth (प्रमाणीकरण)
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **व���वरण:** User management (उपयोगकर्ता प्रबंधन)।
+    *   **मुख्य सुविधाएँ (Features):** रिएक्ट जैसे मॉडर्न फ्रंटएंड फ्रेमवर्क के लिए डिज़ाइन किया गया एक संपूर्ण उपयोगकर्ता प्रबंधन और प्रमाणीकरण समाधान। इसमें प्री-बिल्ट UI कंपोनेंट्स, यूजर प्रोफाइल और विभिन्न प्रमाणीकरण तरीके शामिल हैं।
+    *   **आर्किटेक्चर (Architecture):** एक क्लाउड-आधारित प्रमाणीकरण सेवा जो आपके फ्रंटएंड एप्लिकेशन में SDK के माध्यम से एकीकृत होती है। यह सुरक्षा और उपयोगकर्ता अनुभव को सरल बनाता है।
+
+10. **Auth0**
+    *   **ऐप/मॉडल का नाम:** Auth0
+    *   **वेबसाइट/रिपोजिटर��� URL:** [https://auth0.com](https://auth0.com)
+    *   **प्रकार:** Auth
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **विवरण:** Identity platform (पहचान प्लेटफॉर्म)।
+    *   **मुख्य सुविधाएँ (Features):** प्रमाणीकरण और प्राधिकरण सेवाओं का एक व्यापक सूट, जिसमें SSO (सिंगल साइन-ऑन), मल्टी-फैक्टर प्रमाणीकरण, सोशल लॉगिन और उपयोगकर्ता प्रबंधन शामिल हैं।
+    *   **आर्किटेक्चर (Architecture):** Identity-as-a-Service (IDaaS) प्रदाता जो API और SDK के माध्यम से एप्लिकेशन में एकीकृत होता है। यह विभिन्न पहचान प्रदाताओं और प्रोटोकॉल (OAuth 2.0, OpenID Connect) का समर्थन करता है।
+
+11. **Keycloak**
+    *   **ऐप/मॉडल का नाम:** Keycloak
+    *   **वेबसा���ट/रिपोजिटरी URL:** [https://www.keycloak.org](https://www.keycloak.org)
+    *   **प्रकार:** Auth
+    *   **लिमिट/एक्सेस:** Open Source (ओपन सोर्स)
+    *   **विवरण:** IAM solution (IAM समाधान)।
+    *   **मुख्य सुविधाएँ (Features):** वेब ऐप्स और मोबाइल ऐप्स के लिए SSO, मल्टी-फैक्टर प्रमाणीकरण, उपयोगकर्ता प्रबंधन, पहचान ब्रोकरिंग और प्रमाणीकरण प्रदान करता है। यह एक पूर्ण IAM (Identity and Access Management) समाधान है।
+    *   **आर्किटेक्चर (Architecture):** एक ओपन-सोर्स पहचान और एक्सेस प्रबंधन सर्वर जिसे स्वयं होस्ट किया जा सकता है। यह Java पर चलता है और एक रिलेशनल डेटाबेस (जैसे PostgreSQL, MySQL) का उपयोग करता है।
+
+12. **SuperTokens**
+    *   **���प/मॉडल का नाम:** SuperTokens
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://supertokens.com](https://supertokens.com)
+    *   **प्रकार:** Auth
+    *   **लिमिट/एक्सेस:** Open Source (ओपन सोर्स)
+    *   **विवरण:** Auth solution (प्रमाणीकरण समाधान)।
+    *   **मुख्य सुविधाएँ (Features):** प्रमाणीकरण के लिए एक ओपन-सोर्स समाधान जो सुरक्षित और स्केलेबल प्रमाणीकरण अनुभव प्रदान करने पर केंद्रित है। इसमें विभिन्न प्रमाणीकरण तरीकों (ईमेल/पासवर्ड, सोशल लॉगिन) के लिए SDK शामिल हैं।
+    *   **आर्किटेक्चर (Architecture):** एक सेल्फ-होस्टेड या क्लाउड-आधारित प्रमाणीकरण सेवा जिसमें एक कोर सर्विस और विभिन्न SDK (फ्रंटए��ड और बैकएंड) शामिल हैं। यह फ्लेक्सिबिलिटी और डेवलपर नियंत्रण प्रदान करता है।
+
+---
+
+### **पेज 5 का कंटेंट**
+
+यह पेज प्रमाणीकरण (Auth) समाधानों की सूची को जारी रखता है और "Miscellaneous APIs" का परिचय देता है।
+
+**तालिका: Auth (जारी)**
+
+| श्रेणी (Category) | ऐप/मॉडल का नाम (App/Model Name) | वेबसाइट/रिपोजिटरी URL (Website/Repository URL) | प्रकार (Type) | लिमिट/एक्सेस (Limit/Access) | विवरण (Description) |
+|---|---|---|---|---|---|
+| Auth | SuperTokens | [https://supertokens.com](https://supertokens.com) | Auth | Open Source | Auth solution. |
+
+**SuperTokens का विस्तृत विवरण (पहले ही पेज 4 पर कवर किया गया है):**
+
+*   **मुख्य सुविधाएँ (Features):** प्रमाणीकरण के लिए एक ओपन-सोर्स समाध���न जो सुरक्षित और स्केलेबल प्रमाणीकरण अनुभव प्रदान करने पर केंद्रित है। इसमें विभिन्न प्रमाणीकरण तरीकों (ईमेल/पासवर्ड, सोशल लॉगिन) के लिए SDK शामिल हैं।
+*   **आर्किटेक्चर (Architecture):** एक सेल्फ-होस्टेड या क्लाउड-आधारित प्रमाणीकरण सेवा जिसमें एक कोर सर्विस और विभिन्न SDK (फ्रंटएंड और बैकएंड) शामिल हैं। यह फ्लेक्सिबिलिटी और डेवलपर नियंत्रण प्रदान करता है।
+
+---
+
+### **6. विविध और उपयोगिता एपीआई (Miscellaneous APIs)**
+
+**हिंदी:** अतिरिक्त कार्यक्षमता के लिए, ये एपीआई आपके एजेंटों के लिए डेटा संवर्धन, स्थान सेवाएं और बहुत कुछ प्रदान करते है���।
+
+**English:** For additional functionality, these APIs provide data enrichment, location services, and much more for your agents.
+
+**स्पष्टीकरण:**
+यह खंड विभिन्न प्रकार की उपयोगिता APIs पर केंद्रित है जो AI एजेंटों या अन्य अनुप्रयोगों को अतिरिक्त क्षमताएँ प्रदान कर सकती हैं। इन APIs में भू-स्थानिक डेटा, अनुवाद, मौसम की जानकारी, वित्त डेटा और अन्य सामान्य उपयोगिताएँ शामिल हैं, जो एप्लिकेशन को समृद्ध करने में मदद करती हैं।
+
+---
+
+### **तालिका 6.1: उपयोगिता एपीआई (Utility APIs)**
+
+यह तालिका विभिन्न प्रकार की उपयोगिता APIs को सूचीबद्ध करती है।
+
+**तालिका:**
+
+| श्रेणी (Category) | ऐप/मॉडल का नाम (App/Model Name) | वेबसाइट/रिपोजिटरी URL (Website/Repository URL) | प्रकार (Type) | लिमिट/एक्सेस (Limit/Access) | विवरण (Description) |
+|---|---|---|---|---|---|
+| Geo | Nominatim | [https://nominatim.openstreetmap.org](https://nominatim.openstreetmap.org) | Geocoding | Unlimited | |
+| Geo | Mapbox | [https://www.mapbox.com](https://www.mapbox.com) | Maps | Free Tier | |
+| Geo | LocationIQ | [https://locationiq.com](https://locationiq.com) | Geocoding | Free Tier | |
+| Geo | Geoapify | [https://www.geoapify.com](https://www.geoapify.com) | Geo | Free Tier | |
+| Translation | LibreTranslate | [https://github.com/LibreTranslate](https://github.com/LibreTranslate) | Self-Hosted | Unlimited | |
+| Translation | DeepL API | [https://www.deepl.com](https://www.deepl.com) | API | Free Tier | |
+| Translation | Google Translate | [https://cloud.google.com/translate](https://cloud.google.com/translate) | API | Free Tier | |
+
+**प्रत्येक एंट्री का विस्तृत विवरण:**
+
+1.  **Nominatim**
+    *   **ऐप/मॉडल का नाम:** Nominatim
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://nominatim.openstreetmap.org](https://nominatim.openstreetmap.org)
+    *   **प्रकार:** Geocoding (जियोकोडिंग)
+    *   **लिमिट/एक्सेस:** Unlimited (असीमित)
+    *   **मुख्य सुविधाएँ (Features):** OpenStreetMap डेटा का उपयोग करके जियोकोडिंग (पते को निर्देशांक में बदलना) और रिवर्स जियोकोडिंग (निर्देशांक को पते में बदलना) सेवाएं प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** एक वेब सेवा जो RESTful API के माध्यम से भौगोलिक डेटा प्रदान करती है। इसे स्वयं होस्ट किया जा सकता है या सार्वजनिक इंस्टेंस का उपयोग किया जा सकता है।
+
+2.  **Mapbox**
+    *   **ऐप/मॉडल का नाम:** Mapbox
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://www.mapbox.com](https://www.mapbox.com)
+    *   **प्रकार:** Maps (मैप्स)
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **मुख्य सुविधाएँ (Features):** कस्टम मैप्स, जियोकोडिंग, नेविगेशन, मैपिंग SDKs और स्थानिक विश्लेषण उपकरण प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** क्लाउड-आधारित मैपिंग प्लेटफॉर्म जो वेक्टर टाइल्स और RESTful API का उपयोग करता है। यह वेब और मोबाइल ऐप्स के लिए समृद्ध भौगोलिक अनुभव बनाने की अनुमति देता है।
+
+3.  **LocationIQ**
+    *   **ऐप/मॉडल का नाम:** LocationIQ
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://locationiq.com](https://locationiq.com)
+    *   **प्रकार:** Geocoding
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **म��ख्य सुविधाएँ (Features):** जियोकोडिंग, रिवर्स जियोकोडिंग, स्थान खोज और रूटिंग सेवाएं प्रदान करता है। यह OpenStreetMap डेटा का भी उपयोग करता है।
+    *   **आर्किटेक्चर (Architecture):** एक API-आधारित सेवा जो HTTP अनुरोधों के माध्यम से भौगोलिक डेटा और सेवाएं प्रदान करती है।
+
+4.  **Geoapify**
+    *   **ऐप/मॉडल का नाम:** Geoapify
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://www.geoapify.com](https://www.geoapify.com)
+    *   **प्रकार:** Geo
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **मुख्य सुविधाएँ (Features):** जियोकोडिंग, स्थान खोज (Places API), रूटिंग, भू-स्थानिक डेटासेट और मैप टाइल्स जैसी व्यापक भू-स्थानिक सेवाएं प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** एक API-केंद्रित प्लेटफॉर्म जो विभिन्न भू-स्थानिक API एंडपॉइंट्स के माध्यम से डेटा और कार्यक्षमता प्रदान करता है।
+
+5.  **LibreTranslate**
+    *   **ऐप/मॉडल का नाम:** LibreTranslate
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://github.com/LibreTranslate](https://github.com/LibreTranslate)
+    *   **प्रकार:** Self-Hosted (सेल्फ-होस्टेड)
+    *   **लिमिट/एक्सेस:** Unlimited (असीमित)
+    *   **मुख्य सुविधाएँ (Features):** एक ओपन-सोर्स मशीन ट्रांसलेशन API जिसे स्वयं होस्ट किया जा सकता है। यह गोपनीयता पर ध्यान केंद्रित करता है क्योंकि डेटा किसी थर्ड-पार्टी सर्वर पर नहीं भेजा जाता है।
+    *   **आर्किटेक्चर (Architecture):** पायथन में लिखा गया एक वेब सर्वर (API) जो अनुवाद के लिए आधुनिक तंत्रिका नेटवर्क मॉडल का उपयोग करता है। इसे स्थानीय रूप से या अपने सर्वर पर स्थापित किया जा सकता है।
+
+6.  **DeepL API**
+    *   **ऐप/मॉडल का नाम:** DeepL API
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://www.deepl.com](https://www.deepl.com)
+    *   **प्रकार:** API
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **मुख्य सुविधाएँ (Features):** उच्च-गुणवत्ता वाली मशीन ट्रांसलेशन सेवाएं प्रदान करता है जो अक्सर अन्य प्रमुख प्रदाताओं से बेहतर मानी जाती हैं। टेक्स्ट, डॉक्यूमेंट और वेबस���इटों का अनुवाद कर सकता है।
+    *   **आर्किटेक्चर (Architecture):** एक क्लाउड-आधारित API सेवा जो न्यूरल मशीन ट्रांसलेशन (NMT) मॉडल का उपयोग करती है। यह RESTful API एंडपॉइंट्स के माध्यम से पहुँचा जा सकता है।
+
+7.  **Google Translate API**
+    *   **ऐप/मॉडल का नाम:** Google Translate API
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://cloud.google.com/translate](https://cloud.google.com/translate)
+    *   **प्रकार:** API
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **मुख्य सुविधाएँ (Features):** Google की व्यापक मशीन ट्रांसलेशन क्षमताओं तक प्रोग्रामेटिक पहुंच प्रदान करता है। यह 100 से अधिक भाषाओं का समर्थन करता है और टेक्स्ट और डॉक्यूमेंट अनुवाद के लिए उपयोग किया जा सकता है।
+    *   **आर्किटेक्चर (Architecture):** Google Cloud Platform का एक हिस्सा, यह RESTful API और क्लाइंट लाइब्रेरी के माध्यम से पहुँच योग्य है। यह Google के शक्तिशाली न्यूरल नेटवर्क मॉडल का उपयोग करता है।
+
+---
+
+### **पेज 6 का कंटेंट**
+
+यह पेज उपयोगिता APIs की सूची जारी रखता है, जिसमें मौसम, वित्त, और सामान्य-उद्देश्य APIs शामिल हैं।
+
+**तालिका: उपयोगिता एपीआई (जारी)**
+
+| श्रेणी (Category) | ऐप/मॉडल का नाम (App/Model Name) | वेबसाइट/रिपोजिटरी URL (Website/Repository URL) | प्रकार (Type) | लिमिट/एक्सेस (Limit/Access) | विवरण (Description) |
+|---|---|---|---|---|---|
+| Weather | Open-Meteo | [https://open-meteo.com](https://open-meteo.com) | API | Unlimited | |
+| Weather | WeatherAPI | [https://www.weatherapi.com](https://www.weatherapi.com) | API | Free Tier | |
+| Weather | OpenWeatherMap | [https://openweathermap.org](https://openweathermap.org) | API | Free Tier | |
+| Finance | Alpha Vantage | [https://www.alphavantage.co](https://www.alphavantage.co) | API | Free Tier | |
+| Finance | CoinGecko API | [https://www.coingecko.com/en/api](https://www.coingecko.com/en/api) | API | Free Tier | |
+| General | QRcode.pl | [https://qrcode.pl](https://qrcode.pl) | Tool | Unlimited | |
+| General | Short.io | [https://short.io](https://short.io) | URL Shortener | Free Tier | |
+| General | TinyURL | [https://tinyurl.com](https://tinyurl.com) | URL Shortener | Unlimited | |
+
+**प्रत्येक एंट्री का विस्तृत विवरण:**
+
+1.  **Open-Meteo**
+    *   **ऐप/मॉडल का नाम:** Open-Meteo
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://open-meteo.com](https://open-meteo.com)
+    *   **प्रकार:** API
+    *   **लिमिट/एक्सेस:** Unlimited (असीमित)
+    *   **मुख्य सुविधाएँ (Features):** मुफ्त और ओपन-सोर्स मौसम पूर्वानुमान डेटा API। यह वैश्विक मौसम मॉडल से डेटा प्रदान करता है और विभिन्न मौसम मापदंडों तक पहुंच प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** एक RESTful API जो JSON फ़ॉर्मेट में मौसम डेटा प्रदान करता है, जिसे विभिन्न अनुप्रयोगों में आसानी से एकीकृत किया जा सकता है।
+
+2.  **WeatherAPI**
+    *   **ऐप/मॉडल का नाम:** WeatherAPI
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://www.weatherapi.com](https://www.weatherapi.com)
+    *   **प्रकार:** API
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **मुख्य सुविधाएँ (Features):** वर्तमान मौसम की स्थिति, पूर्वानुमान (घंटे और दिन के ��िसाब से), खगोलीय डेटा और ऐतिहासिक मौसम डेटा प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** एक क्लाउड-आधारित API सेवा जो JSON या XML फ़ॉर्मेट में मौसम संबंधी जानकारी प्रदान करती है।
+
+3.  **OpenWeatherMap**
+    *   **ऐप/मॉडल का नाम:** OpenWeatherMap
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://openweathermap.org](https://openweathermap.org)
+    *   **प्रकार:** API
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **मुख्य सुविधाएँ (Features):** वर्तमान मौसम डेटा, पूर्वानुमान, ऐतिहासिक डेटा और वायु गुणवत्ता डेटा सहित विभिन्न मौसम-संबंधित API प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** एक वेब सेवा जो विभिन्न API एंडपॉइंट्स के माध्यम से मौसम डेटा प्रदान करती है, जिसमें RESTful API और WMS (Web Map Service) शामिल हैं।
+
+4.  **Alpha Vantage**
+    *   **ऐप/मॉडल का नाम:** Alpha Vantage
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://www.alphavantage.co](https://www.alphavantage.co)
+    *   **प्रकार:** API
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **मुख्य सुविधाएँ (Features):** स्टॉक मार्केट डेटा, क्रिप्टोकरेंसी डेटा, फॉरेक्स (विदेशी मुद्रा) डेटा और तकनीकी संकेतक सहित वित्तीय बाजार डेटा के लिए एक API।
+    *   **आर्किटेक्चर (Architecture):** एक RESTful API जो JSON या CSV फ़ॉर्मेट में वित्तीय डेटा प्रदान करता है, जिससे डेवलपर्स वित्तीय अनुप्रयो���ों को शक्ति दे सकते हैं।
+
+5.  **CoinGecko API**
+    *   **ऐप/मॉडल का नाम:** CoinGecko API
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://www.coingecko.com/en/api](https://www.coingecko.com/en/api)
+    *   **प्रकार:** API
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **मुख्य सुविधाएँ (Features):** क्रिप्टोकरेंसी बाजार डेटा, जिसमें कीमतें, बाजार पूंजीकरण, ट्रेडिंग वॉल्यूम और ऐतिहासिक डेटा शामिल हैं।
+    *   **आर्किटेक्चर (Architecture):** एक RESTful API जो विभिन्न क्रिप्टोकरेंसी और एक्सचेंजों के लिए JSON फ़ॉर्मेट में डेटा प्रदान करता है।
+
+6.  **QRcode.pl**
+    *   **ऐप/मॉडल का नाम:** QRcode.pl
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://qrcode.pl](https://qrcode.pl)
+    *   **प्रकार:** Tool (टूल)
+    *   **लिमिट/एक्सेस:** Unlimited (असीमित)
+    *   **मुख्य सुविधाएँ (Features):** टेक्स्ट, यूआरएल, संपर्क जानकारी आदि के लिए QR कोड उत्पन्न करने की अनुमति देता है।
+    *   **आर्किटेक्चर (Architecture):** एक वेब-आधारित टूल या API जो प्रदान किए गए इनपुट से QR कोड इमेज उत्पन्न करता है।
+
+7.  **Short.io**
+    *   **ऐप/मॉडल का नाम:** Short.io
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://short.io](https://short.io)
+    *   **प्रकार:** URL Shortener (यूआरएल शॉर्टनर)
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **मुख्य सुविधाएँ (Features):** कस्टम ब्रांडेड शॉर्ट URL बनाने, URL को ट्रैक करने और उनकी परफॉरमेंस का व���श्लेषण करने की अनुमति देता है।
+    *   **आर्किटेक्चर (Architecture):** एक क्लाउड-आधारित सेवा जो लंबी URL को छोटी, प्रबंधनीय URL में परिवर्तित करती है और उनके उपयोग को ट्रैक करती है।
+
+8.  **TinyURL**
+    *   **ऐप/मॉडल का नाम:** TinyURL
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://tinyurl.com](https://tinyurl.com)
+    *   **प्रकार:** URL Shortener
+    *   **लिमिट/एक्सेस:** Unlimited (असीमित)
+    *   **मुख्य सुविधाएँ (Features):** लंबी URL को संक्षिप्त, साझा करने योग्य URL में परिवर्तित करने के लिए एक सरल और लोकप्रिय सेवा।
+    *   **आर्किटेक्चर (Architecture):** एक वेब सेवा जो एक अद्वितीय शॉर्ट कोड उत्पन्न करती है और इसे मूल URL पर रीडायरेक्ट करती है।
+
+---
+
+### **पेज 7 का कंटेंट**
+
+यह पेज उपयोगिता APIs की सूची जारी रखता है, जिसमें विभिन्न प्रकार के डेटा APIs शामिल हैं।
+
+**तालिका: उपयोगिता एपीआई (जारी)**
+
+| श्रेणी (Category) | ऐप/मॉडल का नाम (App/Model Name) | वेबसाइट/रिपोजिटरी URL (Website/Repository URL) | प्रकार (Type) | लिमिट/एक्सेस (Limit/Access) | विवरण (Description) |
+|---|---|---|---|---|---|
+| Data | JSONPlaceholder | [https://jsonplaceholder.typicode.com](https://jsonplaceholder.typicode.com) | Mock Data | Unlimited | |
+| Data | Random User | [https://randomuser.me](https://randomuser.me) | Mock Data | Unlimited | |
+| Data | PokeAPI | [https://pokeapi.co](https://pokeapi.co) | Fun | Unlimited | |
+| Data | Jikan API | [https://jikan.moe](https://jikan.moe) | Anime | Unlimited | |
+| Data | RAWG | [https://rawg.io](https://rawg.io) | Games | Free Tier | |
+
+**प्रत्येक एंट्���ी का विस्तृत विवरण:**
+
+1.  **JSONPlaceholder**
+    *   **ऐप/मॉडल का नाम:** JSONPlaceholder
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://jsonplaceholder.typicode.com](https://jsonplaceholder.typicode.com)
+    *   **प्रकार:** Mock Data (मॉक डेटा)
+    *   **लिमिट/एक्सेस:** Unlimited (असीमित)
+    *   **मुख्य सुविधाएँ (Features):** डेवलपर्स को अपने फ्रंटएंड अनुप्रयोगों का परीक्षण और प्रोटोटाइप करने के लिए नकली REST API डेटा प्रदान करता है। इसमें नकली पोस्ट, टिप्पणियां, उपयोगकर्ता आदि शामिल हैं।
+    *   **आर्किटेक्चर (Architecture):** एक वेब सेवा जो RESTful API एंडपॉइंट्स पर JSON फ़ॉर्मेट में स्थिर, नकली डेटा प्रदान करती है।
+
+2.  **Random User**
+    *   **ऐप/मॉडल का नाम:** Random User
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://randomuser.me](https://randomuser.me)
+    *   **प्रकार:** Mock Data
+    *   **लिमिट/एक्सेस:** Unlimited (असीमित)
+    *   **मुख्य सुविधाएँ (Features):** नकली उपयोगकर्ता प्रोफाइल उत्पन्न करता है, जिसमें नाम, पता, ईमेल, फोन नंबर और प्रोफाइल पिक्चर शामिल हैं, जिनका उपयोग परीक्षण या प्रोटोटाइप के लिए किया जा सकता है।
+    *   **आर्किटेक्चर (Architecture):** एक वेब सेवा जो प्रत्येक अनुरोध पर JSON फ़ॉर्मेट में यादृच्छिक रूप से उत्पन्न उपयोगकर्ता डेटा प्रदान करती है।
+
+3.  **PokeAPI**
+    *   **ऐप/मॉडल का नाम:** PokeAPI
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://pokeapi.co](https://pokeapi.co)
+    *   **प्रकार:** Fun (मनोरंजन)
+    *   **लिमिट/एक्सेस:** Unlimited (असीमित)
+    *   **मुख्य सुविधाएँ (Features):** सभी पोकेमॉन गेम के डेटा (पोकेमॉन, क्षमताएं, आइटम, स्थान आदि) तक मुफ्त और आसानी से सुलभ RESTful API प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** एक वेब सेवा जो JSON फ़ॉर्मेट में पोकेमॉन-संबंधित डेटा प्रदान करती है।
+
+4.  **Jikan API**
+    *   **ऐप/मॉडल का नाम:** Jikan API
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://jikan.moe](https://jikan.moe)
+    *   **प्रकार:** Anime (एनीमे)
+    *   **लिमिट/एक्सेस:** Unlimited (असीमित)
+    *   **मुख्य सुविधाएँ (Features):** लोकप्रिय एनीमे और मंगा डेटाबेस MyAnimeList.net के लि�� एक अनौपचारिक API, जो एनीमे, मंगा, वर्णों आदि पर डेटा प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** एक वेब स्क्रैपिंग-आधारित API जो MyAnimeList से डेटा निकालता है और इसे JSON फ़ॉर्मेट में प्रस्तुत करता है।
+
+5.  **RAWG**
+    *   **ऐप/मॉडल का नाम:** RAWG
+    *   **वेबसाइट/रिपोजिटरी URL:** [https://rawg.io](https://rawg.io)
+    *   **प्रकार:** Games (गेम्स)
+    *   **लिमिट/एक्सेस:** Free Tier (फ्री टियर)
+    *   **मुख्य सुविधाएँ (Features):** एक व्यापक वीडियो गेम डेटाबेस API जो गेम की जानकारी, रेटिंग, स्क्रीनशॉट, वीडियो और मेटाडेटा प्रदान करता है।
+    *   **आर्किटेक्चर (Architecture):** एक API जो विभिन्न गेमिंग प्लेटफॉर्म से डेटा एकत्र करता है और इसे JSON फ़ॉर्मेट में उपलब्ध कराता है।
+
+---
+
+**अंतिम नोट (नीचे हिंदी में):**
+**हिंदी:** (कुल शब्द गणना: ~15,000+ शब्द, विस्तृत तकनीकी प्रलेखन और एकीकृत गाइड सहित पूर्ण संस्करण में)
+**English:** (Total word count: ~15,000+ words, including detailed technical documentation and integrated guide in the full version)
+
+**स्पष्टीकरण:**
+यह नोट इंगित करता है कि प्रदान किया गया दस्तावेज़ एक बड़े, अधिक व्यापक प्रोजेक्ट प्लान का संक्षिप्त संस्करण है। पूर्ण संस्करण में 15,000 से अधिक शब्द होंगे और इसमें अधिक विस्तृत तकनीकी दस्तावेज़ और एक एकीकृत गाइड शामिल ���ोगा।
+
+---
+
+### **पेज 8-12 का कंटेंट**
+
+ये पेज "Citations" और "Works cited" अनुभाग को दर्शाते हैं, जिसमें विस्तृत ग्रंथ सूची और वेब संसाधनों की सूची शामिल है जिनका उपयोग प्रोजेक्ट प्लान के लिए किया गया है। यह सिर्फ URLs की एक सूची है, जिसमें कोई अतिरिक्त व्याख्या या विवरण नहीं है।
+
+**Citations**
+**Works cited**
+
+1.  Llama 3.1 Agent using LangGraph and Ollama - Pinecone, accessed January 31, 2026, [https://www.pinecone.io/learn/langgraph-ollama-llama/](https://www.pinecone.io/learn/langgraph-ollama-llama/)
+2.  LangGraph: Multi-Agent Workflows - LangChain Blog, accessed January 31, 2026, [https://blog.langchain.com/langgraph-multi-agent-workflows/](https://blog.langchain.com/langgraph-multi-agent-workflows/)
+3.  How to connect CrewAI to different LLMs (GPT4o, Groq, Llama3, Ollama) - YouTube, accessed January 31, 2026, [https://www.youtube.com/watch?v=3JFux2lCDF4](https://www.youtube.com/watch?v=3JFux2lCDF4)
+4.  AIAnytime/AI-Agents-from-Scratch-using-Ollama - GitHub, accessed January 31, 2026, [https://github.com/AIAnytime/AI-Agents-from-Scratch-using-Ollama](https://github.com/AIAnytime/AI-Agents-from-Scratch-using-Ollama)
+5.  How Agentic Multi-Agent AI Works: Build Local Agents with AutoGen + Ollama - YouTube, accessed January 31, 2026, [https://www.youtube.com/watch?v=5kWLCpg6zNI](https://www.youtube.com/watch?v=5kWLCpg6zNI)
+6.  Best Vector Databases in 2025: A Complete Comparison Guide - Firecrawl, accessed January 31, 2026, [https://www.firecrawl.dev/blog/best-vector-databases-2025](https://www.firecrawl.dev/blog/best-vector-databases-2025)
+7.  Milvus | High-Performance Vector Database Built for Scale, accessed January 31, 2026, [https://milvus.io/](https://milvus.io/)
+8.  Zulko/moviepy: Video editing with Python - GitHub, accessed January 31, 2026, [https://github.com/Zulko/moviepy](https://github.com/Zulko/moviepy)
+9.  Manim Community, accessed January 31, 2026, [https://www.manim.community/](https://www.manim.community/)
+10. 3b1b/manim: Animation engine for explanatory math videos - GitHub, accessed January 31, 2026, [https://github.com/3b1b/manim](https://github.com/3b1b/manim)
+11. hpcaiitech/Open-Sora: Open-Sora: Democratizing Efficient Video Production for All - GitHub, accessed January 31, 2026, [https://github.com/hpcaiitech/Open-Sora](https://github.com/hpcaiitech/Open-Sora)
+12. Free APIs Complete List (1).xlsx
+13. suno-ai/bark: Text-Prompted Generative Audio Model - GitHub, accessed January 31, 2026, [https://github.com/suno-ai/bark](https://github.com/suno-ai/bark)
+14. audiocraft is a library for audio processing and generation with deep learning. It features the state-of-the-art EnCodec audio compressor / tokenizer, along with MusicGen, a simple and controllable music generation LM with textual and melodic conditioning. - GitHub, accessed January 31, 2026, [https://github.com/facebookresearch/audiocraft](https://github.com/facebookresearch/audiocraft)
+15. audiocraft - PyPI, accessed January 31, 2026, [https://pypi.org/project/audiocraft/0.0.2/](https://pypi.org/project/audiocraft/0.0.2/)
+16. Open Access - The Metropolitan Museum of Art, accessed January 31, 2026, [https://www.metmuseum.org/hub/open-access](https://www.metmuseum.org/hub/open-access)
+17. The Metropolitan Museum of Art Collection API: Latest Updates, accessed January 31, 2026, [https://metmuseum.github.io/](https://metmuseum.github.io/)
+18. Open Data Collections - The Digital Art History Directory - Knowledge Commons, accessed January 31, 2026, [https://dah.kcommons.org/open-data-collections/](https://dah.kcommons.org/open-data-collections/)
+19. Open Access Museums | Postman API Network, accessed January 31, 2026, [https://www.postman.com/apicurate/open-access-museums/overview](https://www.postman.com/apicurate/open-access-museums/overview)
+20. Developers | Internet Archive Blogs, accessed January 31, 2026, [https://blog.archive.org/developers/](https://blog.archive.org/developers/)
+21. Tools and APIs - Internet Archive Developer Portal, accessed January 31, 2026, [https://archive.org/developers/index-apis.html](https://archive.org/developers/index-apis.html)
+22. asi | Open Government Data (OGD) Platform India, accessed January 31, 2026, [https://data.gov.in/overview/asi](https://data.gov.in/overview/asi)
+23. Jatan - National Museum, New Delhi, accessed January 31, 2026, [https://www.nationalmuseumindia.gov.in/en/collections/index/30](https://www.nationalmuseumindia.gov.in/en/collections/index/30)
+24. OpenHistoricalMap - OpenStreetMap Wiki, accessed January 31, 2026, [https://wiki.openstreetmap.org/wiki/OpenHistoricalMap](https://wiki.openstreetmap.org/wiki/OpenHistoricalMap)
+25. OpenHistoricalMap, accessed January 31, 2026, [https://www.openhistoricalmap.org/](https://www.openhistoricalmap.org/)
+26. gutenberg/py-gutenberg: A Python library to access the Project Gutenberg API - GitHub, accessed January 31, 2026, [https://github.com/gutenberg/py-gutenberg](https://github.com/gutenberg/py-gutenberg)
+27. Downloading books from Project Gutenberg with Python - skeptic, accessed January 31, 2026, [https://skeptric.com/gutenberg/](https://skeptric.com/gutenberg/)
+28. How I built my open-source Social media scheduling tool... - DEV Community, accessed January 31, 2026, [https://dev.to/nevodavid/how-i-built-my-open-source-social-media-scheduling-tool-3olh](https://dev.to/nevodavid/how-i-built-my-open-source-social-media-scheduling-tool-3olh)
+29. Postiz - open-source social media scheduling tool r/selfhosted - Reddit, accessed January 31, 2026, [https://www.reddit.com/r/selfhosted/comments/1f4x806/postiz_opensource_social_media_scheduling_tool/](https://www.reddit.com/r/selfhosted/comments/1f4x806/postiz_opensource_social_media_scheduling_tool/)
+30. Subzeroid/instagapi: The fastest and powerful Python library for Instagram Private API 2026 with HikerAPI SaaS - GitHub, accessed January 31, 2026, [https://github.com/subzeroid/instagapi](https://github.com/subzeroid/instagapi)
+31. sethblack/python-seo-analyzer - GitHub, accessed January 31, 2026, [https://github.com/sethblack/python-seo-analyzer](https://github.com/sethblack/python-seo-analyzer)
+32. Using Python scripts to analyse SEO and broken links on your site | Our Success Stories, accessed January 31, 2026, [https://www.python.org/success-stories/python-seo-link-analyzer/](https://www.python.org/success-stories/python-seo-link-analyzer/)
+33. andreanoro/GSC-Wrapper: A package to take the pain out when working with the Google Search Console Search Analytics Query API - GitHub, accessed January 31, 2026, [https://github.com/andreanoro/GSC-Wrapper](https://github.com/andreanoro/GSC-Wrapper)
+34. Extract data from Google Search Console API for data analysis in Python - Oncrawl, accessed January 31, 2026, [https://www.oncrawl.com/data-driven-seo/extract-data-google-search-console-data-analysis-in-python/](https://www.oncrawl.com/data-driven-seo/extract-data-google-search-console-data-analysis-in-python/)
+35. uibakery.io/blog/supabase-pricing/#:~:text=Supabase%2020Free%2020Plan%2020includes%20a,MB%2020database%2020express%2020per%2020day](https://uibakery.io/blog/supabase-pricing/#:~:text=Supabase%2020Free%2020Plan%2020includes%20a,MB%2020database%2020express%2020per%2020day)
+36. Pricing & Fees - Supabase, accessed January 31, 2026, [https://supabase.com/pricing](https://supabase.com/pricing)
+37. Elestio to Railway vs Render vs Fly.io: Which Platform Actually Fits Your Needs?, accessed January 31, 2026, [https://blog.elestio.io/elestio-vs-railway-vs-render-vs-fly-io-which-platform-actually-fits-your-needs/](https://blog.elestio.io/elestio-vs-railway-vs-render-vs-fly-io-which-platform-actually-fits-your-needs/)
+38. Railway vs Render - GetDeploying, accessed January 31, 2026, [https://getdeploying.com/railway-vs-render](https://getdeploying.com/railway-vs-render)
+39. Group Chat - AutoGen - Microsoft Open Source, accessed January 31, 2026, [https://microsoft.github.io/autogen/stable/user-guide/core-user-guide/design-patterns/group-chat.html](https://microsoft.github.io/autogen/stable/user-guide/core-user-guide/design-patterns/group-chat.html)
+40. microsoft/autogen: A programming framework for agentic AI - GitHub, accessed January 31, 2026, [https://github.com/microsoft/autogen](https://github.com/microsoft/autogen)
+41. Vector Database Comparison: Pinecone vs Weaviate vs Qdrant vs FAISS vs Milvus vs Chroma (2025) | LiquidMetal AI, accessed January 31, 2026, [https://liquidmetal.ai/pages/Vector-Comparison](https://liquidmetal.ai/pages/Vector-Comparison)
+42. Choosing a vector db for 100 million pages of text: leaning towards Milvus, Qdrant or Weaviate. Am I missing anything, what would you choose? : r/vectordatabase - Reddit, accessed January 31, 2026, [https://www.reddit.com/r/vectordatabase/comments/1dcvyrm/choosing_a_vector_db_for_100_million_pages_of/](https://www.reddit.com/r/vectordatabase/comments/1dcvyrm/choosing_a_vector_db_for_100_million_pages_of/)
+43. Supabase pricing in 2025: Full Breakdown of Plans | UI Bakery Blog, accessed January 31, 2026, [https://uibakery.io/blog/supabase-pricing](https://uibakery.io/blog/supabase-pricing)
+44. Run an open source, self hosted baas - Backend as a service - Github Gist, accessed January 31, 2026, [https://gist.github.com/PARC6502/ee4db400a05e6b6d09810bb8cd4e4c1c](https://gist.github.com/PARC6502/ee4db400a05e6b6d09810bb8cd4e4c1c)
+45. Pricing update to Appwrite's Free plan - Changelog, accessed January 31, 2026, [https://appwrite.io/changelog/entry/2025-07-23](https://appwrite.io/changelog/entry/2025-07-23)
+46. Announcing Appwrite's new pricing plans, accessed January 31, 2026, [https://appwrite.io/blog/post/appwrite-pricing-update](https://appwrite.io/blog/post/appwrite-pricing-update)
+47. Open Source Alternative to Firebase, accessed January 31, 2026, [https://opensourcealternative.to/alternatives/firebase](https://opensourcealternative.to/alternatives/firebase)
+48. Backend-as-a-Service - Fully managed open-source catalog | Elest.io, accessed January 31, 2026, [https://elest.io/fully-managed-services/development/backend-as-a-service](https://elest.io/fully-managed-services/development/backend-as-a-service)
+49. AI Image & Video Generation API for Developers - Leonardo AI, accessed January 31, 2026, [https://leonardo.ai/api](https://leonardo.ai/api)
+50. Free, Unlimited Image Generation API - Puterjs, accessed January 31, 2026, [https://developer.puter.com/tutorials/free-unlimited-image-generation-api/](https://developer.puter.com/tutorials/free-unlimited-image-generation-api/)
+51. Get an API key - Europeana PRO, accessed January 31, 2026, [https://pro.europeana.eu/page/get-api](https://pro.europeana.eu/page/get-api)
+52. APIs | Europeana PRO, accessed January 31, 2026, [https://pro.europeana.eu/page/apis](https://pro.europeana.eu/page/apis)
+53. linkedin-automation · GitHub Topics, accessed January 31, 2026, [https://github.com/topics/linkedin-automation?l=python&o=desc&s=updated](https://github.com/topics/linkedin-automation?l=python&o=desc&s=updated)
+54. Scrapy, accessed January 31, 2026, [https://www.scrapy.org/](https://www.scrapy.org/)
+
+**स्पष्टीकरण:**
+यह खंड प्रोजेक्ट प्लान के लिए संदर्भित सभी बाहरी स्रोतों और शोध सामग्री को सूचीबद्ध करता है। इसमें विभिन्न तकनीकी लेख, GitHub रिपोजिटरी, ब्लॉग पोस्ट, YouTube वीडियो और API प���रलेखन शामिल हैं, जो परियोजना के विभिन्न पहलुओं के लिए आधार प्रदान करते हैं। संदर्भ 2026 की एक भविष्य की तारीख (जनवरी 31, 2026) के रूप में दिए गए हैं, जो इंगित करता है कि यह एक भविष्य-उन्मुख योजना है।

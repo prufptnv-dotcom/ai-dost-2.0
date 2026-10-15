@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+.gitignore
+*.log
+dist
+build
+.env.local
+# Live secrets must never enter a build context (#188)
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example

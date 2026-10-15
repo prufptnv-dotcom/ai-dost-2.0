@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI-Dost — Learning Notes Concept</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root {
+    --bg:#090a0f; --s1:#0f1119; --s2:#141724; --s3:#1a1e30;
+    --line:rgba(255,255,255,.07); --line2:rgba(255,255,255,.13);
+    --txt:#f5f7fb; --mut:#9aa4b8; --dim:#67708a;
+    --acc:#6366f1; --acc2:#818cf8;
+    --grad:linear-gradient(96deg,#38bdf8,#6366f1 55%,#a855f7);
+    --ok:#10b981; --warn:#f59e0b; --err:#f43f5e;
+  }
+  html,body { height:900px; }
+  body { background:var(--bg); color:var(--txt); font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased;
+    display:grid; place-items:center; position:relative; overflow:hidden; }
+
+  /* faux app behind */
+  .app { position:absolute; inset:0; filter:blur(7px) brightness(.44); }
+  .app .row { height:100%; display:grid; grid-template-columns:236px 1fr; }
+  .app .sb { background:#0b0d15; border-right:1px solid var(--line); padding:18px 14px; }
+  .app .line { height:13px; background:rgba(255,255,255,.09); border-radius:7px; margin:14px 6px; }
+  .app .line.w60 { width:60%; } .app .line.w40 { width:40%; } .app .line.w80 { width:80%; }
+  .app .main { padding:26px 34px; }
+  .app .card { height:150px; border:1px solid var(--line); background:rgba(255,255,255,.05); border-radius:16px; margin-bottom:18px; }
+  .app .card.tall { height:300px; }
+  .glow { position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(760px 420px at 50% 44%, rgba(99,102,241,.20), transparent 68%); }
+
+  /* modal */
+  .modal { position:relative; z-index:2; width:600px; background:linear-gradient(180deg,#151928,#10131f);
+    border:1px solid var(--line2); border-radius:20px; box-shadow:0 30px 70px -20px rgba(0,0,0,.9), 0 0 0 1px rgba(255,255,255,.04), 0 0 60px -18px rgba(99,102,241,.45);
+    overflow:hidden; }
+  .mh { display:flex; align-items:center; gap:13px; padding:20px 22px 16px; border-bottom:1px solid var(--line); }
+  .mi { width:38px; height:38px; border-radius:11px; background:rgba(99,102,241,.16); border:1px solid rgba(99,102,241,.4);
+    color:var(--acc2); display:grid; place-items:center; font-size:15px; }
+  .mh h3 { font-family:'Sora'; font-size:17px; font-weight:600; letter-spacing:-.01em; }
+  .mh .cnt { font-family:'JetBrains Mono'; font-size:10.5px; color:var(--acc2); background:rgba(99,102,241,.15);
+    border:1px solid rgba(99,102,241,.4); padding:3px 10px; border-radius:999px; }
+  .mh .x { margin-left:auto; width:32px; height:32px; border-radius:8px; border:1px solid var(--line); background:rgba(255,255,255,.04);
+    color:var(--mut); display:grid; place-items:center; font-size:13px; }
+
+  .mbody { padding:18px 22px 6px; display:flex; flex-direction:column; gap:12px; }
+  .note { background:rgba(255,255,255,.035); border:1px solid var(--line); border-radius:14px; padding:14px 16px;
+    display:flex; gap:14px; align-items:flex-start; }
+  .note:hover { border-color:var(--line2); }
+  .kind { font-family:'JetBrains Mono'; font-size:9px; letter-spacing:.13em; padding:4px 10px; border-radius:6px; font-weight:500; flex-shrink:0; margin-top:2px; }
+  .k-lesson { background:rgba(16,185,129,.14); color:#34d399; border:1px solid rgba(16,185,129,.35); }
+  .k-fix { background:rgba(245,158,11,.13); color:#fbbf24; border:1px solid rgba(245,158,11,.35); }
+  .note .c { flex:1; }
+  .note .c p { font-size:13.5px; line-height:1.6; color:#dde3ee; }
+  .note .meta { display:flex; gap:16px; margin-top:8px; font-family:'JetBrains Mono'; font-size:10px; color:var(--dim); }
+  .note .meta .proj { color:#a5b4fc; }
+  .note .del { width:30px; height:30px; border-radius:8px; border:1px solid transparent; background:transparent; color:var(--dim);
+    display:grid; place-items:center; font-size:12px; flex-shrink:0; }
+  .note .del:hover { color:#fb7185; border-color:rgba(244,63,94,.35); background:rgba(244,63,94,.1); }
+
+  .mfoot { padding:16px 22px 20px; }
+  .sep { height:1px; background:var(--line); margin-bottom:15px; }
+  .dur { display:flex; gap:11px; align-items:flex-start; font-size:12.5px; color:var(--mut); line-height:1.6;
+    background:rgba(99,102,241,.07); border:1px solid rgba(99,102,241,.25); border-radius:11px; padding:12px 14px; }
+  .dur i { color:var(--acc2); margin-top:3px; font-size:12px; }
+  .dur b { color:#c7d2fe; font-weight:600; }
+  .fbtns { display:flex; justify-content:space-between; align-items:center; margin-top:15px; }
+  .cnt-s { font-family:'JetBrains Mono'; font-size:10.5px; color:var(--dim); }
+  .clr { background:transparent; border:1px solid var(--line2); color:var(--mut); font-size:12.5px; font-weight:500;
+    padding:8px 16px; border-radius:9px; font-family:'Inter'; display:flex; gap:8px; align-items:center; }
+  .clr i { color:#fb7185; font-size:11.5px; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <div class="row">
+      <div class="sb">
+        <div class="line w60"></div><div class="line w80"></div><div class="line w40"></div>
+        <div class="line w80"></div><div class="line w60"></div><div class="line w80"></div><div class="line w40"></div>
+      </div>
+      <div class="main">
+        <div class="card"></div>
+        <div class="card tall"></div>
+        <div class="card"></div>
+      </div>
+    </div>
+  </div>
+  <div class="glow"></div>
+
+  <div class="modal">
+    <div class="mh">
+      <div class="mi"><i class="fa-solid fa-brain"></i></div>
+      <h3>Learning Notes</h3>
+      <span class="cnt">3 NOTES</span>
+      <div class="x"><i class="fa-solid fa-xmark"></i></div>
+    </div>
+
+    <div class="mbody">
+      <div class="note">
+        <span class="kind k-lesson">LESSON</span>
+        <div class="c">
+          <p>Vite dev server needs <span style="font-family:'JetBrains Mono';font-size:12.5px;color:#a5b4fc">--host 0.0.0.0</span> inside Docker or the host preview times out.</p>
+          <div class="meta"><span class="proj">todo-app</span><span>used 3×</span><span>2d ago</span></div>
+        </div>
+        <button class="del"><i class="fa-regular fa-trash-can"></i></button>
+      </div>
+
+      <div class="note">
+        <span class="kind k-fix">FIX</span>
+        <div class="c">
+          <p>After <span style="font-family:'JetBrains Mono';font-size:12.5px;color:#fbbf24">npm install --ignore-scripts</span> native addons break — run <span style="font-family:'JetBrains Mono';font-size:12.5px;color:#fbbf24">npm rebuild</span> before starting the API.</p>
+          <div class="meta"><span class="proj">invoice-bot</span><span>used 1×</span><span>5d ago</span></div>
+        </div>
+        <button class="del"><i class="fa-regular fa-trash-can"></i></button>
+      </div>
+
+      <div class="note">
+        <span class="kind k-lesson">LESSON</span>
+        <div class="c">
+          <p>User prefers Hinglish replies for chat, English for generated code comments.</p>
+          <div class="meta"><span class="proj">across all projects</span><span>used 7×</span><span>today</span></div>
+        </div>
+        <button class="del"><i class="fa-regular fa-trash-can"></i></button>
+      </div>
+    </div>
+
+    <div class="mfoot">
+      <div class="sep"></div>
+      <div class="dur"><i class="fa-solid fa-shield-halved"></i>
+        <span><b>Notes outlive your projects.</b> Saved per account — delete the project, the lesson stays. Future runs pull the top matches automatically.</span>
+      </div>
+      <div class="fbtns">
+        <span class="cnt-s">top matches injected into every run · ≤5 notes</span>
+        <button class="clr"><i class="fa-regular fa-trash-can"></i> Clear all</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

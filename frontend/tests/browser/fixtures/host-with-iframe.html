@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Host Page with Preview Iframe</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: sans-serif; }
+    .host-content {
+      padding: 10px;
+      background: #f0f0f0;
+      margin-bottom: 20px;
+    }
+    .broken-host-element {
+      width: 9999px;
+      height: 20px;
+      background: red;
+    }
+    iframe {
+      width: 100%;
+      height: 400px;
+      border: 2px solid #333;
+    }
+  </style>
+</head>
+<body>
+  <div class="host-content">
+    <h1>Host Application</h1>
+    <p>This is the host page. It has a broken element that should NOT be scanned:</p>
+    <div class="broken-host-element">Host broken element</div>
+  </div>
+  <h2>Preview Iframe:</h2>
+  <iframe id="preview-frame" src="overflow.html"></iframe>
+</body>
+</html>
