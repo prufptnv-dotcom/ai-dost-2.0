@@ -93,6 +93,9 @@ function detectFrameworkFromFiles(context = {}) {
   if (names.some((name) => /(^|\/)astro\.config\.[^/]+$/.test(name))) return 'Astro';
   if (names.some((name) => /(^|\/)nuxt\.config\.[^/]+$/.test(name))) return 'Nuxt';
   if (names.some((name) => /(^|\/)svelte\.config\.[^/]+$/.test(name))) return 'Svelte';
+  // Vue and Angular projects can use Vite without a framework-specific config.
+  if (names.some((name) => /(^|\/)src\/App\.vue$/.test(name))) return 'Vue';
+  if (names.some((name) => /(^|\/)angular\.json$/.test(name))) return 'Angular';
   return null;
 }
 function frameworkGuidance(framework) {
