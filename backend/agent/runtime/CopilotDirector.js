@@ -171,22 +171,43 @@ function extractJson(text) {
 }
 
 function fallbackPlan(request) {
+  const strategy = analyzeCodeGenerationRequest(request);
   const text = String(request || '').toLowerCase();
-  const complex = /\b(full|complete|entire|platform|app|application|website|dashboard|integrat|database|backend|frontend|deploy|production|security)\b/.test(text);
+  if (strategy.intent.algorithmic && !strategy.intent.ui && !strategy.intent.fullStack) {
+    return {
+      summary: 'Algorithm-focused fallback execution',
+      tasks: [
+        {
+          id: 'task-1',
+          specialty: 'integration',
+          objective: `Implement the requested algorithm for: ${request}. ${strategy.algorithmRules.join(' ')}`,
+          dependsOn: [],
+          expectedOutput: 'Correct implementation with stated assumptions, complexity analysis, and edge-case handling.'
+        },
+        {
+          id: 'task-2',
+          specialty: 'testing',
+          objective: `Create and run focused tests for the algorithm requested here: ${request}. Cover normal, boundary, empty, duplicate, and adversarial inputs where applicable; compare against a simple independent oracle for small inputs when feasible.`,
+          dependsOn: ['task-1'],
+          expectedOutput: 'Repeatable test evidence and any remaining correctness failures.'
+        }
+      ]
+    };
+  }
+  const complex = /\\b(full|complete|entire|platform|app|application|website|dashboard|integrat|database|backend|frontend|deploy|production|security)\\b/.test(text);
   if (!complex) return {
     summary: 'Single-task adaptive execution',
-    tasks: [{ id: 'task-1', specialty: 'frontend', objective: `Implement working code for: ${request}`, dependsOn: [], expectedOutput: 'Working requested outcome with verification evidence.' }]
+    tasks: [{ id: 'task-1', specialty: strategy.intent.ui ? 'frontend' : 'integration', objective: `Implement working code for: ${request}`, dependsOn: [], expectedOutput: 'Working requested outcome with verification evidence.' }]
   };
   return {
     summary: 'Adaptive multi-specialist execution',
     tasks: [
-      { id: 'task-1', specialty: 'frontend', objective: `Implement complete working code and UI components for: ${request}`, dependsOn: [], expectedOutput: 'Working runnable application source code files.' },
+      { id: 'task-1', specialty: strategy.intent.ui ? 'frontend' : 'backend', objective: `Implement complete working code for: ${request}`, dependsOn: [], expectedOutput: 'Working runnable source code files.' },
       { id: 'task-2', specialty: 'integration', objective: `Integrate and wire complete functionality for: ${request}`, dependsOn: ['task-1'], expectedOutput: 'Implemented outcome in affected subsystem(s).' },
       { id: 'task-3', specialty: 'testing', objective: `Test the completed implementation for: ${request}`, dependsOn: ['task-2'], expectedOutput: 'Test/build/runtime evidence and actionable failures.' }
     ]
   };
 }
-
 function hasDependencyCycle(tasks) {
   const graph = new Map(tasks.map((task) => [task.id, task.dependsOn]));
   const visiting = new Set();
