@@ -1,0 +1,262 @@
+{
+  "schemaVersion": "1.0",
+  "purpose": "Repeatable Phase 1 generated-application quality evaluation. Static signals are diagnostics only; they are not correctness or production-readiness proof.",
+  "cases": [
+    {
+      "id": "dashboard-search-charts-csv",
+      "archetype": "saas-dashboard",
+      "prompt": "Build a responsive finance dashboard with transaction search, date/category filters, labeled charts, and CSV export. Use realistic demo data, clear loading/empty/error states, keyboard-accessible controls, and a polished light theme.",
+      "requiredBehaviors": [
+        "Search transactions by text and filter by date/category",
+        "Render labeled charts from the displayed dataset",
+        "Download a valid CSV with headers and currently filtered records",
+        "Keep controls usable at 360px, 768px, and 1280px",
+        "Show meaningful empty and error states"
+      ],
+      "staticSignals": [
+        {
+          "id": "search-filter",
+          "label": "Search/filter implementation signals",
+          "any": [
+            "search",
+            "filter"
+          ],
+          "regex": "(search|filter|query)"
+        },
+        {
+          "id": "csv-export",
+          "label": "CSV export implementation signals",
+          "any": [
+            "csv",
+            "export"
+          ],
+          "regex": "(text/csv|\\.csv|createObjectURL|Papa\\.unparse|csv)"
+        },
+        {
+          "id": "chart",
+          "label": "Chart/visualization implementation signals",
+          "any": [
+            "chart",
+            "graph",
+            "visualization"
+          ],
+          "regex": "(chart|recharts|chart\\.js|\\<svg|canvas)"
+        },
+        {
+          "id": "responsive",
+          "label": "Responsive layout signals",
+          "any": [
+            "responsive",
+            "media query"
+          ],
+          "regex": "(@media|breakpoint|sm:|md:|lg:)"
+        },
+        {
+          "id": "accessibility",
+          "label": "Accessibility implementation signals",
+          "any": [
+            "aria label",
+            "label",
+            "role"
+          ],
+          "regex": "(aria-label|aria-labelledby|<label|htmlFor=|role=)"
+        },
+        {
+          "id": "states",
+          "label": "Loading/empty/error state signals",
+          "any": [
+            "loading",
+            "empty",
+            "error"
+          ],
+          "regex": "(loading|empty|error)"
+        }
+      ]
+    },
+    {
+      "id": "education-quiz-progress",
+      "archetype": "education",
+      "prompt": "Create a learning platform with course listing, a quiz workspace, answer validation and feedback, progress tracking, and a profile page. Make it responsive and accessible. Clearly label demo data and do not claim a real backend.",
+      "requiredBehaviors": [
+        "Navigate between course listing and quiz workspace",
+        "Validate answers and display correct/incorrect feedback",
+        "Track progress as quizzes are completed",
+        "Persist progress only if an actual persistence mechanism is implemented; otherwise label it as session/demo state",
+        "Provide keyboard-accessible controls and responsive layouts"
+      ],
+      "staticSignals": [
+        {
+          "id": "quiz-flow",
+          "label": "Quiz/answer flow signals",
+          "any": [
+            "quiz",
+            "answer",
+            "feedback"
+          ],
+          "regex": "(quiz|answer|correct|incorrect|feedback)"
+        },
+        {
+          "id": "progress",
+          "label": "Progress tracking signals",
+          "any": [
+            "progress",
+            "completed"
+          ],
+          "regex": "(progress|completed|score)"
+        },
+        {
+          "id": "navigation",
+          "label": "Navigation signals",
+          "any": [
+            "course",
+            "profile",
+            "navigation"
+          ],
+          "regex": "(course|profile|navigate|router|href=)"
+        },
+        {
+          "id": "accessibility",
+          "label": "Accessibility implementation signals",
+          "any": [
+            "aria label",
+            "label",
+            "role"
+          ],
+          "regex": "(aria-label|aria-labelledby|<label|htmlFor=|role=)"
+        },
+        {
+          "id": "responsive",
+          "label": "Responsive layout signals",
+          "any": [
+            "responsive",
+            "media query"
+          ],
+          "regex": "(@media|breakpoint|sm:|md:|lg:)"
+        }
+      ]
+    },
+    {
+      "id": "booking-timezone-cancellation",
+      "archetype": "booking",
+      "prompt": "Build an appointment scheduling app with date and time-slot selection, timezone selection, a booking review step, confirmation, and cancellation policy. Validate unavailable/past slots, show errors clearly, and label any mock booking behavior.",
+      "requiredBehaviors": [
+        "Select and review a valid date/time slot",
+        "Display and apply the selected timezone consistently",
+        "Reject past or unavailable slots",
+        "Show confirmation only for the implemented demo/backend behavior",
+        "Expose cancellation policy and recoverable validation errors"
+      ],
+      "staticSignals": [
+        {
+          "id": "slot-selection",
+          "label": "Date/time slot signals",
+          "any": [
+            "date",
+            "time",
+            "slot"
+          ],
+          "regex": "(date|time|slot|calendar)"
+        },
+        {
+          "id": "timezone",
+          "label": "Timezone signals",
+          "any": [
+            "timezone",
+            "time zone"
+          ],
+          "regex": "(time.?zone|Intl\\.DateTimeFormat)"
+        },
+        {
+          "id": "validation",
+          "label": "Validation/error signals",
+          "any": [
+            "validation",
+            "error",
+            "unavailable"
+          ],
+          "regex": "(validat|unavailable|past|error)"
+        },
+        {
+          "id": "confirmation",
+          "label": "Review/confirmation signals",
+          "any": [
+            "review",
+            "confirm"
+          ],
+          "regex": "(review|confirm|booking)"
+        },
+        {
+          "id": "responsive",
+          "label": "Responsive layout signals",
+          "any": [
+            "responsive",
+            "media query"
+          ],
+          "regex": "(@media|breakpoint|sm:|md:|lg:)"
+        }
+      ]
+    },
+    {
+      "id": "ecommerce-cart-checkout",
+      "archetype": "ecommerce",
+      "prompt": "Create an e-commerce storefront with searchable product catalog, product details, cart quantity controls, recalculated totals, and a checkout review screen. Use a request-appropriate visual system, accessible controls, and clearly labeled demo checkout; never pretend to charge a real payment.",
+      "requiredBehaviors": [
+        "Search or filter catalog products",
+        "Update cart quantities and derive totals from cart state",
+        "Handle empty cart and invalid quantity states",
+        "Review order before checkout",
+        "Never claim a real payment without a configured provider"
+      ],
+      "staticSignals": [
+        {
+          "id": "catalog",
+          "label": "Product catalog signals",
+          "any": [
+            "product",
+            "catalog",
+            "search"
+          ],
+          "regex": "(product|catalog|search|filter)"
+        },
+        {
+          "id": "cart-state",
+          "label": "Cart quantity/total signals",
+          "any": [
+            "cart",
+            "quantity",
+            "total"
+          ],
+          "regex": "(cart|quantity|subtotal|total)"
+        },
+        {
+          "id": "checkout",
+          "label": "Checkout/review signals",
+          "any": [
+            "checkout",
+            "review"
+          ],
+          "regex": "(checkout|order review|review order)"
+        },
+        {
+          "id": "empty-state",
+          "label": "Empty cart/state signals",
+          "any": [
+            "empty",
+            "no items"
+          ],
+          "regex": "(empty cart|no items|empty)"
+        },
+        {
+          "id": "accessibility",
+          "label": "Accessibility implementation signals",
+          "any": [
+            "aria label",
+            "label",
+            "role"
+          ],
+          "regex": "(aria-label|aria-labelledby|<label|htmlFor=|role=)"
+        }
+      ]
+    }
+  ]
+}

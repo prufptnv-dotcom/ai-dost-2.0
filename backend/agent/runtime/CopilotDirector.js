@@ -7,6 +7,7 @@ const AgentCascadeAiService = require('./AgentCascadeAiService');
 const AgentCoordinator = require('./AgentCoordinator');
 const { ResultValidator } = require('./resultValidator');
 const logger = require('../../logger');
+const { analyzeCodeGenerationRequest, formatCodeGenerationStrategy } = require('./codeGenerationStrategy');
 
 // The planner decides the actual count. This is only a defensive ceiling against
 // malformed or adversarial model output, not a workflow rule.
@@ -53,12 +54,20 @@ function listExistingFilesBounded(root, max = 100) {
 // SEARCH is copied verbatim, not recalled. Bounded: priority names first,
 // ≤6 files, ≤2600 chars each (truncated marker beyond), ≤9000 chars total.
 function readKeyFileContents(diskPath, files) {
-  const PRIORITY = ['package.json', 'src/styles/global.css', 'src/index.css', 'src/App.jsx', 'index.html', 'vite.config.js', 'src/main.jsx'];
+  const PRIORITY = [
+    'package.json', 'frontend/package.json', 'web/package.json',
+    'src/styles/global.css', 'src/index.css', 'src/App.jsx',
+    'index.html', 'vite.config.js', 'next.config.js', 'next.config.mjs',
+    'astro.config.mjs', 'nuxt.config.ts', 'svelte.config.js', 'src/main.jsx'
+  ];
   const pick = [];
-  for (const p of PRIORITY) if (files.includes(p)) pick.push(p);
-  for (const p of files) { if (pick.length >= 5) break; if (!pick.includes(p)) pick.push(p); }
+  for (const p of PRIORITY) if (files.includes(p) && pick.length < 7) pick.push(p);
+  for (const p of files) {
+    if (pick.length >= 7) break;
+    if (!pick.includes(p) && /(^|\/)(package\.json|next\.config\.[^/]+|astro\.config\.[^/]+|nuxt\.config\.[^/]+|svelte\.config\.[^/]+)$/.test(p)) pick.push(p);
+  }
   const out = {};
-  let budget = 4800;
+  let budget = 6000;
   for (const p of pick) {
     if (budget <= 0) break;
     try {
@@ -97,7 +106,13 @@ Rules:
 - For upgrades/fixes, target the affected subsystem; do not rebuild unrelated areas.
 - Include testing, security, browser QA, or verification when the request/risk requires it.
 - Runtime failures are automatically retried and repaired; use repair for explicit repair work too.
-- Do not include human/manual task assignment.`;
+- Do not include human/manual task assignment.
+- APP SPECIFICATION TRACEABILITY (when the request includes a validated AI-Dost App Specification):
+  - Preserve every REQ-### identifier from the specification in at least one implementation task objective or expectedOutput; do not merge away or omit explicit requirements.
+  - Map relevant AC-## acceptance checks to a dedicated verification/testing task or explicit output evidence. Do not state that checks passed before execution evidence exists.
+  - For application UI tasks, include the specified design-system, responsive-width, accessibility, and functional-state requirements in implementation outputs.
+  - Treat suggested pages/archetypes as optional guidance; only explicit user requirements are mandatory.
+  - If a requirement is ambiguous or impossible with the available tools/configuration, state that as a blocker in the task expectedOutput instead of silently substituting a mock.`;
 
 function escapeControlCharsInStrings(str) {
   let inStr = false;
@@ -115,7 +130,7 @@ function escapeControlCharsInStrings(str) {
       } else {
         esc = false;
         if (c === '\n') {
-          out += '\\n';
+          out += '\n';
         } else if (c === '\r') {
           // ignore
         } else if (c === '\t') {
@@ -164,22 +179,43 @@ function extractJson(text) {
 }
 
 function fallbackPlan(request) {
+  const strategy = analyzeCodeGenerationRequest(request);
   const text = String(request || '').toLowerCase();
-  const complex = /\b(full|complete|entire|platform|app|application|website|dashboard|integrat|database|backend|frontend|deploy|production|security)\b/.test(text);
+  if (strategy.intent.algorithmic && !strategy.intent.ui && !strategy.intent.fullStack) {
+    return {
+      summary: 'Algorithm-focused fallback execution',
+      tasks: [
+        {
+          id: 'task-1',
+          specialty: 'integration',
+          objective: `Implement the requested algorithm for: ${request}. ${strategy.algorithmRules.join(' ')}`,
+          dependsOn: [],
+          expectedOutput: 'Correct implementation with stated assumptions, complexity analysis, and edge-case handling.'
+        },
+        {
+          id: 'task-2',
+          specialty: 'testing',
+          objective: `Create and run focused tests for the algorithm requested here: ${request}. Cover normal, boundary, empty, duplicate, and adversarial inputs where applicable; compare against a simple independent oracle for small inputs when feasible.`,
+          dependsOn: ['task-1'],
+          expectedOutput: 'Repeatable test evidence and any remaining correctness failures.'
+        }
+      ]
+    };
+  }
+  const complex = strategy.intent.fullStack || strategy.intent.securitySensitive || /\b(full|complete|entire|platform|app|application|website|dashboard|integrat|database|backend|frontend|deploy|production|security)\b/.test(text) || /पूरा ऐप|ऐप बनाओ|वेबसाइट बनाओ|डैशबोर्ड बनाओ|फुल.?स्टैक|प्रोजेक्ट बनाओ|बैक.?एंड|डेटाबेस|लॉगिन सिस्टम/i.test(String(request || ''));
   if (!complex) return {
     summary: 'Single-task adaptive execution',
-    tasks: [{ id: 'task-1', specialty: 'frontend', objective: `Implement working code for: ${request}`, dependsOn: [], expectedOutput: 'Working requested outcome with verification evidence.' }]
+    tasks: [{ id: 'task-1', specialty: strategy.intent.ui ? 'frontend' : 'integration', objective: `Implement working code for: ${request}`, dependsOn: [], expectedOutput: 'Working requested outcome with verification evidence.' }]
   };
   return {
     summary: 'Adaptive multi-specialist execution',
     tasks: [
-      { id: 'task-1', specialty: 'frontend', objective: `Implement complete working code and UI components for: ${request}`, dependsOn: [], expectedOutput: 'Working runnable application source code files.' },
+      { id: 'task-1', specialty: strategy.intent.ui ? 'frontend' : 'backend', objective: `Implement complete working code for: ${request}`, dependsOn: [], expectedOutput: 'Working runnable source code files.' },
       { id: 'task-2', specialty: 'integration', objective: `Integrate and wire complete functionality for: ${request}`, dependsOn: ['task-1'], expectedOutput: 'Implemented outcome in affected subsystem(s).' },
       { id: 'task-3', specialty: 'testing', objective: `Test the completed implementation for: ${request}`, dependsOn: ['task-2'], expectedOutput: 'Test/build/runtime evidence and actionable failures.' }
     ]
   };
 }
-
 function hasDependencyCycle(tasks) {
   const graph = new Map(tasks.map((task) => [task.id, task.dependsOn]));
   const visiting = new Set();
@@ -250,18 +286,21 @@ class CopilotDirector {
     this.coordinator = coordinator || new AgentCoordinator({ db, projectAuthService: projectAuthorization, workspaceManager, toolRegistry, plannerExecutionLoop, contextAssembler, executionController, agentTaskDao, agentRunDao });
   }
 
-  async createPlan(request, context = {}) {
+  async createPlan(request, context = {}, preferredModel = 'auto') {
     if (!String(request || '').trim()) throw new Error('Director request is required');
     try {
-      const prompt = `${DIRECTOR_PLANNER_PROMPT}\n\nREQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
+      const strategy = analyzeCodeGenerationRequest(request, context);
+      const prompt = `${DIRECTOR_PLANNER_PROMPT}\n\n${formatCodeGenerationStrategy(strategy)}\n\nREQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
       // P12.4: mode 'planner' (no system prompt) — 'agent' mode's FILE: format
       // instruction fights this prompt's "respond with valid JSON" contract.
-      const response = await this.aiService.chat(prompt, [], 'planner');
+      const response = preferredModel && preferredModel !== 'auto'
+        ? await this.aiService.chat(prompt, [], 'planner', null, preferredModel)
+        : await this.aiService.chat(prompt, [], 'planner');
       return normalizePlan(extractJson(response), request);
     } catch (_) { return normalizePlan(null, request); }
   }
 
-  async executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent = () => {}, permissionLevel = 'auto', approvalToken = null, approvalState = null }) {
+  async executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent = () => {}, permissionLevel = 'auto', approvalToken = null, approvalState = null, preferredModel = 'auto' }) {
     let hasExistingFiles = false;
     let existingFiles = [];
     let existingFileContents = null;
@@ -288,7 +327,16 @@ class CopilotDirector {
         `]`
       : `[GREENFIELD_DIRECTIVE: Workspace is new/empty. Create required source and component files directly using write_file. Do not attempt to read non-existent legacy files.]`;
 
-    const objectiveWithDirective = `${directive}\n${task.objective}`;
+    let workspacePackageJson = null;
+    try {
+      const packageSource = existingFileContents?.['package.json'];
+      if (packageSource) workspacePackageJson = JSON.parse(packageSource);
+    } catch (_) {}
+    const codeStrategy = analyzeCodeGenerationRequest(request || task.objective, {
+      ...(workspacePackageJson ? { packageJson: workspacePackageJson } : {}),
+      ...(existingFileContents ? { files: existingFileContents } : {})
+    });
+    const objectiveWithDirective = `${directive}\n${formatCodeGenerationStrategy(codeStrategy)}\n${task.objective}`;
     
     let attempt = 0;
     let lastResult = null;
@@ -312,7 +360,8 @@ class CopilotDirector {
           request, 
           expectedOutput: task.expectedOutput,
           ...(existingFiles.length ? { existingFiles } : {}),
-          ...(existingFileContents ? { existingFileContents } : {})
+          ...(existingFileContents ? { existingFileContents } : {}),
+          ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {})
         });
 
         onEvent({ type: 'thinking', message: `⚡ Specialist [${task.id}] executing ${workerPlan.steps?.length || 0} step(s)...` });
@@ -325,7 +374,7 @@ class CopilotDirector {
           maxRepairs || 3, 
           () => Boolean(signal?.aborted), 
           `copilot_${delegated.workerRun.id}_att${attempt}`,
-          { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined }
+          { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined, ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) }
         );
 
         // Execution completed all steps successfully
@@ -351,7 +400,7 @@ class CopilotDirector {
     throw new Error(`Worker ${task.id} failed after ${attempt} self-healing attempts. Final error: ${lastError}`);
   }
 
-  async run({ userId, projectId, request, signal = null, onEvent = () => {}, maxRepairs = 3, plan: presetPlan = null, permissionLevel = 'auto', approvalToken = null }) {
+  async run({ userId, projectId, request, signal = null, onEvent = () => {}, maxRepairs = 3, plan: presetPlan = null, permissionLevel = 'auto', approvalToken = null, preferredModel = 'auto' }) {
     // P12.3: ONE shared mutable approval state for this run — every worker (and
     // the final verification) gets the SAME holder. ExecutionController's
     // single-use rotation writes through the ChatPlanner context proxy into it,
@@ -361,7 +410,7 @@ class CopilotDirector {
     const approvalState = { token: approvalToken || null };
     // Plan-mode override: use the user-approved plan (normalized + validated —
     // bad shapes fall back to a generic sequential plan, never crash).
-    const plan = presetPlan ? normalizePlan(presetPlan, request) : await this.createPlan(request, { projectId });
+    const plan = presetPlan ? normalizePlan(presetPlan, request) : await this.createPlan(request, { projectId }, preferredModel);
     const supervisorResult = await this.coordinator.createSupervisorTask({ userId, projectId, title: `Copilot Director: ${String(request).slice(0, 180)}`, prompt: request, metadata: { source: 'copilot-director', plannedTaskCount: plan.tasks.length } });
     const supervisorTaskId = supervisorResult.task.id;
     const supervisorRunId = supervisorResult.run.id;
@@ -410,7 +459,7 @@ class CopilotDirector {
               break;
             }
             try {
-              executionResult = await this.coordinator.startWorker(delegated.workerRun.id, { autoPlan: false, runner: () => this.executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent, permissionLevel, approvalToken, approvalState }) });
+              executionResult = await this.coordinator.startWorker(delegated.workerRun.id, { autoPlan: false, runner: () => this.executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent, permissionLevel, approvalToken, approvalState, preferredModel }) });
               lastError = null;
               break;
             } catch (error) {
@@ -476,7 +525,7 @@ class CopilotDirector {
       }
       onEvent({ type: 'director_verification', status: 'DELEGATING' });
       const verifier = await this.coordinator.delegate({ supervisorRunId, role: 'VERIFIER', objective: `Perform the final read-only verification gate for the requested outcome: ${request}. Inspect the current workspace state and confirm tests/build/runtime evidence where supported. Do not mutate the workspace.`, constraints: { specialty: 'verification', generatedByDirector: true }, expectedOutput: 'Final verification evidence and any remaining blockers.' });
-      const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, { runner: async () => { const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER' }); return this.plannerExecutionLoop.runWithPlan(projectId, userId, verificationPlan, 0, () => Boolean(signal?.aborted), `copilot_verify_${verifier.workerRun.id}`, { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined }); } });
+      const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, { runner: async () => { const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER', ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) }); return this.plannerExecutionLoop.runWithPlan(projectId, userId, verificationPlan, 0, () => Boolean(signal?.aborted), `copilot_verify_${verifier.workerRun.id}`, { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined, ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) }); } });
       const verificationStatus = String(finalVerification?.status || 'FAILED').toUpperCase();
       const verificationSummary = String(
         finalVerification?.summary || finalVerification?.result?.summary || finalVerification?.message || ''

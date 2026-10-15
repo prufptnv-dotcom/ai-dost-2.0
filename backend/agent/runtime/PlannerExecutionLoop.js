@@ -82,6 +82,7 @@ class PlannerExecutionLoop {
     // rotation crosses worker contexts instead of dying on the first one.
     if (options && typeof options.onEvent === 'function') context.onEvent = options.onEvent;
     if (options && options.permissionLevel) context.permissionLevel = options.permissionLevel;
+    if (options && options.preferredModel && options.preferredModel !== 'auto') context.preferredModel = options.preferredModel;
     if (options && options.approvalState && typeof options.approvalState === 'object') {
       delete context.approvalToken;
       Object.defineProperty(context, 'approvalToken', {

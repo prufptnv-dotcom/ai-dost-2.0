@@ -6,6 +6,7 @@ const { getActiveTask } = require('../../taskCancellation');
 const { capabilityDiscovery } = require('../../agent/registry/CapabilityDiscovery');
 const { capabilityGatekeeper } = require('../../agent/policy/CapabilityGatekeeper');
 const logger = require('../../logger');
+const { buildAppSpecification, formatAppSpecificationForPrompt } = require('../../services/appSpecificationService');
 
 const PERMISSION_LEVELS = ['ask', 'auto', 'turbo'];
 
@@ -32,6 +33,9 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
   const taskId = String(req.get('x-ai-dost-task-id') || body.taskId || `copilot-${Date.now().toString(36)}`);
   const runId = `director-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const request = String(body.userPrompt || body.prompt || '').trim();
+  const preferredModel = typeof body.preferredModel === 'string' && body.preferredModel.trim()
+    ? body.preferredModel.trim()
+    : 'auto';
   if (!request) return res.status(400).json({ success: false, error: 'Director request is required', taskId });
 
   const authorization = (dependencies.projectAuthorization || projectAuthorization).authorize(projectId, req, {
@@ -226,9 +230,22 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
   const contextFiles = (Array.isArray(body.contextFiles) ? body.contextFiles : [])
     .filter(p => typeof p === 'string' && p.trim() && !p.includes('..') && p.length < 400)
     .slice(0, 20);
-  const directorRequest = contextFiles.length
+  const baseDirectorRequest = contextFiles.length
     ? `${request}\n\nUser @-mentioned files (prioritize reading/editing these): ${contextFiles.join(', ')}`
     : request;
+
+  // Phase 1: build a validated requirement/acceptance contract before the
+  // director creates tasks. Keep the raw request above for permission checks;
+  // only the execution/planning context receives the additional spec.
+  const appSpecification = buildAppSpecification(request);
+  const specificationContext = appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '';
+  const directorRequest = [baseDirectorRequest, specificationContext].filter(Boolean).join('\n\n');
+  if (appSpecification) {
+    writeSse(res, {
+      type: 'thinking',
+      message: '🧩 Mapped ' + appSpecification.requirements.length + ' requirement(s) to ' + appSpecification.acceptanceCriteria.length + ' acceptance checks before planning.',
+    });
+  }
 
   const result = await runtime.director.run({
     userId: authorization.user.id,
@@ -236,6 +253,7 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
     request: directorRequest,
     signal,
     maxRepairs: 3,
+    preferredModel,
     ...(presetPlan ? { plan: presetPlan } : {}),
     onEvent: countingOnEvent,
     permissionLevel,

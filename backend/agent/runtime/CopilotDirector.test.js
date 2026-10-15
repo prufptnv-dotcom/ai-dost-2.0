@@ -126,6 +126,98 @@ function createExecutionHarness({ plan, workerStatuses = ['SUCCEEDED'], verifica
   return director;
 }
 
+test('createPlan forwards an explicit preferred model to the planner cascade', async () => {
+  let callArgs = null;
+  const director = new CopilotDirector({
+    aiService: {
+      chat: async (...args) => {
+        callArgs = args;
+        return JSON.stringify({
+          summary: 'model preference plan',
+          tasks: [{
+            id: 'build-ui',
+            specialty: 'frontend',
+            role: 'CODER',
+            objective: 'Build the requested UI',
+            dependsOn: [],
+            expectedOutput: 'Working UI',
+          }],
+        });
+      },
+    },
+    coordinator: {},
+  });
+
+  const plan = await director.createPlan('Build a dashboard', { projectId: 'project-1' }, 'gemini');
+  assert.equal(callArgs[2], 'planner');
+  assert.match(callArgs[0], /AI-DOST CODE GENERATION STRATEGY/);
+  assert.match(callArgs[0], /preserve the detected workspace stack|Choose a well-supported/i);
+  assert.equal(callArgs[4], 'gemini');
+  assert.equal(plan.tasks.length, 1);
+});
+
+test('createPlan preserves the existing cascade call when preferred model is auto', async () => {
+  let callArgs = null;
+  const director = new CopilotDirector({
+    aiService: {
+      chat: async (...args) => {
+        callArgs = args;
+        return JSON.stringify({
+          summary: 'auto plan',
+          tasks: [{
+            id: 'build-ui',
+            specialty: 'frontend',
+            role: 'CODER',
+            objective: 'Build the requested UI',
+            dependsOn: [],
+            expectedOutput: 'Working UI',
+          }],
+        });
+      },
+    },
+    coordinator: {},
+  });
+
+  await director.createPlan('Build a dashboard', { projectId: 'project-1' }, 'auto');
+  assert.equal(callArgs[2], 'planner');
+  assert.equal(callArgs.length, 3);
+});
+
+test('run propagates explicit preferred model to plan creation and worker execution', async () => {
+  const plan = {
+    summary: 'model propagation',
+    tasks: [{
+      id: 'frontend',
+      specialty: 'frontend',
+      role: 'CODER',
+      objective: 'Build UI',
+      dependsOn: [],
+      expectedOutput: 'Working UI',
+    }],
+  };
+  const director = createExecutionHarness({ plan });
+  let planArgs = null;
+  let workerPreferredModel = null;
+  director.createPlan = async (...args) => {
+    planArgs = args;
+    return plan;
+  };
+  director.executeWorker = async (args) => {
+    workerPreferredModel = args.preferredModel;
+    return { status: 'SUCCEEDED', result: { artifact_refs: [] } };
+  };
+
+  const result = await director.run({
+    userId: 'user-1',
+    projectId: 'project-1',
+    request: 'Build a dashboard',
+    preferredModel: 'groq',
+  });
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(planArgs[2], 'groq');
+  assert.equal(workerPreferredModel, 'groq');
+});
+
 test('run executes dependency-ordered tasks and emits completion events', async () => {
   const order = [];
   const plan = {
@@ -410,4 +502,61 @@ test('run fails closed when a required planned task is skipped after delegation 
     true,
     'the supervisor task must be persisted as FAILED when the plan is incomplete'
   );
+});
+
+
+test('fallbackPlan recognizes Hindi full-app requests and preserves verification work', () => {
+  const plan = fallbackPlan('एक पूरा डैशबोर्ड ऐप बनाओ');
+  assert.equal(plan.tasks.length, 3);
+  assert.match(plan.summary, /multi-specialist/i);
+  assert.equal(plan.tasks[2].specialty, 'testing');
+  assert.deepEqual(plan.tasks[2].dependsOn, ['task-2']);
+});
+
+test('fallbackPlan keeps a small Hinglish code request fast', () => {
+  const plan = fallbackPlan('ek date formatting function likho');
+  assert.equal(plan.tasks.length, 1);
+});
+
+test('worker receives framework guidance from an existing nested workspace manifest', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-dost-stack-context-'));
+  try {
+    fs.mkdirSync(path.join(tempDir, 'frontend'), { recursive: true });
+    fs.writeFileSync(path.join(tempDir, 'frontend', 'package.json'), JSON.stringify({ dependencies: { next: '^16.0.0', react: '^19.0.0' } }));
+    fs.writeFileSync(path.join(tempDir, 'frontend', 'src.js'), 'export default 1;');
+    const plannerCalls = [];
+    const workerDirector = new CopilotDirector({
+      aiService: { chat: async () => '{}' },
+      coordinator: {
+        async createSupervisorTask() { return { task: { id: 'supervisor-1' }, run: { id: 'supervisor-run-1' } }; },
+        async delegate() { return { workerRun: { id: 'worker-1' } }; },
+        async startWorker(_id, options) { return options.runner(); },
+      },
+      workspaceManager: { getWorkspaceMetadata: () => ({ fileCount: 2, diskPath: tempDir }) },
+      taskPlanner: {
+        async generatePlan(objective, context) { plannerCalls.push({ objective, context }); return { steps: [] }; },
+        async generateVerificationPlan() { return { steps: [] }; },
+      },
+      plannerExecutionLoop: {
+        async runWithPlan(_projectId, _userId, _plan, _repairs, _cancel, runId) {
+          return String(runId).startsWith('copilot_verify_') ? { status: 'SUCCEEDED' } : { status: 'SUCCEEDED' };
+        },
+      },
+      agentTaskDao: { updateStatus() {} },
+      agentRunDao: { updateStatus() {} },
+    });
+    const result = await workerDirector.run({ userId: 'u1', projectId: 'p1', request: 'Add a settings page to the existing app', plan: {
+      summary: 'stack preservation',
+      tasks: [{ id: 'edit', specialty: 'frontend', objective: 'Add settings page', dependsOn: [], expectedOutput: 'Page works' }],
+    } });
+    assert.equal(result.status, 'COMPLETED');
+    assert.match(plannerCalls[0].objective, /Next\.js/);
+    assert.match(plannerCalls[0].objective, /Preserve the detected workspace stack/i);
+    assert.equal(plannerCalls[0].context.existingFiles.includes('frontend/package.json'), true);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });

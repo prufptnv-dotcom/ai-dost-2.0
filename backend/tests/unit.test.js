@@ -737,6 +737,16 @@ describe('services/imageIntent', () => {
 describe('CopilotDirector plan override', () => {
   const { normalizePlan, fallbackPlan } = require('../agent/runtime/CopilotDirector');
 
+  test('algorithm requests receive algorithm-focused implementation and verification tasks', () => {
+    const plan = fallbackPlan('Implement Dijkstra shortest path for a graph');
+    assert.equal(plan.summary, 'Algorithm-focused fallback execution');
+    assert.equal(plan.tasks.length, 2);
+    assert.equal(plan.tasks[0].specialty, 'integration');
+    assert.match(plan.tasks[0].objective, /time and space complexity/i);
+    assert.equal(plan.tasks[1].specialty, 'testing');
+    assert.deepEqual(plan.tasks[1].dependsOn, ['task-1']);
+  });
+
   test('approved preset plan passes through (objectives, ids, dependsOn chain)', () => {
     const plan = normalizePlan({
       summary: 'Approved by user',
@@ -2222,6 +2232,26 @@ describe('P12.4 — planner honesty, mutation failure, verification gate', () =>
       assert.equal(calls, 3, 'two garbage replies, third lands clean JSON');
       assert.ok(modes.length === 3 && modes.every((m) => m === 'planner'),
         'planner calls must use mode "planner" (Groq agent mode injects a FILE: system prompt that fights JSON output)');
+    });
+
+    test('uses an explicit preferred model for execution, repair, and verification plans', async () => {
+      const calls = [];
+      const planner = createStructuredAgentPlanner({
+        toolRegistry,
+        retryDelayMs: 1,
+        openai: {
+          chat: async (...args) => {
+            calls.push(args);
+            return '{"goal":"inspect","steps":[{"id":"s1","tool":"list_directory","description":"list","input":{}}]}';
+          },
+        },
+      });
+      const context = { preferredModel: 'gemini' };
+      await planner.generateStructuredPlan('build a todo app', context);
+      await planner.generateRepairPlan({ tool: 'write_file' }, 'repair it', context);
+      await planner.generateVerificationPlan('verify it', context);
+      assert.equal(calls.length, 3);
+      assert.ok(calls.every((args) => args[2] === 'planner' && args[4] === 'gemini'));
     });
 
     test('always-garbage replies fail honestly instead of fabricating the src/App.jsx template', async () => {

@@ -10,6 +10,7 @@ export default function CopilotPlanCard({ tasks = [], expanded = true, onToggle 
   const total = tasks.length;
   const allDone = doneCount === total;
   const hasError = tasks.some(t => t.status === 'error');
+  const hasUnverified = tasks.some(t => t.status === 'unverified');
   const pct = Math.round((doneCount / total) * 100);
 
   return (
@@ -23,15 +24,15 @@ export default function CopilotPlanCard({ tasks = [], expanded = true, onToggle 
         title={expanded ? 'Collapse plan' : 'Expand plan'}
       >
         <span className="flex items-center gap-1.5 text-[10px] font-mono font-bold uppercase tracking-[0.14em] text-ink-muted">
-          {allDone ? <CheckCircle2 size={12} className="text-emerald-400" /> : hasError ? <AlertCircle size={12} className="text-red-400" /> : <CircleDot size={12} className="text-accent" />}
-          {allDone ? 'Completed plan' : hasError ? 'Plan needs attention' : 'Working plan'}
+          {allDone ? <CheckCircle2 size={12} className="text-emerald-400" /> : hasError ? <AlertCircle size={12} className="text-red-400" /> : hasUnverified ? <AlertCircle size={12} className="text-amber-400" /> : <CircleDot size={12} className="text-accent" />}
+          {allDone ? 'Completed plan' : hasError ? 'Plan needs attention' : hasUnverified ? 'Needs verification' : 'Working plan'}
         </span>
 
         {/* Mini progress bar */}
         <span className="flex-1 h-1 rounded-full bg-canvas-elevated overflow-hidden         max-w-[180px]">
           <span
             className={`block h-full rounded-full transition-all duration-500 ${
-              hasError ? 'bg-red-500' : allDone ? 'bg-emerald-500' : 'bg-accent'
+              hasError ? 'bg-red-500' : hasUnverified ? 'bg-amber-500' : allDone ? 'bg-emerald-500' : 'bg-accent'
             }`}
             style={{ width: `${pct}%` }}
           />
@@ -39,7 +40,7 @@ export default function CopilotPlanCard({ tasks = [], expanded = true, onToggle 
 
         <span
           className={`text-[10px] font-mono tabular-nums ${
-            hasError ? 'text-red-400' : allDone ? 'text-emerald-500' : 'text-ink-muted'
+            hasError ? 'text-red-400' : hasUnverified ? 'text-amber-400' : allDone ? 'text-emerald-500' : 'text-ink-muted'
           }`}
           data-testid="plan-progress"
         >
