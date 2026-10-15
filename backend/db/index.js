@@ -54,11 +54,11 @@ function initDatabase(customPath = null) {
     };
   }
 
-  // Configure SQLite invariants
-  dbInstance.exec('PRAGMA journal_mode = WAL');
-  dbInstance.exec('PRAGMA synchronous = NORMAL');
-  dbInstance.exec('PRAGMA foreign_keys = ON');
-  dbInstance.exec('PRAGMA busy_timeout = 5000');
+  // Configure SQLite invariants — set busy_timeout first so locks retry gracefully up to 5000ms
+  try { dbInstance.exec('PRAGMA busy_timeout = 5000'); } catch (_) {}
+  try { dbInstance.exec('PRAGMA journal_mode = WAL'); } catch (_) {}
+  try { dbInstance.exec('PRAGMA synchronous = NORMAL'); } catch (_) {}
+  try { dbInstance.exec('PRAGMA foreign_keys = ON'); } catch (_) {}
 
   // Run versioned migrations
   const runner = new MigrationRunner(dbInstance);

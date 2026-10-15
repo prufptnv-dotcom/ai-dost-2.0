@@ -73,9 +73,9 @@ function ensureTestToolsRegistered() {
 }
 
 async function setupDirectorEnvironment(customVerificationPlanFn) {
+  const db = initDatabase(':memory:');
   await registerAll();
   ensureTestToolsRegistered();
-  const db = initDatabase();
 
   const userDao = new UserDAO(db);
   const projectDao = new ProjectDAO(db);

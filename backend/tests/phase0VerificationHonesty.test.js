@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { initDatabase } = require('../db/index');
 const TaskPlanner = require('../agent/runtime/TaskPlanner');
 const { createStructuredAgentPlanner } = require('../agent/runtime/structuredAgentPlanner');
 const { fallbackPlan, normalizePlan, SPECIALTY_TO_ROLE } = require('../agent/runtime/CopilotDirector');
@@ -49,6 +50,7 @@ test('Phase 0 Baseline: CopilotDirector fallbackPlan creates multi-specialist ta
 });
 
 test('Phase 0 Root Cause Reproduction: TaskPlanner verification fallback yields list_directory (file existence check only)', async () => {
+  initDatabase(':memory:');
   await registerAll();
 
   const failingAiService = {
