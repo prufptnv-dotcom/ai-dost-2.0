@@ -119,7 +119,7 @@ function algorithmFamilyGuidance(text) {
   if (/sort|ordering|rank|top.?k/.test(p)) {
     rules.push('For ordering tasks, define comparator/tie-breaking and stability requirements; include duplicates and already/reverse-sorted inputs in tests.');
   }
-  if (/dynamic programming|\\bdp\\b|knapsack|subsequence/.test(p)) {
+  if (/dynamic programming|\bdp\b|knapsack|subsequence/.test(p)) {
     rules.push('For dynamic programming, define state, recurrence, base cases, transition order, and reconstruction requirements before coding.');
   }
   if (/backtrack|constraint satisfaction|combinatorial/.test(p)) {
