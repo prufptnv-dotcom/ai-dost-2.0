@@ -95,6 +95,34 @@ function frameworkGuidance(framework) {
   if (key === 'flask') return [
     'Use app factories/blueprints when consistent with the project; validate inputs and centralize error handling.',
   ];
+  if (key === 'svelte') return [
+    'Follow the installed Svelte/SvelteKit version and existing component syntax; use stores or runes according to the project version.',
+    'Keep browser-only code in the correct lifecycle boundary and clean up subscriptions, listeners, and async work.',
+  ];
+  if (key === 'astro') return [
+    'Prefer Astro components and server-rendered pages by default; add client: directives only for islands that need browser interactivity.',
+    'Respect the configured integrations and avoid turning static pages into a client-heavy SPA without a requirement.',
+  ];
+  if (key === 'nuxt') return [
+    'Follow the installed Nuxt version, file-based routing, auto-import conventions, and server/client boundaries.',
+    'Keep secrets and privileged data access server-side; validate inputs in server routes and preserve runtime configuration conventions.',
+  ];
+  if (key === 'remix') return [
+    'Use route modules with loaders/actions and the installed router conventions; keep mutations in actions and validate form data server-side.',
+    'Handle pending, error, and revalidation states using the framework data lifecycle instead of duplicating server state.',
+  ];
+  if (key === 'laravel') return [
+    'Follow existing Laravel route/controller/model boundaries, middleware, policies, validation requests, and migration conventions.',
+    'Use Eloquent relationships and transactions where appropriate; never bypass authorization or mass-assignment protections.',
+  ];
+  if (key === 'spring boot') return [
+    'Follow the existing Spring Boot version and controller/service/repository boundaries; use DTO validation at API edges.',
+    'Keep transactions and authorization explicit, and avoid blocking reactive paths or introducing unmanaged concurrency.',
+  ];
+  if (key === 'rails') return [
+    'Follow Rails conventions for routes, controllers, models, migrations, and strong parameters; reuse existing application patterns.',
+    'Enforce authorization server-side and use transactions for multi-step writes.',
+  ];
   if (key === 'vite') return [
     'Treat Vite as the build tool, not the UI framework; detect and preserve the actual UI framework from dependencies.',
     'Use existing scripts and aliases from vite.config and package.json rather than inventing paths.',
