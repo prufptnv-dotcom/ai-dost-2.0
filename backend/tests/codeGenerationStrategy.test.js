@@ -124,6 +124,14 @@ test('workspace stack detection does not mistake Vite for a UI framework', () =>
   };
   assert.equal(detectWorkspaceStack(context), null);
   assert.equal(detectFrameworkFromFiles(context), null);
+  assert.equal(detectFrameworkFromFiles({
+    packageJson: { devDependencies: { vite: '^6.0.0' } },
+    files: {
+      'vite.config.js': 'export default {}',
+      'src/App.vue': '<template><main /></template>',
+      'frontend/package.json': JSON.stringify({ dependencies: { vue: '^3.5.0' } }),
+    },
+  }), 'Vue');
 });
 
 test('explicit framework takes precedence over files detected in a workspace', () => {
