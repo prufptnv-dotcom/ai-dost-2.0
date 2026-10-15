@@ -737,6 +737,16 @@ describe('services/imageIntent', () => {
 describe('CopilotDirector plan override', () => {
   const { normalizePlan, fallbackPlan } = require('../agent/runtime/CopilotDirector');
 
+  test('algorithm requests receive algorithm-focused implementation and verification tasks', () => {
+    const plan = fallbackPlan('Implement Dijkstra shortest path for a graph');
+    assert.equal(plan.summary, 'Algorithm-focused fallback execution');
+    assert.equal(plan.tasks.length, 2);
+    assert.equal(plan.tasks[0].specialty, 'integration');
+    assert.match(plan.tasks[0].objective, /time and space complexity/i);
+    assert.equal(plan.tasks[1].specialty, 'testing');
+    assert.deepEqual(plan.tasks[1].dependsOn, ['task-1']);
+  });
+
   test('approved preset plan passes through (objectives, ids, dependsOn chain)', () => {
     const plan = normalizePlan({
       summary: 'Approved by user',
