@@ -519,7 +519,7 @@ class CopilotDirector {
         result: finalVerification
       });
       if (verificationStatus === 'FAILED') {
-        throw new Error(`Final Director verification gate failed: ${verificationSummary || 'Checks failed'}`);
+        throw new Error(`Final Director verification gate did not pass: ${verificationSummary || 'Checks failed'}`);
       }
 
       const artifactRefs = [
