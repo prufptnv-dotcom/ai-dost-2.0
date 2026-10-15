@@ -503,3 +503,17 @@ test('run fails closed when a required planned task is skipped after delegation 
     'the supervisor task must be persisted as FAILED when the plan is incomplete'
   );
 });
+
+
+test('fallbackPlan recognizes Hindi full-app requests and preserves verification work', () => {
+  const plan = fallbackPlan('एक पूरा डैशबोर्ड ऐप बनाओ');
+  assert.equal(plan.tasks.length, 3);
+  assert.match(plan.summary, /multi-specialist/i);
+  assert.equal(plan.tasks[2].specialty, 'testing');
+  assert.deepEqual(plan.tasks[2].dependsOn, ['task-2']);
+});
+
+test('fallbackPlan keeps a small Hinglish code request fast', () => {
+  const plan = fallbackPlan('ek date formatting function likho');
+  assert.equal(plan.tasks.length, 1);
+});
