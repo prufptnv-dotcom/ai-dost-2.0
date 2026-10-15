@@ -7,6 +7,7 @@ const AgentCascadeAiService = require('./AgentCascadeAiService');
 const AgentCoordinator = require('./AgentCoordinator');
 const { ResultValidator } = require('./resultValidator');
 const logger = require('../../logger');
+const { analyzeCodeGenerationRequest, formatCodeGenerationStrategy } = require('./codeGenerationStrategy');
 
 // The planner decides the actual count. This is only a defensive ceiling against
 // malformed or adversarial model output, not a workflow rule.
@@ -259,7 +260,8 @@ class CopilotDirector {
   async createPlan(request, context = {}, preferredModel = 'auto') {
     if (!String(request || '').trim()) throw new Error('Director request is required');
     try {
-      const prompt = `${DIRECTOR_PLANNER_PROMPT}\n\nREQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
+      const strategy = analyzeCodeGenerationRequest(request, context);
+      const prompt = `${DIRECTOR_PLANNER_PROMPT}\\n\\n${formatCodeGenerationStrategy(strategy)}\n\nREQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
       // P12.4: mode 'planner' (no system prompt) — 'agent' mode's FILE: format
       // instruction fights this prompt's "respond with valid JSON" contract.
       const response = preferredModel && preferredModel !== 'auto'
@@ -296,7 +298,15 @@ class CopilotDirector {
         `]`
       : `[GREENFIELD_DIRECTIVE: Workspace is new/empty. Create required source and component files directly using write_file. Do not attempt to read non-existent legacy files.]`;
 
-    const objectiveWithDirective = `${directive}\n${task.objective}`;
+    let workspacePackageJson = null;
+    try {
+      const packageSource = existingFileContents?.['package.json'];
+      if (packageSource) workspacePackageJson = JSON.parse(packageSource);
+    } catch (_) {}
+    const codeStrategy = analyzeCodeGenerationRequest(request || task.objective, {
+      ...(workspacePackageJson ? { packageJson: workspacePackageJson } : {})
+    });
+    const objectiveWithDirective = `${directive}\\n${formatCodeGenerationStrategy(codeStrategy)}\n${task.objective}`;
     
     let attempt = 0;
     let lastResult = null;
