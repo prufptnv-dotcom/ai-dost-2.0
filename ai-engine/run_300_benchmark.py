@@ -1,70 +1,27 @@
+"""
+AI-Dost Versioned Benchmark Runner (v2.0.0-verified)
+Executes reproducible, sandboxed evaluations across the 300-question benchmark dataset.
+Replaces heuristic formatting/length scoring with execution testing and calibrated rubrics.
+"""
+
 import os
 import sys
 import time
 import json
-import re
-import requests
 import statistics
+import requests
+from typing import Dict, Any
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
+from benchmark_evaluator.evaluator import evaluate_response_verified, EVALUATOR_VERSION, DATASET_VERSION, get_git_revision
+
 API_URL = "http://127.0.0.1:8002/api/ai-dost/chat"
 DATASET_FILE = "benchmark_300_dataset.json"
-RESULTS_FILE = "benchmark_300_results.json"
-SUMMARY_REPORT = "benchmark_300_summary_sheet.md"
-
-def evaluate_response(item, reply, latency):
-    prompt = item["prompt"]
-    cat = item["cat"]
-    diff = item["diff"]
-
-    refusal_patterns = [
-        r"I'm sorry, but I can't assist",
-        r"as a text-based AI, I don't have access",
-        r"I cannot fulfill"
-    ]
-    has_refusal = any(re.search(pat, reply, re.IGNORECASE) for pat in refusal_patterns)
-    has_code = "```" in reply
-    length = len(reply)
-    tokens_est = max(1, int(length / 3.8))
-
-    score = 10
-    notes = []
-
-    if has_refusal:
-        score -= 6
-        notes.append("False refusal detected")
-
-    if length < 60:
-        score -= 4
-        notes.append("Too brief")
-    elif length > 250:
-        notes.append("Detailed response")
-
-    if "Algorithm" in cat or "Web Development" in cat:
-        if "implement" in prompt.lower() or "write a python" in prompt.lower() or "write a javascript" in prompt.lower() or "function" in prompt.lower():
-            if not has_code:
-                score -= 3
-                notes.append("Missing code block")
-            else:
-                notes.append("Code provided")
-
-    if "Database" in cat and "write sql" in prompt.lower() and not ("select" in reply.lower() or "with" in reply.lower()):
-        score -= 2
-        notes.append("Missing SQL query")
-
-    score = max(1, min(10, score))
-    pass_fail = "PASS" if score >= 6 else "FAIL"
-
-    eval_note = "; ".join(notes) if notes else "Accurate and coherent response"
-
-    return {
-        "score": score,
-        "pass_fail": pass_fail,
-        "tokens_est": tokens_est,
-        "eval_note": eval_note
-    }
+HISTORICAL_RESULTS_FILE = "benchmark_300_results_historical_heuristic.json"
+VERIFIED_RESULTS_FILE = "benchmark_300_verified_results.json"
+SUMMARY_REPORT = "benchmark_300_verified_summary.md"
 
 def run_benchmark():
     if not os.path.exists(DATASET_FILE):
@@ -77,22 +34,23 @@ def run_benchmark():
     results = []
     done_qids = set()
 
-    if os.path.exists(RESULTS_FILE):
+    if os.path.exists(VERIFIED_RESULTS_FILE):
         try:
-            with open(RESULTS_FILE, "r", encoding="utf-8") as f:
+            with open(VERIFIED_RESULTS_FILE, "r", encoding="utf-8") as f:
                 existing = json.load(f)
                 if isinstance(existing, list):
                     results = existing
                     done_qids = {r["qid"] for r in results if r.get("success")}
-                    print(f"Resuming benchmark: loaded {len(done_qids)} previously completed questions.")
+                    print(f"Resuming benchmark: loaded {len(done_qids)} previously completed verified questions.")
         except Exception as e:
-            print(f"Could not load previous results: {e}")
+            print(f"Could not load previous verified results: {e}")
 
-    print("=" * 75)
-    print("VKP-Omni-2B: Real Benchmark Test Set (300 Blind Evaluation Questions)")
+    git_rev = get_git_revision()
+    print("=" * 80)
+    print(f"AI-Dost 3.1: Reproducible Benchmark Engine (Evaluator {EVALUATOR_VERSION} | Git {git_rev})")
     print(f"Total Questions: {len(questions)} | Target: {API_URL}")
     print(f"Remaining to run: {len(questions) - len(done_qids)}")
-    print("=" * 75)
+    print("=" * 80)
 
     t_start = time.time()
 
@@ -105,12 +63,13 @@ def run_benchmark():
         cat = item["cat"]
         diff = item["diff"]
 
-        print(f"[{idx}/300] [{qid} | {diff}] {prompt[:50]}...", end=" ", flush=True)
+        print(f"[{idx}/300] [{qid} | {diff}] {prompt[:45]}...", end=" ", flush=True)
 
         t0 = time.time()
         success = False
         reply = ""
         last_err = ""
+        model_name = "unknown"
 
         for attempt in range(2):
             try:
@@ -118,6 +77,7 @@ def run_benchmark():
                 if resp.status_code == 200:
                     data = resp.json()
                     reply = data.get("response", "").strip()
+                    model_name = data.get("model", "unknown")
                     success = True
                     break
                 else:
@@ -130,28 +90,20 @@ def run_benchmark():
         dt = time.time() - t0
 
         if success:
-            eval_data = evaluate_response(item, reply, dt)
-            tokens = eval_data["tokens_est"]
-            tps = round(tokens / dt, 1) if dt > 0 else 0
-            score = eval_data["score"]
-            pf = eval_data["pass_fail"]
-            note = eval_data["eval_note"]
+            eval_record = evaluate_response_verified(item, reply, dt, model_id=model_name)
+            score = eval_record["score"]
+            pf = eval_record["pass_fail"]
+            status = eval_record.get("status", "DONE")
+            note = eval_record["evaluator_note"]
 
             record = {
-                "qid": qid,
-                "cat": cat,
-                "diff": diff,
-                "prompt": prompt,
+                **eval_record,
                 "model_answer": reply,
-                "latency_s": round(dt, 2),
-                "generated_tokens": tokens,
-                "tokens_per_sec": tps,
-                "score": score,
-                "pass_fail": pf,
-                "evaluator_note": note,
-                "success": True
+                "success": True,
+                "generated_tokens": max(1, int(len(reply) / 3.8)),
+                "tokens_per_sec": round(max(1, int(len(reply) / 3.8)) / dt, 1) if dt > 0 else 0
             }
-            print(f"-> {pf} ({score}/10, {dt:.1f}s, {tokens} tok, {tps} tok/s) [{note}]", flush=True)
+            print(f"-> {pf} [{status}] ({score}/10, {dt:.1f}s) [{note[:60]}]", flush=True)
         else:
             record = {
                 "qid": qid,
@@ -164,28 +116,33 @@ def run_benchmark():
                 "tokens_per_sec": 0,
                 "score": 0,
                 "pass_fail": "FAIL",
+                "status": "HTTP_OR_TIMEOUT_ERROR",
+                "failure_type": "NETWORK_OR_SERVER_ERROR",
                 "evaluator_note": f"Error: {last_err}",
-                "success": False
+                "success": False,
+                "evaluator_version": EVALUATOR_VERSION,
+                "dataset_version": DATASET_VERSION,
+                "git_revision": git_rev,
+                "model_id": model_name
             }
             print(f"-> FAIL ({last_err})", flush=True)
 
         results.append(record)
         done_qids.add(qid)
 
-        # Save incrementally
-        with open(RESULTS_FILE, "w", encoding="utf-8") as f:
+        with open(VERIFIED_RESULTS_FILE, "w", encoding="utf-8") as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
 
         time.sleep(0.1)
 
     total_time = round(time.time() - t_start, 1)
-    print("\n" + "=" * 75)
-    print(f"Completed 300-Question Evaluation in {total_time}s!")
-    print("=" * 75)
+    print("\n" + "=" * 80)
+    print(f"Completed Evaluation in {total_time}s!")
+    print("=" * 80)
 
-    generate_summary_sheet(results)
+    generate_verified_summary_sheet(results)
 
-def generate_summary_sheet(results):
+def generate_verified_summary_sheet(results):
     successful = [r for r in results if r.get("success")]
     total_q = len(results)
     completed = len(successful)
@@ -194,10 +151,20 @@ def generate_summary_sheet(results):
     latencies = [r["latency_s"] for r in successful]
     avg_latency = round(statistics.mean(latencies), 2) if latencies else 0
     median_latency = round(statistics.median(latencies), 2) if latencies else 0
-    total_tokens = sum(r["generated_tokens"] for r in successful)
+    total_tokens = sum(r.get("generated_tokens", 0) for r in successful)
     total_time = sum(latencies)
     avg_tps = round(total_tokens / total_time, 1) if total_time > 0 else 0
     overall_score = round(sum(r["score"] for r in successful) / len(successful), 2) if successful else 0
+
+    exec_items = [r for r in results if r.get("is_executable")]
+    exec_passed = sum(1 for r in exec_items if r.get("pass_fail") == "PASS")
+    exec_pass_rate = f"{(exec_passed / len(exec_items)) * 100:.1f}%" if exec_items else "N/A"
+
+    failure_types = {}
+    for r in results:
+        ft = r.get("failure_type")
+        if ft:
+            failure_types[ft] = failure_types.get(ft, 0) + 1
 
     cats = {}
     for r in results:
@@ -206,33 +173,44 @@ def generate_summary_sheet(results):
             cats[c] = []
         cats[c].append(r)
 
-    md = f"""# VKP-Omni-2B: Real Benchmark Test Run Summary Sheet
-**Evaluated Questions:** 300 Blind Evaluation Questions (10 categories x 30 questions)  
-**Execution Environment:** Local GPU Acceleration (`cuda:0` / float16), Offline Neural Engine  
+    git_rev = get_git_revision()
 
-## Benchmark Run Summary Sheet
+    md = f"""# AI-Dost: Verified Benchmark Evaluation Report
+**Evaluator Version:** `{EVALUATOR_VERSION}`  
+**Dataset Version:** `{DATASET_VERSION}`  
+**Git Revision:** `{git_rev}`  
+**Evaluation Methodology:** Isolated Subprocess Sandboxing, Property & Differential Testing, Calibrated Category Rubrics  
+**Historical Heuristic Baseline Preserved:** `benchmark_300_results_historical_heuristic.json`  
 
-| Metric | Value |
-|---|---|
-| **Model checkpoint** | `NandiAi/VKP-Omni-2B` (snapshot `b8473449fccbd9dbec9cfafafc34a790f3d6a959`) |
-| **Base model / training method** | Qwen2-VL-2B-Instruct / Fine-tuned by Vikash Kumar Pandit at IIT Patna |
-| **Hardware** | NVIDIA GPU (`cuda:0`), 8GB+ VRAM |
-| **Precision / quantization** | float16 / Full precision |
-| **Total questions** | {total_q} |
-| **Completed** | {completed} |
-| **Failed / timeout** | {failed} |
-| **Average latency** | {avg_latency}s |
-| **Median latency** | {median_latency}s |
-| **Tokens/sec** | {avg_tps} tok/s |
-| **Peak VRAM** | ~4.8 GB |
-| **Overall score** | **{overall_score} / 10** |
-| **Pass Rate** | **{round((sum(1 for r in successful if r.get('pass_fail')=='PASS')/total_q)*100, 1)}%** |
+## Executive Summary
+
+| Metric | Verified Value | Historical Heuristic (Unverified) |
+|---|---|---|
+| **Evaluator Engine** | `benchmark_evaluator v2.0.0` (Execution-Tested) | String-length & Regex Heuristic |
+| **Total Questions** | {total_q} | 300 |
+| **Completed Queries** | {completed} | 300 |
+| **Mean Latency** | {avg_latency}s | 23.4s |
+| **Median Latency** | {median_latency}s | 22.1s |
+| **Mean Score** | **{overall_score} / 10** | 9.8 / 10 (Inflated) |
+| **Verified Pass Rate** | **{round((sum(1 for r in successful if r.get('pass_fail')=='PASS')/max(1, total_q))*100, 1)}%** | 99.3% (Heuristic) |
+| **Executable Code Pass Rate** | **{exec_pass_rate}** ({exec_passed}/{len(exec_items)}) | Not Measured |
 
 ---
 
-## Category-Wise Breakdown (10 Categories × 30 Questions)
+## Failure Breakdown by Category
 
-| Category | Completed | Pass Rate | Avg Score | Avg Latency | Avg Tokens |
+| Failure Type | Count | Description |
+|---|---|---|
+"""
+    for ft, count in sorted(failure_types.items(), key=lambda x: x[1], reverse=True):
+        md += f"| `{ft}` | {count} | Evaluator classified failure |\n"
+
+    md += """
+---
+
+## Category-Wise Breakdown
+
+| Category | Completed | Pass Rate | Avg Score | Executable Tested | Avg Latency |
 |---|---|---|---|---|---|
 """
     for c, items in cats.items():
@@ -241,17 +219,17 @@ def generate_summary_sheet(results):
         c_rate = f"{(pass_cnt / len(items)) * 100:.1f}%"
         c_score = f"{sum(x['score'] for x in s_items) / len(s_items):.2f}" if s_items else "0"
         c_lat = f"{statistics.mean([x['latency_s'] for x in s_items]):.1f}s" if s_items else "0s"
-        c_tok = f"{int(statistics.mean([x['generated_tokens'] for x in s_items]))}" if s_items else "0"
-        md += f"| {c} | {len(s_items)}/30 | {c_rate} | {c_score}/10 | {c_lat} | {c_tok} |\n"
+        exec_cnt = sum(1 for x in items if x.get("is_executable"))
+        md += f"| {c} | {len(s_items)}/{len(items)} | {c_rate} | {c_score}/10 | {exec_cnt} | {c_lat} |\n"
 
     md += """
 ---
-*Generated automatically by Antigravity IDE Benchmark Engine for VKP-Omni-2B.*
+*Generated by AI-Dost Verified Benchmark Engine (v2.0.0-verified).*
 """
 
     with open(SUMMARY_REPORT, "w", encoding="utf-8") as f:
         f.write(md)
-    print(f"\nSaved formal summary sheet to {SUMMARY_REPORT}")
+    print(f"\nSaved verified summary sheet to {SUMMARY_REPORT}")
 
 if __name__ == "__main__":
     run_benchmark()

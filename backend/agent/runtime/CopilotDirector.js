@@ -6,6 +6,7 @@ const OpenAIService = require('../../services/openaiService');
 const AgentCascadeAiService = require('./AgentCascadeAiService');
 const AgentCoordinator = require('./AgentCoordinator');
 const { ResultValidator } = require('./resultValidator');
+const { workspaceFrameworkIntelligence } = require('../../services/workspaceFrameworkIntelligence');
 const logger = require('../../logger');
 
 // The planner decides the actual count. This is only a defensive ceiling against
@@ -253,7 +254,8 @@ class CopilotDirector {
   async createPlan(request, context = {}) {
     if (!String(request || '').trim()) throw new Error('Director request is required');
     try {
-      const prompt = `${DIRECTOR_PLANNER_PROMPT}\n\nREQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
+      const wsDirective = context.workspace?.promptDirective || '';
+      const prompt = `${DIRECTOR_PLANNER_PROMPT}\n\n${wsDirective ? `${wsDirective}\n\n` : ''}REQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
       // P12.4: mode 'planner' (no system prompt) — 'agent' mode's FILE: format
       // instruction fights this prompt's "respond with valid JSON" contract.
       const response = await this.aiService.chat(prompt, [], 'planner');
@@ -359,9 +361,24 @@ class CopilotDirector {
     // of the original one an earlier worker already consumed
     // ("already consumed (replay rejected)" used to kill every later gated step).
     const approvalState = { token: approvalToken || null };
+
+    // Phase 3: Inspect real workspace intelligence BEFORE planning initial tasks
+    let workspaceIntelligence = null;
+    try {
+      const meta = this.workspaceManager?.getWorkspaceMetadata?.(projectId, userId);
+      if (meta?.diskPath && fs.existsSync(meta.diskPath)) {
+        workspaceIntelligence = workspaceFrameworkIntelligence.inspectWorkspace(meta.diskPath);
+      }
+    } catch (_) {}
+
+    const planContext = {
+      projectId,
+      ...(workspaceIntelligence ? { workspace: workspaceIntelligence } : {})
+    };
+
     // Plan-mode override: use the user-approved plan (normalized + validated —
     // bad shapes fall back to a generic sequential plan, never crash).
-    const plan = presetPlan ? normalizePlan(presetPlan, request) : await this.createPlan(request, { projectId });
+    const plan = presetPlan ? normalizePlan(presetPlan, request) : await this.createPlan(request, planContext);
     const supervisorResult = await this.coordinator.createSupervisorTask({ userId, projectId, title: `Copilot Director: ${String(request).slice(0, 180)}`, prompt: request, metadata: { source: 'copilot-director', plannedTaskCount: plan.tasks.length } });
     const supervisorTaskId = supervisorResult.task.id;
     const supervisorRunId = supervisorResult.run.id;

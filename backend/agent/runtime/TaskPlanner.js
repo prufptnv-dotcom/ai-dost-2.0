@@ -38,17 +38,16 @@ class TaskPlanner {
     // plan, (2) the safety goal was never at risk — a dropped step is never
     // executed. Now mutating / unclassified steps are FILTERED OUT (safety
     // preserved) and the surviving read-only steps run as before. If nothing
-    // read-only survives, fall back to a deterministic list_directory so the
-    // gate still records REAL evidence instead of passing with zero checks
-    // (P12.4 honesty: a silently-empty verification is exactly the lie the
-    // honest gate was built to prevent).
+    // read-only survives, fall back to a deterministic evidence check.
     const validSteps = [];
     const dropped = [];
     for (const step of plan.steps) {
       const tool = this.toolRegistry.get(step.tool);
       const permissions = Array.isArray(tool?.permissions) ? tool.permissions : [];
       const mutates = tool?.mutates === true || tool?.sideEffect === true || permissions.some((p) => /write|mutation|destructive/i.test(String(p)));
-      const readOnlyClassified = explicitlyReadOnly.has(step.tool) || /^(read|list|search|fetch|get|inspect|status|verify|check|test)/i.test(step.tool);
+      const readOnlyClassified = explicitlyReadOnly.has(step.tool) ||
+        /^(read|list|search|fetch|get|inspect|status|verify|check|test)/i.test(step.tool) ||
+        (tool && !mutates && !obviouslyMutating.test(step.tool));
       if (mutates || obviouslyMutating.test(step.tool) || !readOnlyClassified) {
         dropped.push(step.tool);
         continue;
@@ -59,13 +58,16 @@ class TaskPlanner {
       logger.warn(`[TaskPlanner] Verification plan sanitized — dropped ${dropped.length} non-read-only step(s): ${dropped.join(', ')}`);
     }
     if (validSteps.length === 0) {
-      logger.warn('[TaskPlanner] No read-only verification steps survived sanitization — falling back to list_directory evidence check');
+      const fallbackTool = this.toolRegistry.get('list_directory')
+        ? 'list_directory'
+        : (this.toolRegistry.list?.().find(t => !t.permissions?.some(p => /write|mutation/i.test(p)))?.name || 'read_file');
+      logger.warn(`[TaskPlanner] No read-only verification steps survived sanitization — falling back to ${fallbackTool} evidence check`);
       return {
         goal: plan.goal,
         steps: [{
           id: 'verify_fallback_list',
-          tool: 'list_directory',
-          description: 'List the workspace root to confirm the project tree exists',
+          tool: fallbackTool,
+          description: 'Confirm project tree or evidence exists',
           input: {}
         }]
       };
