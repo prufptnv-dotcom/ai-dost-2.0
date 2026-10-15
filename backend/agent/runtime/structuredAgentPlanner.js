@@ -2,6 +2,7 @@
 
 const OpenAIService = require('../../services/openaiService');
 const AgentCascadeAiService = require('./AgentCascadeAiService');
+const { deriveAlgorithmSpecification, buildAlgorithmGuidanceBlock } = require('./codeGenerationStrategy');
 const logger = require('../../logger');
 
 function escapeControlCharsInStrings(str) {
@@ -289,7 +290,9 @@ function createStructuredAgentPlanner({ toolRegistry, openai = AgentCascadeAiSer
     // objective) or surface an honest error.
     async generateStructuredPlan(intent, context) {
       try {
-        return await complete(plannerPrompt('execution', intent, context, toolCatalog(toolRegistry)));
+        const spec = deriveAlgorithmSpecification(intent);
+        const algoGuidance = spec.specificationNeeded ? buildAlgorithmGuidanceBlock(spec) : '';
+        return await complete(plannerPrompt('execution', intent, context, toolCatalog(toolRegistry), algoGuidance));
       } catch (err) {
         const rawIntent = String(intent || '').toLowerCase();
         const isThemeIntent = /(theme|color|dark mode|light mode|palette|style|css|styling|design)/i.test(rawIntent);

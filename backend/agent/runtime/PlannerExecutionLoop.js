@@ -333,6 +333,14 @@ await this.executionController.recordObservation(step.id, 'TOOL_OUTPUT', output)
           const stepDef = stepQueue.shift();
           await this.executionController.saveCheckpoint(runId, { stepQueue, repairAttempts, goal });
 
+          if (context && typeof context.onEvent === 'function') {
+            context.onEvent({
+              type: 'step',
+              tool: stepDef.tool,
+              description: stepDef.description,
+              status: 'running'
+            });
+          }
           const step = await this.executionController.recordStep(runId, 'TOOL', stepDef.input);
           await this.executionController.startStep(step.id);
           
@@ -342,11 +350,56 @@ await this.executionController.recordObservation(step.id, 'TOOL_OUTPUT', output)
             );
             
             assertToolOutputSucceeded(stepDef.tool, output);
-await this.executionController.recordObservation(step.id, 'TOOL_OUTPUT', output);
+            await this.executionController.recordObservation(step.id, 'TOOL_OUTPUT', output);
             await this.executionController.completeStep(step.id, 'SUCCEEDED', output);
+            if (context && typeof context.onEvent === 'function') {
+              context.onEvent({
+                type: 'step',
+                tool: stepDef.tool,
+                description: stepDef.description,
+                status: 'done'
+              });
+            }
           } catch (err) {
+            console.error(`❌ [PlannerExecutionLoop] Step ${stepDef?.id} (${stepDef?.tool}) execution error: ${err.message}`);
             await this.executionController.recordObservation(step.id, 'TOOL_ERROR', err.message);
-            await this.executionController.completeStep(step.id, 'FAILED', null, err.message);
+            await this.executionController.completeStep(step.id, 'FAILED', null, err.message).catch(() => {});
+            if (context && typeof context.onEvent === 'function') {
+              context.onEvent({
+                type: 'step',
+                tool: stepDef.tool,
+                description: stepDef.description,
+                status: 'failed',
+                error: err.message
+              });
+            }
+            if (err.code === 'TASK_CANCELED') {
+              await this.executionController.completeRun(runId, 'CANCELLED', 'Canceled by user').catch(() => {});
+              this.agentTaskDao.updateStatus(taskId, 'CANCELLED');
+              return { runId, status: 'CANCELLED', reason: 'Canceled by user' };
+            }
+            if (err.code === 'APPROVAL_REQUIRED') {
+              if (context && typeof context.onEvent === 'function') {
+                context.onEvent({
+                  type: 'gate_approval_required',
+                  message: `Approval required: ${err.decision} for ${err.capabilityId || 'capability'} — press Approve to resume this run`,
+                  gate: {
+                    decision: err.decision,
+                    approval_token: err.approvalToken,
+                    capabilities: err.capabilities,
+                    capabilityId: err.capabilityId,
+                  },
+                });
+              }
+              await this.executionController.completeRun(runId, 'FAILED', `Step ${step.id} requires user approval: ${err.message}`).catch(() => {});
+              this.agentTaskDao.updateStatus(taskId, 'FAILED');
+              return {
+                runId,
+                status: 'FAILED',
+                reason: `APPROVAL_REQUIRED: ${err.message}`,
+                approvalGate: { decision: err.decision, approval_token: err.approvalToken, capabilityId: err.capabilityId },
+              };
+            }
             
             if (repairAttempts >= maxRepairs) {
               const failureReason = `Max repairs reached for ${stepDef.tool}: ${err.message}`;
