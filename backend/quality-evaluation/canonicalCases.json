@@ -1,0 +1,101 @@
+{
+  "version": "1.0.0",
+  "suite": "AI-Dost Canonical Generated-Application Quality Evaluation",
+  "cases": [
+    {
+      "id": "dashboard-search-charts-csv",
+      "name": "Interactive Analytics Dashboard with Search, Charts & CSV Export",
+      "prompt": "Build an interactive analytics dashboard featuring real-time data filtering, search across data rows, interactive charts (line/bar/pie), and CSV data export functionality with loading and error states.",
+      "requiredCapabilities": [
+        "search_filtering",
+        "data_visualization",
+        "csv_export",
+        "state_management",
+        "loading_error_states"
+      ],
+      "requiredElements": [
+        { "name": "search_input", "description": "Text input or search field filtering displayed rows" },
+        { "name": "data_table_or_grid", "description": "Table or grid displaying filtered records" },
+        { "name": "chart_component", "description": "Visual chart (SVG, canvas, or chart library) displaying metrics" },
+        { "name": "csv_export_button", "description": "Button triggering CSV export or file download" }
+      ],
+      "antiPatterns": [
+        "onClick={() => {}}",
+        "TODO: implement search",
+        "TODO: implement export",
+        "javascript:void(0)"
+      ]
+    },
+    {
+      "id": "education-quiz-progress",
+      "name": "Educational Quiz Application with Timer, Progress & High Scores",
+      "prompt": "Build an education quiz application with timed questions, category selection, instant feedback on answers, progress bar tracking, score review screen, and local persistence of high scores.",
+      "requiredCapabilities": [
+        "timer_countdown",
+        "category_selection",
+        "feedback_system",
+        "progress_tracking",
+        "score_persistence"
+      ],
+      "requiredElements": [
+        { "name": "category_selector", "description": "Option to select quiz topics or difficulties" },
+        { "name": "progress_indicator", "description": "Progress bar or counter showing current question vs total" },
+        { "name": "answer_options", "description": "Selectable answer buttons or inputs" },
+        { "name": "score_screen", "description": "Review screen summarizing final score and breakdown" },
+        { "name": "persistence_call", "description": "localStorage or store saving past scores or user stats" }
+      ],
+      "antiPatterns": [
+        "onClick={() => {}}",
+        "TODO: implement timer",
+        "TODO: implement save score"
+      ]
+    },
+    {
+      "id": "booking-timezone-cancellation",
+      "name": "Appointment Booking with Timezone Conversion & Cancellation Modal",
+      "prompt": "Build an appointment booking system with date and time slot selection, timezone conversion display, double-booking prevention, cancellation policy with confirmation modal, and booking status badge.",
+      "requiredCapabilities": [
+        "date_slot_selection",
+        "timezone_conversion",
+        "conflict_prevention",
+        "cancellation_flow",
+        "status_indicators"
+      ],
+      "requiredElements": [
+        { "name": "date_time_picker", "description": "Date and slot selection interface" },
+        { "name": "timezone_selector", "description": "Dropdown or indicator for timezone conversion" },
+        { "name": "confirmation_modal", "description": "Modal or dialog confirming appointment or cancellation" },
+        { "name": "status_badge", "description": "Visual indicator for Confirmed, Pending, or Cancelled" }
+      ],
+      "antiPatterns": [
+        "onClick={() => {}}",
+        "TODO: implement booking",
+        "TODO: implement cancellation"
+      ]
+    },
+    {
+      "id": "ecommerce-cart-checkout",
+      "name": "E-Commerce Catalog with Cart Drawer, Promo Code & Validated Checkout",
+      "prompt": "Build an e-commerce catalog with category filtering, price range slider, product detail modal, add-to-cart with quantity adjustment, persistent cart state, discount promo code calculation, and checkout form with validation.",
+      "requiredCapabilities": [
+        "catalog_filtering",
+        "cart_operations",
+        "discount_calculation",
+        "form_validation",
+        "cart_persistence"
+      ],
+      "requiredElements": [
+        { "name": "catalog_grid", "description": "Products displayed with image, title, price, and add button" },
+        { "name": "category_or_price_filter", "description": "Controls to filter products by category or price" },
+        { "name": "cart_management", "description": "Cart view or drawer with quantity +/- and remove actions" },
+        { "name": "promo_code_input", "description": "Input field to apply coupons or promo discounts" },
+        { "name": "checkout_form", "description": "Form with name, email, and address inputs and validation" }
+      ],
+      "antiPatterns": [
+        "onClick={() => {}}",
+        "TODO: implement checkout",
+        "TODO: implement discount"
+      ]
+    }
+  ]
+}
