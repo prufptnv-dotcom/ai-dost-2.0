@@ -150,6 +150,8 @@ test('createPlan forwards an explicit preferred model to the planner cascade', a
 
   const plan = await director.createPlan('Build a dashboard', { projectId: 'project-1' }, 'gemini');
   assert.equal(callArgs[2], 'planner');
+  assert.match(callArgs[0], /AI-DOST CODE GENERATION STRATEGY/);
+  assert.match(callArgs[0], /preserve the detected workspace stack|Choose a well-supported/i);
   assert.equal(callArgs[4], 'gemini');
   assert.equal(plan.tasks.length, 1);
 });
