@@ -105,3 +105,31 @@ test('framework-specific guidance covers SvelteKit, Astro islands, and Remix dat
   const remix = analyzeCodeGenerationRequest('Build a Remix app');
   assert.ok(remix.frameworkGuidance.some((rule) => /loaders\/actions/.test(rule)));
 });
+
+test('framework can be detected from nested workspace package manifests', () => {
+  const { detectFrameworkFromFiles } = require('../agent/runtime/codeGenerationStrategy');
+  assert.equal(detectFrameworkFromFiles({
+    files: { 'frontend/package.json': JSON.stringify({ dependencies: { next: '^16.0.0', react: '^19.0.0' } }) },
+  }), 'Next.js');
+  assert.equal(detectFrameworkFromFiles({
+    files: { 'web/package.json': JSON.stringify({ devDependencies: { astro: '^5.0.0' } }) },
+  }), 'Astro');
+});
+
+test('workspace stack detection does not mistake Vite for a UI framework', () => {
+  const { detectFrameworkFromFiles } = require('../agent/runtime/codeGenerationStrategy');
+  const context = {
+    packageJson: { devDependencies: { vite: '^6.0.0' } },
+    files: { 'vite.config.js': 'export default {}', 'src/App.vue': '<template><main /></template>' },
+  };
+  assert.equal(detectWorkspaceStack(context), null);
+  assert.equal(detectFrameworkFromFiles(context), null);
+});
+
+test('explicit framework takes precedence over files detected in a workspace', () => {
+  const strategy = analyzeCodeGenerationRequest('Build an Astro website', {
+    files: { 'package.json': JSON.stringify({ dependencies: { next: '^16.0.0', react: '^19.0.0' } }) },
+  });
+  assert.equal(strategy.stack.explicitFramework, 'Astro');
+  assert.ok(strategy.frameworkGuidance.some((rule) => /client: directives/.test(rule)));
+});
