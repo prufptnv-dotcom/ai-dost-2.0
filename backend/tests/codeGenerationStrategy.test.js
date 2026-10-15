@@ -141,3 +141,9 @@ test('explicit framework takes precedence over files detected in a workspace', (
   assert.equal(strategy.stack.explicitFramework, 'Astro');
   assert.ok(strategy.frameworkGuidance.some((rule) => /client: directives/.test(rule)));
 });
+
+test('framework file hints detect Vue and Angular in Vite workspaces', () => {
+  const { detectFrameworkFromFiles } = require('../agent/runtime/codeGenerationStrategy');
+  assert.equal(detectFrameworkFromFiles({ files: { 'vite.config.js': 'export default {}', 'src/App.vue': '<template><main /></template>' } }), 'Vue');
+  assert.equal(detectFrameworkFromFiles({ files: { 'vite.config.js': 'export default {}', 'angular.json': '{}' } }), 'Angular');
+});
