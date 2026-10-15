@@ -23,14 +23,43 @@ function makeRunFixture(t, testCase = cases[0]) {
   return { root, runDir, write, testCase };
 }
 
-function minimalPngHeader(width, height) {
-  const header = Buffer.alloc(24);
-  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(header, 0);
-  header.writeUInt32BE(13, 8);
-  header.write('IHDR', 12, 4, 'ascii');
-  header.writeUInt32BE(width, 16);
-  header.writeUInt32BE(height, 20);
-  return header;
+function pngChunk(type, data) {
+  const typeBuffer = Buffer.from(type, 'ascii');
+  const chunk = Buffer.alloc(12 + data.length);
+  chunk.writeUInt32BE(data.length, 0);
+  typeBuffer.copy(chunk, 4);
+  data.copy(chunk, 8);
+  const crcInput = chunk.subarray(4, 8 + data.length);
+  chunk.writeUInt32BE(testCrc32(crcInput), 8 + data.length);
+  return chunk;
+}
+
+function testCrc32(buffer) {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function validPng(width, height) {
+  const zlib = require('node:zlib');
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 6;
+  const scanline = Buffer.alloc(1 + width * 4);
+  const rows = Buffer.concat(Array.from({ length: height }, () => scanline));
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', header),
+    pngChunk('IDAT', zlib.deflateSync(rows)),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
 }
 
 function validManifest(fixture, phase = 'candidate', runNumber = 1) {
@@ -53,9 +82,9 @@ function validManifest(fixture, phase = 'candidate', runNumber = 1) {
     tests: { status: 'PASS', logPath: write('logs/tests.log') },
     browserFlows: { status: 'PASS', logPath: write('logs/browser.log') },
     screenshots: {
-      '360': write('screenshots/360.png', minimalPngHeader(360, 800)),
-      '768': write('screenshots/768.png', minimalPngHeader(768, 900)),
-      '1280': write('screenshots/1280.png', minimalPngHeader(1280, 900)),
+      '360': write('screenshots/360.png', validPng(360, 800)),
+      '768': write('screenshots/768.png', validPng(768, 900)),
+      '1280': write('screenshots/1280.png', validPng(1280, 900)),
     },
     requirements,
     humanReview: { blindReview: true, dimensions },
@@ -76,10 +105,11 @@ describe('Phase 1 runtime evidence package validator', () => {
     const fixture = makeRunFixture(t);
     fixture.write('screenshots/fake.png', 'not a PNG');
     fixture.write('screenshots/bad.png', Buffer.alloc(24));
-    fixture.write('screenshots/valid.png', minimalPngHeader(360, 800));
+    fixture.write('screenshots/valid.png', validPng(360, 800));
     assert.equal(isPngScreenshot(fixture.runDir, 'screenshots/fake.png'), false);
     assert.equal(isPngScreenshot(fixture.runDir, 'screenshots/bad.png'), false);
-    assert.equal(isPngScreenshot(fixture.runDir, 'screenshots/valid.png'), true);
+    assert.equal(isPngScreenshot(fixture.runDir, 'screenshots/valid.png', 360), true);
+    assert.equal(isPngScreenshot(fixture.runDir, 'screenshots/valid.png', 768), false);
   });
 
   test('rejects symlinks that escape the run directory', (t) => {
