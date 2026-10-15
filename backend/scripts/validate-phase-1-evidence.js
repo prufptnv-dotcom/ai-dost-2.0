@@ -55,25 +55,60 @@ function safeEvidenceFile(runDir, relativePath) {
   }
 }
 
-function isPngScreenshot(runDir, relativePath) {
-  if (!safeEvidenceFile(runDir, relativePath)) return false;
+function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function isPngScreenshot(runDir, relativePath, minimumWidth = 1) {
+  if (!safeEvidenceFile(runDir, relativePath) || !Number.isInteger(minimumWidth) || minimumWidth < 1) return false;
   try {
     const filePath = path.resolve(runDir, relativePath.replace(/\\/g, '/'));
-    const header = Buffer.alloc(24);
-    const fd = fs.openSync(filePath, 'r');
-    let bytesRead;
-    try {
-      bytesRead = fs.readSync(fd, header, 0, header.length, 0);
-    } finally {
-      fs.closeSync(fd);
-    }
-    if (bytesRead !== header.length) return false;
+    const buffer = fs.readFileSync(filePath);
     const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    return header.subarray(0, 8).equals(signature) &&
-      header.readUInt32BE(8) === 13 &&
-      header.toString('ascii', 12, 16) === 'IHDR' &&
-      header.readUInt32BE(16) > 0 &&
-      header.readUInt32BE(20) > 0;
+    if (buffer.length < 8 || !buffer.subarray(0, 8).equals(signature)) return false;
+
+    let offset = 8;
+    let seenHeader = false;
+    let seenImageData = false;
+    let seenEnd = false;
+    while (offset < buffer.length) {
+      if (offset + 12 > buffer.length) return false;
+      const length = buffer.readUInt32BE(offset);
+      const typeStart = offset + 4;
+      const dataStart = offset + 8;
+      const dataEnd = dataStart + length;
+      const chunkEnd = dataEnd + 4;
+      if (dataEnd < dataStart || chunkEnd > buffer.length) return false;
+      const type = buffer.toString('ascii', typeStart, dataStart);
+      const chunkTypeAndData = buffer.subarray(typeStart, dataEnd);
+      if (buffer.readUInt32BE(dataEnd) !== crc32(chunkTypeAndData)) return false;
+
+      if (!seenHeader) {
+        if (type !== 'IHDR' || length !== 13) return false;
+        const width = buffer.readUInt32BE(dataStart);
+        const height = buffer.readUInt32BE(dataStart + 4);
+        if (width < minimumWidth || height < 1) return false;
+        seenHeader = true;
+      } else if (type === 'IHDR') {
+        return false;
+      }
+
+      if (type === 'IDAT') seenImageData = true;
+      offset = chunkEnd;
+      if (type === 'IEND') {
+        if (length !== 0 || !seenImageData || offset !== buffer.length) return false;
+        seenEnd = true;
+        break;
+      }
+    }
+    return seenHeader && seenImageData && seenEnd;
   } catch {
     return false;
   }
@@ -110,7 +145,7 @@ function validateRun(runDir, phase, caseId, runNumber, requiredBehaviors) {
 
   const screenshots = manifest.screenshots || {};
   for (const width of WIDTHS) {
-    if (!isPngScreenshot(runDir, screenshots[width])) {
+    if (!isPngScreenshot(runDir, screenshots[width], Number(width))) {
       errors.push('screenshots.' + width + ' must reference a valid PNG screenshot with an IHDR and non-zero dimensions inside this run directory');
     }
   }
