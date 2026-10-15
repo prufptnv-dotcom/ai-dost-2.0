@@ -40,22 +40,58 @@ function detectWorkspaceStack(context = {}) {
   );
   if (explicit) return explicit.trim().slice(0, 100);
 
-  const pkg = context.packageJson && typeof context.packageJson === 'object'
-    ? context.packageJson
-    : null;
-  if (!pkg) return null;
-  const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-  const names = Object.keys(deps);
-  if (names.includes('next')) return 'Next.js';
-  if (names.includes('react')) return 'React';
-  if (names.includes('vue')) return 'Vue';
-  if (names.includes('@angular/core')) return 'Angular';
-  if (names.includes('express')) return 'Express.js';
-  if (names.includes('@nestjs/core')) return 'NestJS';
-  if (names.includes('vite')) return 'Vite';
-  return null;
+  const pkg = context.packageJson && typeof context.packageJson === 'object' ? context.packageJson : null;
+  if (pkg) {
+    const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+    for (const [packageName, framework] of FRAMEWORK_PACKAGE_MAP) {
+      if (Object.hasOwn(deps, packageName)) return framework;
+    }
+    // Vite is a build tool; do not misclassify it as the UI framework.
+  }
+  return detectFrameworkFromFiles(context);
 }
 
+const FRAMEWORK_PACKAGE_MAP = [
+  ['next', 'Next.js'],
+  ['react', 'React'],
+  ['vue', 'Vue'],
+  ['@angular/core', 'Angular'],
+  ['svelte', 'Svelte'],
+  ['astro', 'Astro'],
+  ['nuxt', 'Nuxt'],
+  ['@remix-run/react', 'Remix'],
+  ['express', 'Express.js'],
+  ['@nestjs/core', 'NestJS'],
+  ['fastapi', 'FastAPI'],
+  ['django', 'Django'],
+  ['flask', 'Flask'],
+  ['laravel/framework', 'Laravel'],
+];
+
+function detectFrameworkFromFiles(context = {}) {
+  const files = context && context.files && typeof context.files === 'object' ? context.files : null;
+  if (!files) return null;
+  for (const fileName of ['package.json', 'frontend/package.json', 'web/package.json']) {
+    const source = files[fileName];
+    if (typeof source !== 'string') continue;
+    try {
+      const pkg = JSON.parse(source);
+      const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+      for (const [packageName, framework] of FRAMEWORK_PACKAGE_MAP) {
+        if (Object.hasOwn(deps, packageName)) return framework;
+      }
+    } catch (_) {
+      // An unreadable package manifest must not block code generation.
+    }
+  }
+  // Config files are lower-confidence hints; Vite alone is not a UI framework.
+  const names = Object.keys(files).map((name) => name.replace(/\\/g, '/'));
+  if (names.some((name) => /(^|\/)next\.config\.[^/]+$/.test(name))) return 'Next.js';
+  if (names.some((name) => /(^|\/)astro\.config\.[^/]+$/.test(name))) return 'Astro';
+  if (names.some((name) => /(^|\/)nuxt\.config\.[^/]+$/.test(name))) return 'Nuxt';
+  if (names.some((name) => /(^|\/)svelte\.config\.[^/]+$/.test(name))) return 'Svelte';
+  return null;
+}
 function frameworkGuidance(framework) {
   const key = String(framework || '').toLowerCase();
   if (key === 'next.js') return [
@@ -215,7 +251,7 @@ function analyzeCodeGenerationRequest(request, context = {}) {
         'Validate inputs and cover empty, invalid, boundary, and failure states relevant to the feature.',
       ];
 
-  const requestedFramework = explicitFramework || workspaceStack;
+  const requestedFramework = explicitFramework || workspaceStack || detectFrameworkFromFiles(context);
   const frameworkRules = frameworkGuidance(requestedFramework);
   const algorithmFamilyRules = algorithmFamilyGuidance(text);
 
@@ -272,4 +308,4 @@ function formatCodeGenerationStrategy(strategy) {
   ].join('\n');
 }
 
-module.exports = { analyzeCodeGenerationRequest, formatCodeGenerationStrategy, detectWorkspaceStack };
+module.exports = { analyzeCodeGenerationRequest, formatCodeGenerationStrategy, detectWorkspaceStack, detectFrameworkFromFiles };
