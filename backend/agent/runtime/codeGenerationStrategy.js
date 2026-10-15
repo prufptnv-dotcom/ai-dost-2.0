@@ -56,6 +56,81 @@ function detectWorkspaceStack(context = {}) {
   return null;
 }
 
+function frameworkGuidance(framework) {
+  const key = String(framework || '').toLowerCase();
+  if (key === 'next.js') return [
+    'Use the existing App Router or Pages Router convention; do not mix routing systems without a reason.',
+    'In App Router, default to Server Components and add client boundaries only for browser APIs or interactive state.',
+    'Use route handlers/server actions only where they fit the existing architecture; validate inputs at server boundaries.',
+  ];
+  if (key === 'react') return [
+    'Use small composable components, stable keys, and hooks only at component/custom-hook top level.',
+    'Keep derived state derived; avoid redundant state and mutation of state objects.',
+    'Represent loading, empty, error, success, and disabled states for async or interactive features.',
+  ];
+  if (key === 'vue') return [
+    'Follow the installed Vue version and existing Options API or Composition API convention.',
+    'Keep reactive state and side effects explicit; clean up subscriptions/timers and avoid stale async updates.',
+  ];
+  if (key === 'angular') return [
+    'Follow the installed Angular version and existing standalone/module convention.',
+    'Use typed services for I/O, reactive forms for complex forms, and lifecycle-safe subscriptions.',
+  ];
+  if (key === 'express.js') return [
+    'Separate route wiring from business logic when scope warrants it; validate request data at the boundary.',
+    'Use centralized error middleware and never leak stack traces or secrets to clients.',
+  ];
+  if (key === 'nestjs') return [
+    'Follow module/controller/provider boundaries and use DTO validation at request boundaries.',
+    'Keep business logic in injectable providers and preserve the existing dependency-injection conventions.',
+  ];
+  if (key === 'fastapi') return [
+    'Use Pydantic models for request/response contracts and dependency injection for shared services.',
+    'Use async handlers only when the called I/O stack is async; do not block the event loop with synchronous heavy work.',
+  ];
+  if (key === 'django') return [
+    'Follow the existing Django app/model/view structure and use migrations for schema changes.',
+    'Enforce permissions server-side and validate writes through forms or serializers appropriate to the project.',
+  ];
+  if (key === 'flask') return [
+    'Use app factories/blueprints when consistent with the project; validate inputs and centralize error handling.',
+  ];
+  if (key === 'vite') return [
+    'Treat Vite as the build tool, not the UI framework; detect and preserve the actual UI framework from dependencies.',
+    'Use existing scripts and aliases from vite.config and package.json rather than inventing paths.',
+  ];
+  return framework ? [
+    `Respect the installed ${framework} version and official project conventions; inspect existing configuration before adding packages.`,
+  ] : [
+    'Before choosing a framework, check existing project files and installed dependencies; do not infer a framework from a build tool alone.',
+  ];
+}
+
+function algorithmFamilyGuidance(text) {
+  const p = String(text || '').toLowerCase();
+  const rules = [];
+  if (/shortest path|dijkstra|bellman.?ford|floyd.?warshall|graph/.test(p)) {
+    rules.push('For graph problems, make directedness, weights, disconnected vertices, and negative-edge constraints explicit.');
+    rules.push('Choose BFS for unweighted shortest paths, Dijkstra only for non-negative edge weights, Bellman-Ford when negative edges are allowed, and detect negative cycles when relevant.');
+  }
+  if (/binary search|sorted array|lower bound|upper bound/.test(p)) {
+    rules.push('For binary search, state the sorted-input precondition and use one consistent interval convention; test empty input, one element, duplicates, and targets outside the range.');
+  }
+  if (/sort|ordering|rank|top.?k/.test(p)) {
+    rules.push('For ordering tasks, define comparator/tie-breaking and stability requirements; include duplicates and already/reverse-sorted inputs in tests.');
+  }
+  if (/dynamic programming|\\bdp\\b|knapsack|subsequence/.test(p)) {
+    rules.push('For dynamic programming, define state, recurrence, base cases, transition order, and reconstruction requirements before coding.');
+  }
+  if (/backtrack|constraint satisfaction|combinatorial/.test(p)) {
+    rules.push('For backtracking/search, state pruning conditions and prove they cannot discard valid solutions; test no-solution and many-solution cases.');
+  }
+  if (/concurren|race condition|parallel|scheduler/.test(p)) {
+    rules.push('For concurrent work, define shared-state ownership, cancellation, idempotency, ordering, and race-condition tests.');
+  }
+  return rules;
+}
+
 function analyzeCodeGenerationRequest(request, context = {}) {
   const original = String(request || '').trim();
   const text = original.toLowerCase();
@@ -94,6 +169,10 @@ function analyzeCodeGenerationRequest(request, context = {}) {
         'Validate inputs and cover empty, invalid, boundary, and failure states relevant to the feature.',
       ];
 
+  const requestedFramework = explicitFramework || workspaceStack;
+  const frameworkRules = frameworkGuidance(requestedFramework);
+  const algorithmFamilyRules = algorithmFamilyGuidance(text);
+
   const verificationGates = [
     'Check imports, file paths, package scripts, and dependency availability against the actual workspace.',
     'Run the narrowest relevant tests first, then build/type-check/lint where configured.',
@@ -124,8 +203,9 @@ function analyzeCodeGenerationRequest(request, context = {}) {
           ? 'Preserve the detected workspace stack; do not migrate frameworks without explicit authorization.'
           : 'Choose a well-supported, minimal stack from requirements and available tools.',
     },
+    frameworkGuidance: frameworkRules,
     architectureRules,
-    algorithmRules,
+    algorithmRules: [...algorithmRules, ...algorithmFamilyRules],
     verificationGates,
     executionPolicy: {
       simpleTask: 'Use one focused implementation task when scope and risk are low.',
