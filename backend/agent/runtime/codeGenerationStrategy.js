@@ -68,7 +68,6 @@ const FRAMEWORK_PACKAGE_MAP = [
   ['django', 'Django'],
   ['flask', 'Flask'],
   ['laravel/framework', 'Laravel'],
-  ['vite', 'Vite'],
 ];
 
 function detectFrameworkFromFiles(context = {}) {
