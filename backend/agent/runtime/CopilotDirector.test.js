@@ -554,7 +554,7 @@ test('worker receives framework guidance from an existing nested workspace manif
     } });
     assert.equal(result.status, 'COMPLETED');
     assert.match(plannerCalls[0].objective, /Next\.js/);
-    assert.match(plannerCalls[0].objective, /preserve the detected workspace stack/);
+    assert.match(plannerCalls[0].objective, /Preserve the detected workspace stack/i);
     assert.equal(plannerCalls[0].context.existingFiles.includes('frontend/package.json'), true);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
