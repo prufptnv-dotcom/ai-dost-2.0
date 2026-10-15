@@ -36,6 +36,19 @@ test('algorithmic tasks receive complexity, invariant, and adversarial test guid
   assert.ok(strategy.algorithmRules.some((rule) => /adversarial cases/.test(rule)));
 });
 
+test('framework-specific guidance is selected for Next.js and React', () => {
+  const next = analyzeCodeGenerationRequest('Build a Next.js app');
+  assert.ok(next.frameworkGuidance.some((rule) => /Server Components/.test(rule)));
+  const react = analyzeCodeGenerationRequest('Build a React dashboard');
+  assert.ok(react.frameworkGuidance.some((rule) => /loading, empty, error/.test(rule)));
+});
+
+test('graph algorithm requests receive algorithm-family constraints', () => {
+  const strategy = analyzeCodeGenerationRequest('Implement Dijkstra shortest path');
+  assert.ok(strategy.algorithmRules.some((rule) => /Dijkstra only for non-negative/.test(rule)));
+  assert.ok(strategy.algorithmRules.some((rule) => /negative cycles/.test(rule)));
+});
+
 test('security-sensitive full-stack work adds trust-boundary checks', () => {
   const strategy = analyzeCodeGenerationRequest('Build a full-stack checkout API with authentication');
   assert.equal(strategy.intent.fullStack, true);
