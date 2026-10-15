@@ -1,11 +1,11 @@
-﻿'use strict';
+'use strict';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const TaskPlanner = require('../agent/runtime/taskPlanner');
+const TaskPlanner = require('../agent/runtime/TaskPlanner');
 const { createStructuredAgentPlanner } = require('../agent/runtime/structuredAgentPlanner');
 const { fallbackPlan, normalizePlan, SPECIALTY_TO_ROLE } = require('../agent/runtime/CopilotDirector');
 const toolRegistry = require('../agent/runtime/ToolRegistry');
