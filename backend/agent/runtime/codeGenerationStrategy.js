@@ -73,7 +73,7 @@ const FRAMEWORK_PACKAGE_MAP = [
 function detectFrameworkFromFiles(context = {}) {
   const files = context && context.files && typeof context.files === 'object' ? context.files : null;
   if (!files) return null;
-  for (const fileName of ['package.json', 'frontend/package.json', 'web/package.json']) {
+  for (const fileName of ['frontend/package.json', 'web/package.json', 'package.json']) {
     const source = files[fileName];
     if (typeof source !== 'string') continue;
     try {
