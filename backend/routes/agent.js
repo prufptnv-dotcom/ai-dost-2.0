@@ -53,6 +53,7 @@ const fixMemory        = require('../services/fixMemory');
 const deterministicCodeGuard = require('../services/DeterministicCodeGuard');
 const { detectCategory, buildFullstackSystemPrompt, generateGoldenScaffold } = require('../agent/fullstackTrainer');
 const { buildAppSpecification, formatAppSpecificationForPrompt, findMissingFeatureSignals } = require('../services/appSpecificationService');
+const { analyzeCodeGenerationRequest, formatCodeGenerationStrategy } = require('../agent/runtime/codeGenerationStrategy');
 const { saveProjectFile, deleteProjectFile, getProjectFiles, onWorkspaceChange } = require('../projectStore');
 const { learnNotes, retrieveNotes, formatNotes, extractRunNotes } = require('../services/copilotMemory');
 const backgroundRuns = require('../services/backgroundRuns'); // P9 background runs
@@ -767,7 +768,11 @@ async function executeTool(action, parameters, projectPath, projectFiles, onProg
           }
 
           const appSpecification = buildAppSpecification(prompt, { force: true });
-          const specificationContext = appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '';
+          const codeGenerationStrategy = analyzeCodeGenerationRequest(prompt);
+          const specificationContext = [
+            appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '',
+            formatCodeGenerationStrategy(codeGenerationStrategy),
+          ].filter(Boolean).join('\\n\\n');
           const systemPrompt = [buildFullstackSystemPrompt(prompt, category), specificationContext].filter(Boolean).join('\n\n');
           
           let parsedData = null;
@@ -3238,7 +3243,11 @@ router.post('/scaffold-wizard', async (req, res) => {
     'Selected theme: ' + (wizardConfig.theme || 'domain-appropriate theme'),
   ].filter(Boolean).join('\n\n');
   const appSpecification = buildAppSpecification(specificationRequest, { force: true });
-  const specificationContext = appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '';
+  const codeGenerationStrategy = analyzeCodeGenerationRequest(specificationRequest, { stack: stackInfo });
+  const specificationContext = [
+    appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '',
+    formatCodeGenerationStrategy(codeGenerationStrategy),
+  ].filter(Boolean).join('\\n\\n');
   const callWithTimeout = (promise, timeoutMs, message) => {
     let timer;
     return Promise.race([
