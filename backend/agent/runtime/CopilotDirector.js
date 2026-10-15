@@ -194,7 +194,7 @@ function fallbackPlan(request) {
       ]
     };
   }
-  const complex = /\\b(full|complete|entire|platform|app|application|website|dashboard|integrat|database|backend|frontend|deploy|production|security)\\b/.test(text);
+  const complex = /\b(full|complete|entire|platform|app|application|website|dashboard|integrat|database|backend|frontend|deploy|production|security)\b/.test(text);
   if (!complex) return {
     summary: 'Single-task adaptive execution',
     tasks: [{ id: 'task-1', specialty: strategy.intent.ui ? 'frontend' : 'integration', objective: `Implement working code for: ${request}`, dependsOn: [], expectedOutput: 'Working requested outcome with verification evidence.' }]
