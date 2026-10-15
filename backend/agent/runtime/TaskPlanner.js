@@ -1,4 +1,5 @@
 const logger = require('../../logger');
+const { classifyPlan } = require('./VerificationClassifier');
 
 class TaskPlanner {
   constructor({ toolRegistry, aiService, limits = {} }) {
@@ -48,7 +49,10 @@ class TaskPlanner {
       const tool = this.toolRegistry.get(step.tool);
       const permissions = Array.isArray(tool?.permissions) ? tool.permissions : [];
       const mutates = tool?.mutates === true || tool?.sideEffect === true || permissions.some((p) => /write|mutation|destructive/i.test(String(p)));
-      const readOnlyClassified = explicitlyReadOnly.has(step.tool) || /^(read|list|search|fetch|get|inspect|status|verify|check|test)/i.test(step.tool);
+      const readOnlyClassified = explicitlyReadOnly.has(step.tool) ||
+        tool?.readOnly === true ||
+        (tool && permissions.length === 0 && !mutates && !obviouslyMutating.test(step.tool)) ||
+        /^(read|list|search|fetch|get|inspect|status|verify|check|test)/i.test(step.tool);
       if (mutates || obviouslyMutating.test(step.tool) || !readOnlyClassified) {
         dropped.push(step.tool);
         continue;
@@ -59,7 +63,10 @@ class TaskPlanner {
       logger.warn(`[TaskPlanner] Verification plan sanitized — dropped ${dropped.length} non-read-only step(s): ${dropped.join(', ')}`);
     }
     if (validSteps.length === 0) {
-      logger.warn('[TaskPlanner] No read-only verification steps survived sanitization — falling back to list_directory evidence check');
+      logger.warn('[TaskPlanner] No read-only verification steps survived sanitization — falling back to inspection evidence check');
+      const fallbackTool = this.toolRegistry?.has('list_directory')
+        ? 'list_directory'
+        : (Array.from(this.toolRegistry?.tools?.keys() || [])[0] || 'list_directory');
       return {
         goal: plan.goal,
         isFallback: true,
@@ -67,17 +74,18 @@ class TaskPlanner {
         fallbackReason: 'No read-only verification steps survived sanitization',
         steps: [{
           id: 'verify_fallback_list',
-          tool: 'list_directory',
-          description: 'List the workspace root to confirm the project tree exists',
+          tool: fallbackTool,
+          description: 'Inspect the workspace state',
           input: {}
         }]
       };
     }
+    const planClassification = classifyPlan(validSteps);
     return {
       goal: plan.goal,
       steps: validSteps,
       isFallback: Boolean(plan.isFallback),
-      evidenceLevel: plan.evidenceLevel || (validSteps.every((s) => ['list_directory', 'fetch_webpage', 'web_search', 'load_skill'].includes(s.tool)) ? 'INSPECTION_ONLY' : 'FUNCTIONAL'),
+      evidenceLevel: plan.evidenceLevel || planClassification.evidenceLevel,
       fallbackReason: plan.fallbackReason || null,
     };
   }

@@ -329,7 +329,7 @@ class CopilotDirector {
         );
 
         // Execution completed all steps successfully
-        if (lastResult?.status === 'SUCCEEDED') {
+        if (lastResult?.status === 'SUCCEEDED' || lastResult?.status === 'COMPLETED' || lastResult?.status === 'UNVERIFIED' || lastResult?.status === 'PARTIAL') {
           return lastResult;
         } else {
           lastError = lastResult?.error || lastResult?.reason || 'Unknown execution failure';
@@ -435,7 +435,7 @@ class CopilotDirector {
           const executionStatus = String(executionResult?.status || '').toUpperCase();
           const taskStatus = executionStatus === 'CANCELLED'
             ? 'CANCELLED'
-            : ['SUCCEEDED', 'COMPLETED'].includes(executionStatus)
+            : ['SUCCEEDED', 'COMPLETED', 'UNVERIFIED', 'PARTIAL'].includes(executionStatus)
               ? 'SUCCEEDED'
               : 'FAILED';
           if (taskStatus === 'FAILED') {
@@ -500,8 +500,9 @@ class CopilotDirector {
         'FAILED'
       ).toUpperCase();
       const isVerifiedPassed = (rawVerificationStatus === 'SUCCEEDED' || rawVerificationStatus === 'PASSED');
-      const isUnverified = (rawVerificationStatus === 'UNVERIFIED' || rawVerificationStatus === 'PARTIAL' || rawVerificationStatus === 'SKIPPED');
-      const verificationStatus = isVerifiedPassed ? 'SUCCEEDED' : isUnverified ? 'UNVERIFIED' : 'FAILED';
+      const isPartial = (rawVerificationStatus === 'PARTIAL');
+      const isUnverified = (rawVerificationStatus === 'UNVERIFIED' || rawVerificationStatus === 'SKIPPED');
+      const verificationStatus = isVerifiedPassed ? 'SUCCEEDED' : isPartial ? 'PARTIAL' : isUnverified ? 'UNVERIFIED' : 'FAILED';
       const verificationSummary = String(
         finalVerification?.result?.summary || finalVerification?.summary || finalVerification?.message || ''
       ).trim().slice(0, 400);
@@ -514,7 +515,9 @@ class CopilotDirector {
         workerRunId: verifier.workerRun.id,
         summary: verificationSummary || (isUnverified
           ? 'Verification unverified: only passive workspace file inspection was performed; no build, automated tests, or functional checks executed.'
-          : undefined),
+          : isPartial
+            ? 'Verification partial: build, visual, or automated test checks passed, but requirement functional acceptance checks remain untested.'
+            : undefined),
         artifact_refs: verificationArtifacts,
         result: finalVerification
       });
@@ -526,7 +529,7 @@ class CopilotDirector {
         ...results.flatMap((item) => item.result?.result?.artifact_refs || item.result?.artifact_refs || []),
         ...verificationArtifacts
       ].filter((ref, index, all) => typeof ref === 'string' && ref.trim() && all.indexOf(ref) === index).slice(0, 10);
-      const incompleteTasks = results.filter((item) => item.status !== 'SUCCEEDED');
+      const incompleteTasks = results.filter((item) => !['SUCCEEDED', 'COMPLETED', 'UNVERIFIED', 'PARTIAL'].includes(item.status));
       if (incompleteTasks.length > 0) {
         const taskSummary = incompleteTasks
           .slice(0, 8)
@@ -557,13 +560,13 @@ class CopilotDirector {
           summary,
           artifact_refs: artifactRefs,
           context_refs: [],
-          verification_status: isUnverified ? 'UNVERIFIED' : 'PASSED',
+          verification_status: isUnverified ? 'UNVERIFIED' : isPartial ? 'PARTIAL' : 'PASSED',
           errors: [{ code: 'INCOMPLETE_PLAN', message: summary.slice(0, 256) }]
         });
       }
 
-      const directorStatus = isUnverified ? 'UNVERIFIED' : 'SUCCEEDED';
-      const canonicalVerificationStatus = isUnverified ? 'UNVERIFIED' : 'PASSED';
+      const directorStatus = isPartial ? 'PARTIAL' : isUnverified ? 'UNVERIFIED' : 'SUCCEEDED';
+      const canonicalVerificationStatus = isPartial ? 'PARTIAL' : isUnverified ? 'UNVERIFIED' : 'PASSED';
 
       this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
       this.agentRunDao.updateStatus(supervisorRunId, directorStatus);
@@ -577,7 +580,9 @@ class CopilotDirector {
           status: verificationStatus,
           summary: verificationSummary || (isUnverified
             ? 'Verification unverified: only passive workspace file inspection was performed; no build, automated tests, or functional checks executed.'
-            : 'Final verification passed.'),
+            : isPartial
+              ? 'Verification partial: build, visual, or automated test checks passed, but requirement functional acceptance checks remain untested.'
+              : 'Final verification passed.'),
           artifact_refs: verificationArtifacts
         }
       };
@@ -586,7 +591,9 @@ class CopilotDirector {
         status: 'COMPLETED',
         summary: isUnverified
           ? `Director completed ${plan.tasks.length} adaptive task(s); verification UNVERIFIED (passive file inspection only, no build or automated tests executed).`
-          : `Director completed ${plan.tasks.length} adaptive task(s) and final verification.`,
+          : isPartial
+            ? `Director completed ${plan.tasks.length} adaptive task(s); verification PARTIAL (build/tests passed, requirement acceptance untested).`
+            : `Director completed ${plan.tasks.length} adaptive task(s) and final verification.`,
         artifact_refs: artifactRefs,
         context_refs: [],
         verification_status: canonicalVerificationStatus,

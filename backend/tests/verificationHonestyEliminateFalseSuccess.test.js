@@ -29,9 +29,52 @@ const ChatPlannerExecutionLoop = require('../agent/runtime/ChatPlannerExecutionL
 const TaskPlanner = require('../agent/runtime/TaskPlanner');
 const AgentCoordinator = require('../agent/runtime/AgentCoordinator');
 const { CopilotDirector } = require('../agent/runtime/CopilotDirector');
+const {
+  EVIDENCE_CATEGORIES,
+  classifyTool,
+  classifyPlan,
+  evaluateVerificationRun
+} = require('../agent/runtime/VerificationClassifier');
+
+// Ensure extra verification tools are registered in toolRegistry for deterministic testing
+function ensureTestToolsRegistered() {
+  if (!toolRegistry.has('search_codebase')) {
+    toolRegistry.register({
+      name: 'search_codebase',
+      description: 'Search workspace files for tokens or AST nodes',
+      permissions: ['read'],
+      execute: async (input) => ({ success: true, matches: [{ file: 'index.js', line: 1 }] })
+    });
+  }
+  if (!toolRegistry.has('sandbox_dev_build')) {
+    toolRegistry.register({
+      name: 'sandbox_dev_build',
+      description: 'Build or compile the workspace application',
+      permissions: ['read', 'execute'],
+      execute: async (input) => ({ success: true, buildOutput: 'Compiled successfully in 420ms', errorCount: 0 })
+    });
+  }
+  if (!toolRegistry.has('run_tests')) {
+    toolRegistry.register({
+      name: 'run_tests',
+      description: 'Run automated test suites',
+      permissions: ['read', 'execute'],
+      execute: async (input) => ({ success: true, total: 12, passed: 12, failed: 0 })
+    });
+  }
+  if (!toolRegistry.has('verify_project')) {
+    toolRegistry.register({
+      name: 'verify_project',
+      description: 'Verify project against requirement-level functional acceptance criteria',
+      permissions: ['read', 'execute'],
+      execute: async (input) => ({ success: true, verified: true, functionalAcceptanceSatisfied: true })
+    });
+  }
+}
 
 async function setupDirectorEnvironment(customVerificationPlanFn) {
   await registerAll();
+  ensureTestToolsRegistered();
   const db = initDatabase();
 
   const userDao = new UserDAO(db);
@@ -97,11 +140,9 @@ async function setupDirectorEnvironment(customVerificationPlanFn) {
       steps: [{ id: 's1', tool: 'list_directory', description: 'Inspect directory', input: { path: '.' } }]
     }),
     generateVerificationPlan: async (goal, context) => {
-      // If called for director final verification gate (role: VERIFIER)
       if (context?.role === 'VERIFIER') {
         return customVerificationPlanFn(goal, context);
       }
-      // For intermediate worker steps, return a basic list_directory check
       return {
         goal: 'Worker step verify',
         steps: [{ id: 'v-step', tool: 'list_directory', description: 'Verify workspace exists', input: { path: '.' } }]
@@ -157,128 +198,311 @@ async function setupDirectorEnvironment(customVerificationPlanFn) {
   return { director, userId: user.id, projectId: project.id, workspaceManager };
 }
 
-test('Regression: Fallback list_directory verification MUST NOT produce SUCCEEDED or QA Passed', async () => {
-  const events = [];
-  const onEvent = (evt) => events.push(evt);
+// -----------------------------------------------------------------------------
+// PART 1: VerificationClassifier Unit Tests (Evidence Classification & Decision Path)
+// -----------------------------------------------------------------------------
 
-  // Simulates verification planner falling back to list_directory
-  const fallbackListDirectoryVerification = async () => ({
-    goal: 'Verify outcome',
-    isFallback: true,
-    evidenceLevel: 'INSPECTION_ONLY',
-    fallbackReason: 'Verification plan generation failed; fell back to directory inspection',
-    steps: [{ id: 'step-verify-files', tool: 'list_directory', description: 'Inspect workspace files', input: { path: '.' } }]
-  });
+test('VerificationClassifier: Classifies tool names into explicit evidence categories', () => {
+  assert.equal(classifyTool('list_directory'), EVIDENCE_CATEGORIES.INSPECTION);
+  assert.equal(classifyTool('read_file'), EVIDENCE_CATEGORIES.INSPECTION);
+  assert.equal(classifyTool('search_codebase'), EVIDENCE_CATEGORIES.INSPECTION);
+  assert.equal(classifyTool('fetch_webpage'), EVIDENCE_CATEGORIES.INSPECTION);
+  assert.equal(classifyTool('load_skill'), EVIDENCE_CATEGORIES.INSPECTION);
 
-  const { director, userId, projectId } = await setupDirectorEnvironment(fallbackListDirectoryVerification);
+  assert.equal(classifyTool('sandbox_dev_build'), EVIDENCE_CATEGORIES.BUILD);
+  assert.equal(classifyTool('build_project'), EVIDENCE_CATEGORIES.BUILD);
 
-  const result = await director.run({
-    userId,
-    projectId,
-    request: 'Build a SaaS dashboard with interactive charts and export',
-    onEvent
-  });
+  assert.equal(classifyTool('take_screenshot'), EVIDENCE_CATEGORIES.VISUAL);
+  assert.equal(classifyTool('browser_screenshot'), EVIDENCE_CATEGORIES.VISUAL);
 
-  // Collect verification and completion events
-  const verifyEvents = events.filter((e) => e.type === 'director_verification');
-  const completeEvents = events.filter((e) => e.type === 'director_complete');
+  assert.equal(classifyTool('run_tests'), EVIDENCE_CATEGORIES.TEST);
+  assert.equal(classifyTool('test_project'), EVIDENCE_CATEGORIES.TEST);
 
-  const finalVerifyEvent = verifyEvents[verifyEvents.length - 1];
-  const finalCompleteEvent = completeEvents[completeEvents.length - 1];
+  assert.equal(classifyTool('verify_project'), EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE);
+  assert.equal(classifyTool('verify_functional_acceptance'), EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE);
 
-  // 1. Assert director_verification does NOT claim SUCCEEDED or PASSED
-  assert.ok(finalVerifyEvent, 'Must emit director_verification event');
-  assert.notEqual(finalVerifyEvent.status, 'SUCCEEDED', 'Verification event status MUST NOT be SUCCEEDED for list_directory fallback');
-  assert.equal(finalVerifyEvent.status, 'UNVERIFIED', 'Verification event status MUST be UNVERIFIED when only list_directory runs');
-
-  // 2. Assert director_complete does NOT claim SUCCEEDED
-  assert.ok(finalCompleteEvent, 'Must emit director_complete event');
-  assert.notEqual(finalCompleteEvent.status, 'SUCCEEDED', 'Director completion MUST NOT be SUCCEEDED when verification is unverified');
-  assert.equal(finalCompleteEvent.status, 'UNVERIFIED', 'Director completion status MUST be UNVERIFIED');
-
-  // 3. Assert ResultValidator returned verification_status is UNVERIFIED
-  assert.notEqual(result.verification_status, 'PASSED', 'Result verification_status MUST NOT be PASSED');
-  assert.equal(result.verification_status, 'UNVERIFIED', 'Result verification_status MUST be UNVERIFIED');
-
-  // 4. Assert explanation of missing functional evidence
-  assert.match(
-    finalCompleteEvent.verification?.summary || result.summary,
-    /unverified|passive|inspection/i,
-    'Must explain that only passive inspection occurred and functional evidence is missing'
-  );
+  // Unknown tools default conservatively to INSPECTION, never assumed functional
+  assert.equal(classifyTool('unknown_custom_inspector'), EVIDENCE_CATEGORIES.INSPECTION);
 });
 
-test('Functional Verification: Genuine functional check that passes produces SUCCEEDED and PASSED', async () => {
+test('VerificationClassifier: Evaluation Case 1 — list_directory only → UNVERIFIED', () => {
+  const result = evaluateVerificationRun({
+    executedSteps: [{ tool: 'list_directory', input: { path: '.' }, output: { entries: ['index.html'] }, success: true }]
+  });
+  assert.equal(result.status, 'UNVERIFIED');
+  assert.equal(result.verification_status, 'UNVERIFIED');
+  assert.equal(result.evidenceLevel, 'INSPECTION_ONLY');
+  assert.equal(result.acceptanceStatus, 'NOT_EVALUATED');
+  assert.match(result.summary, /passive workspace inspection/i);
+});
+
+test('VerificationClassifier: Evaluation Case 2 — read_file only → UNVERIFIED', () => {
+  const result = evaluateVerificationRun({
+    executedSteps: [{ tool: 'read_file', input: { path: 'package.json' }, output: { content: '{"name":"app"}' }, success: true }]
+  });
+  assert.equal(result.status, 'UNVERIFIED');
+  assert.equal(result.verification_status, 'UNVERIFIED');
+  assert.equal(result.evidenceLevel, 'INSPECTION_ONLY');
+  assert.equal(result.acceptanceStatus, 'NOT_EVALUATED');
+});
+
+test('VerificationClassifier: Evaluation Case 3 — list_directory + read_file → UNVERIFIED (Reading package.json is NOT functional verification)', () => {
+  const result = evaluateVerificationRun({
+    executedSteps: [
+      { tool: 'list_directory', input: { path: '.' }, output: { entries: ['package.json'] }, success: true },
+      { tool: 'read_file', input: { path: 'package.json' }, output: { content: '{"name":"app"}' }, success: true }
+    ]
+  });
+  assert.equal(result.status, 'UNVERIFIED');
+  assert.equal(result.verification_status, 'UNVERIFIED');
+  assert.equal(result.evidenceLevel, 'INSPECTION_ONLY');
+  assert.equal(result.acceptanceStatus, 'NOT_EVALUATED');
+});
+
+test('VerificationClassifier: Evaluation Case 4 — search_codebase only → UNVERIFIED', () => {
+  const result = evaluateVerificationRun({
+    executedSteps: [{ tool: 'search_codebase', input: { query: 'export default' }, output: { matches: [] }, success: true }]
+  });
+  assert.equal(result.status, 'UNVERIFIED');
+  assert.equal(result.verification_status, 'UNVERIFIED');
+  assert.equal(result.evidenceLevel, 'INSPECTION_ONLY');
+  assert.equal(result.acceptanceStatus, 'NOT_EVALUATED');
+});
+
+test('VerificationClassifier: Evaluation Case 5 — Real build/test tool passing → PARTIAL, acceptanceStatus: NOT_EVALUATED', () => {
+  // Build passed
+  const buildResult = evaluateVerificationRun({
+    executedSteps: [
+      { tool: 'list_directory', input: {}, output: {}, success: true },
+      { tool: 'sandbox_dev_build', input: {}, output: { success: true }, success: true }
+    ]
+  });
+  assert.equal(buildResult.status, 'PARTIAL');
+  assert.equal(buildResult.verification_status, 'PARTIAL');
+  assert.equal(buildResult.evidenceLevel, 'BUILD_PASSED_ACCEPTANCE_UNTESTED');
+  assert.equal(buildResult.acceptanceStatus, 'NOT_EVALUATED');
+  assert.match(buildResult.summary, /build passed, but requirement-level functional acceptance/i);
+
+  // Test passed
+  const testResult = evaluateVerificationRun({
+    executedSteps: [
+      { tool: 'read_file', input: { path: 'app.js' }, output: {}, success: true },
+      { tool: 'run_tests', input: {}, output: { passed: 5 }, success: true }
+    ]
+  });
+  assert.equal(testResult.status, 'PARTIAL');
+  assert.equal(testResult.verification_status, 'PARTIAL');
+  assert.equal(testResult.evidenceLevel, 'TEST_PASSED_ACCEPTANCE_UNTESTED');
+  assert.equal(testResult.acceptanceStatus, 'NOT_EVALUATED');
+});
+
+test('VerificationClassifier: Evaluation Case 6 — Explicit functional acceptance checks pass → SUCCEEDED and SATISFIED', () => {
+  const result = evaluateVerificationRun({
+    executedSteps: [
+      { tool: 'list_directory', input: {}, output: {}, success: true },
+      { tool: 'sandbox_dev_build', input: {}, output: { success: true }, success: true },
+      { tool: 'verify_project', input: { requirements: ['charts', 'export'] }, output: { success: true, satisfied: true }, success: true }
+    ]
+  });
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.equal(result.verification_status, 'PASSED');
+  assert.equal(result.evidenceLevel, 'FUNCTIONAL_ACCEPTANCE');
+  assert.equal(result.acceptanceStatus, 'SATISFIED');
+});
+
+test('VerificationClassifier: Evaluation Case 7 — Tool failure or unconfirmed check MUST NEVER produce green QA pass', () => {
+  // Negative 1: explicit success:false in output
+  const failOutputResult = evaluateVerificationRun({
+    executedSteps: [
+      { tool: 'list_directory', input: {}, output: {}, success: true },
+      { tool: 'sandbox_dev_build', input: {}, output: { success: false, error: 'SyntaxError: Unexpected token' }, success: false }
+    ]
+  });
+  assert.equal(failOutputResult.status, 'FAILED');
+  assert.equal(failOutputResult.verification_status, 'FAILED');
+  assert.equal(failOutputResult.acceptanceStatus, 'FAILED');
+
+  // Negative 2: step threw an error
+  const failErrorResult = evaluateVerificationRun({
+    executedSteps: [
+      { tool: 'verify_project', input: {}, error: 'Connection refused to dev server', success: false }
+    ]
+  });
+  assert.equal(failErrorResult.status, 'FAILED');
+  assert.equal(failErrorResult.verification_status, 'FAILED');
+  assert.equal(failErrorResult.acceptanceStatus, 'FAILED');
+
+  // Negative 3: Empty verification steps
+  const emptyResult = evaluateVerificationRun({ executedSteps: [] });
+  assert.equal(emptyResult.status, 'UNVERIFIED');
+  assert.equal(emptyResult.acceptanceStatus, 'NOT_EVALUATED');
+});
+
+// -----------------------------------------------------------------------------
+// PART 2: CopilotDirector End-to-End Integration Tests
+// -----------------------------------------------------------------------------
+
+test('Director Integration: list_directory only → verification UNVERIFIED', async () => {
   const events = [];
   const onEvent = (evt) => events.push(evt);
 
-  // Simulates verification plan with functional verification step that passes
-  const functionalVerification = async () => ({
+  const listDirVerification = async () => ({
     goal: 'Verify outcome',
-    isFunctional: true,
-    steps: [
-      { id: 'step-check-files', tool: 'list_directory', description: 'Inspect files', input: { path: '.' } },
-      { id: 'step-verify-content', tool: 'read_file', description: 'Read created file', input: { path: 'package.json' } }
-    ]
+    steps: [{ id: 'v1', tool: 'list_directory', description: 'Inspect files', input: { path: '.' } }]
   });
 
-  const { director, userId, projectId, workspaceManager } = await setupDirectorEnvironment(functionalVerification);
+  const { director, userId, projectId } = await setupDirectorEnvironment(listDirVerification);
+  const result = await director.run({ userId, projectId, request: 'Build SaaS dashboard', onEvent });
 
-  // Write a real package.json in workspace so read_file succeeds
+  const finalVerifyEvent = events.filter((e) => e.type === 'director_verification').pop();
+  const finalCompleteEvent = events.filter((e) => e.type === 'director_complete').pop();
+
+  assert.equal(finalVerifyEvent.status, 'UNVERIFIED');
+  assert.equal(finalCompleteEvent.status, 'UNVERIFIED');
+  assert.equal(result.verification_status, 'UNVERIFIED');
+});
+
+test('Director Integration: read_file only → verification UNVERIFIED (even when file exists)', async () => {
+  const events = [];
+  const onEvent = (evt) => events.push(evt);
+
+  const readFileVerification = async () => ({
+    goal: 'Verify outcome',
+    steps: [{ id: 'v1', tool: 'read_file', description: 'Read index.html', input: { path: 'index.html' } }]
+  });
+
+  const { director, userId, projectId, workspaceManager } = await setupDirectorEnvironment(readFileVerification);
   const wsDir = workspaceManager.getWorkspacePath(projectId);
   fs.mkdirSync(wsDir, { recursive: true });
-  fs.writeFileSync(path.join(wsDir, 'package.json'), JSON.stringify({ name: 'test-app' }));
+  fs.writeFileSync(path.join(wsDir, 'index.html'), '<!DOCTYPE html><html><body>Test</body></html>');
 
-  const result = await director.run({
-    userId,
-    projectId,
-    request: 'Build a SaaS dashboard with package.json',
-    onEvent
-  });
+  const result = await director.run({ userId, projectId, request: 'Build landing page', onEvent });
 
-  const verifyEvents = events.filter((e) => e.type === 'director_verification');
-  const completeEvents = events.filter((e) => e.type === 'director_complete');
+  const finalVerifyEvent = events.filter((e) => e.type === 'director_verification').pop();
+  const finalCompleteEvent = events.filter((e) => e.type === 'director_complete').pop();
 
-  const finalVerifyEvent = verifyEvents[verifyEvents.length - 1];
-  const finalCompleteEvent = completeEvents[completeEvents.length - 1];
-
-  assert.ok(finalVerifyEvent, 'Must emit director_verification event');
-  assert.equal(finalVerifyEvent.status, 'SUCCEEDED', 'Verification event status MUST be SUCCEEDED for passing functional check');
-
-  assert.ok(finalCompleteEvent, 'Must emit director_complete event');
-  assert.equal(finalCompleteEvent.status, 'SUCCEEDED', 'Director complete MUST be SUCCEEDED for passing functional check');
-  assert.equal(result.verification_status, 'PASSED', 'Result verification_status MUST be PASSED');
+  assert.equal(finalVerifyEvent.status, 'UNVERIFIED');
+  assert.equal(finalCompleteEvent.status, 'UNVERIFIED');
+  assert.equal(result.verification_status, 'UNVERIFIED');
 });
 
-test('Functional Verification: Verification check that fails produces FAILED', async () => {
+test('Director Integration: list_directory + read_file (package.json) → verification UNVERIFIED', async () => {
   const events = [];
   const onEvent = (evt) => events.push(evt);
 
-  // Simulates verification step that fails (file does not exist)
-  const failingFunctionalVerification = async () => ({
+  const inspectionVerification = async () => ({
     goal: 'Verify outcome',
     steps: [
-      { id: 'step-check-missing', tool: 'read_file', description: 'Read missing file', input: { path: 'non_existent_file.xyz' } }
+      { id: 'v1', tool: 'list_directory', description: 'Inspect workspace files', input: { path: '.' } },
+      { id: 'v2', tool: 'read_file', description: 'Read package.json', input: { path: 'package.json' } }
     ]
   });
 
-  const { director, userId, projectId } = await setupDirectorEnvironment(failingFunctionalVerification);
+  const { director, userId, projectId, workspaceManager } = await setupDirectorEnvironment(inspectionVerification);
+  const wsDir = workspaceManager.getWorkspacePath(projectId);
+  fs.mkdirSync(wsDir, { recursive: true });
+  fs.writeFileSync(path.join(wsDir, 'package.json'), JSON.stringify({ name: 'test-app', version: '1.0.0' }));
+
+  const result = await director.run({ userId, projectId, request: 'Build SaaS dashboard with package.json', onEvent });
+
+  const finalVerifyEvent = events.filter((e) => e.type === 'director_verification').pop();
+  const finalCompleteEvent = events.filter((e) => e.type === 'director_complete').pop();
+
+  assert.notEqual(finalVerifyEvent.status, 'SUCCEEDED', 'Reading package.json must not be misclassified as SUCCEEDED');
+  assert.equal(finalVerifyEvent.status, 'UNVERIFIED');
+  assert.equal(finalCompleteEvent.status, 'UNVERIFIED');
+  assert.equal(result.verification_status, 'UNVERIFIED');
+});
+
+test('Director Integration: search_codebase only → verification UNVERIFIED', async () => {
+  const events = [];
+  const onEvent = (evt) => events.push(evt);
+
+  const searchVerification = async () => ({
+    goal: 'Verify outcome',
+    steps: [{ id: 'v1', tool: 'search_codebase', description: 'Search component code', input: { query: 'Dashboard' } }]
+  });
+
+  const { director, userId, projectId } = await setupDirectorEnvironment(searchVerification);
+  const result = await director.run({ userId, projectId, request: 'Build Dashboard', onEvent });
+
+  const finalVerifyEvent = events.filter((e) => e.type === 'director_verification').pop();
+  const finalCompleteEvent = events.filter((e) => e.type === 'director_complete').pop();
+
+  assert.equal(finalVerifyEvent.status, 'UNVERIFIED');
+  assert.equal(finalCompleteEvent.status, 'UNVERIFIED');
+  assert.equal(result.verification_status, 'UNVERIFIED');
+});
+
+test('Director Integration: Build or test check passes → verification PARTIAL (does not claim full functional acceptance)', async () => {
+  const events = [];
+  const onEvent = (evt) => events.push(evt);
+
+  const buildVerification = async () => ({
+    goal: 'Verify outcome',
+    steps: [
+      { id: 'v1', tool: 'list_directory', description: 'List files', input: { path: '.' } },
+      { id: 'v2', tool: 'sandbox_dev_build', description: 'Compile project', input: {} }
+    ]
+  });
+
+  const { director, userId, projectId } = await setupDirectorEnvironment(buildVerification);
+  const result = await director.run({ userId, projectId, request: 'Build app', onEvent });
+
+  const finalVerifyEvent = events.filter((e) => e.type === 'director_verification').pop();
+  const finalCompleteEvent = events.filter((e) => e.type === 'director_complete').pop();
+
+  assert.equal(finalVerifyEvent.status, 'PARTIAL');
+  assert.equal(finalCompleteEvent.status, 'PARTIAL');
+  assert.equal(result.verification_status, 'PARTIAL');
+  assert.match(finalVerifyEvent.summary, /partial|acceptance/i);
+});
+
+test('Director Integration: Explicit functional acceptance check passes → verification SUCCEEDED and PASSED', async () => {
+  const events = [];
+  const onEvent = (evt) => events.push(evt);
+
+  const functionalVerification = async () => ({
+    goal: 'Verify outcome',
+    steps: [
+      { id: 'v1', tool: 'list_directory', description: 'List files', input: { path: '.' } },
+      { id: 'v2', tool: 'sandbox_dev_build', description: 'Compile project', input: {} },
+      { id: 'v3', tool: 'verify_project', description: 'Verify functional requirements', input: { features: ['auth', 'dashboard'] } }
+    ]
+  });
+
+  const { director, userId, projectId } = await setupDirectorEnvironment(functionalVerification);
+  const result = await director.run({ userId, projectId, request: 'Build and verify app', onEvent });
+
+  const finalVerifyEvent = events.filter((e) => e.type === 'director_verification').pop();
+  const finalCompleteEvent = events.filter((e) => e.type === 'director_complete').pop();
+
+  assert.equal(finalVerifyEvent.status, 'SUCCEEDED');
+  assert.equal(finalCompleteEvent.status, 'SUCCEEDED');
+  assert.equal(result.verification_status, 'PASSED');
+});
+
+test('Director Integration: Verification check fails → verification FAILED (never produces green pass)', async () => {
+  const events = [];
+  const onEvent = (evt) => events.push(evt);
+
+  const failingVerification = async () => ({
+    goal: 'Verify outcome',
+    steps: [
+      { id: 'v1', tool: 'read_file', description: 'Read missing file', input: { path: 'non_existent_file.xyz' } }
+    ]
+  });
+
+  const { director, userId, projectId } = await setupDirectorEnvironment(failingVerification);
 
   await assert.rejects(
     async () => {
-      await director.run({
-        userId,
-        projectId,
-        request: 'Build a SaaS dashboard expecting non_existent_file.xyz',
-        onEvent
-      });
+      await director.run({ userId, projectId, request: 'Build app with missing file', onEvent });
     },
-    /Final Director verification gate failed|did not pass|Verification failed/i
+    /Final Director verification gate did not pass|Verification failed/i
   );
 
-  const verifyEvents = events.filter((e) => e.type === 'director_verification');
-  const finalVerifyEvent = verifyEvents[verifyEvents.length - 1];
-
+  const finalVerifyEvent = events.filter((e) => e.type === 'director_verification').pop();
   assert.ok(finalVerifyEvent, 'Must emit director_verification event');
-  assert.equal(finalVerifyEvent.status, 'FAILED', 'Verification event status MUST be FAILED');
+  assert.equal(finalVerifyEvent.status, 'FAILED');
 });
