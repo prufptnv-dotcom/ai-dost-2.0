@@ -16,6 +16,7 @@ const {
   buildAlgorithmGuidanceBlock,
   validateTaskPlanSchema
 } = require('./codeGenerationStrategy');
+const { resolveCanonicalCase, CANONICAL_CASE_IDS } = require('../../quality-evaluation/canonicalCaseResolver');
 const { AlgorithmVerifier } = require('../../quality-evaluation/algorithmVerifier');
 const { GeneratedAppQualityGate, STATUS } = require('../../quality-evaluation/generatedAppQualityGate');
 const { TrustedExecutionService } = require('../../quality-evaluation/trustedExecutionService');
@@ -698,7 +699,8 @@ class CopilotDirector {
         }
       }
 
-      const classification = classifyRequest(request);
+      const classification = classifyRequest(request, { files: finalFiles });
+      const canonicalResolution = resolveCanonicalCase(request, finalFiles);
       let algorithmVerificationOutcome = null;
 
       // ── Layer A: Algorithm Oracle Verification Path ──
@@ -713,9 +715,10 @@ class CopilotDirector {
               const err = `Algorithm oracle verification failed for [${oracleName}]: ${algoResult.error || 'Test failure'}`;
               onEvent({ type: 'director_verification', status: 'FAILED', error: err, algorithmResult: algoResult });
               throw new Error(err);
+            } else {
+              algorithmVerificationOutcome = { verified: true, oracle: oracleName, algoResult };
+              onEvent({ type: 'director_verification', status: 'SUCCEEDED', oracle: oracleName, algorithmResult: algoResult });
             }
-            algorithmVerificationOutcome = { verified: true, oracle: oracleName, algoResult };
-            onEvent({ type: 'director_verification', status: 'SUCCEEDED', oracle: oracleName, algorithmResult: algoResult });
           } else {
             const err = `No candidate implementation found for algorithm [${oracleName}] in workspace`;
             onEvent({ type: 'director_verification', status: 'FAILED', error: err });
@@ -737,31 +740,42 @@ class CopilotDirector {
       );
 
       if (isAppGeneration && meta?.diskPath) {
-        try {
-          const evidence = await this.trustedRunner.execute({
-            projectDir: meta.diskPath,
-            files: finalFiles,
-            runId: supervisorRunId
-          });
-          const gateResult = await this.qualityGate.evaluate({
-            projectDir: meta.diskPath,
-            files: finalFiles,
-            caseId: classification.canonicalCase || 'landing_page',
-            runId: supervisorRunId,
-            executionEvidence: evidence
-          });
-          qualityGateOutcome = gateResult;
-          onEvent({ type: 'quality_gate_evaluation', status: gateResult.status, gateResult });
+        if (canonicalResolution.canonicalCase) {
+          try {
+            const evidence = await this.trustedRunner.execute({
+              projectDir: meta.diskPath,
+              files: finalFiles,
+              runId: supervisorRunId
+            });
+            const gateResult = await this.qualityGate.evaluate({
+              projectDir: meta.diskPath,
+              files: finalFiles,
+              caseId: canonicalResolution.canonicalCase,
+              runId: supervisorRunId,
+              executionEvidence: evidence
+            });
+            qualityGateOutcome = gateResult;
+            onEvent({ type: 'quality_gate_evaluation', status: gateResult.status, gateResult });
 
-          if (gateResult.status === STATUS.FAILED) {
-            const detail = (gateResult.defects || []).map((d) => d.detail).join('; ') || 'Quality gate validation failed';
-            throw new Error(`Generated app quality gate failed: ${detail}`);
+            if (gateResult.status === STATUS.FAILED) {
+              const detail = (gateResult.defects || []).map((d) => d.detail).join('; ') || 'Quality gate validation failed';
+              const err = `Generated app quality gate failed: ${detail}`;
+              onEvent({ type: 'quality_gate_evaluation', status: STATUS.FAILED, error: err });
+              throw new Error(err);
+            }
+          } catch (err) {
+            // Fail closed! Missing runner secret, artifact mutation, failed build/tests must NOT be swallowed as warnings
+            onEvent({ type: 'quality_gate_evaluation', status: STATUS.FAILED, error: err.message });
+            logger.warn(`[CopilotDirector] Quality gate failure recorded: ${err.message}`);
+            if (err.message && err.message.startsWith('Generated app quality gate failed')) {
+              throw err;
+            }
+            throw new Error(`Generated app quality gate failed: ${err.message}`);
           }
-        } catch (err) {
-          if (err.message && err.message.startsWith('Generated app quality gate failed')) {
-            throw err;
-          }
-          logger.warn(`[CopilotDirector] Quality gate warning: ${err.message}`);
+        } else {
+          // Request does not match a canonical benchmark: report NOT_EVALUATED honestly without failing the generation
+          qualityGateOutcome = { status: STATUS.NOT_EVALUATED, reason: canonicalResolution.reason };
+          onEvent({ type: 'quality_gate_evaluation', status: STATUS.NOT_EVALUATED, reason: canonicalResolution.reason });
         }
       }
 
@@ -824,6 +838,66 @@ class CopilotDirector {
         });
       }
 
+      // Fail closed: algorithm verification failure
+      if (algorithmVerificationOutcome && algorithmVerificationOutcome.failed) {
+        const summary = `Algorithm verification failed: ${algorithmVerificationOutcome.error || 'Test failure'}`.slice(0, 480);
+        this.agentTaskDao.updateStatus(supervisorTaskId, 'FAILED');
+        this.agentRunDao.updateStatus(supervisorRunId, 'FAILED', summary, null, new Date().toISOString());
+        const completion = {
+          type: 'director_complete',
+          status: 'FAILED',
+          taskId: supervisorTaskId,
+          runId: supervisorRunId,
+          taskCount: plan.tasks.length,
+          message: summary,
+          summary,
+          verification: {
+            status: 'FAILED',
+            summary,
+            artifact_refs: verificationArtifacts
+          }
+        };
+        onEvent(completion);
+        return ResultValidator.validate({
+          status: 'FAILED',
+          summary,
+          artifact_refs: artifactRefs,
+          context_refs: [],
+          verification_status: 'FAILED',
+          errors: [{ code: 'ALGORITHM_VERIFICATION_FAILED', message: summary.slice(0, 256) }]
+        });
+      }
+
+      // Fail closed: quality gate failure (verifier worker cannot convert failure to success)
+      if (qualityGateOutcome && qualityGateOutcome.status === STATUS.FAILED) {
+        const summary = `Generated app quality gate failed: ${qualityGateOutcome.error || 'Quality gate defects detected'}`.slice(0, 480);
+        this.agentTaskDao.updateStatus(supervisorTaskId, 'FAILED');
+        this.agentRunDao.updateStatus(supervisorRunId, 'FAILED', summary, null, new Date().toISOString());
+        const completion = {
+          type: 'director_complete',
+          status: 'FAILED',
+          taskId: supervisorTaskId,
+          runId: supervisorRunId,
+          taskCount: plan.tasks.length,
+          message: summary,
+          summary,
+          verification: {
+            status: 'FAILED',
+            summary,
+            artifact_refs: verificationArtifacts
+          }
+        };
+        onEvent(completion);
+        return ResultValidator.validate({
+          status: 'FAILED',
+          summary,
+          artifact_refs: artifactRefs,
+          context_refs: [],
+          verification_status: 'FAILED',
+          errors: [{ code: 'QUALITY_GATE_FAILED', message: summary.slice(0, 256) }]
+        });
+      }
+
       if (qualityGateOutcome && qualityGateOutcome.status === STATUS.PARTIAL) {
         const summary = `Director completed tasks with PARTIAL verification (acceptance criteria or build evidence incomplete).`;
         this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
@@ -848,6 +922,33 @@ class CopilotDirector {
           context_refs: [],
           verification_status: 'PARTIAL',
           errors: [{ code: 'PARTIAL_VERIFICATION', message: 'Required acceptance criteria or execution evidence incomplete.' }]
+        });
+      }
+
+      if (qualityGateOutcome && qualityGateOutcome.status === STATUS.NOT_EVALUATED) {
+        const summary = `Director completed tasks (canonical benchmark: NOT_EVALUATED - ${qualityGateOutcome.reason || 'unmatched scope'}).`;
+        this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
+        this.agentRunDao.updateStatus(supervisorRunId, 'SUCCEEDED');
+        const completion = {
+          type: 'director_complete',
+          status: 'COMPLETED',
+          taskId: supervisorTaskId,
+          runId: supervisorRunId,
+          taskCount: plan.tasks.length,
+          verification: {
+            status: 'UNVERIFIED',
+            summary: qualityGateOutcome.reason || 'Benchmark scope not evaluated.',
+            artifact_refs: verificationArtifacts
+          }
+        };
+        onEvent(completion);
+        return ResultValidator.validate({
+          status: 'COMPLETED',
+          summary,
+          artifact_refs: artifactRefs,
+          context_refs: [],
+          verification_status: 'UNVERIFIED',
+          errors: []
         });
       }
 

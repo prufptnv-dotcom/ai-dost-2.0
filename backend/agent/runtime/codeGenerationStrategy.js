@@ -1,5 +1,7 @@
 'use strict';
 
+const { resolveCanonicalCase, CANONICAL_CASE_IDS } = require('../../quality-evaluation/canonicalCaseResolver');
+
 const FRAMEWORKS = [
   ['Next.js', /\bnext(?:\.js)?\b/i],
   ['React', /\breact\b/i],
@@ -734,7 +736,7 @@ registerAlgorithmFamily({
 /**
  * Classify a prompt into routine edit vs algorithmic vs application feature.
  */
-function classifyRequest(request = '') {
+function classifyRequest(request = '', context = {}) {
   const text = String(request || '').trim();
   const lower = text.toLowerCase();
   if (!text) return { kind: 'ROUTINE_EDIT', isRoutine: true, strategy: 'FAST_PATH', family: null };
@@ -804,6 +806,7 @@ function classifyRequest(request = '') {
   }
 
   // Full-stack / Feature request
+  const canonicalRes = resolveCanonicalCase(request, context?.files || {});
   return {
     kind: 'APPLICATION_FEATURE',
     category: 'APPLICATION_FEATURE',
@@ -811,7 +814,10 @@ function classifyRequest(request = '') {
     multiTask: true,
     strategy: 'STANDARD_ENGINEERING',
     family: null,
-    familyName: null
+    familyName: null,
+    canonicalCase: canonicalRes.canonicalCase,
+    canonicalStatus: canonicalRes.status,
+    canonicalReason: canonicalRes.reason
   };
 }
 
@@ -1175,6 +1181,8 @@ module.exports = {
   ALGORITHM_FAMILIES,
   registerAlgorithmFamily,
   classifyRequest,
+  resolveCanonicalCase,
+  CANONICAL_CASE_IDS,
   deriveAlgorithmTaskContract,
   buildAlgorithmGuidanceBlock,
   validateTaskPlanSchema,

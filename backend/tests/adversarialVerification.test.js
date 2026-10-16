@@ -19,7 +19,10 @@ const {
   computeArtifactHash,
   verifyExecutionReceipt,
   canonicalizeReceiptPayload,
-  _clearConsumedReceiptsForTesting
+  _clearConsumedReceiptsForTesting,
+  collectCanonicalWorkspaceFiles,
+  resolveCanonicalCase,
+  CANONICAL_CASE_IDS
 } = require('../quality-evaluation/generatedAppQualityGate');
 
 const {
@@ -418,4 +421,190 @@ function twoSum(nums, target) {
       } catch (_) {}
     }
   });
+  // ── 13. Canonical Case Mapping: All 6 IDs resolve deterministically; unsupported returns NOT_EVALUATED ──
+  await t.test('13. Canonical Case Mapping: All 6 IDs resolve deterministically; unsupported returns NOT_EVALUATED', async () => {
+    assert.strictEqual(CANONICAL_CASE_IDS.length, 6);
+    
+    // Each ID directly resolves
+    for (const id of CANONICAL_CASE_IDS) {
+      const res = resolveCanonicalCase(id);
+      assert.strictEqual(res.canonicalCase, id);
+      assert.strictEqual(res.status, 'EVALUABLE');
+      assert.ok(res.caseDef);
+    }
+
+    // Supported prompts
+    assert.strictEqual(resolveCanonicalCase('Create a modern landing page for an AI product with hero section').canonicalCase, 'landing-page-hero-features-cta');
+    assert.strictEqual(resolveCanonicalCase('Build an analytics dashboard with search, charts and CSV export').canonicalCase, 'dashboard-search-charts-csv');
+    assert.strictEqual(resolveCanonicalCase('Build an e-commerce catalog with cart drawer and checkout form').canonicalCase, 'ecommerce-cart-checkout');
+    assert.strictEqual(resolveCanonicalCase('Build an education quiz application with timer and progress bar').canonicalCase, 'education-quiz-progress');
+    assert.strictEqual(resolveCanonicalCase('Build a full-stack REST API with Express and React CRUD for items').canonicalCase, 'api-backed-crud');
+    assert.strictEqual(resolveCanonicalCase('Perform multi-step code repair for unhandled runtime exception').canonicalCase, 'multi-step-repair');
+
+    // Unsupported prompt does NOT match any benchmark and returns NOT_EVALUATED
+    const unsupported = resolveCanonicalCase('Build a classic snake game with canvas keyboard controls');
+    assert.strictEqual(unsupported.canonicalCase, null);
+    assert.strictEqual(unsupported.status, 'NOT_EVALUATED');
+    assert.match(unsupported.reason, /does not match any of the 6 canonical evaluation benchmark cases/);
+  });
+
+  // ── 14. Quality Gate with unsupported case returns NOT_EVALUATED, never FAILED ──
+  await t.test('14. Quality Gate with unsupported case returns NOT_EVALUATED, never FAILED', async () => {
+    const gate = new GeneratedAppQualityGate();
+    const res = await gate.evaluate({
+      files: validFiles,
+      caseId: 'arbitrary-unsupported-case'
+    });
+    assert.strictEqual(res.status, STATUS.NOT_EVALUATED);
+    assert.match(res.reason, /Unknown or unsupported canonical case ID/);
+  });
+
+  // ── 15. TrustedExecutionService: Default unexecuted build, separated test, rejected static acceptance ──
+  await t.test('15. TrustedExecutionService defaults build to unexecuted, separates test, rejects static acceptance', async () => {
+    const service = new TrustedExecutionService({ secret: TEST_RUNNER_SECRET });
+    
+    // 1. Static flow without executable function must be rejected
+    const evidenceStaticFlow = await service.execute({
+      files: validFiles,
+      runId: 'run-static-flow-test',
+      acceptanceFlows: [{ id: 'fake-flow', name: 'Fake Flow', passed: true }]
+    });
+    assert.strictEqual(evidenceStaticFlow.acceptance.passed, false);
+    assert.strictEqual(evidenceStaticFlow.acceptance.flows[0].passed, false);
+    assert.match(evidenceStaticFlow.acceptance.flows[0].error, /STATIC_ASSERTION_REJECTED/);
+
+    // 2. Build is NOT executed unless an actual build command is run
+    assert.strictEqual(evidenceStaticFlow.build.executed, false);
+    assert.strictEqual(evidenceStaticFlow.build.success, false);
+  });
+
+  // ── 16. Canonical workspace file collector & hash parity across services ──
+  await t.test('16. Canonical workspace file collector and hash parity across services', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canonical-manifest-test-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'index.js'), 'console.log(1);', 'utf8');
+      fs.writeFileSync(path.join(tmpDir, 'module.mjs'), 'export const a = 1;', 'utf8');
+      fs.writeFileSync(path.join(tmpDir, 'common.cjs'), 'module.exports = { b: 2 };', 'utf8');
+      fs.writeFileSync(path.join(tmpDir, 'config.json'), '{"name":"test"}', 'utf8');
+      fs.mkdirSync(path.join(tmpDir, 'node_modules'), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, 'node_modules', 'dep.js'), 'should be excluded', 'utf8');
+
+      const fileMap1 = {};
+      collectCanonicalWorkspaceFiles(tmpDir, tmpDir, fileMap1);
+      
+      assert.ok('index.js' in fileMap1);
+      assert.ok('module.mjs' in fileMap1);
+      assert.ok('common.cjs' in fileMap1);
+      assert.ok('config.json' in fileMap1);
+      assert.ok(!('node_modules/dep.js' in fileMap1));
+
+      const hash1 = computeArtifactHash(fileMap1);
+      const hash2 = computeArtifactHash(fileMap1);
+      assert.strictEqual(hash1, hash2);
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  });
+
+  // ── 17. Container isolation: Active probe rejects env-only claim; requireOsIsolation fails closed ──
+  await t.test('17. Container isolation active probe rejects env flag alone and fails closed with SANDBOX_UNAVAILABLE', async () => {
+    process.env.AIDOST_CONTAINER_ISOLATION = 'true';
+    
+    // checkOsIsolationAvailable actively probes CLI and returns false if daemon is not operational
+    const isolationAvailable = checkOsIsolationAvailable();
+    assert.strictEqual(isolationAvailable, false);
+
+    // Running with requireOsIsolation: true fails closed
+    const runRes = await executeCandidateRunner({
+      code: 'function solve(){ return 42; }',
+      spec: { mode: 'function', names: ['solve'], cases: [{ id: 'c1', args: [] }] },
+      requireOsIsolation: true
+    });
+    assert.strictEqual(runRes.status, 'SANDBOX_UNAVAILABLE');
+    assert.match(runRes.error, /SANDBOX_UNAVAILABLE/);
+  });
+
+  // ── 18. Quality gate failure in CopilotDirector fails closed (verifier worker cannot override) ──
+  await t.test('18. Quality gate failure in CopilotDirector fails closed despite verifier worker', async () => {
+    const mockTaskPlanner = {
+      generatePlan: async () => ({
+        goal: 'Generate landing page',
+        tasks: [{ id: 't1', specialty: 'frontend', role: 'CODER', objective: 'Create app' }]
+      }),
+      generateVerificationPlan: async () => ({
+        goal: 'Verify app',
+        tasks: [{ id: 'v1', specialty: 'verification', role: 'VERIFIER', objective: 'Verify' }]
+      })
+    };
+
+    const mockExecutionLoop = {
+      runWithPlan: async () => ({
+        status: 'SUCCEEDED',
+        summary: 'Verifier worker claimed SUCCEEDED'
+      })
+    };
+
+    const mockCoord = {
+      createSupervisorTask: async () => ({ task: { id: 'sup-task-2' }, run: { id: 'sup-run-2' } }),
+      delegate: async () => ({ workerRun: { id: 'worker-2' } }),
+      startWorker: async (id, { runner }) => await runner()
+    };
+
+    const tmpProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'director-qg-fail-'));
+    // Write placeholder that triggers quality gate defect
+    fs.writeFileSync(path.join(tmpProjectDir, 'package.json'), '{"name":"landing-page","scripts":{"build":"exit 1"}}', 'utf8');
+    fs.writeFileSync(path.join(tmpProjectDir, 'App.jsx'), 'export default function App() { return <button onClick={() => {}}>TODO: implement pricing</button>; }', 'utf8');
+
+    const mockWorkspace = {
+      getWorkspaceMetadata: () => ({ diskPath: tmpProjectDir })
+    };
+
+    // Quality gate mock that returns FAILED
+    const mockQualityGate = {
+      evaluate: async () => ({
+        status: STATUS.FAILED,
+        score: 10,
+        defects: [{ detail: 'Found placeholder: TODO: implement pricing' }]
+      })
+    };
+
+    const mockTrustedRunner = {
+      execute: async () => ({
+        receipt: { runId: 'sup-run-2' }
+      })
+    };
+
+    const events = [];
+    const director = new CopilotDirector({
+      taskPlanner: mockTaskPlanner,
+      plannerExecutionLoop: mockExecutionLoop,
+      coordinator: mockCoord,
+      workspaceManager: mockWorkspace,
+      qualityGate: mockQualityGate,
+      trustedRunner: mockTrustedRunner,
+      agentTaskDao: { create: () => {}, updateStatus: () => {} },
+      agentRunDao: { create: () => {}, updateStatus: () => {} }
+    });
+
+    try {
+      // Must reject with quality gate failure: verifier worker cannot override quality gate failure!
+      await assert.rejects(
+        () => director.run({
+          userId: 'u1',
+          projectId: 'p1',
+          request: 'Create a modern landing page for an AI product with hero section',
+          onEvent: (ev) => events.push(ev)
+        }),
+        /Generated app quality gate failed/
+      );
+      
+      // Quality gate evaluation event must be recorded as FAILED
+      const qgEvent = events.find((e) => e.type === 'quality_gate_evaluation');
+      assert.ok(qgEvent);
+      assert.strictEqual(qgEvent.status, STATUS.FAILED);
+    } finally {
+      try { fs.rmSync(tmpProjectDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  });
+
 });

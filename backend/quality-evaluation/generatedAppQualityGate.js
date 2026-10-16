@@ -14,6 +14,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
 
 const STATUS = {
   VERIFIED_PASS: 'VERIFIED_PASS',
@@ -30,6 +31,42 @@ function getRunnerSecret() {
     return null;
   }
   return secret.trim();
+}
+
+const CANONICAL_EXTENSIONS = new Set([
+  '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs',
+  '.json', '.html', '.css', '.svg', '.vue', '.svelte',
+  '.yaml', '.yml'
+]);
+
+const CANONICAL_EXCLUDE_DIRS = new Set([
+  'node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.turbo', '.cache'
+]);
+
+/**
+ * Single authoritative canonical file collector for all verification and evidence services.
+ */
+function collectCanonicalWorkspaceFiles(dir, rootDir = dir, fileMap = {}) {
+  if (!dir || !fs.existsSync(dir)) return fileMap;
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const ent of entries) {
+      if (CANONICAL_EXCLUDE_DIRS.has(ent.name)) continue;
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) {
+        collectCanonicalWorkspaceFiles(full, rootDir, fileMap);
+      } else if (ent.isFile()) {
+        const ext = path.extname(ent.name).toLowerCase();
+        if (CANONICAL_EXTENSIONS.has(ext)) {
+          const rel = path.relative(rootDir, full).replace(/\\/g, '/');
+          try {
+            fileMap[rel] = fs.readFileSync(full, 'utf8');
+          } catch (_) {}
+        }
+      }
+    }
+  } catch (_) {}
+  return fileMap;
 }
 
 /**
@@ -89,10 +126,36 @@ function canonicalizeReceiptPayload(payload = {}) {
   return JSON.stringify(canonicalObj);
 }
 
-// Replay protection registry
+// Replay protection registry (in-memory + durable atomic tracking)
 const consumedReceiptSignatures = new Set();
+const DURABLE_REPLAY_FILE = path.join(os.tmpdir(), '.aidost_consumed_receipts.json');
+
+function _loadDurableReceipts() {
+  try {
+    if (fs.existsSync(DURABLE_REPLAY_FILE)) {
+      const data = JSON.parse(fs.readFileSync(DURABLE_REPLAY_FILE, 'utf8'));
+      if (Array.isArray(data)) {
+        for (const sig of data) consumedReceiptSignatures.add(sig);
+      }
+    }
+  } catch (_) {}
+}
+_loadDurableReceipts();
+
+function _recordDurableReceipt(sig) {
+  try {
+    const arr = Array.from(consumedReceiptSignatures).slice(-2000);
+    fs.writeFileSync(DURABLE_REPLAY_FILE, JSON.stringify(arr), 'utf8');
+  } catch (_) {}
+}
+
 function _clearConsumedReceiptsForTesting() {
   consumedReceiptSignatures.clear();
+  try {
+    if (fs.existsSync(DURABLE_REPLAY_FILE)) {
+      fs.unlinkSync(DURABLE_REPLAY_FILE);
+    }
+  } catch (_) {}
 }
 
 /**
@@ -171,6 +234,7 @@ function verifyExecutionReceipt(receipt, expectedArtifactHash, expectedRunId = n
 
   // Mark signature consumed for replay protection
   consumedReceiptSignatures.add(receipt.receiptSignature);
+  _recordDurableReceipt(receipt.receiptSignature);
   if (consumedReceiptSignatures.size > 10000) {
     const oldest = consumedReceiptSignatures.values().next().value;
     consumedReceiptSignatures.delete(oldest);
@@ -217,9 +281,10 @@ class GeneratedAppQualityGate {
     if (!caseDef) {
       return {
         evaluatorVersion: this.version,
-        status: STATUS.FAILED,
-        caseId,
+        status: STATUS.NOT_EVALUATED,
+        caseId: caseId || null,
         score: 0,
+        reason: `Unknown or unsupported canonical case ID: ${caseId}`,
         errors: [`Unknown canonical case ID: ${caseId}`],
         layers: {
           staticDiagnostics: { passed: false, score: 0 },
@@ -555,28 +620,28 @@ class GeneratedAppQualityGate {
   }
 
   _collectFiles(rootDir, currentDir, fileMap) {
-    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
-    for (const ent of entries) {
-      if (ent.name === 'node_modules' || ent.name === '.git' || ent.name === 'dist' || ent.name === 'build') continue;
-      const full = path.join(currentDir, ent.name);
-      if (ent.isDirectory()) {
-        this._collectFiles(rootDir, full, fileMap);
-      } else if (ent.isFile() && /\.(jsx?|tsx?|html|css|json)$/i.test(ent.name)) {
-        const rel = path.relative(rootDir, full).replace(/\\/g, '/');
-        try {
-          fileMap[rel] = fs.readFileSync(full, 'utf8');
-        } catch (_) {}
-      }
-    }
+    return collectCanonicalWorkspaceFiles(currentDir, rootDir, fileMap);
   }
 }
+
+const {
+  resolveCanonicalCase,
+  getCanonicalCase,
+  CANONICAL_CASES,
+  CANONICAL_CASE_IDS
+} = require('./canonicalCaseResolver');
 
 module.exports = {
   GeneratedAppQualityGate,
   STATUS,
   computeArtifactHash,
+  collectCanonicalWorkspaceFiles,
   verifyExecutionReceipt,
   canonicalizeReceiptPayload,
   getRunnerSecret,
-  _clearConsumedReceiptsForTesting
+  _clearConsumedReceiptsForTesting,
+  resolveCanonicalCase,
+  getCanonicalCase,
+  CANONICAL_CASES,
+  CANONICAL_CASE_IDS
 };

@@ -229,14 +229,15 @@ export default function App() {
     assert.ok(res.defects.some((d) => d.type === 'ANTI_PATTERN_DETECTED' || d.type === 'EMPTY_EVENT_HANDLER'));
   });
 
-  await t.test('8. Missing or unknown canonical case ID returns FAILED cleanly', async () => {
+  await t.test('8. Missing or unknown canonical case ID returns NOT_EVALUATED cleanly', async () => {
     _clearConsumedReceiptsForTesting();
     const res = await gate.evaluate({
       files: validDashboardFiles,
       caseId: 'non-existent-case-id'
     });
 
-    assert.strictEqual(res.status, STATUS.FAILED);
+    assert.strictEqual(res.status, STATUS.NOT_EVALUATED);
     assert.ok(res.errors[0].includes('Unknown canonical case ID'));
+    assert.match(res.reason, /Unknown or unsupported canonical case ID/);
   });
 });

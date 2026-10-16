@@ -23,14 +23,46 @@ const MAX_OUTPUT_BYTES = 64 * 1024; // 64 KB
 const ISOLATION_LIMITATION =
   'Subprocess execution with memory separation and restricted VM context. OS container isolation (namespaces/cgroups/jail) is NOT active on this host; no full OS security sandbox guarantee is claimed.';
 
+let _testContainerOverride = null;
+function _setOsIsolationBackendForTesting(override) {
+  _testContainerOverride = override;
+}
+
 /**
  * Checks whether true OS container isolation (Docker, Podman, or cgroups/nsjail) is operational.
+ * Note: An environment variable AIDOST_CONTAINER_ISOLATION=true is NOT trusted on its own.
+ * We actively probe for an operational container CLI responding to 'info'.
  */
-function checkOsIsolationAvailable() {
-  // If environment explicitly declares an active container isolation runtime
-  if (process.env.AIDOST_CONTAINER_ISOLATION === 'true') {
-    return true;
+function checkOsIsolationAvailable(options = {}) {
+  if (_testContainerOverride !== null) {
+    if (options && options.details) return _testContainerOverride;
+    return Boolean(_testContainerOverride.available);
   }
+
+  // Active operational probe: verify Docker or Podman responds
+  const candidates = ['docker', 'podman'];
+  for (const bin of candidates) {
+    try {
+      const res = execSync(`${bin} info`, {
+        timeout: 2000,
+        stdio: 'pipe',
+        windowsHide: true
+      });
+      if (res) {
+        const details = { available: true, runtime: bin, verified: true };
+        if (options && options.details) return details;
+        return true;
+      }
+    } catch (_) {}
+  }
+
+  const details = {
+    available: false,
+    runtime: null,
+    verified: false,
+    reason: 'No operational container runtime (Docker/Podman) is responding on this host'
+  };
+  if (options && options.details) return details;
   return false;
 }
 
@@ -453,5 +485,6 @@ module.exports = {
   executePythonScript,
   runProcess,
   checkOsIsolationAvailable,
+  _setOsIsolationBackendForTesting,
   ISOLATION_LIMITATION
 };

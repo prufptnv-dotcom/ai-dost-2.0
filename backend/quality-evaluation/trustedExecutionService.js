@@ -9,7 +9,11 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { computeArtifactHash, canonicalizeReceiptPayload } = require('./generatedAppQualityGate');
+const {
+  collectCanonicalWorkspaceFiles,
+  computeArtifactHash,
+  canonicalizeReceiptPayload
+} = require('./generatedAppQualityGate');
 const { runProcess } = require('./executionSandbox');
 
 function getRunnerSecret() {
@@ -44,7 +48,16 @@ class TrustedExecutionService {
   /**
    * Executes commands and acceptance flows on the project workspace and returns signed evidence.
    */
-  async execute({ projectDir, files, runId, command = null, acceptanceFlows = [], caseDef = null }) {
+  async execute({
+    projectDir,
+    files,
+    runId,
+    command = null,
+    buildCommand = null,
+    testCommand = null,
+    acceptanceFlows = [],
+    caseDef = null
+  }) {
     if (!this.secret) {
       throw new Error('TRUSTED_RUNNER_SECRET_UNAVAILABLE: Valid AIDOST_RUNNER_SECRET must be configured with at least 16 characters.');
     }
@@ -56,7 +69,7 @@ class TrustedExecutionService {
     if (files && typeof files === 'object') {
       Object.assign(fileMap, files);
     } else if (projectDir && fs.existsSync(projectDir)) {
-      this._collectFiles(projectDir, projectDir, fileMap);
+      collectCanonicalWorkspaceFiles(projectDir, projectDir, fileMap);
     }
 
     const preRunHash = computeArtifactHash(fileMap);
@@ -64,14 +77,24 @@ class TrustedExecutionService {
       throw new Error('EMPTY_ARTIFACT: No project files to evaluate.');
     }
 
-    let buildResult = { success: true, exitCode: 0, output: 'Execution recorded' };
-    let testResult = { testsRun: 0, testsPassed: 0, testsFailed: 0 };
+    // Strict default: build is NOT passed until an actual build executes with exit code 0
+    let buildResult = {
+      executed: false,
+      success: false,
+      exitCode: null,
+      output: 'No build command executed'
+    };
+    let testResult = {
+      executed: false,
+      testsRun: 0,
+      testsPassed: 0,
+      testsFailed: 0
+    };
     let runtimeResult = { started: false, port: null };
     let acceptanceResult = { passed: false, flowsTested: 0, flowsFailed: 0, flows: [] };
     let finalExitCode = 0;
     let executedCommand = command || 'evaluation_gate';
 
-    // 1. Run real command if specified or package.json has test/build
     if (projectDir && fs.existsSync(projectDir)) {
       const pkgPath = path.join(projectDir, 'package.json');
       const hasPkg = fs.existsSync(pkgPath);
@@ -82,65 +105,87 @@ class TrustedExecutionService {
         } catch (_) {}
       }
 
-      if (command) {
-        executedCommand = command;
-        const [cmd, ...args] = command.split(' ');
-        const runRes = await runProcess(cmd, args, { cwd: projectDir, timeoutMs: this.timeoutMs });
-        finalExitCode = runRes.exitCode;
+      // 1. Execute Build command if requested or package has build script
+      const effectiveBuildCmd = buildCommand || (pkg?.scripts?.build ? 'npm run build' : null);
+      if (effectiveBuildCmd) {
+        executedCommand = effectiveBuildCmd;
+        const [bCmd, ...bArgs] = effectiveBuildCmd.split(' ');
+        const buildRun = await runProcess(bCmd, bArgs, { cwd: projectDir, timeoutMs: this.timeoutMs });
+        finalExitCode = buildRun.exitCode;
         buildResult = {
-          success: runRes.exitCode === 0,
-          exitCode: runRes.exitCode,
-          output: (runRes.stdout + '\n' + runRes.stderr).slice(0, 4000)
+          executed: true,
+          success: buildRun.exitCode === 0,
+          exitCode: buildRun.exitCode,
+          output: (buildRun.stdout + '\n' + buildRun.stderr).slice(0, 4000)
         };
-        const combined = runRes.stdout + '\n' + runRes.stderr;
-        const passMatch = combined.match(/pass(?:ed)?\s*(\d+)/i) || combined.match(/(\d+)\s*passing/i);
-        const failMatch = combined.match(/fail(?:ed)?\s*(\d+)/i) || combined.match(/(\d+)\s*failing/i);
-        if (passMatch || failMatch) {
-          const passed = passMatch ? parseInt(passMatch[1], 10) : 0;
-          const failed = failMatch ? parseInt(failMatch[1], 10) : 0;
+      }
+
+      // 2. Execute Test command if requested or package has test script (distinct from build!)
+      const effectiveTestCmd = testCommand || command || (pkg?.scripts?.test ? 'npm test' : null);
+      if (effectiveTestCmd && effectiveTestCmd !== effectiveBuildCmd) {
+        executedCommand = executedCommand ? `${executedCommand}; ${effectiveTestCmd}` : effectiveTestCmd;
+        const [tCmd, ...tArgs] = effectiveTestCmd.split(' ');
+        const testRun = await runProcess(tCmd, tArgs, { cwd: projectDir, timeoutMs: this.timeoutMs });
+        if (testRun.exitCode !== 0) {
+          finalExitCode = testRun.exitCode;
+        }
+
+        const combined = testRun.stdout + '\n' + testRun.stderr;
+        const tapTotalMatch = combined.match(/#\s*tests\s+(\d+)/i);
+        const tapPassMatch = combined.match(/#\s*pass\s+(\d+)/i);
+        const tapFailMatch = combined.match(/#\s*fail\s+(\d+)/i);
+
+        if (tapTotalMatch) {
+          const total = parseInt(tapTotalMatch[1], 10);
+          const passed = tapPassMatch ? parseInt(tapPassMatch[1], 10) : (testRun.exitCode === 0 ? total : 0);
+          const failed = tapFailMatch ? parseInt(tapFailMatch[1], 10) : (total - passed);
           testResult = {
+            executed: true,
+            testsRun: total,
+            testsPassed: passed,
+            testsFailed: failed
+          };
+        } else {
+          // Fallback based on test command exit code (never inventing fake counts)
+          const passed = testRun.exitCode === 0 ? 1 : 0;
+          const failed = testRun.exitCode === 0 ? 0 : 1;
+          testResult = {
+            executed: true,
             testsRun: passed + failed,
             testsPassed: passed,
             testsFailed: failed
           };
         }
-      } else if (pkg && pkg.scripts && pkg.scripts.test) {
-        executedCommand = 'npm test';
-        const runRes = await runProcess('npm', ['test'], { cwd: projectDir, timeoutMs: this.timeoutMs });
-        finalExitCode = runRes.exitCode;
-        testResult = {
-          testsRun: runRes.exitCode === 0 ? 1 : 0,
-          testsPassed: runRes.exitCode === 0 ? 1 : 0,
-          testsFailed: runRes.exitCode === 0 ? 0 : 1
-        };
-        buildResult = {
-          success: runRes.exitCode === 0,
-          exitCode: runRes.exitCode,
-          output: (runRes.stdout + '\n' + runRes.stderr).slice(0, 4000)
-        };
       }
     }
 
-    // 2. Validate acceptance flows if provided
+    // 3. Validate acceptance flows with mandatory executable verification
     if (Array.isArray(acceptanceFlows) && acceptanceFlows.length > 0) {
       const flows = [];
       let allPassed = true;
       for (const flow of acceptanceFlows) {
         let passed = false;
+        let flowError = null;
         try {
           if (typeof flow.test === 'function') {
             passed = Boolean(await flow.test(fileMap, projectDir));
+          } else if (typeof flow.run === 'function') {
+            passed = Boolean(await flow.run(fileMap, projectDir));
           } else {
-            passed = Boolean(flow.passed);
+            // Rejection of fabricated/static caller booleans without executable code
+            passed = false;
+            flowError = 'STATIC_ASSERTION_REJECTED: Acceptance flow lacked executable test function or runner';
           }
-        } catch (_) {
+        } catch (err) {
           passed = false;
+          flowError = err.message;
         }
         if (!passed) allPassed = false;
         flows.push({
           id: String(flow.id || flow.name || `flow-${flows.length}`),
           name: String(flow.name || flow.id || 'Acceptance Flow'),
-          passed
+          passed,
+          error: flowError || undefined
         });
       }
       acceptanceResult = {
@@ -151,13 +196,14 @@ class TrustedExecutionService {
       };
     }
 
-    // 3. Immutability validation: ensure files did not mutate during test execution
+    // 4. Immutability validation: ensure files did not mutate during test execution
     const postFileMap = {};
     if (projectDir && fs.existsSync(projectDir)) {
-      this._collectFiles(projectDir, projectDir, postFileMap);
+      collectCanonicalWorkspaceFiles(projectDir, projectDir, postFileMap);
     } else {
       Object.assign(postFileMap, files);
     }
+
     const postRunHash = computeArtifactHash(postFileMap);
     if (postRunHash !== preRunHash) {
       throw new Error(`ARTIFACT_MUTATION_DETECTED: Workspace files were modified during test execution. Pre-hash: ${preRunHash}, post-hash: ${postRunHash}`);
@@ -186,22 +232,6 @@ class TrustedExecutionService {
       acceptance: receipt.acceptance,
       artifactHash: preRunHash
     };
-  }
-
-  _collectFiles(rootDir, currentDir, fileMap) {
-    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
-    for (const ent of entries) {
-      if (ent.name === 'node_modules' || ent.name === '.git' || ent.name === 'dist' || ent.name === 'build') continue;
-      const full = path.join(currentDir, ent.name);
-      if (ent.isDirectory()) {
-        this._collectFiles(rootDir, full, fileMap);
-      } else if (ent.isFile() && /\.(jsx?|tsx?|html|css|json)$/i.test(ent.name)) {
-        const rel = path.relative(rootDir, full).replace(/\\/g, '/');
-        try {
-          fileMap[rel] = fs.readFileSync(full, 'utf8');
-        } catch (_) {}
-      }
-    }
   }
 }
 
