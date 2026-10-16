@@ -2,7 +2,13 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { GeneratedAppQualityGate, STATUS } = require('../quality-evaluation/generatedAppQualityGate');
+const {
+  GeneratedAppQualityGate,
+  STATUS,
+  createTrustedExecutionEvidence,
+  mintExecutionReceipt,
+  computeArtifactHash
+} = require('../quality-evaluation/generatedAppQualityGate');
 
 test('GeneratedAppQualityGate: Execution-Backed Evidence Gate', async (t) => {
   const gate = new GeneratedAppQualityGate();
@@ -69,38 +75,109 @@ export default function App() {
     assert.strictEqual(res.layers.unitTests.executed, false);
   });
 
-  await t.test('2. Real passing execution evidence elevates status to VERIFIED_PASS', async () => {
+  await t.test('2. Real passing execution evidence with valid receipt elevates status to VERIFIED_PASS', async () => {
+    const evidence = createTrustedExecutionEvidence({
+      files: validDashboardFiles,
+      runId: 'run-valid-1',
+      build: { success: true, exitCode: 0, output: 'Vite v5.0 built in 320ms' },
+      tests: { testsRun: 5, testsPassed: 5, testsFailed: 0 },
+      runtime: { started: true, port: 3000 },
+      acceptance: { passed: true, flowsTested: 3, flowsFailed: 0 }
+    });
+
     const res = await gate.evaluate({
       files: validDashboardFiles,
       caseId: 'dashboard-search-charts-csv',
-      executionEvidence: {
-        build: { success: true, output: 'Vite v5.0 built in 320ms' },
-        tests: { testsRun: 5, testsPassed: 5, testsFailed: 0 },
-        runtime: { started: true, port: 3000 },
-        acceptance: { passed: true, flowsChecked: 3 }
-      }
+      executionEvidence: evidence
     });
 
     assert.strictEqual(res.status, STATUS.VERIFIED_PASS, 'Real passing tests and build must produce VERIFIED_PASS');
+    assert.strictEqual(res.layers.executionReceipt.verified, true);
     assert.strictEqual(res.layers.buildExecution.passed, true);
     assert.strictEqual(res.layers.unitTests.passed, true);
     assert.strictEqual(res.layers.acceptanceFlows.passed, true);
   });
 
-  await t.test('3. Empty test set (testsRun: 0) does not satisfy verified pass requirement', async () => {
+  await t.test('3. Fabricated or caller-supplied execution evidence without receipt is rejected', async () => {
+    const fabricatedEvidence = {
+      build: { success: true, exitCode: 0 },
+      tests: { testsRun: 10, testsPassed: 10, testsFailed: 0 },
+      acceptance: { passed: true }
+    };
+
     const res = await gate.evaluate({
       files: validDashboardFiles,
       caseId: 'dashboard-search-charts-csv',
-      executionEvidence: {
-        tests: { testsRun: 0, testsPassed: 0 } // Empty tests
-      }
+      executionEvidence: fabricatedEvidence
     });
 
-    assert.notStrictEqual(res.status, STATUS.VERIFIED_PASS);
-    assert.strictEqual(res.status, STATUS.STATIC_DIAGNOSTIC_PASS);
+    assert.strictEqual(res.status, STATUS.FAILED);
+    assert.strictEqual(res.layers.executionReceipt.verified, false);
+    assert.ok(res.defects.some((d) => d.type === 'FABRICATED_OR_UNTRUSTED_EVIDENCE'));
   });
 
-  await t.test('4. Forbidden placeholder anti-pattern yields FAILED status', async () => {
+  await t.test('4. Evidence with mismatched artifact hash is rejected with ARTIFACT_HASH_MISMATCH', async () => {
+    const otherFiles = {
+      'src/App.jsx': 'export default function Other() { return <div>Other</div>; }'
+    };
+    const otherEvidence = createTrustedExecutionEvidence({
+      files: otherFiles,
+      runId: 'run-other-1',
+      build: { success: true, exitCode: 0 },
+      acceptance: { passed: true, flowsTested: 2 }
+    });
+
+    const res = await gate.evaluate({
+      files: validDashboardFiles,
+      caseId: 'dashboard-search-charts-csv',
+      executionEvidence: otherEvidence
+    });
+
+    assert.strictEqual(res.status, STATUS.FAILED);
+    assert.strictEqual(res.layers.executionReceipt.verified, false);
+    assert.ok(res.defects.some((d) => d.type === 'ARTIFACT_HASH_MISMATCH'));
+  });
+
+  await t.test('5. Complex application with build passing but acceptance flow failing yields FAILED', async () => {
+    const evidenceWithFailingAcceptance = createTrustedExecutionEvidence({
+      files: validDashboardFiles,
+      runId: 'run-fail-acceptance-1',
+      build: { success: true, exitCode: 0, output: 'Build succeeded' },
+      tests: { testsRun: 5, testsPassed: 5, testsFailed: 0 },
+      acceptance: { passed: false, flowsTested: 3, flowsFailed: 1 } // Critical flow failed
+    });
+
+    const res = await gate.evaluate({
+      files: validDashboardFiles,
+      caseId: 'dashboard-search-charts-csv',
+      executionEvidence: evidenceWithFailingAcceptance
+    });
+
+    assert.strictEqual(res.status, STATUS.FAILED, 'Acceptance flow failure on complex app must fail the quality gate');
+    assert.strictEqual(res.layers.acceptanceFlows.passed, false);
+  });
+
+  await t.test('6. Complex application with build passing but unexecuted acceptance flow yields PARTIAL', async () => {
+    const evidenceWithoutAcceptance = createTrustedExecutionEvidence({
+      files: validDashboardFiles,
+      runId: 'run-no-acceptance-1',
+      build: { success: true, exitCode: 0, output: 'Build succeeded' },
+      tests: { testsRun: 4, testsPassed: 4, testsFailed: 0 },
+      acceptance: { passed: false, flowsTested: 0, flowsFailed: 0 } // No acceptance flows run
+    });
+
+    const res = await gate.evaluate({
+      files: validDashboardFiles,
+      caseId: 'dashboard-search-charts-csv',
+      executionEvidence: evidenceWithoutAcceptance
+    });
+
+    // Build alone on complex application does not prove interactions work
+    assert.strictEqual(res.status, STATUS.PARTIAL);
+    assert.notStrictEqual(res.status, STATUS.VERIFIED_PASS);
+  });
+
+  await t.test('7. Forbidden placeholder anti-pattern yields FAILED status', async () => {
     const antiPatternFiles = {
       'src/App.jsx': `
 export default function App() {
@@ -124,7 +201,7 @@ export default function App() {
     assert.ok(res.defects.some((d) => d.type === 'ANTI_PATTERN_DETECTED' || d.type === 'EMPTY_EVENT_HANDLER'));
   });
 
-  await t.test('5. Missing or unknown canonical case ID returns FAILED cleanly', async () => {
+  await t.test('8. Missing or unknown canonical case ID returns FAILED cleanly', async () => {
     const res = await gate.evaluate({
       files: validDashboardFiles,
       caseId: 'non-existent-case-id'

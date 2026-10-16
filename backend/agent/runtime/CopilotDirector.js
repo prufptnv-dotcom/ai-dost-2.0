@@ -7,6 +7,7 @@ const AgentCascadeAiService = require('./AgentCascadeAiService');
 const AgentCoordinator = require('./AgentCoordinator');
 const { ResultValidator } = require('./resultValidator');
 const logger = require('../../logger');
+const { validateCrossFileContracts, checkTaskFileCollisions } = require('./crossFileContractValidator');
 const {
   analyzeCodeGenerationRequest,
   formatCodeGenerationStrategy,
@@ -60,6 +61,54 @@ function listExistingFilesBounded(root, max = 100) {
 // compact JSON). Give the planner the REAL bytes of the key small files so
 // SEARCH is copied verbatim, not recalled. Bounded: priority names first,
 // ≤6 files, ≤2600 chars each (truncated marker beyond), ≤9000 chars total.
+
+function collectWorkspaceFilesBounded(rootDir, maxFiles = 100) {
+  const files = {};
+  if (!rootDir || !fs.existsSync(rootDir)) return files;
+  let count = 0;
+  function walk(dir) {
+    if (count >= maxFiles) return;
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const ent of entries) {
+        if (count >= maxFiles) return;
+        if (['node_modules', '.git', '.checkpoints', 'dist', 'build', '.next'].includes(ent.name)) continue;
+        const full = path.join(dir, ent.name);
+        if (ent.isDirectory()) {
+          walk(full);
+        } else if (ent.isFile() && /\.(jsx?|tsx?|mjs|cjs|json|html|css)$/i.test(ent.name)) {
+          const rel = path.relative(rootDir, full).replace(/\\/g, '/');
+          try {
+            const stat = fs.statSync(full);
+            if (stat.size <= 256 * 1024) {
+              files[rel] = fs.readFileSync(full, 'utf8');
+              count++;
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
+  walk(rootDir);
+  return files;
+}
+
+function extractAffectedFilesFromContractErrors(errors = []) {
+  const affected = new Set();
+  for (const err of errors) {
+    const fileMatches = String(err).match(/['"]([^'"\s]+\.[a-zA-Z0-9]+)['"]/g);
+    if (fileMatches) {
+      for (const m of fileMatches) {
+        const clean = m.replace(/['"]/g, '').trim();
+        if (clean && !clean.startsWith('http') && !clean.includes(' ') && clean.includes('.')) {
+          affected.add(clean);
+        }
+      }
+    }
+  }
+  return Array.from(affected);
+}
+
 function readKeyFileContents(diskPath, files) {
   const PRIORITY = [
     'package.json', 'frontend/package.json', 'web/package.json',
@@ -326,8 +375,9 @@ class CopilotDirector {
     let hasExistingFiles = false;
     let existingFiles = [];
     let existingFileContents = null;
+    let meta = null;
     try {
-      const meta = this.workspaceManager?.getWorkspaceMetadata?.(projectId, userId);
+      meta = this.workspaceManager?.getWorkspaceMetadata?.(projectId, userId);
       hasExistingFiles = Boolean(meta && meta.fileCount > 0);
       // P12.8 (E2E run #14): pass the REAL file list to the specialist planner.
       // The SURGICAL directive alone was not enough — the planner kept emitting
@@ -401,6 +451,28 @@ class CopilotDirector {
 
         // Execution completed all steps successfully
         if (lastResult?.status === 'SUCCEEDED') {
+          // Cross-file contract validation on real workspace files
+          if (meta?.diskPath && fs.existsSync(meta.diskPath)) {
+            const currentFiles = collectWorkspaceFilesBounded(meta.diskPath);
+            if (Object.keys(currentFiles).length > 0) {
+              const contractValidation = validateCrossFileContracts(currentFiles, {
+                existingFramework: codeStrategy?.framework || (workspacePackageJson ? 'react' : null)
+              });
+              if (!contractValidation.valid && contractValidation.errors.length > 0) {
+                const affectedFiles = extractAffectedFilesFromContractErrors(contractValidation.errors);
+                onEvent({
+                  type: 'contract_validation_failed',
+                  taskId: task.id,
+                  attempt,
+                  errors: contractValidation.errors,
+                  affectedFiles
+                });
+                lastError = `Cross-file contract validation failed: ${contractValidation.errors.join('; ')}. TARGETED REPAIR REQUIRED: Only modify the affected files [${affectedFiles.join(', ')}]. Do not touch or rewrite unrelated files.`;
+                logger.warn(`[CopilotDirector] Worker ${task.id} contract validation error: ${lastError}`);
+                continue;
+              }
+            }
+          }
           return lastResult;
         } else {
           lastError = lastResult?.error || lastResult?.reason || 'Unknown execution failure';
@@ -546,6 +618,25 @@ class CopilotDirector {
         }
       }
       onEvent({ type: 'director_verification', status: 'DELEGATING' });
+      // Final cross-file contract validation across the entire workspace
+      try {
+        const meta = this.workspaceManager?.getWorkspaceMetadata?.(projectId, userId);
+        if (meta?.diskPath && fs.existsSync(meta.diskPath)) {
+          const finalFiles = collectWorkspaceFilesBounded(meta.diskPath);
+          if (Object.keys(finalFiles).length > 0) {
+            const finalValidation = validateCrossFileContracts(finalFiles);
+            if (!finalValidation.valid && finalValidation.errors.length > 0) {
+              const contractErr = `Final workspace contract validation failed: ${finalValidation.errors.join('; ')}`;
+              onEvent({ type: 'contract_validation_failed', status: 'FAILED', errors: finalValidation.errors });
+              throw new Error(contractErr);
+            }
+          }
+        }
+      } catch (err) {
+        if (err.message && err.message.startsWith('Final workspace contract validation failed')) {
+          throw err;
+        }
+      }
       const verifier = await this.coordinator.delegate({ supervisorRunId, role: 'VERIFIER', objective: `Perform the final read-only verification gate for the requested outcome: ${request}. Inspect the current workspace state and confirm tests/build/runtime evidence where supported. Do not mutate the workspace.`, constraints: { specialty: 'verification', generatedByDirector: true }, expectedOutput: 'Final verification evidence and any remaining blockers.' });
       const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, { runner: async () => { const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER', ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) }); return this.plannerExecutionLoop.runWithPlan(projectId, userId, verificationPlan, 0, () => Boolean(signal?.aborted), `copilot_verify_${verifier.workerRun.id}`, { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined, ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) }); } });
       const verificationStatus = String(finalVerification?.status || 'FAILED').toUpperCase();

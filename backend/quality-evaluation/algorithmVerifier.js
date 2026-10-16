@@ -3,10 +3,17 @@
 /**
  * AI-Dost Algorithm Verifier & Oracle Testing Engine
  * Validates algorithmic correctness across all 12 algorithm families using
- * independent reference oracles, boundary cases, and adversarial inputs.
+ * independent, out-of-process reference oracles, boundary cases, and adversarial checks.
+ *
+ * Security & Integrity Contract:
+ * - Candidate code executes in an isolated, resource-bounded subprocess.
+ * - Expected outputs and assertion logic are kept EXCLUSIVELY in the parent process.
+ * - The candidate code cannot monkey-patch assertion methods, stdout markers, or oracles.
+ * - Single solutions verify specific algorithms and do not award family-wide correctness guarantees.
  */
 
-const { executeNodeScript, executePythonScript } = require('./executionSandbox');
+const assert = require('assert');
+const { executeCandidateRunner } = require('./executionSandbox');
 
 class AlgorithmVerifier {
   constructor() {
@@ -19,309 +26,357 @@ class AlgorithmVerifier {
     this.oracles.set('two_sum', {
       family: 'arrays_strings',
       lang: 'javascript',
-      testHarness: `
-const fn = typeof twoSum === 'function' ? twoSum : (typeof two_sum === 'function' ? two_sum : null);
-assert.ok(fn, 'twoSum function must be defined');
+      spec: {
+        mode: 'function',
+        names: ['twoSum', 'two_sum'],
+        cases: [
+          { id: 'std', args: [[2, 7, 11, 15], 9] },
+          { id: 'neg', args: [[-3, 4, 3, 90], 0] },
+          { id: 'dup', args: [[3, 3], 6] },
+          { id: 'none', args: [[1, 2, 3], 100] },
+          { id: 'empty', args: [[], 5] },
+          { id: 'single', args: [[5], 5] }
+        ]
+      },
+      verify(resultsMap) {
+        const std = resultsMap.get('std');
+        assert.ok(Array.isArray(std) && std.length === 2, 'Result must be a 2-element array');
+        assert.deepStrictEqual(std.slice().sort((a, b) => a - b), [0, 1]);
 
-// Standard cases
-let res = fn([2, 7, 11, 15], 9);
-assert.ok(Array.isArray(res) && res.length === 2, 'Result must be a 2-element array');
-assert.deepStrictEqual(res.slice().sort((a,b)=>a-b), [0, 1]);
+        const neg = resultsMap.get('neg');
+        assert.ok(Array.isArray(neg) && neg.length === 2);
+        assert.deepStrictEqual(neg.slice().sort((a, b) => a - b), [0, 2]);
 
-// Negative numbers and zeros
-res = fn([-3, 4, 3, 90], 0);
-assert.deepStrictEqual(res.slice().sort((a,b)=>a-b), [0, 2]);
+        const dup = resultsMap.get('dup');
+        assert.ok(Array.isArray(dup) && dup.length === 2);
+        assert.deepStrictEqual(dup.slice().sort((a, b) => a - b), [0, 1]);
 
-// Duplicates
-res = fn([3, 3], 6);
-assert.deepStrictEqual(res.slice().sort((a,b)=>a-b), [0, 1]);
-
-// No solution
-assert.strictEqual(fn([1, 2, 3], 100), null, 'Must return null when no pair sums to target');
-
-// Empty or single element
-assert.strictEqual(fn([], 5), null, 'Empty array has no pair');
-assert.strictEqual(fn([5], 5), null, 'Single element has no pair');
-
-console.log('ALL_TESTS_PASSED');
-`
+        assert.strictEqual(resultsMap.get('none'), null, 'Must return null when no pair sums to target');
+        assert.strictEqual(resultsMap.get('empty'), null, 'Empty array has no pair');
+        assert.strictEqual(resultsMap.get('single'), null, 'Single element has no pair');
+      }
     });
 
     // 2. Hashing (Hash Map / Frequency Counter)
     this.oracles.set('hash_map', {
       family: 'hashing',
       lang: 'javascript',
-      testHarness: `
-const Cls = typeof MyHashMap === 'function' ? MyHashMap : (typeof HashMap === 'function' ? HashMap : null);
-assert.ok(Cls, 'MyHashMap class must be defined');
-
-const map = new Cls();
-map.put(1, 1);
-map.put(2, 2);
-assert.strictEqual(map.get(1), 1);
-assert.strictEqual(map.get(3), -1, 'Missing key should return -1');
-map.put(2, 1); // update existing key
-assert.strictEqual(map.get(2), 1);
-map.remove(2);
-assert.strictEqual(map.get(2), -1);
-
-// Adversarial: Hash collisions (large number of keys)
-for (let i = 100; i < 200; i++) map.put(i, i * 2);
-for (let i = 100; i < 200; i++) assert.strictEqual(map.get(i), i * 2);
-
-console.log('ALL_TESTS_PASSED');
-`
+      spec: {
+        mode: 'class',
+        names: ['MyHashMap', 'HashMap'],
+        operations: [
+          { id: 'init', op: 'new', args: [] },
+          { id: 'p1', op: 'put', args: [1, 1] },
+          { id: 'p2', op: 'put', args: [2, 2] },
+          { id: 'g1', op: 'get', args: [1] },
+          { id: 'g3', op: 'get', args: [3] },
+          { id: 'p2_up', op: 'put', args: [2, 1] },
+          { id: 'g2_up', op: 'get', args: [2] },
+          { id: 'r2', op: 'remove', args: [2] },
+          { id: 'g2_rem', op: 'get', args: [2] }
+        ]
+      },
+      verify(resultsMap) {
+        assert.strictEqual(resultsMap.get('g1'), 1);
+        assert.strictEqual(resultsMap.get('g3'), -1, 'Missing key should return -1');
+        assert.strictEqual(resultsMap.get('g2_up'), 1, 'Updated key should reflect new value');
+        assert.strictEqual(resultsMap.get('g2_rem'), -1, 'Removed key should return -1');
+      }
     });
 
     // 3. Sorting & Searching (Binary Search)
     this.oracles.set('binary_search', {
       family: 'sorting_searching',
       lang: 'javascript',
-      testHarness: `
-const fn = typeof binarySearch === 'function' ? binarySearch : (typeof search === 'function' ? search : null);
-assert.ok(fn, 'binarySearch function must be defined');
-
-assert.strictEqual(fn([1, 3, 5, 7, 9], 5), 2);
-assert.strictEqual(fn([1, 3, 5, 7, 9], 1), 0);
-assert.strictEqual(fn([1, 3, 5, 7, 9], 9), 4);
-assert.strictEqual(fn([1, 3, 5, 7, 9], 4), -1);
-
-// Edge cases
-assert.strictEqual(fn([], 5), -1, 'Empty array returns -1');
-assert.strictEqual(fn([5], 5), 0, 'Single element hit');
-assert.strictEqual(fn([5], 2), -1, 'Single element miss');
-assert.strictEqual(fn([-10, -5, 0, 3, 8, 12], -5), 1, 'Negative numbers');
-
-console.log('ALL_TESTS_PASSED');
-`
+      spec: {
+        mode: 'function',
+        names: ['binarySearch', 'search'],
+        cases: [
+          { id: 'mid', args: [[1, 3, 5, 7, 9], 5] },
+          { id: 'first', args: [[1, 3, 5, 7, 9], 1] },
+          { id: 'last', args: [[1, 3, 5, 7, 9], 9] },
+          { id: 'miss', args: [[1, 3, 5, 7, 9], 4] },
+          { id: 'empty', args: [[], 5] },
+          { id: 'single_hit', args: [[5], 5] },
+          { id: 'single_miss', args: [[5], 2] },
+          { id: 'neg', args: [[-10, -5, 0, 3, 8, 12], -5] }
+        ]
+      },
+      verify(resultsMap) {
+        assert.strictEqual(resultsMap.get('mid'), 2);
+        assert.strictEqual(resultsMap.get('first'), 0);
+        assert.strictEqual(resultsMap.get('last'), 4);
+        assert.strictEqual(resultsMap.get('miss'), -1);
+        assert.strictEqual(resultsMap.get('empty'), -1, 'Empty array returns -1');
+        assert.strictEqual(resultsMap.get('single_hit'), 0, 'Single element hit');
+        assert.strictEqual(resultsMap.get('single_miss'), -1, 'Single element miss');
+        assert.strictEqual(resultsMap.get('neg'), 1, 'Negative number index');
+      }
     });
 
     // 4. Stacks & Queues (Valid Parentheses)
     this.oracles.set('valid_parentheses', {
       family: 'stacks_queues',
       lang: 'javascript',
-      testHarness: `
-const fn = typeof isValidParentheses === 'function' ? isValidParentheses : (typeof isValid === 'function' ? isValid : null);
-assert.ok(fn, 'isValidParentheses function must be defined');
-
-assert.strictEqual(fn('()'), true);
-assert.strictEqual(fn('()[]{}'), true);
-assert.strictEqual(fn('(]'), false);
-assert.strictEqual(fn('([)]'), false);
-assert.strictEqual(fn('{[]}'), true);
-
-// Boundary & adversarial cases
-assert.strictEqual(fn(''), true, 'Empty string is valid');
-assert.strictEqual(fn('('), false, 'Unclosed opening bracket');
-assert.strictEqual(fn(']'), false, 'Unmatched closing bracket');
-assert.strictEqual(fn('(((((((('), false, 'All opens');
-
-console.log('ALL_TESTS_PASSED');
-`
+      spec: {
+        mode: 'function',
+        names: ['isValidParentheses', 'isValid'],
+        cases: [
+          { id: 'simple', args: ['()'] },
+          { id: 'multi', args: ['()[]{}'] },
+          { id: 'mismatch', args: ['(]'] },
+          { id: 'cross', args: ['([)]'] },
+          { id: 'nested', args: ['{[]}'] },
+          { id: 'empty', args: [''] },
+          { id: 'unclosed', args: ['('] },
+          { id: 'unopened', args: [']'] },
+          { id: 'all_open', args: ['(((((((('] }
+        ]
+      },
+      verify(resultsMap) {
+        assert.strictEqual(resultsMap.get('simple'), true);
+        assert.strictEqual(resultsMap.get('multi'), true);
+        assert.strictEqual(resultsMap.get('mismatch'), false);
+        assert.strictEqual(resultsMap.get('cross'), false);
+        assert.strictEqual(resultsMap.get('nested'), true);
+        assert.strictEqual(resultsMap.get('empty'), true, 'Empty string is valid');
+        assert.strictEqual(resultsMap.get('unclosed'), false, 'Unclosed opening bracket');
+        assert.strictEqual(resultsMap.get('unopened'), false, 'Unmatched closing bracket');
+        assert.strictEqual(resultsMap.get('all_open'), false, 'All opens');
+      }
     });
 
     // 5. Linked Lists (Detect Cycle)
     this.oracles.set('linked_list_cycle', {
       family: 'linked_lists',
       lang: 'javascript',
-      testHarness: `
-const fn = typeof hasCycle === 'function' ? hasCycle : null;
-assert.ok(fn, 'hasCycle function must be defined');
-
-function Node(val, next = null) { this.val = val; this.next = next; }
-
-// A -> B -> C -> null (no cycle)
-const n3 = new Node(3);
-const n2 = new Node(2, n3);
-const n1 = new Node(1, n2);
-assert.strictEqual(fn(n1), false);
-
-// A -> B -> C -> B (cycle)
-n3.next = n2;
-assert.strictEqual(fn(n1), true);
-
-// Single node self-loop
-const single = new Node(10);
-single.next = single;
-assert.strictEqual(fn(single), true);
-
-// Empty list
-assert.strictEqual(fn(null), false);
-
-console.log('ALL_TESTS_PASSED');
-`
+      spec: {
+        mode: 'function',
+        names: ['hasCycle'],
+        cases: [
+          { id: 'no_cycle', customType: 'linked_list', listValues: [1, 2, 3], cycleIndex: -1 },
+          { id: 'cycle', customType: 'linked_list', listValues: [1, 2, 3], cycleIndex: 1 },
+          { id: 'self_loop', customType: 'linked_list', listValues: [10], cycleIndex: 0 },
+          { id: 'empty', customType: 'linked_list', listValues: [], cycleIndex: -1 }
+        ]
+      },
+      verify(resultsMap) {
+        assert.strictEqual(resultsMap.get('no_cycle'), false);
+        assert.strictEqual(resultsMap.get('cycle'), true);
+        assert.strictEqual(resultsMap.get('self_loop'), true);
+        assert.strictEqual(resultsMap.get('empty'), false);
+      }
     });
 
     // 6. Trees (Validate BST)
     this.oracles.set('bst_validation', {
       family: 'trees',
       lang: 'javascript',
-      testHarness: `
-const fn = typeof isValidBST === 'function' ? isValidBST : null;
-assert.ok(fn, 'isValidBST function must be defined');
-
-function TreeNode(val, left = null, right = null) {
-  this.val = val; this.left = left; this.right = right;
-}
-
-// Valid: 2 with left 1 and right 3
-assert.strictEqual(fn(new TreeNode(2, new TreeNode(1), new TreeNode(3))), true);
-
-// Invalid: 5 with left 1, right 4 (where right has left 3, right 6)
-const badTree = new TreeNode(5, new TreeNode(1), new TreeNode(4, new TreeNode(3), new TreeNode(6)));
-assert.strictEqual(fn(badTree), false);
-
-// Empty tree and single node
-assert.strictEqual(fn(null), true, 'Empty tree is valid BST');
-assert.strictEqual(fn(new TreeNode(42)), true, 'Single node is valid BST');
-
-// Duplicate values (BST forbids duplicates in strict order)
-assert.strictEqual(fn(new TreeNode(2, new TreeNode(2), null)), false, 'Duplicates violate strict BST');
-
-console.log('ALL_TESTS_PASSED');
-`
+      spec: {
+        mode: 'function',
+        names: ['isValidBST'],
+        cases: [
+          { id: 'valid', customType: 'tree', treeDef: { val: 2, left: { val: 1 }, right: { val: 3 } } },
+          { id: 'invalid', customType: 'tree', treeDef: { val: 5, left: { val: 1 }, right: { val: 4, left: { val: 3 }, right: { val: 6 } } } },
+          { id: 'empty', customType: 'tree', treeDef: null },
+          { id: 'single', customType: 'tree', treeDef: { val: 42 } },
+          { id: 'dup', customType: 'tree', treeDef: { val: 2, left: { val: 2 } } }
+        ]
+      },
+      verify(resultsMap) {
+        assert.strictEqual(resultsMap.get('valid'), true);
+        assert.strictEqual(resultsMap.get('invalid'), false);
+        assert.strictEqual(resultsMap.get('empty'), true, 'Empty tree is valid BST');
+        assert.strictEqual(resultsMap.get('single'), true, 'Single node is valid BST');
+        assert.strictEqual(resultsMap.get('dup'), false, 'Duplicates violate strict BST');
+      }
     });
 
     // 7. Heaps (Min Heap)
     this.oracles.set('min_heap', {
       family: 'heaps',
       lang: 'javascript',
-      testHarness: `
-const Cls = typeof MinHeap === 'function' ? MinHeap : null;
-assert.ok(Cls, 'MinHeap class must be defined');
-
-const heap = new Cls();
-heap.insert(5);
-heap.insert(3);
-heap.insert(8);
-heap.insert(1);
-
-assert.strictEqual(heap.peek(), 1, 'Peek must be minimum element');
-assert.strictEqual(heap.extractMin(), 1);
-assert.strictEqual(heap.extractMin(), 3);
-assert.strictEqual(heap.extractMin(), 5);
-assert.strictEqual(heap.extractMin(), 8);
-assert.strictEqual(heap.extractMin(), null, 'Extracting from empty heap returns null');
-
-console.log('ALL_TESTS_PASSED');
-`
+      spec: {
+        mode: 'class',
+        names: ['MinHeap'],
+        operations: [
+          { id: 'init', op: 'new', args: [] },
+          { id: 'i5', op: 'insert', args: [5] },
+          { id: 'i3', op: 'insert', args: [3] },
+          { id: 'i8', op: 'insert', args: [8] },
+          { id: 'i1', op: 'insert', args: [1] },
+          { id: 'peek', op: 'peek', args: [] },
+          { id: 'e1', op: 'extractMin', args: [] },
+          { id: 'e2', op: 'extractMin', args: [] },
+          { id: 'e3', op: 'extractMin', args: [] },
+          { id: 'e4', op: 'extractMin', args: [] },
+          { id: 'e5', op: 'extractMin', args: [] }
+        ]
+      },
+      verify(resultsMap) {
+        assert.strictEqual(resultsMap.get('peek'), 1, 'Peek must be minimum element');
+        assert.strictEqual(resultsMap.get('e1'), 1);
+        assert.strictEqual(resultsMap.get('e2'), 3);
+        assert.strictEqual(resultsMap.get('e3'), 5);
+        assert.strictEqual(resultsMap.get('e4'), 8);
+        assert.strictEqual(resultsMap.get('e5'), null, 'Extracting from empty heap returns null');
+      }
     });
 
     // 8. Graphs (BFS Shortest Path)
     this.oracles.set('graph_bfs', {
       family: 'graphs',
       lang: 'javascript',
-      testHarness: `
-const fn = typeof shortestPathBFS === 'function' ? shortestPathBFS : (typeof shortestPath === 'function' ? shortestPath : null);
-assert.ok(fn, 'shortestPathBFS function must be defined');
-
-const graph = {
-  A: ['B', 'C'],
-  B: ['A', 'D', 'E'],
-  C: ['A', 'F'],
-  D: ['B'],
-  E: ['B', 'F'],
-  F: ['C', 'E']
-};
-
-assert.strictEqual(fn(graph, 'A', 'F'), 2, 'Path A -> C -> F length is 2');
-assert.strictEqual(fn(graph, 'A', 'A'), 0, 'Distance to self is 0');
-assert.strictEqual(fn(graph, 'A', 'NON_EXISTENT'), -1, 'Unreachable node distance is -1');
-
-console.log('ALL_TESTS_PASSED');
-`
+      spec: {
+        mode: 'function',
+        names: ['shortestPathBFS', 'shortestPath'],
+        cases: [
+          {
+            id: 'path_af',
+            args: [
+              {
+                A: ['B', 'C'],
+                B: ['A', 'D', 'E'],
+                C: ['A', 'F'],
+                D: ['B'],
+                E: ['B', 'F'],
+                F: ['C', 'E']
+              },
+              'A',
+              'F'
+            ]
+          },
+          {
+            id: 'self',
+            args: [{ A: ['B', 'C'], B: ['A'] }, 'A', 'A']
+          },
+          {
+            id: 'unreachable',
+            args: [{ A: ['B'] }, 'A', 'NON_EXISTENT']
+          }
+        ]
+      },
+      verify(resultsMap) {
+        assert.strictEqual(resultsMap.get('path_af'), 2, 'Path A -> C -> F length is 2');
+        assert.strictEqual(resultsMap.get('self'), 0, 'Distance to self is 0');
+        assert.strictEqual(resultsMap.get('unreachable'), -1, 'Unreachable node distance is -1');
+      }
     });
 
     // 9. Dynamic Programming (Climbing Stairs)
     this.oracles.set('climbing_stairs', {
       family: 'dynamic_programming',
       lang: 'javascript',
-      testHarness: `
-const fn = typeof climbStairs === 'function' ? climbStairs : null;
-assert.ok(fn, 'climbStairs function must be defined');
-
-assert.strictEqual(fn(1), 1);
-assert.strictEqual(fn(2), 2);
-assert.strictEqual(fn(3), 3);
-assert.strictEqual(fn(4), 5);
-assert.strictEqual(fn(5), 8);
-assert.strictEqual(fn(10), 89);
-
-// Boundary
-assert.strictEqual(fn(0), 1, '0 stairs has 1 way (do nothing)');
-
-console.log('ALL_TESTS_PASSED');
-`
+      spec: {
+        mode: 'function',
+        names: ['climbStairs'],
+        cases: [
+          { id: 'c1', args: [1] },
+          { id: 'c2', args: [2] },
+          { id: 'c3', args: [3] },
+          { id: 'c4', args: [4] },
+          { id: 'c5', args: [5] },
+          { id: 'c10', args: [10] },
+          { id: 'c0', args: [0] }
+        ]
+      },
+      verify(resultsMap) {
+        assert.strictEqual(resultsMap.get('c1'), 1);
+        assert.strictEqual(resultsMap.get('c2'), 2);
+        assert.strictEqual(resultsMap.get('c3'), 3);
+        assert.strictEqual(resultsMap.get('c4'), 5);
+        assert.strictEqual(resultsMap.get('c5'), 8);
+        assert.strictEqual(resultsMap.get('c10'), 89);
+        assert.strictEqual(resultsMap.get('c0'), 1, '0 stairs has 1 way');
+      }
     });
 
     // 10. Caching (LRU Cache)
     this.oracles.set('lru_cache', {
       family: 'caching',
       lang: 'javascript',
-      testHarness: `
-const Cls = typeof LRUCache === 'function' ? LRUCache : (typeof LruCache === 'function' ? LruCache : null);
-assert.ok(Cls, 'LRUCache class must be defined');
-
-const cache = new Cls(2);
-cache.put(1, 1);
-cache.put(2, 2);
-assert.strictEqual(cache.get(1), 1);
-cache.put(3, 3); // evicts key 2
-assert.strictEqual(cache.get(2), -1, 'Key 2 should have been evicted');
-cache.put(4, 4); // evicts key 1
-assert.strictEqual(cache.get(1), -1, 'Key 1 should have been evicted');
-assert.strictEqual(cache.get(3), 3);
-assert.strictEqual(cache.get(4), 4);
-
-console.log('ALL_TESTS_PASSED');
-`
+      spec: {
+        mode: 'class',
+        names: ['LRUCache', 'LruCache'],
+        operations: [
+          { id: 'init', op: 'new', args: [2] },
+          { id: 'p1', op: 'put', args: [1, 1] },
+          { id: 'p2', op: 'put', args: [2, 2] },
+          { id: 'g1', op: 'get', args: [1] },
+          { id: 'p3', op: 'put', args: [3, 3] }, // evicts 2
+          { id: 'g2', op: 'get', args: [2] },
+          { id: 'p4', op: 'put', args: [4, 4] }, // evicts 1
+          { id: 'g1_evicted', op: 'get', args: [1] },
+          { id: 'g3', op: 'get', args: [3] },
+          { id: 'g4', op: 'get', args: [4] }
+        ]
+      },
+      verify(resultsMap) {
+        assert.strictEqual(resultsMap.get('g1'), 1);
+        assert.strictEqual(resultsMap.get('g2'), -1, 'Key 2 should have been evicted');
+        assert.strictEqual(resultsMap.get('g1_evicted'), -1, 'Key 1 should have been evicted');
+        assert.strictEqual(resultsMap.get('g3'), 3);
+        assert.strictEqual(resultsMap.get('g4'), 4);
+      }
     });
 
     // 11. Union-Find (Disjoint Set)
     this.oracles.set('union_find', {
       family: 'union_find',
       lang: 'javascript',
-      testHarness: `
-const Cls = typeof UnionFind === 'function' ? UnionFind : (typeof DisjointSet === 'function' ? DisjointSet : null);
-assert.ok(Cls, 'UnionFind class must be defined');
-
-const uf = new Cls(5);
-assert.strictEqual(uf.connected(0, 1), false);
-uf.union(0, 1);
-assert.strictEqual(uf.connected(0, 1), true);
-uf.union(1, 2);
-assert.strictEqual(uf.connected(0, 2), true, 'Transitive connectivity');
-assert.strictEqual(uf.connected(0, 3), false);
-
-console.log('ALL_TESTS_PASSED');
-`
+      spec: {
+        mode: 'class',
+        names: ['UnionFind', 'DisjointSet'],
+        operations: [
+          { id: 'init', op: 'new', args: [5] },
+          { id: 'c01_before', op: 'connected', args: [0, 1] },
+          { id: 'u01', op: 'union', args: [0, 1] },
+          { id: 'c01_after', op: 'connected', args: [0, 1] },
+          { id: 'u12', op: 'union', args: [1, 2] },
+          { id: 'c02', op: 'connected', args: [0, 2] },
+          { id: 'c03', op: 'connected', args: [0, 3] }
+        ]
+      },
+      verify(resultsMap) {
+        assert.strictEqual(resultsMap.get('c01_before'), false);
+        assert.strictEqual(resultsMap.get('c01_after'), true);
+        assert.strictEqual(resultsMap.get('c02'), true, 'Transitive connectivity');
+        assert.strictEqual(resultsMap.get('c03'), false);
+      }
     });
 
     // 12. String Matching (KMP / Substring Search)
     this.oracles.set('string_matching', {
       family: 'string_matching',
       lang: 'javascript',
-      testHarness: `
-const fn = typeof strStr === 'function' ? strStr : (typeof kmpSearch === 'function' ? kmpSearch : null);
-assert.ok(fn, 'strStr or kmpSearch function must be defined');
-
-assert.strictEqual(fn('hello', 'll'), 2);
-assert.strictEqual(fn('aaaaa', 'bba'), -1);
-assert.strictEqual(fn('a', 'a'), 0);
-assert.strictEqual(fn('mississippi', 'issip'), 4);
-
-// Boundary cases
-assert.strictEqual(fn('', ''), 0, 'Empty pattern in empty text is at index 0');
-assert.strictEqual(fn('abc', ''), 0, 'Empty pattern is at index 0');
-assert.strictEqual(fn('', 'a'), -1, 'Non-empty pattern in empty text returns -1');
-
-console.log('ALL_TESTS_PASSED');
-`
+      spec: {
+        mode: 'function',
+        names: ['strStr', 'kmpSearch'],
+        cases: [
+          { id: 'sub', args: ['hello', 'll'] },
+          { id: 'none', args: ['aaaaa', 'bba'] },
+          { id: 'single', args: ['a', 'a'] },
+          { id: 'multi', args: ['mississippi', 'issip'] },
+          { id: 'empty_both', args: ['', ''] },
+          { id: 'empty_pat', args: ['abc', ''] },
+          { id: 'empty_text', args: ['', 'a'] }
+        ]
+      },
+      verify(resultsMap) {
+        assert.strictEqual(resultsMap.get('sub'), 2);
+        assert.strictEqual(resultsMap.get('none'), -1);
+        assert.strictEqual(resultsMap.get('single'), 0);
+        assert.strictEqual(resultsMap.get('multi'), 4);
+        assert.strictEqual(resultsMap.get('empty_both'), 0, 'Empty pattern in empty text is at 0');
+        assert.strictEqual(resultsMap.get('empty_pat'), 0, 'Empty pattern is at 0');
+        assert.strictEqual(resultsMap.get('empty_text'), -1, 'Non-empty pattern in empty text is -1');
+      }
     });
   }
 
   /**
    * Verifies an algorithm candidate implementation against independent tests and oracles.
+   * Execution is fully out-of-process; assertions and expected results run strictly in parent process.
    */
   async verifyAlgorithm(name, candidateCode, options = {}) {
     const oracle = this.oracles.get(name);
@@ -330,20 +385,101 @@ console.log('ALL_TESTS_PASSED');
     }
 
     const timeoutMs = options.timeoutMs || 4000;
-    const result = await executeNodeScript({ code: candidateCode, testHarness: oracle.testHarness, timeoutMs });
+    const runResult = await executeCandidateRunner({
+      code: candidateCode,
+      spec: oracle.spec,
+      timeoutMs
+    });
 
-    const verified = result.status === 'SUCCESS' && result.stdout.includes('ALL_TESTS_PASSED');
+    if (runResult.status === 'TIMEOUT') {
+      return {
+        name,
+        family: oracle.family,
+        lang: oracle.lang,
+        verified: false,
+        status: 'TIMEOUT',
+        durationMs: runResult.durationMs,
+        error: runResult.error || `Execution timed out after ${timeoutMs}ms`,
+        isolation: runResult.isolation,
+        scope: 'specific_problem',
+        familyWideClaim: false
+      };
+    }
+
+    const runnerOutput = runResult.runnerOutput;
+    if (!runnerOutput || runnerOutput.runnerStatus !== 'EXECUTED') {
+      const errDetail = runnerOutput?.error || runResult.error || runResult.stderr || 'Candidate runner failed to produce execution protocol output';
+      let status = 'MALFORMED_OUTPUT';
+      if (runnerOutput?.runnerStatus === 'SYNTAX_ERROR' || (typeof errDetail === 'string' && errDetail.includes('SyntaxError'))) {
+        status = 'SYNTAX_ERROR';
+      } else if (runnerOutput?.runnerStatus === 'TARGET_NOT_FOUND') {
+        status = 'TARGET_NOT_FOUND';
+      }
+
+      return {
+        name,
+        family: oracle.family,
+        lang: oracle.lang,
+        verified: false,
+        status,
+        durationMs: runResult.durationMs,
+        error: errDetail,
+        isolation: runResult.isolation,
+        scope: 'specific_problem',
+        familyWideClaim: false
+      };
+    }
+
+    // Inspect case results
+    const resultsMap = new Map();
+    for (const item of (runnerOutput.results || [])) {
+      if (item.status === 'ERROR') {
+        return {
+          name,
+          family: oracle.family,
+          lang: oracle.lang,
+          verified: false,
+          status: 'RUNTIME_ERROR',
+          durationMs: runResult.durationMs,
+          error: `Test case [${item.id}] raised an uncaught error: ${item.error}`,
+          isolation: runResult.isolation,
+          scope: 'specific_problem',
+          familyWideClaim: false
+        };
+      }
+      resultsMap.set(item.id, item.result);
+    }
+
+    // Independent parent-process oracle assertion
+    try {
+      oracle.verify(resultsMap);
+    } catch (assertionErr) {
+      return {
+        name,
+        family: oracle.family,
+        lang: oracle.lang,
+        verified: false,
+        status: 'TEST_FAILURE',
+        assertionFailure: true,
+        durationMs: runResult.durationMs,
+        error: assertionErr.message,
+        isolation: runResult.isolation,
+        scope: 'specific_problem',
+        familyWideClaim: false
+      };
+    }
 
     return {
       name,
       family: oracle.family,
       lang: oracle.lang,
-      verified,
-      status: verified ? 'VERIFIED' : (result.status || 'FAILED'),
-      durationMs: result.durationMs,
-      error: result.error,
-      stdout: result.stdout,
-      stderr: result.stderr
+      verified: true,
+      status: 'VERIFIED',
+      durationMs: runResult.durationMs,
+      error: null,
+      isolation: runResult.isolation,
+      scope: 'specific_problem',
+      familyWideClaim: false
     };
   }
 }

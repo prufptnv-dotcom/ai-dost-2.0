@@ -1059,7 +1059,7 @@ function validateTaskPlanSchema(tasks, options = {}) {
         const prevTaskId = fileOwnership.get(normFile);
         const deps = Array.isArray(task.dependsOn) ? task.dependsOn : (Array.isArray(task.dependencies) ? task.dependencies : []);
         if (!deps.includes(prevTaskId)) {
-          warnings.push(`Uncoordinated file ownership collision on "${normFile}" between tasks "${prevTaskId}" and "${id}"`);
+          errors.push(`Uncoordinated concurrent file write conflict on "${normFile}" between tasks "${prevTaskId}" and "${id}" without explicit dependency order`);
         }
       }
       fileOwnership.set(normFile, id);

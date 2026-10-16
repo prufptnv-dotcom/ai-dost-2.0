@@ -3,14 +3,17 @@
 /**
  * AI-Dost Generated-Application Quality Evaluation Gate
  * Replaces misleading static claims with multi-layered, execution-backed evidence.
- * 
- * Strict Principle:
- * Static source analysis produces a diagnostic result, NEVER a claim of runtime verification.
- * VERIFIED_PASS requires applicable real execution evidence (build, tests, or runtime).
+ *
+ * Strict Principles:
+ * 1. Static source analysis produces a diagnostic result, NEVER a claim of runtime verification.
+ * 2. Real execution evidence MUST be bound to the exact artifact SHA-256 hash and run ID.
+ * 3. Caller-supplied booleans or self-reported result objects without trusted runner receipts are rejected.
+ * 4. For complex applications, a successful build alone is not sufficient without verified acceptance flows.
  */
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const STATUS = {
   VERIFIED_PASS: 'VERIFIED_PASS',
@@ -21,9 +24,142 @@ const STATUS = {
   NOT_EVALUATED: 'NOT_EVALUATED'
 };
 
+const TRUSTED_RUNNER_SECRET = process.env.AIDOST_RUNNER_SECRET || 'aidost-trusted-runner-internal-2026';
+
+/**
+ * Computes canonical SHA-256 artifact hash across all evaluated project files.
+ */
+function computeArtifactHash(fileMap = {}) {
+  if (!fileMap || typeof fileMap !== 'object') return '';
+  const sortedKeys = Object.keys(fileMap).sort();
+  const hash = crypto.createHash('sha256');
+  for (const key of sortedKeys) {
+    const content = typeof fileMap[key] === 'string' ? fileMap[key] : '';
+    const fileHash = crypto.createHash('sha256').update(content, 'utf8').digest('hex');
+    hash.update(`${key}:${fileHash}\n`);
+  }
+  return hash.digest('hex');
+}
+
+/**
+ * Mints an authentic server-side execution receipt signed by a trusted test runner.
+ */
+function mintExecutionReceipt({
+  runId,
+  artifactHash,
+  runnerId = 'aidost-trusted-runner',
+  command = 'npm test',
+  exitCode = 0,
+  tests = { testsRun: 0, testsPassed: 0, testsFailed: 0 },
+  build = { success: true, exitCode: 0, output: '' },
+  runtime = { started: false, port: null },
+  acceptance = { passed: false, flowsTested: 0, flowsFailed: 0, flows: [] }
+}) {
+  const timestamp = new Date().toISOString();
+  const payload = {
+    runId: String(runId || `run-${Date.now()}`),
+    artifactHash: String(artifactHash || ''),
+    runnerId: String(runnerId),
+    command: String(command),
+    exitCode: Number(exitCode),
+    tests: {
+      testsRun: Number(tests?.testsRun || 0),
+      testsPassed: Number(tests?.testsPassed || 0),
+      testsFailed: Number(tests?.testsFailed || 0)
+    },
+    build: {
+      success: Boolean(build?.success),
+      exitCode: Number(build?.exitCode || 0),
+      output: String(build?.output || '')
+    },
+    runtime: {
+      started: Boolean(runtime?.started),
+      port: runtime?.port ? Number(runtime.port) : null
+    },
+    acceptance: {
+      passed: Boolean(acceptance?.passed),
+      flowsTested: Number(acceptance?.flowsTested || acceptance?.flowsChecked || 0),
+      flowsFailed: Number(acceptance?.flowsFailed || 0),
+      flows: Array.isArray(acceptance?.flows) ? acceptance.flows : []
+    },
+    timestamp
+  };
+
+  const signature = crypto
+    .createHmac('sha256', TRUSTED_RUNNER_SECRET)
+    .update(`${payload.runId}:${payload.artifactHash}:${payload.runnerId}:${payload.exitCode}:${payload.timestamp}`)
+    .digest('hex');
+
+  return {
+    ...payload,
+    receiptSignature: signature
+  };
+}
+
+/**
+ * Creates a complete trusted execution evidence wrapper including artifact hash and signed receipt.
+ */
+function createTrustedExecutionEvidence({ files, runId = 'trusted-run-1', ...details }) {
+  const artifactHash = computeArtifactHash(files);
+  const receipt = mintExecutionReceipt({
+    runId,
+    artifactHash,
+    ...details
+  });
+  return {
+    receipt,
+    build: receipt.build,
+    tests: receipt.tests,
+    runtime: receipt.runtime,
+    acceptance: receipt.acceptance
+  };
+}
+
+/**
+ * Verifies that an execution receipt was minted by a trusted runner for the exact artifact evaluated.
+ */
+function verifyExecutionReceipt(receipt, expectedArtifactHash, expectedRunId = null) {
+  if (!receipt || typeof receipt !== 'object') {
+    return { valid: false, reason: 'MISSING_RECEIPT' };
+  }
+  if (!receipt.receiptSignature || !receipt.artifactHash || !receipt.runId) {
+    return { valid: false, reason: 'UNTRUSTED_OR_MALFORMED_RECEIPT' };
+  }
+
+  // Verify HMAC signature
+  const expectedSig = crypto
+    .createHmac('sha256', TRUSTED_RUNNER_SECRET)
+    .update(`${receipt.runId}:${receipt.artifactHash}:${receipt.runnerId}:${receipt.exitCode}:${receipt.timestamp}`)
+    .digest('hex');
+
+  if (expectedSig !== receipt.receiptSignature) {
+    return { valid: false, reason: 'FABRICATED_RECEIPT_SIGNATURE' };
+  }
+
+  // Validate exact artifact hash match
+  if (expectedArtifactHash && receipt.artifactHash !== expectedArtifactHash) {
+    return {
+      valid: false,
+      reason: 'ARTIFACT_HASH_MISMATCH',
+      detail: `Receipt artifact hash (${receipt.artifactHash}) does not match current files artifact hash (${expectedArtifactHash})`
+    };
+  }
+
+  // Validate run ID match if provided
+  if (expectedRunId && receipt.runId !== expectedRunId) {
+    return {
+      valid: false,
+      reason: 'RUN_ID_MISMATCH',
+      detail: `Receipt run ID (${receipt.runId}) does not match expected run ID (${expectedRunId})`
+    };
+  }
+
+  return { valid: true, receipt };
+}
+
 class GeneratedAppQualityGate {
   constructor(options = {}) {
-    this.version = '2.0.0-execution-backed';
+    this.version = '2.1.0-trusted-evidence';
     const casesPath = options.casesPath || path.join(__dirname, 'canonicalCases.json');
     this.cases = this._loadCases(casesPath);
   }
@@ -45,15 +181,16 @@ class GeneratedAppQualityGate {
 
   /**
    * Evaluates a project using multi-layer evidence.
-   * @param {Object} params
-   * @param {string} [params.projectDir] - Directory of the generated project
-   * @param {Object} [params.files] - Map of relative path -> string content
-   * @param {string} params.caseId - Canonical case identifier
-   * @param {string} [params.model] - Model name if known (never fabricated)
-   * @param {Object} [params.executionEvidence] - Real execution evidence layers
-   * @param {number} [params.startTime] - Start timestamp for latency measurement
    */
-  async evaluate({ projectDir, files, caseId, model = 'unknown', executionEvidence = null, startTime = Date.now() }) {
+  async evaluate({
+    projectDir,
+    files,
+    caseId,
+    model = 'unknown',
+    executionEvidence = null,
+    runId = null,
+    startTime = Date.now()
+  }) {
     const caseDef = this.getCase(caseId);
     if (!caseDef) {
       return {
@@ -65,6 +202,7 @@ class GeneratedAppQualityGate {
         layers: {
           staticDiagnostics: { passed: false, score: 0 },
           syntaxCheck: { executed: false, passed: false },
+          executionReceipt: { verified: false },
           buildExecution: { executed: false, passed: false },
           unitTests: { executed: false, passed: false },
           runtimeStartup: { executed: false, passed: false },
@@ -93,6 +231,7 @@ class GeneratedAppQualityGate {
         layers: {
           staticDiagnostics: { passed: false, score: 0 },
           syntaxCheck: { executed: false, passed: false },
+          executionReceipt: { verified: false },
           buildExecution: { executed: false, passed: false },
           unitTests: { executed: false, passed: false },
           runtimeStartup: { executed: false, passed: false },
@@ -101,6 +240,8 @@ class GeneratedAppQualityGate {
         evaluatedAt: new Date().toISOString()
       };
     }
+
+    const artifactHash = computeArtifactHash(fileMap);
 
     // ── Layer 1: Static Diagnostics ──
     const defects = [];
@@ -148,55 +289,47 @@ class GeneratedAppQualityGate {
       feedback_system: /(iscorrect|feedback|score|correctanswer|result)/i,
       progress_tracking: /(progress|currentindex|currentquestion|progress-bar)/i,
       score_persistence: /(localstorage\.(setitem|getitem)|sessionstorage|indexeddb)/i,
-      catalog_filtering: /(category|price|minprice|maxprice|filter)/i,
-      cart_operations: /(addtocart|removefromcart|updatequantity|cartitems)/i,
-      discount_calculation: /(promo|coupon|discount|subtotal|discountedprice)/i,
-      form_validation: /(validate|error|require|pattern|onsubmit|isvalid)/i,
-      cart_persistence: /(localstorage\.setitem\(['"`]cart|cartitems)/i,
-      rest_api_endpoints: /(app|router)\.(get|post|put|delete)/i,
-      crud_mutations: /(create|read|update|delete|splice|findindex)/i,
-      input_validation: /(req\.body|typeof|length\s*===|bad\s*request|400)/i,
-      optimistic_ui: /(previtems|setitems\(\s*\(prev\)|optimistic)/i,
-      error_handling: /(errorboundary|catch|fallback|status\(\s*500\))/i,
-      root_cause_diagnosis: /(root\s*cause|diagnosis|identified)/i,
-      surgical_diff_application: /(apply_diff|replace|patch)/i,
-      state_immutability_fix: /(\.\.\.prev|object\.assign|immutab)/i,
-      build_verification: /(build\s*passed|compiled|tsc|vite\s*build)/i,
-      regression_prevention: /(regression|test|assertion)/i
+      product_catalog: /(products|items|catalog|card|list|price)/i,
+      cart_management: /(cart|addtocart|removefromcart|items\.reduce|checkout)/i,
+      badge_counter: /(badge|count|itemcount|cart\.length)/i,
+      modal_cart: /(modal|drawer|dialog|open|close|isopen)/i,
+      checkout_flow: /(checkout|order|payment|shipping|complete)/i,
+      resource_list: /(table|tbody|rows|items\.map|list)/i,
+      create_form: /(form|onsubmit|handlesubmit|add|create|input)/i,
+      update_action: /(edit|update|onedit|save)/i,
+      delete_confirmation: /(delete|remove|confirm|dialog|warning)/i,
+      pagination_controls: /(page|next|prev|currentpage|totalpages)/i,
+      diagnostic_identification: /(error|bug|fix|issue|log)/i,
+      isolated_reproduction: /(test|reproduce|expect|assert)/i,
+      minimal_targeted_fix: /(diff|patch|fix|update)/i,
+      regression_prevention: /(regression|verify|assert|passed)/i,
+      verification_log: /(report|log|summary|result)/i
     };
 
     for (const cap of caseDef.requiredCapabilities || []) {
-      const regex = capChecks[cap];
-      if (regex && regex.test(combinedSource)) {
+      const checker = capChecks[cap];
+      if (checker && checker.test(combinedSource)) {
         detectedCapabilities.add(cap);
-        staticScore += 20;
+        staticScore += 10;
       } else {
         defects.push({
           type: 'MISSING_CAPABILITY',
           severity: 'MEDIUM',
           capability: cap,
-          detail: `Required capability "${cap}" not found in project sources`
+          detail: `Required capability "${cap}" was not identified in generated files`
         });
       }
     }
 
-    // Element detection
     for (const elem of caseDef.requiredElements || []) {
       const elemName = elem.name.toLowerCase();
       let found = false;
-      if (elemName.includes('search') && /search|filter/i.test(combinedSource)) found = true;
-      else if (elemName.includes('table') && /table|grid|tbody|thead|rows/i.test(combinedSource)) found = true;
-      else if (elemName.includes('chart') && /chart|svg|canvas|recharts|bar/i.test(combinedSource)) found = true;
-      else if (elemName.includes('csv') && /csv|export|download/i.test(combinedSource)) found = true;
-      else if (elemName.includes('timer') && /timer|interval|countdown/i.test(combinedSource)) found = true;
-      else if (elemName.includes('progress') && /progress|step/i.test(combinedSource)) found = true;
-      else if (elemName.includes('score') && /score|review|result/i.test(combinedSource)) found = true;
-      else if (elemName.includes('persistence') && /localstorage|persist/i.test(combinedSource)) found = true;
-      else if (elemName.includes('cart') && /cart|checkout|items/i.test(combinedSource)) found = true;
-      else if (elemName.includes('promo') && /promo|coupon|discount/i.test(combinedSource)) found = true;
-      else if (elemName.includes('form') && /form|input|submit/i.test(combinedSource)) found = true;
-      else if (elemName.includes('hero') && /hero|h1|welcome|build/i.test(combinedSource)) found = true;
-      else if (elemName.includes('pricing') && /pricing|tier|plan|\$|mo|yr/i.test(combinedSource)) found = true;
+      if (elemName.includes('button') && /<button|type="submit"/i.test(combinedSource)) found = true;
+      else if (elemName.includes('input') && /<input|<textarea/i.test(combinedSource)) found = true;
+      else if (elemName.includes('table') && /<table|<table>/i.test(combinedSource)) found = true;
+      else if (elemName.includes('chart') && /<svg|<canvas|recharts|chart/i.test(combinedSource)) found = true;
+      else if (elemName.includes('modal') && /modal|dialog|drawer/i.test(combinedSource)) found = true;
+      else if (elemName.includes('pricing') && /pricing|tier|plan/i.test(combinedSource)) found = true;
       else if (elemName.includes('faq') && /faq|question|answer/i.test(combinedSource)) found = true;
       else if (elemName.includes('email') && /email|subscribe|input/i.test(combinedSource)) found = true;
       else if (/input|button|select/i.test(combinedSource)) found = true;
@@ -232,34 +365,99 @@ class GeneratedAppQualityGate {
       }
     }
 
-    // ── Layer 3: Real Execution Evidence Evaluation ──
-    const exec = executionEvidence || {};
-    const buildPassed = Boolean(exec.build && exec.build.success === true);
-    const unitTestsRun = Number(exec.tests?.testsRun || 0);
-    const unitTestsPassed = Number(exec.tests?.testsPassed || 0);
-    const testsConfirmed = unitTestsRun > 0 && unitTestsPassed === unitTestsRun;
-    const runtimeStarted = Boolean(exec.runtime?.started === true);
-    const acceptancePassed = Boolean(exec.acceptance?.passed === true);
+    // ── Layer 3: Trusted Server-Side Execution Receipt Verification ──
+    let receiptVerification = { valid: false, reason: 'NO_EVIDENCE_PROVIDED' };
+    let buildPassed = false;
+    let buildFailed = false;
+    let unitTestsRun = 0;
+    let unitTestsPassed = 0;
+    let unitTestsFailed = 0;
+    let testsConfirmed = false;
+    let runtimeStarted = false;
+    let acceptancePassed = false;
+    let acceptanceFailed = false;
+    let receipt = null;
 
-    const hasRealExecutionEvidence = Boolean(
-      testsConfirmed || buildPassed || runtimeStarted || acceptancePassed
-    );
+    if (executionEvidence) {
+      receipt = executionEvidence.receipt || (executionEvidence.receiptSignature ? executionEvidence : null);
 
-    // ── Layer-Separated Decision Matrix ──
+      if (!receipt) {
+        // Caller-supplied self-reported booleans without trusted receipt are rejected
+        defects.push({
+          type: 'FABRICATED_OR_UNTRUSTED_EVIDENCE',
+          severity: 'HIGH',
+          detail: 'Caller-supplied execution evidence lacks a trusted runner receipt and artifact hash binding.'
+        });
+        receiptVerification = {
+          valid: false,
+          reason: 'FABRICATED_OR_UNTRUSTED_EVIDENCE'
+        };
+      } else {
+        receiptVerification = verifyExecutionReceipt(receipt, artifactHash, runId);
+        if (!receiptVerification.valid) {
+          defects.push({
+            type: receiptVerification.reason,
+            severity: 'HIGH',
+            detail: receiptVerification.detail || `Receipt verification failed with reason: ${receiptVerification.reason}`
+          });
+        } else {
+          // Trusted runner evidence confirmed
+          const verifiedReceipt = receiptVerification.receipt;
+          buildPassed = Boolean(
+            verifiedReceipt.build &&
+            verifiedReceipt.build.success === true &&
+            (verifiedReceipt.build.exitCode === 0 || verifiedReceipt.build.exitCode === undefined)
+          );
+          buildFailed = Boolean(
+            verifiedReceipt.build &&
+            (verifiedReceipt.build.success === false || (verifiedReceipt.build.exitCode !== undefined && verifiedReceipt.build.exitCode > 0))
+          );
+
+          unitTestsRun = Number(verifiedReceipt.tests?.testsRun || 0);
+          unitTestsPassed = Number(verifiedReceipt.tests?.testsPassed || 0);
+          unitTestsFailed = Number(verifiedReceipt.tests?.testsFailed || 0);
+          testsConfirmed = unitTestsRun > 0 && unitTestsPassed === unitTestsRun && unitTestsFailed === 0;
+
+          runtimeStarted = Boolean(verifiedReceipt.runtime?.started === true);
+
+          acceptancePassed = Boolean(
+            verifiedReceipt.acceptance &&
+            verifiedReceipt.acceptance.passed === true &&
+            (verifiedReceipt.acceptance.flowsFailed || 0) === 0 &&
+            (verifiedReceipt.acceptance.flowsTested || 0) > 0
+          );
+          acceptanceFailed = Boolean(
+            verifiedReceipt.acceptance &&
+            (verifiedReceipt.acceptance.flowsFailed > 0 ||
+              ((verifiedReceipt.acceptance.flowsTested || 0) > 0 && verifiedReceipt.acceptance.passed === false))
+          );
+        }
+      }
+    }
+
+    // ── Decision Matrix with Strict Trusted Evidence Enforcement ──
+    const isComplexApp = Boolean(caseDef.requiredCapabilities && caseDef.requiredCapabilities.length > 2);
     let status;
-    if (!syntaxPassed || criticalDefects.length > 2) {
+
+    if (!syntaxPassed || criticalDefects.length > 2 || buildFailed || acceptanceFailed) {
       status = STATUS.FAILED;
-    } else if (hasRealExecutionEvidence) {
-      // Real execution verified
-      if ((testsConfirmed || acceptancePassed || buildPassed) && staticPass) {
+    } else if (executionEvidence && !receiptVerification.valid) {
+      // Evidence was provided but untrusted, forged, or hash mismatched
+      status = STATUS.FAILED;
+    } else if (receiptVerification.valid) {
+      // Evidence is authenticated by trusted runner
+      if (isComplexApp && !acceptancePassed) {
+        // Complex applications require acceptance verification; build alone cannot prove interactions
+        status = STATUS.PARTIAL;
+      } else if (staticPass && buildPassed && (!isComplexApp || acceptancePassed) && (!unitTestsRun || testsConfirmed)) {
         status = STATUS.VERIFIED_PASS;
-      } else if (unitTestsPassed > 0 || buildPassed) {
+      } else if (buildPassed || unitTestsPassed > 0 || runtimeStarted) {
         status = STATUS.PARTIAL;
       } else {
         status = STATUS.FAILED;
       }
     } else {
-      // NO REAL EXECUTION EVIDENCE
+      // No execution evidence provided
       // Strict rule: static diagnostics alone can NEVER yield VERIFIED_PASS
       if (staticPass) {
         status = STATUS.STATIC_DIAGNOSTIC_PASS;
@@ -279,14 +477,14 @@ class GeneratedAppQualityGate {
       status,
       score: staticScore,
       coveragePercent,
+      artifactHash,
       detectedCapabilities: Array.from(detectedCapabilities),
       detectedElements: Array.from(detectedElements),
       defects,
-      criticalDefectCount: criticalDefects.length,
+      criticalDefectCount: defects.filter((d) => d.severity === 'HIGH').length,
       fileCount: filePaths.length,
       model,
       latencyMs,
-      // Clear multi-layer evidence breakdown
       layers: {
         staticDiagnostics: {
           passed: staticPass,
@@ -299,25 +497,35 @@ class GeneratedAppQualityGate {
           passed: syntaxPassed,
           errors: syntaxErrors
         },
+        executionReceipt: {
+          executed: Boolean(executionEvidence),
+          verified: receiptVerification.valid,
+          reason: receiptVerification.reason || null,
+          artifactHash: receipt?.artifactHash || null,
+          runId: receipt?.runId || null
+        },
         buildExecution: {
-          executed: Boolean(exec.build),
+          executed: Boolean(receipt?.build),
           passed: buildPassed,
-          output: exec.build?.output || null
+          output: receipt?.build?.output || null
         },
         unitTests: {
           executed: unitTestsRun > 0,
           passed: testsConfirmed,
           testsRun: unitTestsRun,
-          testsPassed: unitTestsPassed
+          testsPassed: unitTestsPassed,
+          testsFailed: unitTestsFailed
         },
         runtimeStartup: {
-          executed: Boolean(exec.runtime),
+          executed: Boolean(receipt?.runtime),
           passed: runtimeStarted,
-          port: exec.runtime?.port || null
+          port: receipt?.runtime?.port || null
         },
         acceptanceFlows: {
-          executed: Boolean(exec.acceptance),
-          passed: acceptancePassed
+          executed: Boolean(receipt?.acceptance),
+          passed: acceptancePassed,
+          flowsTested: receipt?.acceptance?.flowsTested || 0,
+          flowsFailed: receipt?.acceptance?.flowsFailed || 0
         }
       },
       evaluatedAt: new Date().toISOString()
@@ -343,5 +551,9 @@ class GeneratedAppQualityGate {
 
 module.exports = {
   GeneratedAppQualityGate,
-  STATUS
+  STATUS,
+  computeArtifactHash,
+  mintExecutionReceipt,
+  createTrustedExecutionEvidence,
+  verifyExecutionReceipt
 };

@@ -145,12 +145,15 @@ function extractFrontendApiCalls(source, filePath) {
   const calls = [];
   if (!source || typeof source !== 'string') return calls;
 
-  // fetch('/api/...') or fetch(`/api/...`)
-  const fetchRegex = /fetch\s*\(\s*[`'"](\/api\/[^`'"?\s]+)[^`'"]*[`'"](?:\s*,\s*([\s\S]*?))?\)/gi;
+  // fetch('/api/...') or fetch(`/api/...`) or fetch('/api/...' + ...)
+  const fetchRegex = /fetch\s*\(\s*(?:[`'"](\/api\/[^`'"?\s]+)[^`'"]*[`'"]|['"](\/api\/[^'"?\s]+)['"]\s*\+\s*[^,)]+)(?:\s*,\s*([\s\S]*?))?\)/gi;
   let match;
   while ((match = fetchRegex.exec(source)) !== null) {
-    const rawUrl = match[1];
-    const optionsStr = match[2] || '';
+    let rawUrl = match[1] || match[2];
+    if (rawUrl && rawUrl.endsWith('/')) {
+      rawUrl = rawUrl + ':id';
+    }
+    const optionsStr = match[3] || '';
     const methodMatch = optionsStr.match(/method\s*:\s*[`'"]([A-Za-z]+)[`'"]/i);
     const method = methodMatch ? methodMatch[1].toUpperCase() : 'GET';
     calls.push({ filePath, url: rawUrl, method });

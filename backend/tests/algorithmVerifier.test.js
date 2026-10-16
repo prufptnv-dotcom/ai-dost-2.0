@@ -116,4 +116,69 @@ function twoSum(nums, target) {
     assert.strictEqual(res.verified, false);
     assert.strictEqual(res.status, 'SYNTAX_ERROR');
   });
+
+  await t.test('7. Adversarial candidate attempts to monkey-patch assert and print ALL_TESTS_PASSED', async () => {
+    const adversarialBypassAttempt = `
+// Attempt to subvert the test harness by patching global assert and printing pass token
+global.assert = {
+  ok: () => true,
+  strictEqual: () => true,
+  deepStrictEqual: () => true
+};
+console.log('ALL_TESTS_PASSED');
+
+function twoSum(nums, target) {
+  // Returns bogus results
+  return [999, 999];
+}
+`;
+    const res = await verifier.verifyAlgorithm('two_sum', adversarialBypassAttempt);
+    // Verifier MUST reject the attempt because parent process oracle independently checks results
+    assert.strictEqual(res.verified, false);
+    assert.strictEqual(res.status, 'TEST_FAILURE');
+    assert.strictEqual(res.familyWideClaim, false);
+  });
+
+  await t.test('8. Candidate throwing uncaught runtime exception is rejected with RUNTIME_ERROR', async () => {
+    const throwingCode = `
+function twoSum(nums, target) {
+  throw new Error('Fatal memory allocation failure');
+}
+`;
+    const res = await verifier.verifyAlgorithm('two_sum', throwingCode);
+    assert.strictEqual(res.verified, false);
+    assert.strictEqual(res.status, 'RUNTIME_ERROR');
+    assert.ok(res.error.includes('Fatal memory allocation failure'));
+  });
+
+  await t.test('9. Missing required function entrypoint is rejected with TARGET_NOT_FOUND', async () => {
+    const emptyCode = `
+// No twoSum or two_sum declared
+const irrelevantHelper = () => 42;
+`;
+    const res = await verifier.verifyAlgorithm('two_sum', emptyCode);
+    assert.strictEqual(res.verified, false);
+    assert.strictEqual(res.status, 'TARGET_NOT_FOUND');
+  });
+
+  await t.test('10. Verified algorithm produces bounded scope and does not award family-wide claim', async () => {
+    const validBinarySearch = `
+function binarySearch(nums, target) {
+  let left = 0, right = nums.length - 1;
+  while (left <= right) {
+    const mid = (left + right) >> 1;
+    if (nums[mid] === target) return mid;
+    if (nums[mid] < target) left = mid + 1;
+    else right = mid - 1;
+  }
+  return -1;
+}
+`;
+    const res = await verifier.verifyAlgorithm('binary_search', validBinarySearch);
+    assert.strictEqual(res.verified, true);
+    assert.strictEqual(res.status, 'VERIFIED');
+    assert.strictEqual(res.scope, 'specific_problem');
+    assert.strictEqual(res.familyWideClaim, false);
+    assert.strictEqual(res.isolation.securityGuarantee, false);
+  });
 });

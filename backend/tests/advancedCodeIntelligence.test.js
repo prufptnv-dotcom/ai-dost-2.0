@@ -22,7 +22,8 @@ const {
 
 const {
   GeneratedAppQualityGate,
-  STATUS
+  STATUS,
+  createTrustedExecutionEvidence
 } = require('../quality-evaluation/generatedAppQualityGate');
 
 const {
@@ -256,11 +257,14 @@ export default function App() {
     const evalResult = await gate.evaluate({
       files: validFiles,
       caseId: 'dashboard-search-charts-csv',
-      executionEvidence: {
-        build: { success: true },
+      executionEvidence: createTrustedExecutionEvidence({
+        files: validFiles,
+        runId: 'trusted-test-8',
+        build: { success: true, exitCode: 0 },
         tests: { testsRun: 4, testsPassed: 4 },
-        runtime: { started: true }
-      }
+        runtime: { started: true },
+        acceptance: { passed: true, flowsTested: 2 }
+      })
     });
 
     assert.strictEqual(evalResult.status, STATUS.VERIFIED_PASS);
@@ -305,5 +309,311 @@ export default function App() {
     const complexAlg = classifyRequest('Implement an LRU Cache with O(1) get and put');
     assert.strictEqual(complexAlg.category, 'ALGORITHMIC_PROBLEM');
     assert.strictEqual(complexAlg.multiTask, true);
+  });
+
+  // ── 11. Section 6 Proof: Eleven Specific Advanced Code Intelligence Regressions ──
+  await t.test('11. Section 6: Missing local import is detected as error', () => {
+    const files = {
+      'src/App.jsx': `
+import React from 'react';
+import Navbar from './components/Navbar';
+
+export default function App() { return <Navbar />; }
+`
+    };
+    const res = validateCrossFileContracts(files);
+    assert.strictEqual(res.valid, false);
+    assert.ok(res.errors.some((e) => e.includes('MISSING_LOCAL_FILE') && e.includes('./components/Navbar')));
+  });
+
+  await t.test('12. Section 6: Missing named export is detected as error', () => {
+    const files = {
+      'src/App.jsx': `
+import React from 'react';
+import { Button, IconButton } from './components/Button';
+
+export default function App() { return <Button />; }
+`,
+      'src/components/Button.jsx': `
+export function Button() { return <button>Click</button>; }
+// IconButton is missing!
+`
+    };
+    const res = validateCrossFileContracts(files);
+    assert.strictEqual(res.valid, false);
+    assert.ok(res.errors.some((e) => e.includes('MISSING_NAMED_EXPORT') && e.includes('IconButton')));
+  });
+
+  await t.test('13. Section 6: Frontend/backend HTTP-method mismatch is detected as error', () => {
+    const files = {
+      'src/api/users.js': `
+export async function deleteUser(id) {
+  return fetch('/api/users/' + id, { method: 'DELETE' });
+}
+`,
+      'server.js': `
+const express = require('express');
+const app = express();
+
+app.get('/api/users/:id', (req, res) => res.json({ id: req.params.id }));
+app.post('/api/users', (req, res) => res.json({ success: true }));
+// DELETE /api/users/:id is NOT implemented!
+`
+    };
+    const res = validateCrossFileContracts(files);
+    assert.strictEqual(res.valid, false);
+    assert.ok(res.errors.some((e) => e.includes('API_METHOD_MISMATCH')));
+  });
+
+  await t.test('14. Section 6: Conflicting concurrent file assignment is rejected as fatal error', () => {
+    const concurrentTasks = [
+      { id: 'task-1', title: 'Update styling', files: ['src/App.jsx'], dependsOn: [] },
+      { id: 'task-2', title: 'Add auth header', files: ['src/App.jsx'], dependsOn: [] }
+    ];
+
+    const schemaRes = validateTaskPlanSchema(concurrentTasks);
+    assert.strictEqual(schemaRes.valid, false, 'Uncoordinated concurrent file writes must not pass validation');
+    assert.ok(schemaRes.errors.some((e) => e.includes('Uncoordinated concurrent file write conflict')));
+
+    const collisionRes = checkTaskFileCollisions(concurrentTasks);
+    assert.strictEqual(collisionRes.valid, false);
+    assert.ok(collisionRes.errors.some((e) => e.includes('UNCOORDINATED_FILE_WRITE')));
+  });
+
+  await t.test('15. Section 6: Candidate attempts to mutate the test harness are rejected', async () => {
+    const verifier = new AlgorithmVerifier();
+    const maliciousCode = `
+global.assert = {
+  ok: () => true,
+  strictEqual: () => true,
+  deepStrictEqual: () => true
+};
+console.log('ALL_TESTS_PASSED');
+
+function twoSum(nums, target) {
+  return [999, 999]; // Wrong answers
+}
+`;
+    const res = await verifier.verifyAlgorithm('two_sum', maliciousCode);
+    assert.strictEqual(res.verified, false);
+    assert.strictEqual(res.status, 'TEST_FAILURE');
+  });
+
+  await t.test('16. Section 6: Incorrect algorithm output despite a success-looking message is rejected', async () => {
+    const verifier = new AlgorithmVerifier();
+    const deceptiveCode = `
+console.log('ALL_TESTS_PASSED');
+console.log('SUCCESS: All 10/10 test cases verified');
+
+function twoSum(nums, target) {
+  // Returns zero-length array
+  return [];
+}
+`;
+    const res = await verifier.verifyAlgorithm('two_sum', deceptiveCode);
+    assert.strictEqual(res.verified, false);
+    assert.strictEqual(res.status, 'TEST_FAILURE');
+  });
+
+  await t.test('17. Section 6: Fabricated execution evidence is rejected with FAILED status', async () => {
+    const gate = new GeneratedAppQualityGate();
+    const dummyFiles = {
+      'src/App.jsx': `
+import React, { useState } from 'react';
+export default function App() {
+  const [q, setQ] = useState('');
+  return (
+    <div>
+      <input type="text" placeholder="Search" value={q} onChange={e => setQ(e.target.value)} />
+      <button onClick={() => {}}>Export CSV</button>
+      <svg><circle cx="5" cy="5" r="4" /></svg>
+      <table><tbody><tr><td>Row</td></tr></tbody></table>
+    </div>
+  );
+}
+`
+    };
+
+    const callerFabricatedEvidence = {
+      build: { success: true },
+      tests: { testsRun: 50, testsPassed: 50 },
+      acceptance: { passed: true }
+    };
+
+    const res = await gate.evaluate({
+      files: dummyFiles,
+      caseId: 'dashboard-search-charts-csv',
+      executionEvidence: callerFabricatedEvidence
+    });
+
+    assert.strictEqual(res.status, STATUS.FAILED);
+    assert.strictEqual(res.layers.executionReceipt.verified, false);
+    assert.ok(res.defects.some((d) => d.type === 'FABRICATED_OR_UNTRUSTED_EVIDENCE'));
+  });
+
+  await t.test('18. Section 6: Evidence with the wrong artifact hash is rejected', async () => {
+    const gate = new GeneratedAppQualityGate();
+    const originalFiles = {
+      'src/App.jsx': `
+import React, { useState } from 'react';
+export default function App() {
+  const [q, setQ] = useState('');
+  return (
+    <div>
+      <input type="text" placeholder="Search" value={q} onChange={e => setQ(e.target.value)} />
+      <button onClick={() => {}}>Export CSV</button>
+      <svg><circle cx="5" cy="5" r="4" /></svg>
+      <table><tbody><tr><td>Row</td></tr></tbody></table>
+    </div>
+  );
+}
+`
+    };
+
+    const modifiedFiles = {
+      ...originalFiles,
+      'src/App.jsx': originalFiles['src/App.jsx'] + '\n// Tampered content'
+    };
+
+    // Evidence minted for originalFiles
+    const evidenceForOriginal = createTrustedExecutionEvidence({
+      files: originalFiles,
+      runId: 'run-hash-1',
+      build: { success: true, exitCode: 0 },
+      tests: { testsRun: 3, testsPassed: 3 },
+      acceptance: { passed: true, flowsTested: 2 }
+    });
+
+    // Evaluated against modifiedFiles
+    const res = await gate.evaluate({
+      files: modifiedFiles,
+      caseId: 'dashboard-search-charts-csv',
+      executionEvidence: evidenceForOriginal
+    });
+
+    assert.strictEqual(res.status, STATUS.FAILED);
+    assert.strictEqual(res.layers.executionReceipt.verified, false);
+    assert.ok(res.defects.some((d) => d.type === 'ARTIFACT_HASH_MISMATCH'));
+  });
+
+  await t.test('19. Section 6: Build passing while an acceptance-critical flow fails is rejected', async () => {
+    const gate = new GeneratedAppQualityGate();
+    const appFiles = {
+      'src/App.jsx': `
+import React, { useState } from 'react';
+export default function App() {
+  const [q, setQ] = useState('');
+  return (
+    <div>
+      <input type="text" placeholder="Search" value={q} onChange={e => setQ(e.target.value)} />
+      <button onClick={() => {}}>Export CSV</button>
+      <svg><circle cx="5" cy="5" r="4" /></svg>
+      <table><tbody><tr><td>Row</td></tr></tbody></table>
+    </div>
+  );
+}
+`
+    };
+
+    const evidenceWithFailedAcceptance = createTrustedExecutionEvidence({
+      files: appFiles,
+      runId: 'run-acc-fail-1',
+      build: { success: true, exitCode: 0, output: 'Build successful' },
+      tests: { testsRun: 5, testsPassed: 5, testsFailed: 0 },
+      acceptance: { passed: false, flowsTested: 4, flowsFailed: 1 } // Flow failure!
+    });
+
+    const res = await gate.evaluate({
+      files: appFiles,
+      caseId: 'dashboard-search-charts-csv',
+      executionEvidence: evidenceWithFailedAcceptance
+    });
+
+    assert.strictEqual(res.status, STATUS.FAILED);
+    assert.strictEqual(res.layers.acceptanceFlows.passed, false);
+  });
+
+  await t.test('20. Section 6: Genuine trusted evidence still passes cleanly', async () => {
+    const gate = new GeneratedAppQualityGate();
+    const appFiles = {
+      'src/App.jsx': `
+import React, { useState } from 'react';
+export default function App() {
+  const [q, setQ] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const handleExport = () => {
+    const csv = 'id,name\\n1,test';
+    const blob = new Blob([csv], { type: 'text/csv' });
+  };
+  return (
+    <div>
+      <input type="text" placeholder="Search" value={q} onChange={e => setQ(e.target.value)} />
+      <button onClick={handleExport}>Export CSV</button>
+      <svg><circle cx="5" cy="5" r="4" /></svg>
+      {isLoading ? <p>Loading...</p> : null}
+      {error ? <p>Error</p> : null}
+      <table><tbody><tr><td>Row</td></tr></tbody></table>
+    </div>
+  );
+}
+`
+    };
+
+    const trustedEvidence = createTrustedExecutionEvidence({
+      files: appFiles,
+      runId: 'run-genuine-1',
+      build: { success: true, exitCode: 0, output: 'Vite build complete in 210ms' },
+      tests: { testsRun: 5, testsPassed: 5, testsFailed: 0 },
+      runtime: { started: true, port: 3000 },
+      acceptance: { passed: true, flowsTested: 3, flowsFailed: 0 }
+    });
+
+    const res = await gate.evaluate({
+      files: appFiles,
+      caseId: 'dashboard-search-charts-csv',
+      executionEvidence: trustedEvidence
+    });
+
+    assert.strictEqual(res.status, STATUS.VERIFIED_PASS);
+    assert.strictEqual(res.layers.executionReceipt.verified, true);
+    assert.strictEqual(res.layers.buildExecution.passed, true);
+    assert.strictEqual(res.layers.acceptanceFlows.passed, true);
+  });
+
+  await t.test('21. Section 6: Targeted repair resolving a concrete contract failure', () => {
+    // Initial broken state: missing named export
+    const brokenFiles = {
+      'src/App.jsx': `
+import React from 'react';
+import { exportToCSV } from './utils/export';
+
+export default function App() {
+  return <button onClick={exportToCSV}>Export</button>;
+}
+`,
+      'src/utils/export.js': `
+export function exportToJSON(data) { return JSON.stringify(data); }
+// exportToCSV is missing!
+`
+    };
+
+    const initialValidation = validateCrossFileContracts(brokenFiles);
+    assert.strictEqual(initialValidation.valid, false);
+    assert.ok(initialValidation.errors.some((e) => e.includes('MISSING_NAMED_EXPORT') && e.includes('exportToCSV')));
+
+    // Bounded targeted repair applied ONLY to affected file 'src/utils/export.js'
+    const repairedFiles = {
+      ...brokenFiles,
+      'src/utils/export.js': `
+export function exportToJSON(data) { return JSON.stringify(data); }
+export function exportToCSV(data) { return 'csv,content'; }
+`
+    };
+
+    // Re-run validation on the actual files
+    const recheckValidation = validateCrossFileContracts(repairedFiles);
+    assert.strictEqual(recheckValidation.valid, true);
+    assert.strictEqual(recheckValidation.errors.length, 0);
   });
 });
