@@ -389,7 +389,8 @@ class AlgorithmVerifier {
       code: candidateCode,
       spec: oracle.spec,
       timeoutMs,
-      requireOsIsolation: Boolean(options.requireOsIsolation || options.strictIsolation)
+      requireOsIsolation: Boolean(options.requireOsIsolation || options.strictIsolation || process.env.AIDOST_STRICT_ISOLATION === 'true'),
+      adapter: options.adapter || null
     });
 
     if (runResult.status === 'SANDBOX_UNAVAILABLE') {

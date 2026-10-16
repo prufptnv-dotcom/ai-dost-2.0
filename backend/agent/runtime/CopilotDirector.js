@@ -20,6 +20,7 @@ const { resolveCanonicalCase, CANONICAL_CASE_IDS } = require('../../quality-eval
 const { AlgorithmVerifier } = require('../../quality-evaluation/algorithmVerifier');
 const { GeneratedAppQualityGate, STATUS } = require('../../quality-evaluation/generatedAppQualityGate');
 const { TrustedExecutionService } = require('../../quality-evaluation/trustedExecutionService');
+const { getAcceptanceFlows } = require('../../quality-evaluation/canonicalAcceptanceFlows');
 
 // The planner decides the actual count. This is only a defensive ceiling against
 // malformed or adversarial model output, not a workflow rule.
@@ -742,10 +743,13 @@ class CopilotDirector {
       if (isAppGeneration && meta?.diskPath) {
         if (canonicalResolution.canonicalCase) {
           try {
+            const flows = getAcceptanceFlows(canonicalResolution.canonicalCase);
             const evidence = await this.trustedRunner.execute({
               projectDir: meta.diskPath,
               files: finalFiles,
-              runId: supervisorRunId
+              runId: supervisorRunId,
+              caseId: canonicalResolution.canonicalCase,
+              acceptanceFlows: flows
             });
             const gateResult = await this.qualityGate.evaluate({
               projectDir: meta.diskPath,

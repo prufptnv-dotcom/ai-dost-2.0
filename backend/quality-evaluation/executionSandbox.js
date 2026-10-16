@@ -16,6 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const { ContainerExecutionAdapter } = require('./containerExecutionAdapter');
 
 const DEFAULT_TIMEOUT_MS = 4000;
 const MAX_OUTPUT_BYTES = 64 * 1024; // 64 KB
@@ -39,28 +40,19 @@ function checkOsIsolationAvailable(options = {}) {
     return Boolean(_testContainerOverride.available);
   }
 
-  // Active operational probe: verify Docker or Podman responds
-  const candidates = ['docker', 'podman'];
-  for (const bin of candidates) {
-    try {
-      const res = execSync(`${bin} info`, {
-        timeout: 2000,
-        stdio: 'pipe',
-        windowsHide: true
-      });
-      if (res) {
-        const details = { available: true, runtime: bin, verified: true };
-        if (options && options.details) return details;
-        return true;
-      }
-    } catch (_) {}
+  const adapter = new ContainerExecutionAdapter();
+  const probe = adapter.probeRuntime();
+  if (probe.available) {
+    const details = { available: true, runtime: probe.runtime, verified: true };
+    if (options && options.details) return details;
+    return true;
   }
 
   const details = {
     available: false,
     runtime: null,
     verified: false,
-    reason: 'No operational container runtime (Docker/Podman) is responding on this host'
+    reason: probe.reason || 'No operational container runtime (Docker/Podman) is responding on this host'
   };
   if (options && options.details) return details;
   return false;
@@ -185,23 +177,28 @@ function runProcess(command, args, options = {}) {
  * Executes candidate code out-of-process in a strictly bounded runner.
  * Results are communicated strictly out-of-band via private output file.
  */
-async function executeCandidateRunner({ code, spec, timeoutMs = DEFAULT_TIMEOUT_MS, requireOsIsolation = false }) {
-  if (requireOsIsolation && !checkOsIsolationAvailable()) {
-    return {
-      status: 'SANDBOX_UNAVAILABLE',
-      exitCode: -1,
-      stdout: '',
-      stderr: 'Required OS-level container isolation is unavailable on this host.',
-      durationMs: 0,
-      error: 'SANDBOX_UNAVAILABLE: Execution blocked because strict container isolation is required but unavailable.',
-      runnerOutput: null,
-      isolation: {
-        level: 'NONE',
-        securityGuarantee: false,
-        containerIsolation: false,
-        limitation: 'Host lacks container/jail isolation'
-      }
-    };
+async function executeCandidateRunner({ code, spec, timeoutMs = DEFAULT_TIMEOUT_MS, requireOsIsolation = false, adapter = null }) {
+  const containerAdapter = adapter || (requireOsIsolation ? new ContainerExecutionAdapter({ strictIsolation: true, timeoutMs }) : null);
+
+  if (requireOsIsolation) {
+    const isAvailable = containerAdapter ? containerAdapter.isAvailable() : checkOsIsolationAvailable();
+    if (!isAvailable) {
+      return {
+        status: 'SANDBOX_UNAVAILABLE',
+        exitCode: -1,
+        stdout: '',
+        stderr: 'Required OS-level container isolation is unavailable on this host.',
+        durationMs: 0,
+        error: 'SANDBOX_UNAVAILABLE: Execution blocked because strict container isolation is required but unavailable.',
+        runnerOutput: null,
+        isolation: {
+          level: 'NONE',
+          securityGuarantee: false,
+          containerIsolation: false,
+          limitation: 'Host lacks container/jail isolation'
+        }
+      };
+    }
   }
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidost-eval-runner-'));
@@ -385,22 +382,54 @@ try {
     fs.writeFileSync(runnerPath, runnerScript, 'utf8');
 
     const startTime = Date.now();
-    const runRes = await runProcess(
-      process.execPath,
-      [
-        '--no-addons',
-        '--max-old-space-size=64',
-        '--disallow-code-generation-from-strings',
-        runnerPath,
-        specPath,
-        outputPath
-      ],
-      {
-        cwd: tmpDir,
-        timeoutMs,
-        startTime
-      }
-    );
+    let runRes;
+    let isolationInfo;
+
+    if (requireOsIsolation && containerAdapter) {
+      const containerResult = await containerAdapter.execute({
+        stagedDir: tmpDir,
+        command: 'node',
+        args: ['runner.js', 'spec.json', `result_${runNonce}.json`],
+        timeoutMs
+      });
+      runRes = {
+        status: containerResult.status === 'TIMEOUT' ? 'TIMEOUT' : (containerResult.exitCode === 0 ? 'SUCCESS' : (containerResult.status || 'FAILED')),
+        exitCode: containerResult.exitCode,
+        stdout: containerResult.stdout,
+        stderr: containerResult.stderr,
+        durationMs: Date.now() - startTime,
+        error: containerResult.error
+      };
+      isolationInfo = {
+        level: 'CONTAINER_ISOLATED',
+        securityGuarantee: true,
+        containerIsolation: true,
+        limitation: null
+      };
+    } else {
+      runRes = await runProcess(
+        process.execPath,
+        [
+          '--no-addons',
+          '--max-old-space-size=64',
+          '--disallow-code-generation-from-strings',
+          runnerPath,
+          specPath,
+          outputPath
+        ],
+        {
+          cwd: tmpDir,
+          timeoutMs,
+          startTime
+        }
+      );
+      isolationInfo = {
+        level: 'SUBPROCESS_RESTRICTED',
+        securityGuarantee: false,
+        containerIsolation: false,
+        limitation: ISOLATION_LIMITATION
+      };
+    }
 
     let runnerOutput = null;
     if (fs.existsSync(outputPath)) {
@@ -418,12 +447,7 @@ try {
       durationMs: runRes.durationMs,
       error: runRes.error,
       runnerOutput,
-      isolation: {
-        level: 'SUBPROCESS_RESTRICTED',
-        securityGuarantee: false,
-        containerIsolation: false,
-        limitation: ISOLATION_LIMITATION
-      }
+      isolation: isolationInfo
     };
   } finally {
     try {

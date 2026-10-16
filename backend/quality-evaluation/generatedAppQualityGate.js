@@ -16,6 +16,22 @@ const path = require('path');
 const crypto = require('crypto');
 const os = require('os');
 
+const {
+  createWorkspaceSnapshot,
+  computeSnapshotHash,
+  SUPPORTED_EXTENSIONS,
+  EXCLUDED_DIRS,
+  DEFAULT_LIMITS
+} = require('./workspaceManifest');
+
+const {
+  consumeReceiptSignature,
+  isReceiptSignatureConsumed,
+  _clearConsumedReceiptsForTesting
+} = require('./receiptReplayStore');
+
+const { getAcceptanceFlows } = require('./canonicalAcceptanceFlows');
+
 const STATUS = {
   VERIFIED_PASS: 'VERIFIED_PASS',
   STATIC_DIAGNOSTIC_PASS: 'STATIC_DIAGNOSTIC_PASS',
@@ -33,15 +49,8 @@ function getRunnerSecret() {
   return secret.trim();
 }
 
-const CANONICAL_EXTENSIONS = new Set([
-  '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs',
-  '.json', '.html', '.css', '.svg', '.vue', '.svelte',
-  '.yaml', '.yml'
-]);
-
-const CANONICAL_EXCLUDE_DIRS = new Set([
-  'node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.turbo', '.cache'
-]);
+const CANONICAL_EXTENSIONS = SUPPORTED_EXTENSIONS;
+const CANONICAL_EXCLUDE_DIRS = EXCLUDED_DIRS;
 
 /**
  * Single authoritative canonical file collector for all verification and evidence services.
@@ -73,15 +82,7 @@ function collectCanonicalWorkspaceFiles(dir, rootDir = dir, fileMap = {}) {
  * Computes canonical SHA-256 artifact hash across all evaluated project files.
  */
 function computeArtifactHash(fileMap = {}) {
-  if (!fileMap || typeof fileMap !== 'object') return '';
-  const sortedKeys = Object.keys(fileMap).sort();
-  const hash = crypto.createHash('sha256');
-  for (const key of sortedKeys) {
-    const content = typeof fileMap[key] === 'string' ? fileMap[key] : '';
-    const fileHash = crypto.createHash('sha256').update(content, 'utf8').digest('hex');
-    hash.update(`${key}:${fileHash}\n`);
-  }
-  return hash.digest('hex');
+  return computeSnapshotHash(fileMap);
 }
 
 /**
@@ -104,8 +105,9 @@ function canonicalizeReceiptPayload(payload = {}) {
     },
     artifactHash: String(payload.artifactHash || ''),
     build: {
-      exitCode: Number(payload.build?.exitCode || 0),
+      exitCode: payload.build?.exitCode != null ? Number(payload.build.exitCode) : null,
       output: String(payload.build?.output || ''),
+      status: String(payload.build?.status || (payload.build?.success ? 'PASSED' : 'NOT_REQUIRED')),
       success: Boolean(payload.build?.success)
     },
     command: String(payload.command || ''),
@@ -117,45 +119,15 @@ function canonicalizeReceiptPayload(payload = {}) {
       started: Boolean(payload.runtime?.started)
     },
     tests: {
-      testsFailed: Number(payload.tests?.testsFailed || 0),
-      testsPassed: Number(payload.tests?.testsPassed || 0),
-      testsRun: Number(payload.tests?.testsRun || 0)
+      commandPassed: Boolean(payload.tests?.commandPassed),
+      countsMeasured: Boolean(payload.tests?.countsMeasured),
+      testsFailed: payload.tests?.testsFailed != null ? Number(payload.tests.testsFailed) : null,
+      testsPassed: payload.tests?.testsPassed != null ? Number(payload.tests.testsPassed) : null,
+      testsRun: payload.tests?.testsRun != null ? Number(payload.tests.testsRun) : null
     },
     timestamp: String(payload.timestamp || '')
   };
   return JSON.stringify(canonicalObj);
-}
-
-// Replay protection registry (in-memory + durable atomic tracking)
-const consumedReceiptSignatures = new Set();
-const DURABLE_REPLAY_FILE = path.join(os.tmpdir(), '.aidost_consumed_receipts.json');
-
-function _loadDurableReceipts() {
-  try {
-    if (fs.existsSync(DURABLE_REPLAY_FILE)) {
-      const data = JSON.parse(fs.readFileSync(DURABLE_REPLAY_FILE, 'utf8'));
-      if (Array.isArray(data)) {
-        for (const sig of data) consumedReceiptSignatures.add(sig);
-      }
-    }
-  } catch (_) {}
-}
-_loadDurableReceipts();
-
-function _recordDurableReceipt(sig) {
-  try {
-    const arr = Array.from(consumedReceiptSignatures).slice(-2000);
-    fs.writeFileSync(DURABLE_REPLAY_FILE, JSON.stringify(arr), 'utf8');
-  } catch (_) {}
-}
-
-function _clearConsumedReceiptsForTesting() {
-  consumedReceiptSignatures.clear();
-  try {
-    if (fs.existsSync(DURABLE_REPLAY_FILE)) {
-      fs.unlinkSync(DURABLE_REPLAY_FILE);
-    }
-  } catch (_) {}
 }
 
 /**
@@ -206,7 +178,7 @@ function verifyExecutionReceipt(receipt, expectedArtifactHash, expectedRunId = n
   }
 
   // Replay protection: check if signature was already consumed
-  if (consumedReceiptSignatures.has(receipt.receiptSignature)) {
+  if (isReceiptSignatureConsumed(receipt.receiptSignature)) {
     return { valid: false, reason: 'RECEIPT_REPLAY_DETECTED' };
   }
 
@@ -232,12 +204,14 @@ function verifyExecutionReceipt(receipt, expectedArtifactHash, expectedRunId = n
     return { valid: false, reason: 'FABRICATED_RECEIPT_SIGNATURE' };
   }
 
-  // Mark signature consumed for replay protection
-  consumedReceiptSignatures.add(receipt.receiptSignature);
-  _recordDurableReceipt(receipt.receiptSignature);
-  if (consumedReceiptSignatures.size > 10000) {
-    const oldest = consumedReceiptSignatures.values().next().value;
-    consumedReceiptSignatures.delete(oldest);
+  // Mark signature consumed in transactional durable replay store
+  try {
+    consumeReceiptSignature(receipt.receiptSignature, receipt.runId, receipt.artifactHash);
+  } catch (err) {
+    if (err && err.code === 'RECEIPT_REPLAY_DETECTED') {
+      return { valid: false, reason: 'RECEIPT_REPLAY_DETECTED' };
+    }
+    return { valid: false, reason: 'REPLAY_REGISTRY_ERROR', detail: err.message };
   }
 
   return { valid: true, receipt };
@@ -299,13 +273,40 @@ class GeneratedAppQualityGate {
       };
     }
 
-    const fileMap = {};
-    if (files && typeof files === 'object') {
-      Object.assign(fileMap, files);
-    } else if (projectDir && fs.existsSync(projectDir)) {
-      this._collectFiles(projectDir, projectDir, fileMap);
+    let snapshot;
+    try {
+      const source = files || projectDir;
+      if (!source) {
+        throw new Error('No project files found to evaluate');
+      }
+      snapshot = createWorkspaceSnapshot(source);
+    } catch (manifestErr) {
+      return {
+        evaluatorVersion: this.version,
+        status: STATUS.FAILED,
+        caseId,
+        score: 0,
+        coveragePercent: 0,
+        errors: [manifestErr.message],
+        defects: [{
+          type: manifestErr.message.includes('MANIFEST_LIMIT_EXCEEDED') ? 'MANIFEST_LIMIT_EXCEEDED' : 'WORKSPACE_SNAPSHOT_ERROR',
+          severity: 'HIGH',
+          detail: manifestErr.message
+        }],
+        layers: {
+          staticDiagnostics: { passed: false, score: 0 },
+          syntaxCheck: { executed: false, passed: false },
+          executionReceipt: { verified: false },
+          buildExecution: { executed: false, passed: false },
+          unitTests: { executed: false, passed: false },
+          runtimeStartup: { executed: false, passed: false },
+          acceptanceFlows: { executed: false, passed: false }
+        },
+        evaluatedAt: new Date().toISOString()
+      };
     }
 
+    const fileMap = snapshot.files;
     const filePaths = Object.keys(fileMap);
     if (filePaths.length === 0) {
       return {
@@ -328,7 +329,7 @@ class GeneratedAppQualityGate {
       };
     }
 
-    const artifactHash = computeArtifactHash(fileMap);
+    const artifactHash = snapshot.hash;
 
     // ── Layer 1: Static Diagnostics ──
     const defects = [];
@@ -456,9 +457,11 @@ class GeneratedAppQualityGate {
     let receiptVerification = { valid: false, reason: 'NO_EVIDENCE_PROVIDED' };
     let buildPassed = false;
     let buildFailed = false;
-    let unitTestsRun = 0;
-    let unitTestsPassed = 0;
-    let unitTestsFailed = 0;
+    let buildNotRequired = false;
+    let unitTestsRun = null;
+    let unitTestsPassed = null;
+    let unitTestsFailed = null;
+    let countsMeasured = false;
     let testsConfirmed = false;
     let runtimeStarted = false;
     let acceptancePassed = false;
@@ -490,20 +493,32 @@ class GeneratedAppQualityGate {
         } else {
           // Trusted runner evidence confirmed
           const verifiedReceipt = receiptVerification.receipt;
-          buildPassed = Boolean(
-            verifiedReceipt.build &&
-            verifiedReceipt.build.success === true &&
-            (verifiedReceipt.build.exitCode === 0 || verifiedReceipt.build.exitCode === undefined)
-          );
-          buildFailed = Boolean(
-            verifiedReceipt.build &&
-            (verifiedReceipt.build.success === false || (verifiedReceipt.build.exitCode !== undefined && verifiedReceipt.build.exitCode > 0))
-          );
+          const buildStatus = verifiedReceipt.build?.status;
+          const buildExecuted = Boolean(verifiedReceipt.build?.executed);
 
-          unitTestsRun = Number(verifiedReceipt.tests?.testsRun || 0);
-          unitTestsPassed = Number(verifiedReceipt.tests?.testsPassed || 0);
-          unitTestsFailed = Number(verifiedReceipt.tests?.testsFailed || 0);
-          testsConfirmed = unitTestsRun > 0 && unitTestsPassed === unitTestsRun && unitTestsFailed === 0;
+          if (buildStatus === 'PASSED' || (verifiedReceipt.build?.success === true && (verifiedReceipt.build?.exitCode === 0 || verifiedReceipt.build?.exitCode == null))) {
+            buildPassed = true;
+            buildFailed = false;
+          } else if (buildStatus === 'FAILED' || (buildExecuted && verifiedReceipt.build?.success === false) || (verifiedReceipt.build?.exitCode != null && verifiedReceipt.build?.exitCode > 0)) {
+            buildPassed = false;
+            buildFailed = true;
+          } else if (buildStatus === 'NOT_REQUIRED' || (!buildExecuted && !verifiedReceipt.build?.success)) {
+            buildNotRequired = true;
+            buildFailed = false;
+          }
+
+          countsMeasured = Boolean(verifiedReceipt.tests?.countsMeasured);
+          unitTestsRun = verifiedReceipt.tests?.testsRun != null ? Number(verifiedReceipt.tests.testsRun) : null;
+          unitTestsPassed = verifiedReceipt.tests?.testsPassed != null ? Number(verifiedReceipt.tests.testsPassed) : null;
+          unitTestsFailed = verifiedReceipt.tests?.testsFailed != null ? Number(verifiedReceipt.tests.testsFailed) : null;
+
+          testsConfirmed = Boolean(
+            countsMeasured &&
+            unitTestsRun != null &&
+            unitTestsRun > 0 &&
+            unitTestsPassed === unitTestsRun &&
+            (!unitTestsFailed || unitTestsFailed === 0)
+          );
 
           runtimeStarted = Boolean(verifiedReceipt.runtime?.started === true);
 
@@ -529,16 +544,22 @@ class GeneratedAppQualityGate {
     if (!syntaxPassed || criticalDefects.length > 2 || buildFailed || acceptanceFailed) {
       status = STATUS.FAILED;
     } else if (executionEvidence && !receiptVerification.valid) {
-      // Evidence was provided but untrusted, forged, or hash mismatched
+      // Evidence was provided but untrusted, forged, replayed, or hash mismatched
       status = STATUS.FAILED;
     } else if (receiptVerification.valid) {
       // Evidence is authenticated by trusted runner
+      const buildSatisfied = buildPassed || buildNotRequired;
+
       if (isComplexApp && !acceptancePassed) {
         // Complex applications require acceptance verification; build alone cannot prove interactions
         status = STATUS.PARTIAL;
-      } else if (staticPass && buildPassed && (!isComplexApp || acceptancePassed) && (!unitTestsRun || testsConfirmed)) {
-        status = STATUS.VERIFIED_PASS;
-      } else if (buildPassed || unitTestsPassed > 0 || runtimeStarted) {
+      } else if (staticPass && buildSatisfied && (!isComplexApp || acceptancePassed) && (!countsMeasured || testsConfirmed)) {
+        if (unitTestsRun != null && !testsConfirmed) {
+          status = STATUS.PARTIAL;
+        } else {
+          status = STATUS.VERIFIED_PASS;
+        }
+      } else if (buildPassed || (countsMeasured && unitTestsPassed > 0) || runtimeStarted) {
         status = STATUS.PARTIAL;
       } else {
         status = STATUS.FAILED;
@@ -592,13 +613,15 @@ class GeneratedAppQualityGate {
           runId: receipt?.runId || null
         },
         buildExecution: {
-          executed: Boolean(receipt?.build),
+          executed: Boolean(receipt?.build?.executed || (receipt?.build && receipt?.build?.status !== 'NOT_REQUIRED')),
           passed: buildPassed,
+          status: receipt?.build?.status || (buildPassed ? 'PASSED' : (buildNotRequired ? 'NOT_REQUIRED' : 'FAILED')),
           output: receipt?.build?.output || null
         },
         unitTests: {
-          executed: unitTestsRun > 0,
+          executed: countsMeasured && unitTestsRun != null && unitTestsRun > 0,
           passed: testsConfirmed,
+          countsMeasured,
           testsRun: unitTestsRun,
           testsPassed: unitTestsPassed,
           testsFailed: unitTestsFailed
@@ -643,5 +666,8 @@ module.exports = {
   resolveCanonicalCase,
   getCanonicalCase,
   CANONICAL_CASES,
-  CANONICAL_CASE_IDS
+  CANONICAL_CASE_IDS,
+  createWorkspaceSnapshot,
+  computeSnapshotHash,
+  getAcceptanceFlows
 };

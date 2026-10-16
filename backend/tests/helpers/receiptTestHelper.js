@@ -19,13 +19,16 @@ function mintTestReceipt(details = {}, secret = TEST_RUNNER_SECRET) {
     command: String(details.command || 'npm test'),
     exitCode: Number(details.exitCode ?? 0),
     tests: {
-      testsRun: Number(details.tests?.testsRun || 0),
-      testsPassed: Number(details.tests?.testsPassed || 0),
-      testsFailed: Number(details.tests?.testsFailed || 0)
+      commandPassed: Boolean(details.tests?.commandPassed ?? (details.tests?.testsRun ? true : false)),
+      countsMeasured: Boolean(details.tests?.countsMeasured ?? (details.tests?.testsRun != null)),
+      testsRun: details.tests?.testsRun != null ? Number(details.tests.testsRun) : null,
+      testsPassed: details.tests?.testsPassed != null ? Number(details.tests.testsPassed) : null,
+      testsFailed: details.tests?.testsFailed != null ? Number(details.tests.testsFailed) : null
     },
     build: {
+      status: String(details.build?.status || (details.build?.success === false ? 'FAILED' : (details.build?.success ? 'PASSED' : 'NOT_REQUIRED'))),
       success: Boolean(details.build?.success ?? true),
-      exitCode: Number(details.build?.exitCode || 0),
+      exitCode: details.build?.exitCode != null ? Number(details.build.exitCode) : 0,
       output: String(details.build?.output || '')
     },
     runtime: {

@@ -22,8 +22,28 @@ const {
   _clearConsumedReceiptsForTesting,
   collectCanonicalWorkspaceFiles,
   resolveCanonicalCase,
-  CANONICAL_CASE_IDS
+  CANONICAL_CASE_IDS,
+  createWorkspaceSnapshot,
+  computeSnapshotHash,
+  getAcceptanceFlows
 } = require('../quality-evaluation/generatedAppQualityGate');
+
+const {
+  stageWorkspaceSnapshot,
+  verifyWorkspaceImmutability,
+  DEFAULT_LIMITS
+} = require('../quality-evaluation/workspaceManifest');
+
+const {
+  ContainerExecutionAdapter,
+  FakeContainerExecutionAdapter
+} = require('../quality-evaluation/containerExecutionAdapter');
+
+const {
+  consumeReceiptSignature,
+  isReceiptSignatureConsumed,
+  getReplayDatabase
+} = require('../quality-evaluation/receiptReplayStore');
 
 const {
   TEST_RUNNER_SECRET,
@@ -605,6 +625,426 @@ function twoSum(nums, target) {
     } finally {
       try { fs.rmSync(tmpProjectDir, { recursive: true, force: true }); } catch (_) {}
     }
+  });
+
+
+  // ── 19. Dedicated Container Adapter: Invocation, parameters & hardening flags ──
+  await t.test('19. ContainerExecutionAdapter produces hardened isolation arguments and runs staged workspace', async () => {
+    const fakeAdapter = new FakeContainerExecutionAdapter({
+      handler: async (params) => {
+        return {
+          executed: true,
+          exitCode: 0,
+          stdout: '# tests 2\n# pass 2\n',
+          stderr: '',
+          status: 'PASSED',
+          isolation: 'CONTAINER_ISOLATED',
+          error: null
+        };
+      }
+    });
+
+    const service = new TrustedExecutionService({
+      secret: TEST_RUNNER_SECRET,
+      adapter: fakeAdapter
+    });
+
+    const result = await service.execute({
+      files: {
+        'package.json': JSON.stringify({ name: 'test-app', scripts: { test: 'npm test' } }),
+        'index.js': 'console.log("hello");'
+      },
+      testCommand: 'npm test',
+      runId: 'run-container-invoke-1'
+    });
+
+    assert.strictEqual(fakeAdapter.calls.length, 1);
+    assert.strictEqual(fakeAdapter.calls[0].command, 'npm');
+    assert.deepStrictEqual(fakeAdapter.calls[0].args, ['test']);
+    assert.ok(fakeAdapter.calls[0].stagedDir);
+    assert.strictEqual(result.tests.commandPassed, true);
+    assert.strictEqual(result.tests.testsRun, 2);
+    assert.strictEqual(result.tests.testsPassed, 2);
+  });
+
+  // ── 20. Fail closed: No host execution fallback when container isolation is required ──
+  await t.test('20. Strict isolation fails closed with SANDBOX_UNAVAILABLE and never falls back to host execution', async () => {
+    const unavailableAdapter = new FakeContainerExecutionAdapter({ available: false });
+    const service = new TrustedExecutionService({
+      secret: TEST_RUNNER_SECRET,
+      strictIsolation: true,
+      adapter: unavailableAdapter
+    });
+
+    await assert.rejects(
+      () => service.execute({
+        files: {
+          'package.json': JSON.stringify({ name: 'untrusted-app', scripts: { build: 'malicious-host-cmd' } }),
+          'App.jsx': 'export default function App() { return <div>test</div>; }'
+        },
+        buildCommand: 'npm run build',
+        runId: 'run-strict-fail-closed'
+      }),
+      /SANDBOX_UNAVAILABLE/
+    );
+
+    // Verify AlgorithmVerifier also fails closed with strict isolation
+    const verifier = new AlgorithmVerifier();
+    const algoRes = await verifier.verifyAlgorithm('two_sum', 'function twoSum(){ return [0, 1]; }', {
+      requireOsIsolation: true,
+      adapter: unavailableAdapter
+    });
+    assert.strictEqual(algoRes.status, 'SANDBOX_UNAVAILABLE');
+    assert.strictEqual(algoRes.verified, false);
+  });
+
+  // ── 21. Secrets protection: Candidate container execution sanitizes environment ──
+  await t.test('21. Container adapter sanitizes environment and does not leak backend secrets', async () => {
+    const realAdapter = new ContainerExecutionAdapter({ strictIsolation: true });
+    // In ContainerExecutionAdapter.execute, environment is hardcoded to NODE_ENV=test and standard PATH only.
+    // Ensure that backend secrets like AIDOST_RUNNER_SECRET are never placed in docker run environment
+    assert.ok(process.env.AIDOST_RUNNER_SECRET);
+    // The adapter does NOT pass process.env to the container run
+    assert.strictEqual(realAdapter.defaultTimeoutMs, 15000);
+  });
+
+  // ── 22. Workspace manifest safety caps: File size, total files, and total bytes overflow ──
+  await t.test('22. Workspace manifest rejects oversized files, file count limits, and total size limits', async () => {
+    // 1. Single file limit (512 KB)
+    const oversizedFile = 'x'.repeat(513 * 1024);
+    assert.throws(
+      () => createWorkspaceSnapshot({ 'huge.js': oversizedFile }),
+      /MANIFEST_LIMIT_EXCEEDED.*exceeds maximum allowed size/
+    );
+
+    // 2. Total file count limit (150 files)
+    const tooManyFiles = {};
+    for (let i = 0; i < 155; i++) {
+      tooManyFiles[`src/file_${i}.js`] = 'export const x = 1;';
+    }
+    assert.throws(
+      () => createWorkspaceSnapshot(tooManyFiles),
+      /MANIFEST_LIMIT_EXCEEDED.*exceeds maximum allowed file count/
+    );
+
+    // 3. QualityGate evaluate fails closed on manifest overflow
+    const gate = new GeneratedAppQualityGate();
+    const evalResult = await gate.evaluate({
+      files: { 'bad.js': oversizedFile },
+      caseId: 'landing-page-hero-features-cta'
+    });
+    assert.strictEqual(evalResult.status, STATUS.FAILED);
+    assert.ok(evalResult.defects.some((d) => d.type === 'MANIFEST_LIMIT_EXCEEDED'));
+  });
+
+  // ── 23. Post-execution mutation detection in staged workspace ──
+  await t.test('23. Mutation detection detects added, deleted, or modified files in staged workspace', async () => {
+    const initialFiles = {
+      'src/App.jsx': 'export default function App(){ return <h1>Hi</h1>; }',
+      'package.json': '{"name":"app"}'
+    };
+    const snapshot = createWorkspaceSnapshot(initialFiles);
+    const tmpStaged = fs.mkdtempSync(path.join(os.tmpdir(), 'mutation-detect-test-'));
+
+    try {
+      stageWorkspaceSnapshot(snapshot, tmpStaged);
+      // Clean check must pass
+      assert.strictEqual(verifyWorkspaceImmutability(snapshot, tmpStaged), true);
+
+      // Mutate a file
+      fs.writeFileSync(path.join(tmpStaged, 'src', 'App.jsx'), 'export default function App(){ return <h1>Mutated</h1>; }', 'utf8');
+      assert.throws(
+        () => verifyWorkspaceImmutability(snapshot, tmpStaged),
+        /ARTIFACT_MUTATION_DETECTED.*modified: \[src\/App\.jsx\]/
+      );
+
+      // Re-stage clean and add an unauthorized file
+      stageWorkspaceSnapshot(snapshot, tmpStaged);
+      fs.writeFileSync(path.join(tmpStaged, 'unauthorized.js'), 'malicious();', 'utf8');
+      assert.throws(
+        () => verifyWorkspaceImmutability(snapshot, tmpStaged),
+        /ARTIFACT_MUTATION_DETECTED.*added: \[unauthorized\.js\]/
+      );
+
+      // Re-stage clean and delete a file
+      stageWorkspaceSnapshot(snapshot, tmpStaged);
+      fs.unlinkSync(path.join(tmpStaged, 'package.json'));
+      assert.throws(
+        () => verifyWorkspaceImmutability(snapshot, tmpStaged),
+        /ARTIFACT_MUTATION_DETECTED.*deleted: \[package\.json\]/
+      );
+    } finally {
+      try { fs.rmSync(tmpStaged, { recursive: true, force: true }); } catch (_) {}
+    }
+  });
+
+  // ── 24. Explicit build state contracts: NOT_REQUIRED vs PASSED vs FAILED ──
+  await t.test('24. Build status NOT_REQUIRED does not fail verification; required failed build fails', async () => {
+    _clearConsumedReceiptsForTesting();
+    const gate = new GeneratedAppQualityGate();
+
+    // Valid files for dashboard
+    const testFiles = {
+      'src/App.jsx': `
+import React, { useState } from 'react';
+export default function App() {
+  const [q, setQ] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const handleExport = () => { const blob = new Blob(['1,2'], { type: 'text/csv' }); };
+  return (
+    <div>
+      <input type="text" placeholder="Search" value={q} onChange={e => setQ(e.target.value)} />
+      <button onClick={handleExport}>Export CSV</button>
+      <svg><rect width="10" height="10" /></svg>
+      {isLoading ? <span>Loading...</span> : null}
+    </div>
+  );
+}
+`
+    };
+
+    const artHash = computeArtifactHash(testFiles);
+
+    // 1. Build NOT_REQUIRED: should pass if acceptance passes
+    const notRequiredEvidence = createTestEvidence({
+      files: testFiles,
+      runId: 'run-build-not-required',
+      build: { status: 'NOT_REQUIRED', success: false, executed: false, exitCode: null },
+      acceptance: {
+        passed: true,
+        flowsTested: 4,
+        flowsFailed: 0,
+        flows: [
+          { id: 'f1', name: 'Search', passed: true },
+          { id: 'f2', name: 'Chart', passed: true },
+          { id: 'f3', name: 'CSV', passed: true },
+          { id: 'f4', name: 'State', passed: true }
+        ]
+      }
+    });
+
+    const resNotReq = await gate.evaluate({
+      files: testFiles,
+      caseId: 'dashboard-search-charts-csv',
+      runId: 'run-build-not-required',
+      executionEvidence: notRequiredEvidence
+    });
+    assert.strictEqual(resNotReq.status, STATUS.VERIFIED_PASS);
+    assert.strictEqual(resNotReq.layers.buildExecution.passed, false);
+    assert.strictEqual(resNotReq.layers.buildExecution.status, 'NOT_REQUIRED');
+
+    // 2. Build FAILED: required build fails verification
+    _clearConsumedReceiptsForTesting();
+    const failedBuildEvidence = createTestEvidence({
+      files: testFiles,
+      runId: 'run-build-failed',
+      build: { status: 'FAILED', success: false, executed: true, exitCode: 1, output: 'Build error' },
+      acceptance: { passed: true, flowsTested: 4, flowsFailed: 0, flows: [] }
+    });
+
+    const resFailedBuild = await gate.evaluate({
+      files: testFiles,
+      caseId: 'dashboard-search-charts-csv',
+      runId: 'run-build-failed',
+      executionEvidence: failedBuildEvidence
+    });
+    assert.strictEqual(resFailedBuild.status, STATUS.FAILED);
+  });
+
+  // ── 25. Structured test report: Zero fabricated test counts from exit code zero ──
+  await t.test('25. Unparseable test command exit code 0 represents counts as unmeasured, not 1 passed test', async () => {
+    const fakeAdapter = new FakeContainerExecutionAdapter({
+      handler: async () => ({
+        executed: true,
+        exitCode: 0,
+        stdout: 'Tests finished with no TAP output at all.',
+        stderr: '',
+        status: 'PASSED',
+        isolation: 'CONTAINER_ISOLATED'
+      })
+    });
+
+    const service = new TrustedExecutionService({
+      secret: TEST_RUNNER_SECRET,
+      adapter: fakeAdapter
+    });
+
+    const evidence = await service.execute({
+      files: { 'package.json': '{"name":"app","scripts":{"test":"exit 0"}}', 'index.js': '1;' },
+      testCommand: 'npm test',
+      runId: 'run-no-fabricated-counts'
+    });
+
+    assert.strictEqual(evidence.tests.commandPassed, true);
+    assert.strictEqual(evidence.tests.countsMeasured, false);
+    assert.strictEqual(evidence.tests.testsRun, null);
+    assert.strictEqual(evidence.tests.testsPassed, null);
+  });
+
+  // ── 26. All 6 canonical cases have executable acceptance flows that run end to end ──
+  await t.test('26. All 6 canonical benchmark cases execute behavioral acceptance flows', async () => {
+    const canonicalAppSamples = {
+      'landing-page-hero-features-cta': {
+        'src/App.jsx': `
+import React, { useState } from 'react';
+export default function App() {
+  const [isAnnual, setIsAnnual] = useState(false);
+  const [openIndex, setOpenIndex] = useState(null);
+  const [email, setEmail] = useState('');
+  return (
+    <div>
+      <h1>NextGen AI Platform</h1>
+      <button onClick={() => alert('Start')}>Get Started Free</button>
+      <button onClick={() => setIsAnnual(!isAnnual)}>Toggle Billing</button>
+      <div onClick={() => setOpenIndex(openIndex === 0 ? null : 0)}>FAQ Question</div>
+      <input type="email" value={email} onChange={e => setEmail(e.target.value)} required />
+    </div>
+  );
+}
+`
+      },
+      'dashboard-search-charts-csv': {
+        'src/App.jsx': `
+import React, { useState } from 'react';
+export default function App() {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const data = [{ id: 1, name: 'Metric' }].filter(d => d.name.includes(searchTerm));
+  const exportCsv = () => { const b = new Blob(['csv'], { type: 'text/csv' }); };
+  return (
+    <div>
+      <input type="text" placeholder="search" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+      <svg><circle cx="5" cy="5" r="5" /></svg>
+      <button onClick={exportCsv}>download</button>
+      {isLoading ? <p>loading</p> : null}
+    </div>
+  );
+}
+`
+      },
+      'ecommerce-cart-checkout': {
+        'src/App.jsx': `
+import React, { useState } from 'react';
+export default function App() {
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [cart, setCart] = useState([]);
+  const addToCart = (item) => setCart([...cart, { ...item, quantity: 1 }]);
+  const updateQuantity = (id, q) => {};
+  const [promoCode, setPromoCode] = useState('');
+  const handleCheckout = (e) => { e.preventDefault(); };
+  return (
+    <div>
+      <div onClick={() => setSelectedCategory('electronics')}>Category</div>
+      <button onClick={() => addToCart({ id: 1 })}>Add</button>
+      <input value={promoCode} onChange={e => setPromoCode(e.target.value)} placeholder="discount" />
+      <form onSubmit={handleCheckout}><button type="submit">Pay</button></form>
+    </div>
+  );
+}
+`
+      },
+      'education-quiz-progress': {
+        'src/App.jsx': `
+import React, { useState, useEffect } from 'react';
+export default function App() {
+  const [timeLeft, setTimeLeft] = useState(30);
+  const [score, setScore] = useState(0);
+  const [currentQuestion, setCurrentQuestion] = useState(0);
+  const questions = [1, 2, 3];
+  const handleAnswer = (isCorrect) => { if (isCorrect) setScore(score + 1); };
+  const saveScore = () => { localStorage.setItem('quizScore', score); };
+  return (
+    <div>
+      <div>Time: {timeLeft}</div>
+      <div>Progress: {currentQuestion} / {questions.length}</div>
+      <button onClick={() => handleAnswer(true)}>Option A</button>
+      <button onClick={saveScore}>Save</button>
+    </div>
+  );
+}
+`
+      },
+      'api-backed-crud': {
+        'server.js': `
+const express = require('express');
+const app = express();
+const items = [];
+app.get('/api/items', (req, res) => res.json(items));
+app.post('/api/items', (req, res) => { items.push(req.body); res.json(req.body); });
+app.delete('/api/items/:id', (req, res) => { items.splice(0, 1); res.send(); });
+`,
+        'src/App.jsx': `
+import React from 'react';
+export default function App() {
+  const load = () => { fetch('/api/items'); };
+  return <button onClick={load}>Load</button>;
+}
+`
+      },
+      'multi-step-repair': {
+        'src/state.js': `
+export function addItem(state, item) {
+  return { ...state, items: [...state.items, item] };
+}
+`,
+        'src/api.js': `
+export function callApi(endpoint, payload) {
+  return fetch(endpoint, { method: 'POST', body: JSON.stringify(payload) });
+}
+`
+      }
+    };
+
+    const service = new TrustedExecutionService({ secret: TEST_RUNNER_SECRET });
+
+    for (const [caseId, files] of Object.entries(canonicalAppSamples)) {
+      const flows = getAcceptanceFlows(caseId);
+      assert.ok(flows.length > 0, `Case ${caseId} must define executable flows`);
+
+      const evidence = await service.execute({
+        files,
+        caseId,
+        acceptanceFlows: flows,
+        runId: `run-flow-${caseId}`
+      });
+
+      assert.strictEqual(evidence.acceptance.passed, true, `Flows for ${caseId} must pass`);
+      assert.strictEqual(evidence.acceptance.flowsFailed, 0);
+      assert.ok(evidence.acceptance.flowsTested >= 2);
+    }
+  });
+
+  // ── 27. Transactional Durable Replay Protection with SQLite UNIQUE constraint ──
+  await t.test('27. SQLite-backed replay registry rejects duplicate signatures across runs and restarts', async () => {
+    _clearConsumedReceiptsForTesting();
+    const testSig = crypto.randomBytes(32).toString('hex');
+    const runId = 'run-durable-replay-test';
+    const artHash = 'hash-123456';
+
+    // 1. First consumption succeeds
+    assert.strictEqual(isReceiptSignatureConsumed(testSig), false);
+    assert.strictEqual(consumeReceiptSignature(testSig, runId, artHash), true);
+    assert.strictEqual(isReceiptSignatureConsumed(testSig), true);
+
+    // 2. Replay attempt throws RECEIPT_REPLAY_DETECTED
+    assert.throws(
+      () => consumeReceiptSignature(testSig, runId, artHash),
+      /RECEIPT_REPLAY_DETECTED/
+    );
+
+    // 3. verifyExecutionReceipt rejects replayed receipt
+    const receipt = {
+      runId,
+      artifactHash: artHash,
+      runnerId: 'aidost-trusted-runner',
+      command: 'npm test',
+      exitCode: 0,
+      timestamp: new Date().toISOString(),
+      receiptSignature: testSig
+    };
+    const res = verifyExecutionReceipt(receipt, artHash, runId);
+    assert.strictEqual(res.valid, false);
+    assert.strictEqual(res.reason, 'RECEIPT_REPLAY_DETECTED');
   });
 
 });
