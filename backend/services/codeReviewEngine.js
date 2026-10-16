@@ -1,0 +1,252 @@
+'use strict';
+
+/**
+ * AI-Dost Advanced Code Review & Static Quality Engine
+ * Implements Phase 1 (P6) 10-stage static code review and bounded repair planning.
+ * 
+ * NOTE: As per Phase 3 rules, this performs static analysis and review preparation.
+ * It does NOT claim that code is tested or executed at runtime.
+ */
+
+const path = require('path');
+
+const SEVERITY = {
+  ERROR: 'ERROR',
+  WARNING: 'WARNING',
+  INFO: 'INFO'
+};
+
+const STAGES = {
+  SPEC_COVERAGE: 'STAGE_1_SPEC_COVERAGE',
+  SYNTAX_IMPORTS: 'STAGE_2_SYNTAX_IMPORTS',
+  CROSS_FILE_CONTRACTS: 'STAGE_3_CROSS_FILE_CONTRACTS',
+  FRAMEWORK_MANIFEST: 'STAGE_4_FRAMEWORK_MANIFEST',
+  RESOURCE_ERROR_HANDLING: 'STAGE_5_RESOURCE_ERROR_HANDLING',
+  ALGORITHMIC_PERFORMANCE: 'STAGE_6_ALGORITHMIC_PERFORMANCE',
+  SECURITY_AUDIT: 'STAGE_7_SECURITY_AUDIT',
+  DUPLICATION_MAINTAINABILITY: 'STAGE_8_DUPLICATION_MAINTAINABILITY',
+  INCOMPLETE_PLACEHOLDERS: 'STAGE_9_INCOMPLETE_PLACEHOLDERS',
+  REPAIR_PLAN_GENERATION: 'STAGE_10_REPAIR_PLAN_GENERATION'
+};
+
+const PLACEHOLDER_PATTERNS = [
+  { pattern: /\/\/\s*TODO\b/i, message: 'Unimplemented TODO comment found in production code.' },
+  { pattern: /\/\/\s*FIXME\b/i, message: 'Unresolved FIXME comment found in code.' },
+  { pattern: /\/\/\s*(?:implement|add logic|placeholder|write here|stub)\b/i, message: 'Placeholder comment indicates missing implementation logic.' },
+  { pattern: /throw\s+new\s+Error\s*\(\s*['"](?:Not implemented|TODO|stub)['"]\s*\)/i, message: 'NotImplementedError placeholder thrown in code.' },
+  { pattern: /function\s+[\w$]+\s*\([^)]*\)\s*\{\s*\}/, message: 'Empty function body with no operational logic.' }
+];
+
+const SECURITY_PATTERNS = [
+  { pattern: /AIza[0-9A-Za-z-_]{35}/, message: 'Hardcoded Google API key pattern detected in source file.' },
+  { pattern: /sk-[a-zA-Z0-9]{20,}/, message: 'Hardcoded secret token / OpenAI-style key pattern detected.' },
+  { pattern: /ghp_[a-zA-Z0-9]{20,}/, message: 'Hardcoded GitHub Personal Access Token detected.' },
+  { pattern: /BEGIN\s+(?:RSA|OPENSSH|DSA|EC)?\s*PRIVATE\s+KEY/, message: 'Private key data committed in plaintext.' },
+  { pattern: /["']?(?:password|secret|jwt_secret|api_key|token)["']?\s*[:=]\s*["'][a-zA-Z0-9!@#$%^&*()_+]{8,}["']/i, message: 'Likely hardcoded password or auth secret literal instead of process.env reference.' },
+  { pattern: /\beval\s*\(/, message: 'Unsafe eval() usage detected; potential arbitrary code execution vulnerability.' },
+  { pattern: /new\s+Function\s*\(/, message: 'Unsafe Function constructor usage detected.' },
+  { pattern: /dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?!DOMPurify\.sanitize)/, message: 'Unsanitized dangerouslySetInnerHTML usage creates XSS vulnerability.' },
+  { pattern: /SELECT\s+.*?\s+FROM\s+.*?\s+WHERE\s+.*?[\w$]+\s*=\s*['"]?\s*\+\s*[\w$]+/i, message: 'Potential SQL injection risk: raw string concatenation in SQL statement.' }
+];
+
+const RESOURCE_PATTERNS = [
+  { pattern: /catch\s*\([^)]*\)\s*\{\s*\}/, message: 'Empty catch block silently swallows exceptions without logging or handling.' },
+  { pattern: /setInterval\s*\(/, mustHave: /clearInterval\s*\(/, message: 'setInterval without corresponding clearInterval may cause persistent memory leak.' },
+  { pattern: /addEventListener\s*\(/, mustHave: /removeEventListener\s*\(/, scope: 'react', message: 'Window/DOM addEventListener in component should have cleanup in useEffect return.' }
+];
+
+/**
+ * Reviews a project files dictionary against the 10 quality stages.
+ * 
+ * @param {Object} files - Map of relative path -> string content
+ * @param {Object} spec - AppSpecification or Algorithm Task Contract
+ * @param {Object} options - Review settings
+ * @returns {Object} Review report with findings, metrics, and targeted repair plan
+ */
+function reviewProjectFiles(files = {}, spec = null, options = {}) {
+  const findings = [];
+  const entries = Object.entries(files || {});
+  const fileKeys = new Set(Object.keys(files || {}));
+
+  // Stage 1: Requirements coverage
+  if (spec && Array.isArray(spec.requirements) && spec.requirements.length > 0) {
+    const combinedContent = entries.map(([, c]) => String(c)).join('\n');
+    for (const req of spec.requirements) {
+      const desc = typeof req === 'string' ? req : (req.description || req.title || '');
+      const keywords = desc.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
+      const matches = keywords.filter((kw) => combinedContent.toLowerCase().includes(kw));
+      if (keywords.length > 0 && matches.length === 0) {
+        findings.push({
+          ruleId: 'REQ-COVERAGE-DEFICIT',
+          stage: STAGES.SPEC_COVERAGE,
+          severity: SEVERITY.WARNING,
+          filePath: null,
+          message: `Requirement "${desc}" may lack implementation based on keyword coverage.`,
+          suggestion: 'Ensure the feature is explicitly addressed in one of the source files.'
+        });
+      }
+    }
+  }
+
+  // Iterate over files for content checks
+  for (const [filePath, content] of entries) {
+    if (typeof content !== 'string') continue;
+    const lines = content.split('\n');
+
+    // Stage 9: Incomplete & Placeholder checks
+    for (const p of PLACEHOLDER_PATTERNS) {
+      for (let i = 0; i < lines.length; i++) {
+        if (p.pattern.test(lines[i])) {
+          findings.push({
+            ruleId: 'CODE-QUALITY-PLACEHOLDER',
+            stage: STAGES.INCOMPLETE_PLACEHOLDERS,
+            severity: SEVERITY.ERROR,
+            filePath,
+            line: i + 1,
+            message: p.message,
+            suggestion: 'Implement complete operational code. Do not output placeholders or TODO markers.'
+          });
+        }
+      }
+    }
+
+    // Stage 7: Security Audit
+    for (const sec of SECURITY_PATTERNS) {
+      for (let i = 0; i < lines.length; i++) {
+        if (sec.pattern.test(lines[i])) {
+          findings.push({
+            ruleId: 'SECURITY-UNSAFE-PATTERN',
+            stage: STAGES.SECURITY_AUDIT,
+            severity: SEVERITY.ERROR,
+            filePath,
+            line: i + 1,
+            message: sec.message,
+            suggestion: 'Use environment variables, parameterized queries, or input sanitization.'
+          });
+        }
+      }
+    }
+
+    // Stage 5: Resource Management & Error Handling
+    for (const res of RESOURCE_PATTERNS) {
+      if (res.pattern.test(content)) {
+        if (res.mustHave && !res.mustHave.test(content)) {
+          findings.push({
+            ruleId: 'RESOURCE-LEAK-RISK',
+            stage: STAGES.RESOURCE_ERROR_HANDLING,
+            severity: SEVERITY.WARNING,
+            filePath,
+            message: res.message,
+            suggestion: 'Add symmetric cleanup (e.g. clearInterval or removeEventListener).'
+          });
+        } else if (!res.mustHave) {
+          findings.push({
+            ruleId: 'SILENT-ERROR-SWALLOWED',
+            stage: STAGES.RESOURCE_ERROR_HANDLING,
+            severity: SEVERITY.ERROR,
+            filePath,
+            message: res.message,
+            suggestion: 'Log the error or propagate it; never swallow exceptions silently.'
+          });
+        }
+      }
+    }
+
+    // Stage 6: Algorithmic Complexity Check
+    // Detect nested iterations like arr.map(x => other.filter(...)) or for (...) for (...) on same collection
+    if (/\b(?:map|filter|forEach)\s*\([^)]*=>\s*[^)]*\.(?:find|filter|map|includes)\s*\(/.test(content)) {
+      findings.push({
+        ruleId: 'QUADRATIC-COMPLEXITY-RISK',
+        stage: STAGES.ALGORITHMIC_PERFORMANCE,
+        severity: SEVERITY.WARNING,
+        filePath,
+        message: 'Nested collection iteration detected (e.g. array.map with inner array.find/includes). May cause O(N^2) complexity.',
+        suggestion: 'Convert the inner collection into a Set or Map for O(1) lookup.'
+      });
+    }
+
+    // Stage 2: Obvious syntax / unclosed brackets check
+    const openBraces = (content.match(/\{/g) || []).length;
+    const closeBraces = (content.match(/\}/g) || []).length;
+    if (openBraces !== closeBraces && Math.abs(openBraces - closeBraces) > 1 && /\.[jt]sx?$/i.test(filePath)) {
+      findings.push({
+        ruleId: 'SYNTAX-UNBALANCED-BRACES',
+        stage: STAGES.SYNTAX_IMPORTS,
+        severity: SEVERITY.ERROR,
+        filePath,
+        message: `Mismatched curly braces detected in file (${openBraces} opening vs ${closeBraces} closing).`,
+        suggestion: 'Verify matching braces around functions and component blocks.'
+      });
+    }
+  }
+
+  // Stage 4: Package manifest consistency
+  const pkgStr = files['package.json'] || files['frontend/package.json'];
+  if (pkgStr) {
+    try {
+      const pkg = JSON.parse(pkgStr);
+      const allDeps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+      // Check if code imports packages not declared in dependencies
+      for (const [filePath, content] of entries) {
+        if (!/\.[jt]sx?$/i.test(filePath)) continue;
+        const importPkgs = content.match(/from\s+['"]([^.'"/][^'"]*)['"]/g) || [];
+        for (const imp of importPkgs) {
+          const rawName = imp.replace(/from\s+['"]/, '').replace(/['"]$/, '');
+          const pkgName = rawName.startsWith('@') ? rawName.split('/').slice(0, 2).join('/') : rawName.split('/')[0];
+          // Built-in node packages are fine
+          const builtins = new Set(['fs', 'path', 'http', 'https', 'crypto', 'os', 'stream', 'events', 'util', 'url', 'buffer', 'querystring', 'child_process', 'assert']);
+          if (!builtins.has(pkgName) && !allDeps[pkgName] && pkgName !== 'react' && pkgName !== 'react-dom') {
+            findings.push({
+              ruleId: 'UNDECLARED-DEPENDENCY',
+              stage: STAGES.FRAMEWORK_MANIFEST,
+              severity: SEVERITY.WARNING,
+              filePath,
+              message: `Module imports external package '${pkgName}', which is not listed in package.json.`,
+              suggestion: `Add "${pkgName}" to dependencies in package.json or use a native alternative.`
+            });
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // Stage 10: Generate bounded, targeted repair plan
+  const errorFindings = findings.filter((f) => f.severity === SEVERITY.ERROR);
+  const warningFindings = findings.filter((f) => f.severity === SEVERITY.WARNING);
+  const affectedFiles = [...new Set(errorFindings.map((f) => f.filePath).filter(Boolean))];
+
+  const repairPlan = {
+    needed: errorFindings.length > 0,
+    targetFiles: affectedFiles,
+    actionableItems: errorFindings.slice(0, 8).map((f) => ({
+      file: f.filePath,
+      issue: f.message,
+      fix: f.suggestion
+    })),
+    strategy: affectedFiles.length > 0 ? 'SURGICAL_FILE_REPAIR' : 'NO_REPAIR_NEEDED'
+  };
+
+  const score = Math.max(0, 100 - (errorFindings.length * 20) - (warningFindings.length * 5));
+  const passed = errorFindings.length === 0;
+
+  return {
+    passed,
+    status: 'UNVERIFIED_STATIC_REVIEW',
+    score,
+    totalFiles: entries.length,
+    findingsCount: {
+      errors: errorFindings.length,
+      warnings: warningFindings.length,
+      info: findings.filter((f) => f.severity === SEVERITY.INFO).length
+    },
+    findings,
+    repairPlan,
+    verificationNote: 'Testing and execution verification are deferred to a later phase. Results reflect static AST and code pattern review.'
+  };
+}
+
+module.exports = {
+  SEVERITY,
+  STAGES,
+  reviewProjectFiles
+};

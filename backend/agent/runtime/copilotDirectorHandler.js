@@ -8,17 +8,18 @@ const { capabilityGatekeeper } = require('../../agent/policy/CapabilityGatekeepe
 const logger = require('../../logger');
 const { buildAppSpecification, formatAppSpecificationForPrompt } = require('../../services/appSpecificationService');
 const { classifyRequest, deriveAlgorithmTaskContract, buildAlgorithmGuidanceBlock } = require('./codeGenerationStrategy');
+const { inspectWorkspace, buildPromptDirective } = require('../../services/workspaceFrameworkIntelligence');
 
 const PERMISSION_LEVELS = ['ask', 'auto', 'turbo'];
 
 function writeSse(res, event) {
   // Hardened: a client that aborted mid-run leaves `destroyed` true but
-  // `writableEnded` may still be false — writing then can emit an unhandled
+  // `writableEnded` may still be false â€” writing then can emit an unhandled
   // stream error. Never throw out of the completion path (P12.1).
   if (!res || res.writableEnded || res.destroyed) return;
   try {
     res.write(`event: ${String(event.type || 'director_event')}\ndata: ${JSON.stringify(event)}\n\n`);
-  } catch (_) { /* stream gone — drop the frame */ }
+  } catch (_) { /* stream gone â€” drop the frame */ }
 }
 
 function resolveProjectId(body) {
@@ -76,18 +77,18 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
   // Emit run_started so CopilotIDE can track the runId
   writeSse(res, { type: 'run_started', runId, taskId });
   writeSse(res, { type: 'director_start', phase: 'queued', taskId, runId, status: 'Copilot Director accepted the outcome request' });
-  writeSse(res, { type: 'thinking', message: '🎯 Director inspecting workspace and selecting optimal execution path...' });
+  writeSse(res, { type: 'thinking', message: 'ðŸŽ¯ Director inspecting workspace and selecting optimal execution path...' });
 
-  // ── Devin-style permission levels (ask / auto / turbo) ──
+  // â”€â”€ Devin-style permission levels (ask / auto / turbo) â”€â”€
   // 'ask': pause BEFORE any workspace mutation until the user approves with a
   // single-use gatekeeper token. The resume re-POSTs the same run with
-  // body.approvalToken (capability set + requestId must match — deterministic).
+  // body.approvalToken (capability set + requestId must match â€” deterministic).
   const permissionLevel = PERMISSION_LEVELS.includes(String(body.permissionLevel || '').toLowerCase())
     ? String(body.permissionLevel).toLowerCase()
     : 'auto';
   // P12.3: the approved token must be forwarded into the run context so the
   // per-step CapabilityGatekeeper can validate it (previously it was read for
-  // the ask-mode probe and then dropped — even an approved run died at its
+  // the ask-mode probe and then dropped â€” even an approved run died at its
   // first gated tool). Auto/turbo pass body.approvalToken straight through.
   let runApprovalToken = body.approvalToken || req.headers?.['x-approval-token'] || null;
   if (permissionLevel === 'ask') {
@@ -103,7 +104,7 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
       });
       writeSse(res, {
         type: 'done',
-        message: '❌ Execution blocked because capability discovery failed.',
+        message: 'âŒ Execution blocked because capability discovery failed.',
         steps: [],
       });
       return res.end();
@@ -115,7 +116,7 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
     );
     const capabilityIds = (probe.capabilities || []).map(c => c.capability_id);
     if (probe.decision === 'BLOCK') {
-      // Hard policy block — no approval token can unlock it (fail-closed).
+      // Hard policy block â€” no approval token can unlock it (fail-closed).
       writeSse(res, {
         type: 'gate_blocked',
         message: 'Ask mode: execution blocked by CapabilityGatekeeper policy.',
@@ -123,7 +124,7 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
       });
       writeSse(res, {
         type: 'done',
-        message: '❌ Execution blocked by CapabilityGatekeeper policy.',
+        message: 'âŒ Execution blocked by CapabilityGatekeeper policy.',
         steps: [],
       });
       return res.end();
@@ -138,7 +139,7 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
         });
         writeSse(res, {
           type: 'done',
-          message: '⏸️ Ask mode: run paused — press Approve in the chat to start.',
+          message: 'â¸ï¸ Ask mode: run paused â€” press Approve in the chat to start.',
           steps: [],
         });
         return res.end();
@@ -158,7 +159,7 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
         });
         writeSse(res, {
           type: 'done',
-          message: `❌ Ask mode approval invalid: ${validation.reason}`,
+          message: `âŒ Ask mode approval invalid: ${validation.reason}`,
           steps: [],
         });
         return res.end();
@@ -170,7 +171,7 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
         gate: probe,
       });
       // P12.3: the request-level token was consumed above (single-use replay
-      // protection) — mint a fresh run-scoped token so per-step gates can
+      // protection) â€” mint a fresh run-scoped token so per-step gates can
       // validate without dying at the first gated tool of the approved run.
       runApprovalToken = capabilityGatekeeper._createApprovalToken({
         requestId: taskId,
@@ -180,9 +181,9 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
     }
   }
 
-  // ── P12.1 honest-completion accounting ──────────────────────────────────
+  // â”€â”€ P12.1 honest-completion accounting â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // deterministicCodeGuard refuses full-file rewrites of EXISTING files; before
-  // P12 the completion line still said "🎉 completed ... with final
+  // P12 the completion line still said "ðŸŽ‰ completed ... with final
   // verification" even when every write was refused and ZERO files changed.
   // Observe the event stream: count write TOOL steps vs actual file_written
   // events, then report exactly what happened. Declared BEFORE the try so the
@@ -218,10 +219,10 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
       runtime: dependencies.runtime,
     });
 
-    writeSse(res, { type: 'thinking', message: '📋 Creating adaptive specialist plan...' });
+    writeSse(res, { type: 'thinking', message: 'ðŸ“‹ Creating adaptive specialist plan...' });
 
   // User-approved plan from Plan mode (possibly hand-edited) overrides the
-  // director's own LLM plan — CopilotDirector normalizes/validates it.
+  // director's own LLM plan â€” CopilotDirector normalizes/validates it.
   const presetPlan = body.plan && typeof body.plan === 'object' && Array.isArray(body.plan.tasks) && body.plan.tasks.length
     ? body.plan
     : null;
@@ -249,11 +250,25 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
     algorithmContext = buildAlgorithmGuidanceBlock(algorithmContract);
     writeSse(res, {
       type: 'thinking',
-      message: `📐 Formulated algorithm contract for ${algorithmContract.algorithmFamily} (${algorithmContract.selectedAlgorithm?.name || 'Selected'}) with invariant and falsification tests.`,
+      message: `ðŸ“ Formulated algorithm contract for ${algorithmContract.algorithmFamily} (${algorithmContract.selectedAlgorithm?.name || 'Selected'}) with invariant and falsification tests.`,
     });
   }
 
-  const directorRequest = [baseDirectorRequest, specificationContext, algorithmContext].filter(Boolean).join('\n\n');
+  let workspaceContext = '';
+  try {
+    const meta = dependencies.workspaceManager?.getWorkspaceMetadata?.(authorization.project.id, authorization.user.id)
+      || runtime?.director?.workspaceManager?.getWorkspaceMetadata?.(authorization.project.id, authorization.user.id);
+    if (meta?.diskPath) {
+      const workspaceIntelligence = inspectWorkspace(meta.diskPath);
+      workspaceContext = buildPromptDirective(workspaceIntelligence);
+      writeSse(res, {
+        type: 'thinking',
+        message: `🔍 Discovered workspace framework: ${workspaceIntelligence.framework || 'standard'} (endpoints: ${workspaceIntelligence.routes?.length || 0}, DB: ${workspaceIntelligence.database?.orm || 'None'}).`,
+      });
+    }
+  } catch (_) {}
+
+  const directorRequest = [baseDirectorRequest, specificationContext, algorithmContext, workspaceContext].filter(Boolean).join('\n\n');
   if (appSpecification) {
     writeSse(res, {
       type: 'thinking',
@@ -282,26 +297,26 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
     // Say the truth: files changed / writes rejected / analysis-only / canceled.
     let message;
     if (canceled) {
-      message = `⏹️ Director run canceled — ${taskCount} task(s) processed, ${filesWritten} file(s) had changed before the stop.`;
+      message = `â¹ï¸ Director run canceled â€” ${taskCount} task(s) processed, ${filesWritten} file(s) had changed before the stop.`;
     } else if (result?.status === 'FAILED') {
       const failureSummary = String(result.summary || result.message || 'The requested plan did not complete successfully.').trim();
-      message = `⚠️ Copilot Director did not complete the full plan — ${failureSummary}`;
+      message = `âš ï¸ Copilot Director did not complete the full plan â€” ${failureSummary}`;
       if (filesWritten > 0) {
         message += ` ${filesWritten} file(s) changed before completion was marked failed.`;
       }
     } else if (filesWritten > 0) {
       const shown = changedPaths.slice(0, 6).join(', ');
       const more = filesWritten > 6 ? ` +${filesWritten - 6} more` : '';
-      message = `🎉 Copilot Director completed ${taskCount} task(s) with verification — ${filesWritten} file(s) changed: ${shown}${more}`;
+      message = `ðŸŽ‰ Copilot Director completed ${taskCount} task(s) with verification â€” ${filesWritten} file(s) changed: ${shown}${more}`;
     } else if (writeAttempts > 0) {
-      message = `⚠️ Copilot Director finished ${taskCount} task(s) but saved NO files — ${writeAttempts} write attempt(s) were rejected (existing files require surgical apply_diff / SEARCH-REPLACE edits, not full-file replacement). No changes were persisted; re-run asking for a targeted edit.`;
+      message = `âš ï¸ Copilot Director finished ${taskCount} task(s) but saved NO files â€” ${writeAttempts} write attempt(s) were rejected (existing files require surgical apply_diff / SEARCH-REPLACE edits, not full-file replacement). No changes were persisted; re-run asking for a targeted edit.`;
     } else {
-      message = `🎯 Copilot Director completed ${taskCount} task(s) — analysis only, no file changes were requested.`;
+      message = `ðŸŽ¯ Copilot Director completed ${taskCount} task(s) â€” analysis only, no file changes were requested.`;
     }
     // P12.3: say when tasks could not be delegated (worker cap / blocked deps)
     // instead of silently implying every plan task ran.
     if (tasksSkipped > 0) {
-      message += ` (${tasksSkipped} plan task(s) were skipped — worker/dependency limits)`;
+      message += ` (${tasksSkipped} plan task(s) were skipped â€” worker/dependency limits)`;
     }
 
     writeSse(res, {
@@ -316,6 +331,13 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
       tasksSkipped,
       message,
       result,
+      specification: appSpecification ? {
+        applicationType: appSpecification.applicationType,
+        unresolvedAssumptions: appSpecification.unresolvedAssumptions,
+        evidenceContract: appSpecification.evidenceContract,
+        requirementsCount: appSpecification.requirements.length
+      } : null,
+      verificationStatus: result?.verificationOutcome || 'UNVERIFIED_STATIC_ANALYSIS'
     });
     return res.end();
   } catch (error) {
@@ -324,7 +346,7 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
     const changedPaths = [...writtenPaths].slice(0, 50);
 
     // P12.3: approval gates are a PAUSE, not a failure. The step-level gate
-    // already emitted gate_approval_required (with the minted token) — end the
+    // already emitted gate_approval_required (with the minted token) â€” end the
     // stream as `done` so the amber Approve banner is the last thing the UI
     // sees; Approve re-POSTs the same prompt with body.approvalToken.
     if (!canceled && (error?.code === 'APPROVAL_REQUIRED' || gateRequired)) {
@@ -343,7 +365,7 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
       const capLabel = error?.capabilityId || gateRequired?.capabilityId || 'capability';
       writeSse(res, {
         type: 'done',
-        message: `⏸️ Run paused — approval required (${capLabel}) — ${filesWritten} file(s) already changed. Press Approve to resume with the same plan.`,
+        message: `â¸ï¸ Run paused â€” approval required (${capLabel}) â€” ${filesWritten} file(s) already changed. Press Approve to resume with the same plan.`,
         steps: [],
         filesWritten,
         writeAttempts,
@@ -361,7 +383,7 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
       : (error?.message || 'Copilot Director failed');
     const message = canceled
       ? base
-      : `${base} — ${filesWritten} file(s) had changed before the failure.`;
+      : `${base} â€” ${filesWritten} file(s) had changed before the failure.`;
     logger.error(
       `[CopilotDirector] run ${runId} failed: ${error?.stack || error?.message || 'unknown error'} ` +
       `(filesWritten=${filesWritten}, writeAttempts=${writeAttempts}, tasksSkipped=${tasksSkipped})`

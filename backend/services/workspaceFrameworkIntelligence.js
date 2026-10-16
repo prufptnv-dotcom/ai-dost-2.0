@@ -58,6 +58,10 @@ class WorkspaceFrameworkIntelligence {
       // Detect language and package manager
       const language = this._detectPrimaryLanguage(manifests, workspacePath);
       const packageManager = this._detectPackageManager(workspacePath);
+      const databaseAndOrm = this._discoverDatabaseAndOrm(manifests, workspacePath);
+      const existingRoutes = this._discoverExistingRoutesAndEndpoints(workspacePath);
+      const codeConventions = this._discoverCodeConventions(workspacePath);
+      const conflictingModules = this._detectConflictingModules(manifests);
 
       // Gather important scripts from primary manifest
       const scripts = primaryManifest?.parsed?.scripts || {};
@@ -76,6 +80,10 @@ class WorkspaceFrameworkIntelligence {
         stylingSystem,
         stateManagement,
         testingFramework,
+        databaseAndOrm,
+        existingRoutes,
+        codeConventions,
+        conflictingModules,
         scripts,
         manifestLocations: manifests.map((m) => m.relativePath).filter(Boolean),
         dependencies: this._summarizeDependencies(manifests)
@@ -381,6 +389,88 @@ class WorkspaceFrameworkIntelligence {
     return summary;
   }
 
+  _discoverDatabaseAndOrm(manifests, workspacePath) {
+    for (const m of manifests) {
+      if (m.type === 'npm' && m.parsed) {
+        const deps = { ...(m.parsed.dependencies || {}), ...(m.parsed.devDependencies || {}) };
+        if (deps['@prisma/client'] || deps['prisma']) return { orm: 'prisma', schema: 'prisma/schema.prisma' };
+        if (deps['drizzle-orm']) return { orm: 'drizzle', schema: 'drizzle/schema.ts' };
+        if (deps['mongoose']) return { orm: 'mongoose', schema: 'models/' };
+        if (deps['sequelize']) return { orm: 'sequelize', schema: 'models/' };
+        if (deps['typeorm']) return { orm: 'typeorm', schema: 'entities/' };
+        if (deps['better-sqlite3'] || deps['sqlite3']) return { orm: 'sqlite', schema: 'database/schema.sql' };
+        if (deps['pg']) return { orm: 'postgres', schema: 'database/schema.sql' };
+      }
+    }
+    try {
+      if (fs.existsSync(path.join(workspacePath, 'prisma/schema.prisma'))) {
+        return { orm: 'prisma', schema: 'prisma/schema.prisma' };
+      }
+    } catch (_) {}
+    return { orm: 'none', schema: null };
+  }
+
+  _discoverExistingRoutesAndEndpoints(workspacePath) {
+    const endpoints = [];
+    const routeRegex = /\b(?:app|router)\.(get|post|put|patch|delete)\s*\(\s*['"`]([^'"`]+)['"`]/gi;
+    const skip = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.checkpoints']);
+
+    const scanDir = (dir, depth = 0) => {
+      if (depth > 4 || endpoints.length >= 25) return;
+      let entries = [];
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+      for (const e of entries) {
+        if (skip.has(e.name)) continue;
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          scanDir(full, depth + 1);
+        } else if (e.isFile() && /\.(js|ts|mjs|cjs)$/.test(e.name)) {
+          try {
+            const content = fs.readFileSync(full, 'utf8');
+            let m;
+            while ((m = routeRegex.exec(content)) !== null) {
+              endpoints.push({ method: m[1].toUpperCase(), route: m[2], file: path.relative(workspacePath, full).replace(/\\/g, '/') });
+              if (endpoints.length >= 25) break;
+            }
+          } catch (_) {}
+        }
+      }
+    };
+
+    scanDir(workspacePath);
+    return endpoints;
+  }
+
+  _discoverCodeConventions(workspacePath) {
+    const conventions = {
+      jsxExtension: '.jsx',
+      style: 'esm',
+      indentation: '2-spaces',
+      exportStyle: 'default-and-named'
+    };
+    try {
+      const files = fs.readdirSync(workspacePath);
+      if (files.some((f) => f.endsWith('.tsx'))) conventions.jsxExtension = '.tsx';
+      if (files.includes('tsconfig.json')) conventions.style = 'typescript';
+    } catch (_) {}
+    return conventions;
+  }
+
+  _detectConflictingModules(manifests) {
+    const conflicts = [];
+    const reactVersions = new Set();
+    for (const m of manifests) {
+      if (m.type === 'npm' && m.parsed) {
+        const v = m.parsed.dependencies?.react || m.parsed.devDependencies?.react;
+        if (v) reactVersions.add(v);
+      }
+    }
+    if (reactVersions.size > 1) {
+      conflicts.push(`Multiple conflicting React versions detected across workspaces: ${Array.from(reactVersions).join(', ')}`);
+    }
+    return conflicts;
+  }
+
   /**
    * Generates a concise, high-value prompt block (< 1200 chars) for Director & Planner LLM calls.
    */
@@ -397,8 +487,21 @@ class WorkspaceFrameworkIntelligence {
       `- Testing Stack: ${summary.testingFramework}`
     ];
 
+    if (summary.databaseAndOrm && summary.databaseAndOrm.orm !== 'none') {
+      lines.push(`- Database/ORM: ${summary.databaseAndOrm.orm} (Schema: ${summary.databaseAndOrm.schema || 'standard'})`);
+    }
+
+    if (summary.existingRoutes && summary.existingRoutes.length > 0) {
+      const routeList = summary.existingRoutes.slice(0, 5).map(r => `${r.method} ${r.route}`).join(', ');
+      lines.push(`- Existing API Routes: ${routeList}${summary.existingRoutes.length > 5 ? ' ...' : ''}`);
+    }
+
     if (summary.manifestLocations && summary.manifestLocations.length > 0) {
       lines.push(`- Project Manifests: ${summary.manifestLocations.join(', ')}`);
+    }
+
+    if (summary.conflictingModules && summary.conflictingModules.length > 0) {
+      lines.push(`- ⚠️ Conflict Notice: ${summary.conflictingModules.join('; ')}`);
     }
 
     return lines.join('\n');

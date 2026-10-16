@@ -227,11 +227,11 @@ function analyzeCodeGenerationRequest(request, context = {}) {
   const explicitLanguage = firstMatch(original, STACK_SIGNALS);
   const workspaceStack = detectWorkspaceStack(context);
   const isModification = /\b(fix|debug|repair|refactor|upgrade|modify|change|existing|bug|error)\b/i.test(original);
-  const isAlgorithmic = /\b(algorithm|complexity|big.?o|optimi[sz]|dynamic programming|graph|tree|sort|search|shortest path|dijkstra|bellman.?ford|floyd.?warshall|quick.?sort|merge.?sort|heap.?sort|binary search|breadth.?first|depth.?first|\bbfs\b|\bdfs\b|knapsack|union.?find|path.?finding|scheduler|parser|compiler|constraint|backtrack|recursion|data structure|race condition|concurren|throughput|latency|greedy|priority queue|hash map|hash table|trie|segment tree|fenwick|substring search|kmp|rabin.?karp)\b|एल्गोरिदम|डेटा स्ट्रक्चर|समय जटिलता|स्पेस जटिलता|लॉजिक|लॉजिकल|कोड को ऑप्टिमाइज़|एल्गोरिथम/i.test(original);
+  const isAlgorithmic = /\b(algorithm|complexity|big.?o|optimi[sz]|dynamic programming|graph|tree|sort|search|shortest path|dijkstra|bellman.?ford|floyd.?warshall|quick.?sort|merge.?sort|heap.?sort|binary search|breadth.?first|depth.?first|\bbfs\b|\bdfs\b|knapsack|union.?find|path.?finding|scheduler|parser|compiler|constraint|backtrack|recursion|data structure|race condition|concurren|throughput|latency|greedy|priority queue|hash map|hash table|trie|segment tree|fenwick|substring search|kmp|rabin.?karp)\b|à¤à¤²à¥à¤—à¥‹à¤°à¤¿à¤¦à¤®|à¤¡à¥‡à¤Ÿà¤¾ à¤¸à¥à¤Ÿà¥à¤°à¤•à¥à¤šà¤°|à¤¸à¤®à¤¯ à¤œà¤Ÿà¤¿à¤²à¤¤à¤¾|à¤¸à¥à¤ªà¥‡à¤¸ à¤œà¤Ÿà¤¿à¤²à¤¤à¤¾|à¤²à¥‰à¤œà¤¿à¤•|à¤²à¥‰à¤œà¤¿à¤•à¤²|à¤•à¥‹à¤¡ à¤•à¥‹ à¤‘à¤ªà¥à¤Ÿà¤¿à¤®à¤¾à¤‡à¤œà¤¼|à¤à¤²à¥à¤—à¥‹à¤°à¤¿à¤¥à¤®/i.test(original);
   const isFullStack = /\b(full.?stack|frontend|backend|api|database|authentication|authorization|payment|checkout|webhook|server|deploy|integration)\b/i.test(original);
-  const isUi = /\b(app|application|website|web.?app|dashboard|landing page|portfolio|component|page|ui|ux|interface)\b|ऐप|वेबसाइट|डैशबोर्ड|पेज|इंटरफेस/i.test(original);
+  const isUi = /\b(app|application|website|web.?app|dashboard|landing page|portfolio|component|page|ui|ux|interface)\b|à¤à¤ª|à¤µà¥‡à¤¬à¤¸à¤¾à¤‡à¤Ÿ|à¤¡à¥ˆà¤¶à¤¬à¥‹à¤°à¥à¤¡|à¤ªà¥‡à¤œ|à¤‡à¤‚à¤Ÿà¤°à¤«à¥‡à¤¸/i.test(original);
   const isSecuritySensitive = /\b(auth|authentication|authorization|permission|role|secret|token|password|payment|checkout|personal data|upload|sql|injection|security)\b/i.test(original);
-  const isPerformanceSensitive = /\b(fast|ultra.?fast|performance|scale|scalable|high.?load|latency|throughput|memory|large dataset|optimi[sz]e)\b|तेज|जल्दी|फास्ट|कम समय|कम मेमोरी|परफॉर्मेंस|ऑप्टिमाइज़/i.test(original);
+  const isPerformanceSensitive = /\b(fast|ultra.?fast|performance|scale|scalable|high.?load|latency|throughput|memory|large dataset|optimi[sz]e)\b|à¤¤à¥‡à¤œ|à¤œà¤²à¥à¤¦à¥€|à¤«à¤¾à¤¸à¥à¤Ÿ|à¤•à¤® à¤¸à¤®à¤¯|à¤•à¤® à¤®à¥‡à¤®à¥‹à¤°à¥€|à¤ªà¤°à¤«à¥‰à¤°à¥à¤®à¥‡à¤‚à¤¸|à¤‘à¤ªà¥à¤Ÿà¤¿à¤®à¤¾à¤‡à¤œà¤¼/i.test(original);
 
   const complexity = isAlgorithmic || isSecuritySensitive || isFullStack
     ? 'high'
@@ -733,6 +733,171 @@ registerAlgorithmFamily({
   ]
 });
 
+// 13. Backtracking & Combinatorial Search
+registerAlgorithmFamily({
+  id: 'backtracking',
+  name: 'Backtracking, Recursion & Combinatorial Search',
+  matcher: (text) => /\b(backtrack|backtracking|n-queens|sudoku|permutations|combinations|subset sum|word search|combination sum|generate parentheses)\b/i.test(text),
+  selectAlgorithm: (constraints = {}) => {
+    if (constraints.isConstraintSatisfaction) {
+      return { algorithm: 'Constraint Propagation with Backtracking Search', rationale: 'Forward checking and bitmask pruning prune invalid search subtrees early' };
+    }
+    if (constraints.isDeduplicated) {
+      return { algorithm: 'Sorted Index-Bounded Backtracking', rationale: 'Sorts elements initially and skips adjacent identical choices to prevent duplicate branches' };
+    }
+    return { algorithm: 'Recursive State Space Traversal (Choose-Explore-Unchoose)', rationale: 'Maintains state invariant by undoing mutations upon backtrack returning to caller' };
+  },
+  complexityAnalysis: (constraints = {}) => ({
+    time: 'O(B^D) or O(N!) factorial worst-case bounded by pruning factor',
+    space: 'O(D) call stack where D is maximum recursion depth',
+    isEstimate: !constraints.hasKnownBounds,
+    assumptions: ['Pruning branches as early as invariants are violated', 'In-place state mutation with symmetric undo']
+  }),
+  invariants: [
+    'State restoration: state after returning from a recursive exploration exactly matches state before the call',
+    'Depth bound: recursion depth never exceeds problem domain bound D (prevents stack overflow)'
+  ],
+  edgeCases: [
+    'empty input candidates',
+    'target sum = 0 or k = 0',
+    'no valid configuration exists (must return empty result safely)',
+    'all elements identical in candidate set',
+    'recursion depth exceeding safe call stack'
+  ]
+});
+
+// 14. Range Queries & Advanced Data Structures
+registerAlgorithmFamily({
+  id: 'range_queries',
+  name: 'Range Queries, Segment Trees & Fenwick Trees',
+  matcher: (text) => /\b(segment tree|fenwick tree|binary indexed tree|bit|sparse table|range minimum query|rmq|range sum query|lazy propagation)\b/i.test(text),
+  selectAlgorithm: (constraints = {}) => {
+    if (constraints.isStaticRMQ) {
+      return { algorithm: 'Sparse Table (ST)', rationale: 'O(N log N) preprocessing allows O(1) idempotent range minimum/maximum queries' };
+    }
+    if (constraints.hasRangeUpdates) {
+      return { algorithm: 'Segment Tree with Lazy Propagation', rationale: 'Deferred updates preserve O(log N) both for range updates and range queries' };
+    }
+    return { algorithm: 'Fenwick Tree (Binary Indexed Tree)', rationale: 'Lowest Set Bit indexing (i & -i) delivers O(log N) point updates and prefix sums with minimal memory' };
+  },
+  complexityAnalysis: (constraints = {}) => ({
+    time: 'O(log N) per query/update, O(N) build time',
+    space: 'O(N) for BIT or O(4N) for Segment Tree',
+    isEstimate: !constraints.hasKnownBounds,
+    assumptions: ['0-indexed or 1-indexed conversion handled consistently', 'Associative merge operation']
+  }),
+  invariants: [
+    'Index bound: queries [L, R] strictly enforce 0 <= L <= R < N',
+    'Tree coverage: union of segment tree node intervals at each layer partitions the active range'
+  ],
+  edgeCases: [
+    'range query on single element [i, i]',
+    'range encompassing entire array [0, N-1]',
+    'updating boundary elements at index 0 or N-1',
+    'empty array or range L > R',
+    'large updates causing 32-bit integer overflow'
+  ]
+});
+
+// 15. Greedy Algorithms & Interval Scheduling
+registerAlgorithmFamily({
+  id: 'greedy',
+  name: 'Greedy Algorithms & Interval Scheduling',
+  matcher: (text) => /\b(greedy|interval scheduling|merge intervals|insert interval|non-overlapping intervals|fractional knapsack|gas station|jump game|huffman)\b/i.test(text),
+  selectAlgorithm: (constraints = {}) => {
+    if (constraints.isInterval) {
+      return { algorithm: 'Interval Sorting by End Time (Earliest Deadline First)', rationale: 'Greedy choice property proves earliest finishing interval leaves maximum room for subsequent intervals' };
+    }
+    if (constraints.isReachability) {
+      return { algorithm: 'Greedy Farthest Reach Window Tracking', rationale: 'Maintains maximum reachable index per step in single pass O(N) time with O(1) auxiliary space' };
+    }
+    return { algorithm: 'Locally Optimal Choice Greedy Strategy', rationale: 'Proven matroid or optimal substructure guarantees global optimum from sequence of local decisions' };
+  },
+  complexityAnalysis: (constraints = {}) => ({
+    time: 'O(N log N) if sorting required, otherwise O(N) single-pass',
+    space: 'O(1) auxiliary space or O(N) for output collection',
+    isEstimate: !constraints.hasKnownBounds,
+    assumptions: ['Greedy choice property holds mathematically for the problem']
+  }),
+  invariants: [
+    'Monotonic progression: decisions never backtrack; candidate intervals processed in monotonic order',
+    'Feasibility invariant: each chosen element maintains global feasibility with previously selected elements'
+  ],
+  edgeCases: [
+    'empty interval list',
+    'single interval input',
+    'all intervals completely overlapping',
+    'no intervals overlapping (already disjoint)',
+    'intervals with identical start and end points [x, x]'
+  ]
+});
+
+// 16. Concurrency, Streaming & Reactive Pipelines
+registerAlgorithmFamily({
+  id: 'concurrency_streaming',
+  name: 'Concurrency, Streaming & Bounded Queue Processing',
+  matcher: (text) => /\b(concurrency|debounce|throttle|worker pool|thread pool|event emitter|pub sub|reactive stream|backpressure|leaky bucket|bounded queue)\b/i.test(text),
+  selectAlgorithm: (constraints = {}) => {
+    if (constraints.isDebounceThrottle) {
+      return { algorithm: 'Timer-Cancelled Trailing/Leading Edge Debounce', rationale: 'Clears active timer handles and guarantees at most one execution per quiet interval' };
+    }
+    if (constraints.isWorkerPool) {
+      return { algorithm: 'Bounded Task Queue with Concurrency Semaphore', rationale: 'Limits active asynchronous tasks to maximum concurrency N to prevent resource exhaustion' };
+    }
+    return { algorithm: 'Asynchronous Bounded Pipeline with Backpressure', rationale: 'Pauses producer when consumer buffer exceeds high-water mark' };
+  },
+  complexityAnalysis: (constraints = {}) => ({
+    time: 'O(1) per task dispatch / event emission',
+    space: 'O(Max Buffer Size)',
+    isEstimate: !constraints.hasKnownBounds,
+    assumptions: ['Clean timer teardown and unref on termination', 'No memory leaks from uncleaned listeners']
+  }),
+  invariants: [
+    'Concurrency ceiling: number of running concurrent tasks <= maxConcurrency at all times',
+    'Resource cleanup: all timer handles and listener subscriptions can be disposed via cleanup function'
+  ],
+  edgeCases: [
+    'rapid burst of events exceeding buffer limits',
+    'unhandled error in async worker should not crash pool',
+    'cancelling in-flight operations gracefully',
+    'concurrency limit = 1 (strict sequential execution)',
+    'drain event fired only when all pending tasks conclude'
+  ]
+});
+
+// 17. Numerical & Computational Geometry
+registerAlgorithmFamily({
+  id: 'numerical_geometry',
+  name: 'Numerical Algorithms & Computational Geometry',
+  matcher: (text) => /\b(gcd|lcm|sieve of eratosthenes|prime numbers|modular exponentiation|convex hull|point in polygon|cross product|line intersection)\b/i.test(text),
+  selectAlgorithm: (constraints = {}) => {
+    if (constraints.isConvexHull) {
+      return { algorithm: "Monotone Chain / Graham's Scan", rationale: 'Sorts points and constructs upper/lower hulls using 2D cross product in O(N log N)' };
+    }
+    if (constraints.isModularExp) {
+      return { algorithm: 'Binary Exponentiation (Fast Power)', rationale: 'Repeated squaring computes (base^exp) % mod in O(log exp) time' };
+    }
+    return { algorithm: 'Euclidean Algorithm / Sieve of Eratosthenes', rationale: 'Computes number theoretic functions with minimal operations' };
+  },
+  complexityAnalysis: (constraints = {}) => ({
+    time: 'O(log N) for GCD/exponentiation, O(N log log N) for Sieve, O(N log N) for Geometry',
+    space: 'O(1) or O(N)',
+    isEstimate: !constraints.hasKnownBounds,
+    assumptions: ['Floating-point epsilon checks used for geometry comparisons']
+  }),
+  invariants: [
+    'Non-negativity: modulo invariants maintain positive residues 0 <= r < m',
+    'Collinearity handling: cross product sign determines turn direction; zero cross product handles collinear points'
+  ],
+  edgeCases: [
+    'zero arguments in GCD / division by zero',
+    'floating point precision errors (must use epsilon tolerance)',
+    'degenerate geometries: all points collinear or <= 2 points',
+    'negative bases and exponents',
+    'primes under 2'
+  ]
+});
+
 /**
  * Classify a prompt into routine edit vs algorithmic vs application feature.
  */
@@ -745,7 +910,7 @@ function classifyRequest(request = '', context = {}) {
   const isRoutine = (
     text.length < 80 &&
     /\b(typo|rename|change text|color|update|fix|button text|copyright|add prop|export|import|margin|padding|bg-|header text)\b/i.test(lower) &&
-    !/\b(algorithm|sort|search|tree|graph|dp|cache|dijkstra|knapsack|lru|stack|queue|binary|complexity|big.?o|optimi[sz])\b/i.test(lower)
+    !/\b(algorithm|sort|search|tree|graph|dp|cache|dijkstra|knapsack|lru|stack|queue|binary|complexity|big.?o|optimi[sz]|backtrack|segment tree|greedy|interval|stream)\b/i.test(lower)
   );
 
   if (isRoutine) {
@@ -764,9 +929,14 @@ function classifyRequest(request = '', context = {}) {
   const priorityOrder = [
     'graphs',
     'dynamic_programming',
+    'backtracking',
+    'range_queries',
+    'greedy',
     'caching',
+    'concurrency_streaming',
     'union_find',
     'string_matching',
+    'numerical_geometry',
     'trees',
     'heaps',
     'linked_lists',
@@ -847,6 +1017,16 @@ function deriveAlgorithmTaskContract(request, classification = null, context = {
   const isDAG = /\b(dag|directed acyclic|topological|dependencies)\b/i.test(text);
   const requiresStability = /\b(stable|preserve order|tie.?breaking)\b/i.test(text);
   const isTopK = /\b(top.?k|kth largest|kth smallest)\b/i.test(text);
+  const isConstraintSatisfaction = /\b(n-queens|sudoku|constraint|exact cover)\b/i.test(text);
+  const isDeduplicated = /\b(unique|deduplicate|no duplicates|distinct permutations)\b/i.test(text);
+  const isStaticRMQ = /\b(static|immutable|rmq|range minimum query|sparse table)\b/i.test(text);
+  const hasRangeUpdates = /\b(range update|lazy propagation|lazy|batch update)\b/i.test(text);
+  const isInterval = /\b(interval|meeting rooms|merge intervals|non-overlapping)\b/i.test(text);
+  const isReachability = /\b(jump game|reach|gas station)\b/i.test(text);
+  const isDebounceThrottle = /\b(debounce|throttle|coalesce)\b/i.test(text);
+  const isWorkerPool = /\b(worker pool|concurrency limit|thread pool|semaphore|rate limit)\b/i.test(text);
+  const isConvexHull = /\b(convex hull|graham|monotone chain)\b/i.test(text);
+  const isModularExp = /\b(modular exponentiation|fast power|power modulo)\b/i.test(text);
 
   const constraints = {
     hasKnownBounds,
@@ -857,7 +1037,17 @@ function deriveAlgorithmTaskContract(request, classification = null, context = {
     hasNegativeWeights,
     isDAG,
     requiresStability,
-    isTopK
+    isTopK,
+    isConstraintSatisfaction,
+    isDeduplicated,
+    isStaticRMQ,
+    hasRangeUpdates,
+    isInterval,
+    isReachability,
+    isDebounceThrottle,
+    isWorkerPool,
+    isConvexHull,
+    isModularExp
   };
 
   const selectedAlg = fam && typeof fam.selectAlgorithm === 'function'
@@ -965,37 +1155,56 @@ function deriveAlgorithmTaskContract(request, classification = null, context = {
 
 /**
  * Builds the algorithmic instruction block to inject into agent/copilot prompts.
+ * Emits the comprehensive 9-stage structured algorithm reasoning pipeline.
  */
 function buildAlgorithmGuidanceBlock(spec) {
   if (!spec || !spec.specificationNeeded || !spec.contract) return '';
 
   const c = spec.contract;
   return `
-[ALGORITHM TASK CONTRACT: ${spec.familyName.toUpperCase()}]
-1. PROBLEM STATEMENT:
-   ${c.problemStatement}
+[STRUCTURED ALGORITHM REASONING PIPELINE: ${spec.familyName.toUpperCase()}]
+Follow these 9 rigorous engineering stages to construct the solution:
 
-2. INPUT/OUTPUT CONTRACT & CONSTRAINTS:
-   - Inputs: ${c.inputOutputContract.inputs}
-   - Outputs: ${c.inputOutputContract.outputs}
-   - Complexity: Time ${c.complexity.time}, Space ${c.complexity.space}
-   - Assumptions: ${c.complexity.assumptions.join('; ')}
+STAGE 1: PROBLEM FORMALIZATION
+- Problem Statement: ${c.problemStatement}
+- Inputs: ${c.inputOutputContract.inputs}
+- Outputs: ${c.inputOutputContract.outputs}
+- Domain Invariants: ${c.preconditionsAndInvariants.join('; ')}
 
-3. CORRECTNESS INVARIANTS:
-${c.preconditionsAndInvariants.map((inv) => `   * ${inv}`).join('\n')}
+STAGE 2: CONSTRAINT ANALYSIS & COMPLEXITY BUDGETS
+- Data Constraints: ${c.inputOutputContract.dataConstraints}
+- Target Time Complexity: ${c.complexity.time}
+- Target Space Complexity: ${c.complexity.space}
+- Computational Assumptions: ${c.complexity.assumptions.join('; ')}
 
-4. EDGE CASES TO HANDLE EXPLICITLY:
-${c.edgeCases.map((ec) => `   * ${ec}`).join('\n')}
+STAGE 3: ALGORITHM CANDIDATE SELECTION & TRADEOFFS
+${c.candidateAlgorithms.map((cand) => `  * [${cand.isChosen ? 'SELECTED' : 'REJECTED'}] ${cand.approach}: ${cand.rationale} (Tradeoff: ${cand.tradeOffs})`).join('\n')}
 
-5. SELECTED APPROACH & RATIONALE:
-   - Approach: ${c.selectedAlgorithm}
-   - Chosen because: ${c.candidateAlgorithms.find((a) => a.isChosen)?.rationale || 'Optimal constraint fit'}
+STAGE 4: CORRECTNESS REASONING & INVARIANTS
+${c.preconditionsAndInvariants.map((inv) => `  * Invariant: ${inv}`).join('\n')}
 
-6. IMPLEMENTATION RULES:
-   - ZERO PLACEHOLDERS: Implement complete runnable logic. Never write "// TODO" or stub returns.
-   - DEFENSIVE BOUNDARIES: Validate empty, null, singleton, and extreme inputs at the function entry.
-   - INDEPENDENT VERIFICATION: Include executable tests addressing the falsification suite:
-${c.falsificationTests.map((ft) => `     - ${ft}`).join('\n')}
+STAGE 5: COMPLEXITY ANALYSIS
+- Time: ${c.complexity.time}
+- Space: ${c.complexity.space}
+- Bounded Memory: Avoid duplicate allocations and recursion depths exceeding call stack limits.
+
+STAGE 6: MULTI-LANGUAGE IMPLEMENTATION STRATEGY
+- Follow idiomatic conventions of the active language.
+- Zero external package dependencies unless explicitly configured in project.
+- Expose clear, typed function signatures with deterministic return values.
+
+STAGE 7: EDGE-CASE & BOUNDARY INVENTORY
+Explicitly handle and test every condition:
+${c.edgeCases.map((ec) => `  * ${ec}`).join('\n')}
+
+STAGE 8: CODE REVIEW & REFINEMENT GUARDRAILS
+- ZERO PLACEHOLDERS: Implement complete runnable logic. Never output "// TODO", "// implement here", or stub responses.
+- NO SWALLOWED EXCEPTIONS: Never catch errors silently without reporting or handling.
+- RESOURCE INTEGRITY: Ensure memory, file handles, timers, and worker subscriptions are properly released.
+
+STAGE 9: VERIFIED OUTPUT & FALSIFICATION SUITE
+Include runnable unit tests covering the falsification suite:
+${c.falsificationTests.map((ft) => `  * ${ft}`).join('\n')}
 `;
 }
 

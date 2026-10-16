@@ -297,9 +297,20 @@ function validateCrossFileContracts(files = {}, options = {}) {
     }
   }
 
-  // 1. Validate Imports vs Exports
+  // 1. Validate Imports vs Exports & Stubs
+  const dependencyGraph = new Map();
+
   for (const [filePath, content] of Object.entries(files)) {
     if (!/\.[jt]sx?$/i.test(filePath)) continue;
+
+    // Detect empty or pure comment stubs
+    const stripped = content.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '').trim();
+    if (stripped.length === 0) {
+      errors.push(`EMPTY_STUB_FILE: '${filePath}' is empty or contains only comments with no executable implementation.`);
+      continue;
+    }
+
+    if (!dependencyGraph.has(filePath)) dependencyGraph.set(filePath, []);
 
     const imports = extractImports(content);
     for (const imp of imports) {
@@ -314,8 +325,18 @@ function validateCrossFileContracts(files = {}, options = {}) {
         continue;
       }
 
+      dependencyGraph.get(filePath).push(resolvedTarget);
+
       const targetExports = fileExports.get(resolvedTarget);
       if (targetExports) {
+        // Validate default import
+        if (imp.defaultImport && !targetExports.hasDefault && targetExports.named.size > 0) {
+          // If the target has named exports but no default export, flag missing default export
+          const available = Array.from(targetExports.named).join(', ');
+          errors.push(`MISSING_DEFAULT_EXPORT: '${filePath}' imports default '${imp.defaultImport}' from '${imp.specifier}', but '${resolvedTarget}' only exports named: [${available}].`);
+        }
+
+        // Validate named imports
         exportsChecked += imp.named.length;
         for (const named of imp.named) {
           if (!targetExports.named.has(named)) {
@@ -324,6 +345,28 @@ function validateCrossFileContracts(files = {}, options = {}) {
         }
       }
     }
+  }
+
+  // 1b. Circular Dependency Detection
+  const visiting = new Set();
+  const visited = new Set();
+  function detectCycle(node, pathStack = []) {
+    visiting.add(node);
+    pathStack.push(node);
+    for (const neighbor of dependencyGraph.get(node) || []) {
+      if (pathStack.includes(neighbor)) {
+        const cyclePath = [...pathStack.slice(pathStack.indexOf(neighbor)), neighbor].join(' -> ');
+        warnings.push(`CIRCULAR_IMPORT_CYCLE: Circular import detected across files: ${cyclePath}`);
+      } else if (!visited.has(neighbor)) {
+        detectCycle(neighbor, pathStack);
+      }
+    }
+    pathStack.pop();
+    visiting.delete(node);
+    visited.add(node);
+  }
+  for (const node of dependencyGraph.keys()) {
+    if (!visited.has(node)) detectCycle(node);
   }
 
   // 2. Validate Frontend API Calls against Backend Routes

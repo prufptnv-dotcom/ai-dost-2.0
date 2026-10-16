@@ -5,12 +5,12 @@ const MAX_PROMPT_LENGTH = 4000;
 const MAX_REQUIREMENTS = 60;
 const MAX_ACCEPTANCE_CRITERIA = 75;
 
-const ACTION_RE = /\b(build|create|make|generate|develop|design|scaffold|implement|add|fix|update|upgrade|improve|modify|refactor|enhance|integrate|wire|change|banao|banaye|banado|bana|lagao|jodo|badlo|sudhar|theek)\b/i;
-const SOFTWARE_SCOPE_RE = /\b(app|application|website|web ?app|site|platform|dashboard|admin panel|portal|tool|software|system|api|backend|frontend|server|route|module|function|component|page|screen|form|button|feature|project|code|repository|repo|algorithm|database|schema|service|workflow|automation|game|assistant|agent|landing page|portfolio|store|shop|booking)\b|(?:^|\s)[\w./-]+\.(?:js|jsx|ts|tsx|py|css|html|json)(?:$|\s)/i;
-const UI_SCOPE_RE = /\b(app|application|website|web ?app|web|site|platform|assistant|learning|course|quiz|game|todo app|to-do app|ui|ux|frontend|front-end|landing page|dashboard|admin panel|portal|screen|page|component|layout|design system|responsive|mobile-first|portfolio|storefront|shop|e-?commerce|booking|form|button|navigation|navbar|sidebar|visual|styling|theme|dark mode|light mode)\b/i;
-const NEW_PROJECT_RE = /\b(new|brand new|from scratch|scratch se|naya|nayi|fresh|greenfield)\b/i;
-const MODIFY_RE = /\b(add|fix|update|upgrade|improve|modify|refactor|enhance|integrate|wire|change|debug|repair|lagao|jodo|badlo|sudhar|theek|existing|current)\b/i;
-const CREATE_RE = /\b(build|create|generate|scaffold|start from scratch|scratch se|banao|banado|naya|nayi)\b/i;
+const ACTION_RE = /\b(build|create|make|generate|develop|design|scaffold|implement|add|fix|update|upgrade|improve|modify|refactor|enhance|integrate|wire|change|banao|banaye|banado|bana|lagao|jodo|badlo|sudhar|theek|likho|likh|taiyaar|tayyar)\b/i;
+const SOFTWARE_SCOPE_RE = /\b(app|application|website|web ?app|site|platform|dashboard|admin panel|portal|tool|software|system|api|backend|frontend|server|route|module|function|component|page|screen|form|button|feature|project|code|repository|repo|algorithm|database|schema|service|workflow|automation|game|assistant|agent|landing page|portfolio|store|shop|booking)\b|एल्गोरिदम|एल्गोरिथम|वेबसाइट|ऐप|डैशबोर्ड|प्रोजेक्ट|बैकएंड|फ्रंटएंड|डेटाबेस|(?:^|\s)[\w./-]+\.(?:js|jsx|ts|tsx|py|css|html|json)(?:$|\s)/i;
+const UI_SCOPE_RE = /\b(app|application|website|web ?app|web|site|platform|assistant|learning|course|quiz|game|todo app|to-do app|ui|ux|frontend|front-end|landing page|dashboard|admin panel|portal|screen|page|component|layout|design system|responsive|mobile-first|portfolio|storefront|shop|e-?commerce|booking|form|button|navigation|navbar|sidebar|visual|styling|theme|dark mode|light mode)\b|वेबसाइट|ऐप|डैशबोर्ड|पेज|इंटरफेस/i;
+const NEW_PROJECT_RE = /\b(new|brand new|from scratch|scratch se|naya|nayi|fresh|greenfield)\b|नया|नई|शुरू से/i;
+const MODIFY_RE = /\b(add|fix|update|upgrade|improve|modify|refactor|enhance|integrate|wire|change|debug|repair|lagao|jodo|badlo|sudhar|theek|existing|current)\b|सुधारो|बदलो|जोड़ो|ठीक करो/i;
+const CREATE_RE = /\b(build|create|generate|scaffold|start from scratch|scratch se|banao|banado|naya|nayi)\b|बनाओ|बना दो|तैयार करो/i;
 
 const ARCHETYPES = [
   { id: 'ecommerce', label: 'E-commerce / Marketplace', pattern: /\b(e-?commerce|online store|storefront|shop|shopping cart|checkout|marketplace|product catalog)\b/i, pages: ['Home', 'Product listing', 'Product details', 'Cart', 'Checkout', 'Orders'] },
@@ -279,6 +279,141 @@ function buildInteractionContracts(requirements) {
     }));
 }
 
+const APPLICATION_TYPES = [
+  'frontend', 'backend', 'full-stack', 'library', 'script',
+  'algorithm', 'data-pipeline', 'api', 'infrastructure'
+];
+
+function inferApplicationType(prompt, archetype, stack) {
+  const p = String(prompt || '').toLowerCase();
+  if (/\b(algorithm|data structure|binary search|leetcode|complexity|graph|dijkstra|tree|bst|dp|dynamic programming|sort|bfs|dfs|sliding window)\b|एल्गोरिदम|एल्गोरिथम/.test(p)) {
+    return 'algorithm';
+  }
+  if (/\b(data pipeline|etl|batch processing|stream processing|pandas|spark|data ingestion)\b/i.test(p)) {
+    return 'data-pipeline';
+  }
+  if (/\b(infrastructure|terraform|kubernetes|docker compose|k8s|ansible|helm|ci\/cd|github actions)\b/i.test(p)) {
+    return 'infrastructure';
+  }
+  if (/\b(library|npm package|python package|pip package|shared utility|reusable module|sdk)\b/i.test(p)) {
+    return 'library';
+  }
+  if (/\b(cli script|bash script|shell script|python script|automation script|cron job)\b/i.test(p)) {
+    return 'script';
+  }
+  if (/\b(api|rest api|graphql|grpc|endpoints|routes|backend service|microservice)\b/i.test(p) && !/\b(frontend|ui|page|screen|react|vue|svelte|html)\b/i.test(p)) {
+    return 'api';
+  }
+  if (/\b(backend|server|express server|fastapi server|database)\b/i.test(p) && !/\b(frontend|ui|page|screen|react|vue|svelte|css|html)\b/i.test(p)) {
+    return 'backend';
+  }
+  if (/\b(full.?stack|fullstack|frontend and backend|express.*react|react.*express|next\.?js.*api)\b/i.test(p) || (/\b(frontend|ui|page|screen|client)\b/i.test(p) && /\b(backend|api|database|express|server)\b/i.test(p))) {
+    return 'full-stack';
+  }
+  return 'frontend';
+}
+
+function inferFeatureDependencies(requirements) {
+  const depMap = {
+    payments: ['cart', 'authentication'],
+    'csv-export': ['data-management'],
+    booking: ['forms-validation'],
+    chat: ['authentication'],
+    'sorting-pagination': ['data-management']
+  };
+  const activeKeys = new Set(requirements.map(r => r.featureKey).filter(Boolean));
+  const result = {};
+  for (const [feat, deps] of Object.entries(depMap)) {
+    if (activeKeys.has(feat)) {
+      result[feat] = deps.filter(d => activeKeys.has(d));
+    }
+  }
+  return result;
+}
+
+function inferInputOutputContracts(prompt, archetype, requirements) {
+  const contracts = [];
+  const featureKeys = new Set(requirements.map(r => r.featureKey).filter(Boolean));
+
+  if (featureKeys.has('authentication')) {
+    contracts.push({
+      name: 'authLogin',
+      type: 'api-endpoint',
+      inputs: { email: 'string (valid email format)', password: 'string (min 8 chars)' },
+      outputs: { success: 'boolean', token: 'string (optional JWT)', user: 'object (id, name, email)' },
+      errorStates: ['INVALID_CREDENTIALS', 'ACCOUNT_LOCKED', 'VALIDATION_ERROR']
+    });
+  }
+  if (featureKeys.has('data-management') || featureKeys.has('api-integration')) {
+    contracts.push({
+      name: 'getItems',
+      type: 'api-endpoint',
+      inputs: { query: 'string (optional search)', limit: 'number (pagination)', offset: 'number' },
+      outputs: { items: 'array', total: 'number', hasMore: 'boolean' },
+      errorStates: ['NETWORK_ERROR', 'UNAUTHORIZED', 'NOT_FOUND']
+    });
+    contracts.push({
+      name: 'mutateItem',
+      type: 'api-endpoint',
+      inputs: { action: 'create | update | delete', payload: 'object' },
+      outputs: { success: 'boolean', item: 'object' },
+      errorStates: ['VALIDATION_ERROR', 'CONFLICT', 'FORBIDDEN']
+    });
+  }
+  if (featureKeys.has('csv-export')) {
+    contracts.push({
+      name: 'exportCsv',
+      type: 'utility-function',
+      inputs: { records: 'array of objects', columns: 'array of string headers', filename: 'string' },
+      outputs: { blob: 'Blob (text/csv)', downloadTriggered: 'boolean' },
+      errorStates: ['EMPTY_DATASET', 'EXPORT_GENERATION_FAILED']
+    });
+  }
+
+  return contracts;
+}
+
+function inferUnresolvedAssumptions(prompt, requirements, stack) {
+  const assumptions = [];
+  const p = String(prompt || '').toLowerCase();
+  const featureKeys = new Set(requirements.map(r => r.featureKey).filter(Boolean));
+
+  if (featureKeys.has('authentication') && !/(jwt|oauth|auth0|firebase|supabase|cognito|session|cookie)/i.test(p)) {
+    assumptions.push('Authentication provider not explicitly specified; assuming token-based session auth with input validation.');
+  }
+  if (featureKeys.has('persistent-data') && !/(postgres|mysql|sqlite|mongo|dynamo|redis|prisma)/i.test(p)) {
+    assumptions.push('Target database engine not specified; assuming SQLite or workspace-standard persistent store.');
+  }
+  if (featureKeys.has('payments') && !/(stripe|razorpay|paypal|square)/i.test(p)) {
+    assumptions.push('Payment processor credentials not supplied; assuming sandboxed test checkout flow with simulated webhooks.');
+  }
+  if (featureKeys.has('chat') && !/(websocket|socket\.io|sse|polling)/i.test(p)) {
+    assumptions.push('Real-time messaging transport unspecified; assuming WebSocket/SSE with resilient fallback.');
+  }
+
+  return assumptions;
+}
+
+function inferEvidenceContract(isUi, applicationType, requirements) {
+  const checks = [
+    { check: 'Syntax & Import Validation', requiredEvidence: 'Zero unresolvable imports, valid AST/syntax for all created/modified files.', target: 'all-files' },
+    { check: 'Interface & Type Consistency', requiredEvidence: 'Exported function signatures match consuming call-sites across modules.', target: 'cross-file' },
+    { check: 'Error Boundary & Empty State Handling', requiredEvidence: 'Graceful fallback rendering and actionable error states present for data operations.', target: 'error-handling' }
+  ];
+
+  if (applicationType === 'algorithm') {
+    checks.push({ check: 'Invariant & Complexity Verification', requiredEvidence: 'Satisfies time/space complexity budget and passes boundary/falsification test cases.', target: 'algorithm-core' });
+  }
+  if (applicationType === 'full-stack' || applicationType === 'backend' || applicationType === 'api') {
+    checks.push({ check: 'API Schema & Route Verification', requiredEvidence: 'Endpoints respond with structured JSON status and validated schema shapes.', target: 'api-routes' });
+  }
+  if (isUi) {
+    checks.push({ check: 'Responsive & Interactive Controls', requiredEvidence: 'Interactive elements handle click/change events with observable DOM updates.', target: 'ui-components' });
+  }
+
+  return checks;
+}
+
 function buildAcceptanceCriteria(isUi, requirements) {
   const criteria = [
     { id: 'AC-01', title: 'Primary outcome', check: 'The implementation demonstrates the outcome requested in the original prompt. List blocked or incomplete parts explicitly rather than claiming completion.', requirementIds: ['REQ-001'], scope: ['overall'] },
@@ -407,10 +542,17 @@ function buildAppSpecification(prompt, options = {}) {
     ...featureRequirements,
     ...clauseRequirements,
   ];
+  const appType = inferApplicationType(request, archetype, inferStack(request));
+  const featureDependencies = inferFeatureDependencies(requirements);
+  const inputOutputContracts = inferInputOutputContracts(request, archetype, requirements);
+  const unresolvedAssumptions = inferUnresolvedAssumptions(request, requirements, inferStack(request));
+  const evidenceContract = inferEvidenceContract(isUi, appType, requirements);
+
   const spec = {
     schemaVersion: SPEC_VERSION,
     mode: modification ? 'modify-existing' : 'create-or-implement',
     scope: isUi ? 'application-ui' : 'software-change',
+    applicationType: appType,
     originalRequest: request,
     archetype: isUi ? archetype : { id: 'software-change', label: 'Existing software/change request', suggestedPages: [] },
     targetAudience: 'Infer from the user request and existing project context; do not invent a specific audience when none is stated.',
@@ -421,6 +563,10 @@ function buildAppSpecification(prompt, options = {}) {
       rule: 'Suggestions are optional guidance, not new user requirements. Preserve existing pages unless the user asks to remove them.',
     },
     requirements,
+    featureDependencies,
+    inputOutputContracts,
+    unresolvedAssumptions,
+    evidenceContract,
     componentArchitecture: inferComponentArchitecture(isUi, isUi ? archetype : { id: 'software-change' }, requirements),
     dataModel: inferDataModel(request, isUi ? archetype : { id: 'software-change' }, requirements),
     interactions: buildInteractionContracts(requirements),
@@ -477,6 +623,7 @@ function validateAppSpecification(spec) {
   if (typeof spec.originalRequest !== 'string' || !spec.originalRequest.trim()) errors.push('originalRequest is required');
   if (!['create-or-implement', 'modify-existing'].includes(spec.mode)) errors.push('mode is invalid');
   if (!['application-ui', 'software-change'].includes(spec.scope)) errors.push('scope is invalid');
+  if (spec.applicationType && !APPLICATION_TYPES.includes(spec.applicationType)) errors.push('applicationType is invalid');
   if (!Array.isArray(spec.requirements) || spec.requirements.length === 0) errors.push('at least one requirement is required');
   if (!Array.isArray(spec.acceptanceCriteria) || spec.acceptanceCriteria.length === 0) errors.push('acceptanceCriteria are required');
 
@@ -536,12 +683,17 @@ function formatAppSpecificationForPrompt(spec) {
     schemaVersion: spec.schemaVersion,
     mode: spec.mode,
     scope: spec.scope,
+    applicationType: spec.applicationType,
     originalRequest: spec.originalRequest,
     archetype: spec.archetype,
     targetAudience: spec.targetAudience,
     stack: spec.stack,
     pages: spec.pages,
     requirements: spec.requirements,
+    featureDependencies: spec.featureDependencies,
+    inputOutputContracts: spec.inputOutputContracts,
+    unresolvedAssumptions: spec.unresolvedAssumptions,
+    evidenceContract: spec.evidenceContract,
     explicitCoverage: spec.explicitCoverage,
     componentArchitecture: spec.componentArchitecture,
     dataModel: spec.dataModel,
@@ -563,6 +715,7 @@ function formatAppSpecificationForPrompt(spec) {
 
 module.exports = {
   SPEC_VERSION,
+  APPLICATION_TYPES,
   buildAppSpecification,
   formatAppSpecificationForPrompt,
   shouldCreateAppSpecification,
