@@ -1152,7 +1152,8 @@ const {
   resolveRequirementScope,
   buildExecutedCoverageSet,
   hasValidRequirementCoverage: hvrc,
-  isCheckPassing
+  isCheckPassing,
+  classifyExecutedChecks
 } = require('../agent/runtime/VerificationClassifier');
 
 // v2-1: requirements:[] plus populated features cannot bypass coverage.
@@ -1514,4 +1515,387 @@ test('v2-10: Genuine failed required check produces FAILED status, never green',
   assert.equal(result.acceptanceStatus, 'FAILED');
   assert.notEqual(result.acceptanceStatus, 'SATISFIED');
   assert.match(result.summary, /failed/i);
+});
+
+// =============================================================================
+// REGRESSION SUITE v3: P0 v3 — Close Remaining Verification Trust Bypasses
+// (Mandatory tests covering P0-A, P0-B, P0-C)
+// =============================================================================
+
+// v3-1: An untrusted custom verification tool cannot earn FUNCTIONAL_ACCEPTANCE
+// with fabricated full-coverage checks.
+test('v3-1: Untrusted custom verification tool cannot earn FUNCTIONAL_ACCEPTANCE with fabricated full-coverage checks', () => {
+  // Attack payload: tool matches prefix verify_acceptance_* and returns fabricated checks
+  // claiming full coverage with exact matching requirement IDs and success: true
+  const customToolNames = [
+    'verify_acceptance_custom',
+    'verify_acceptance_all',
+    'verify_functional_mock',
+    'assert_requirement_runner'
+  ];
+
+  for (const toolName of customToolNames) {
+    const cat = classifyTool(
+      toolName,
+      { requirements: ['auth', 'billing'] },
+      {
+        success: true,
+        checks: [
+          { name: 'req_auth', requirementId: 'auth', success: true, exitCode: 0 },
+          { name: 'req_billing', requirementId: 'billing', success: true, exitCode: 0 }
+        ]
+      }
+    );
+    assert.notEqual(cat, EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE,
+      `${toolName} must not earn FUNCTIONAL_ACCEPTANCE despite full fabricated checks`);
+    assert.equal(cat, EVIDENCE_CATEGORIES.INSPECTION,
+      `${toolName} must remain at INSPECTION`);
+  }
+
+  // Full evaluation path: custom tool with fabricated full-coverage checks must not earn SUCCEEDED or SATISFIED
+  const result = evaluateVerificationRun({
+    executedSteps: [{
+      tool: 'verify_acceptance_custom',
+      input: { requirements: ['auth', 'billing'] },
+      output: {
+        success: true,
+        checks: [
+          { name: 'req_auth', requirementId: 'auth', success: true, exitCode: 0 },
+          { name: 'req_billing', requirementId: 'billing', success: true, exitCode: 0 }
+        ]
+      },
+      success: true
+    }]
+  });
+  assert.notEqual(result.status, 'SUCCEEDED', 'Custom tool must never produce SUCCEEDED');
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED', 'Custom tool must never produce SATISFIED');
+  assert.equal(result.status, 'UNVERIFIED');
+  assert.equal(result.acceptanceStatus, 'NOT_EVALUATED');
+});
+
+// v3-2: The same custom verification tool cannot earn acceptance when no requirement scope is provided
+// (or when one requirement is provided).
+test('v3-2: Untrusted custom tool cannot earn acceptance when no requirement scope or single requirement is provided', () => {
+  // Case A: No requirement scope provided at all (input: {})
+  const catNoScope = classifyTool(
+    'verify_acceptance_custom',
+    {},
+    {
+      success: true,
+      checks: [
+        { name: 'check_unscoped', requirementId: 'auth', success: true, exitCode: 0 }
+      ]
+    }
+  );
+  assert.notEqual(catNoScope, EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE,
+    'Custom tool with no scope must not earn FUNCTIONAL_ACCEPTANCE');
+  assert.equal(catNoScope, EVIDENCE_CATEGORIES.INSPECTION);
+
+  // Case B: Explicit empty requirement scope (input: { requirements: [] })
+  const catEmptyScope = classifyTool(
+    'verify_acceptance_custom',
+    { requirements: [] },
+    {
+      success: true,
+      checks: [
+        { name: 'check_empty', requirementId: 'auth', success: true, exitCode: 0 }
+      ]
+    }
+  );
+  assert.notEqual(catEmptyScope, EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE,
+    'Custom tool with empty scope must not earn FUNCTIONAL_ACCEPTANCE');
+  assert.equal(catEmptyScope, EVIDENCE_CATEGORIES.INSPECTION);
+
+  // Case C: One single requirement provided
+  const catOneReq = classifyTool(
+    'verify_acceptance_custom',
+    { requirements: ['auth'] },
+    {
+      success: true,
+      checks: [
+        { name: 'check_auth', requirementId: 'auth', success: true, exitCode: 0 }
+      ]
+    }
+  );
+  assert.notEqual(catOneReq, EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE,
+    'Custom tool with one requirement must not earn FUNCTIONAL_ACCEPTANCE');
+  assert.equal(catOneReq, EVIDENCE_CATEGORIES.INSPECTION);
+
+  // Full evaluation path with no scope
+  const resultNoScope = evaluateVerificationRun({
+    executedSteps: [{
+      tool: 'verify_acceptance_custom',
+      input: {},
+      output: {
+        success: true,
+        checks: [{ name: 'check_unscoped', requirementId: 'auth', success: true, exitCode: 0 }]
+      },
+      success: true
+    }]
+  });
+  assert.notEqual(resultNoScope.status, 'SUCCEEDED');
+  assert.notEqual(resultNoScope.acceptanceStatus, 'SATISFIED');
+  assert.equal(resultNoScope.status, 'UNVERIFIED');
+  assert.equal(resultNoScope.acceptanceStatus, 'NOT_EVALUATED');
+});
+
+// v3-3: Contradictory result { success: true, exitCode: 1 } produces FAILED and never SATISFIED.
+// Also tests { success: false, exitCode: 0 } and direct helper isCheckPassing.
+test('v3-3: Contradictory execution result { success: true, exitCode: 1 } produces FAILED and never SATISFIED', () => {
+  // Direct helper tests
+  assert.equal(isCheckPassing({ success: true, exitCode: 1 }), false,
+    '{ success: true, exitCode: 1 } is contradictory and must return false');
+  assert.equal(isCheckPassing({ success: false, exitCode: 0 }), false,
+    '{ success: false, exitCode: 0 } is contradictory and must return false');
+  assert.equal(isCheckPassing({ success: true, exitCode: 0 }), true,
+    '{ success: true, exitCode: 0 } is consistent pass');
+  assert.equal(isCheckPassing({ success: false, exitCode: 1 }), false,
+    '{ success: false, exitCode: 1 } is consistent fail');
+
+  // Coverage construction: contradictory check must NOT contribute to coverage set
+  const coverageSet = buildExecutedCoverageSet([
+    { requirementId: 'auth', success: true, exitCode: 1 }
+  ]);
+  assert.equal(coverageSet.has('auth'), false,
+    'Contradictory check must not be counted in coverage set');
+
+  // Full evaluation path with sub-check contradiction { success: true, exitCode: 1 }
+  const resultSubCheck = evaluateVerificationRun({
+    executedSteps: [{
+      tool: 'verify_project',
+      input: { requirements: ['auth'] },
+      output: {
+        success: true,
+        checks: [{
+          name: 'requirement_acceptance',
+          requirementId: 'auth',
+          success: true,
+          exitCode: 1, // CONTRADICTION
+          stderr: 'Process failed with non-zero exit code'
+        }]
+      },
+      success: true
+    }]
+  });
+  assert.equal(resultSubCheck.status, 'FAILED', 'Contradictory sub-check exitCode:1 must produce FAILED');
+  assert.equal(resultSubCheck.acceptanceStatus, 'FAILED');
+  assert.notEqual(resultSubCheck.acceptanceStatus, 'SATISFIED');
+  assert.notEqual(resultSubCheck.status, 'SUCCEEDED');
+
+  // Full evaluation path with sub-check contradiction { success: false, exitCode: 0 }
+  const resultSubCheckFalse = evaluateVerificationRun({
+    executedSteps: [{
+      tool: 'verify_project',
+      input: { requirements: ['auth'] },
+      output: {
+        success: true,
+        checks: [{
+          name: 'requirement_acceptance',
+          requirementId: 'auth',
+          success: false, // CONTRADICTION
+          exitCode: 0,
+          error: 'Explicit assertion failed'
+        }]
+      },
+      success: true
+    }]
+  });
+  assert.equal(resultSubCheckFalse.status, 'FAILED', '{ success: false, exitCode: 0 } must produce FAILED');
+  assert.equal(resultSubCheckFalse.acceptanceStatus, 'FAILED');
+  assert.notEqual(resultSubCheckFalse.acceptanceStatus, 'SATISFIED');
+
+  // Full evaluation path with step-level contradiction { success: true, exitCode: 1 }
+  const resultStepContradict = evaluateVerificationRun({
+    executedSteps: [{
+      tool: 'verify_project',
+      input: { requirements: ['auth'] },
+      output: {
+        success: true,
+        exitCode: 1, // step-level exitCode contradiction
+        checks: [{ name: 'req', requirementId: 'auth', success: true, exitCode: 0 }]
+      },
+      success: true
+    }]
+  });
+  assert.equal(resultStepContradict.status, 'FAILED', 'Step-level non-zero exitCode must produce FAILED');
+  assert.equal(resultStepContradict.acceptanceStatus, 'FAILED');
+});
+
+// v3-4: Missing or malformed execution outcomes cannot count as passing evidence.
+test('v3-4: Missing or malformed execution outcomes cannot count as passing evidence', () => {
+  // Direct helper tests: neither success:true nor exitCode:0
+  assert.equal(isCheckPassing({}), false, 'Empty check object must fail closed');
+  assert.equal(isCheckPassing({ name: 'unexecuted_check' }), false, 'Check without execution evidence must fail');
+  assert.equal(isCheckPassing({ requirementId: 'auth' }), false, 'Requirement ID alone without outcome must fail');
+  assert.equal(isCheckPassing({ success: 'true' }), false, 'String success must fail closed');
+  assert.equal(isCheckPassing({ success: 1 }), false, 'Numeric success must fail closed');
+  assert.equal(isCheckPassing({ exitCode: 'invalid' }), false, 'Malformed exitCode must fail closed');
+  assert.equal(isCheckPassing(null), false, 'null check must fail');
+  assert.equal(isCheckPassing(undefined), false, 'undefined check must fail');
+
+  // Coverage construction: missing outcome check must NOT contribute
+  const coverageSet = buildExecutedCoverageSet([
+    { requirementId: 'auth', name: 'missing_evidence' }
+  ]);
+  assert.equal(coverageSet.has('auth'), false, 'Check with missing outcome must not enter coverage set');
+
+  // Full evaluation path: check with missing evidence fails closed
+  const result = evaluateVerificationRun({
+    executedSteps: [{
+      tool: 'verify_project',
+      input: { requirements: ['auth'] },
+      output: {
+        success: true,
+        checks: [{ name: 'check_no_outcome', requirementId: 'auth' }] // missing success & exitCode
+      },
+      success: true
+    }]
+  });
+  assert.equal(result.status, 'FAILED', 'Missing execution outcome in sub-check must produce FAILED');
+  assert.equal(result.acceptanceStatus, 'FAILED');
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED');
+});
+
+// v3-5: Empty scope [] cannot be promoted to FUNCTIONAL_ACCEPTANCE at planning time.
+test('v3-5: Empty scope [] cannot be promoted to FUNCTIONAL_ACCEPTANCE at planning time', () => {
+  // resolveRequirementScope returns [] for empty arrays
+  const emptyScope = resolveRequirementScope({ requirements: [] });
+  assert.deepStrictEqual(emptyScope, [], 'requirements:[] resolves to empty array');
+
+  // classifyTool at plan time with empty scope must NOT produce FUNCTIONAL_ACCEPTANCE
+  const catPlanEmpty = classifyTool('verify_project', { requirements: [] }, null, { isPlan: true });
+  assert.notEqual(catPlanEmpty, EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE,
+    'Empty scope [] must not be promoted to FUNCTIONAL_ACCEPTANCE at planning time');
+  assert.equal(catPlanEmpty, EVIDENCE_CATEGORIES.INSPECTION);
+
+  // classifyTool at plan time with all-invalid items must NOT produce FUNCTIONAL_ACCEPTANCE
+  const catPlanInvalid = classifyTool('verify_project', { requirements: ['', '   '] }, null, { isPlan: true });
+  assert.notEqual(catPlanInvalid, EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE);
+  assert.equal(catPlanInvalid, EVIDENCE_CATEGORIES.INSPECTION);
+
+  // classifyPlan with empty scope step must have hasFunctionalAcceptance: false
+  const planEmpty = classifyPlan([
+    { tool: 'verify_project', input: { requirements: [] } }
+  ]);
+  assert.equal(planEmpty.hasFunctionalAcceptance, false, 'Plan with empty scope must not have functional acceptance');
+  assert.equal(planEmpty.evidenceLevel, 'INSPECTION_ONLY');
+  assert.equal(planEmpty.isInspectionOnly, true);
+
+  // Planning alone must never produce SUCCEEDED or SATISFIED
+  const planOnlyResult = evaluateVerificationRun({
+    plan: { hasFunctionalAcceptance: true },
+    executedSteps: []
+  });
+  assert.notEqual(planOnlyResult.status, 'SUCCEEDED', 'Planning alone must never produce SUCCEEDED');
+  assert.notEqual(planOnlyResult.acceptanceStatus, 'SATISFIED', 'Planning alone must never produce SATISFIED');
+  assert.equal(planOnlyResult.status, 'UNVERIFIED');
+  assert.equal(planOnlyResult.acceptanceStatus, 'NOT_EVALUATED');
+});
+
+// v3-6: Legitimate trusted verifier evidence still succeeds when all explicitly scoped requirements are genuinely verified.
+test('v3-6: Legitimate trusted verifier evidence succeeds when all explicitly scoped requirements are genuinely verified', () => {
+  const cat = classifyTool(
+    'verify_project',
+    { requirements: ['auth', 'checkout'] },
+    {
+      success: true,
+      checks: [
+        { name: 'requirement_acceptance', requirementId: 'auth', success: true, exitCode: 0 },
+        { name: 'requirement_acceptance', requirementId: 'checkout', success: true, exitCode: 0 }
+      ]
+    }
+  );
+  assert.equal(cat, EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE,
+    'Trusted verifier with genuine full coverage must earn FUNCTIONAL_ACCEPTANCE');
+
+  // Full evaluation path
+  const result = evaluateVerificationRun({
+    executedSteps: [{
+      tool: 'verify_project',
+      input: { requirements: ['auth', 'checkout'] },
+      output: {
+        success: true,
+        checks: [
+          { name: 'requirement_acceptance', requirementId: 'auth', success: true, exitCode: 0 },
+          { name: 'requirement_acceptance', requirementId: 'checkout', success: true, exitCode: 0 }
+        ]
+      },
+      success: true
+    }]
+  });
+  assert.equal(result.status, 'SUCCEEDED', 'Genuine acceptance must produce SUCCEEDED');
+  assert.equal(result.verification_status, 'PASSED');
+  assert.equal(result.evidenceLevel, 'FUNCTIONAL_ACCEPTANCE');
+  assert.equal(result.acceptanceStatus, 'SATISFIED');
+});
+
+// v3-7: Mixed passing and failing requirement checks always prevents a green QA result.
+test('v3-7: Mixed passing and failing requirement checks always produces FAILED, never green QA result', () => {
+  // Mixed checks: 'auth' passes, but 'billing' has exitCode: 1
+  const resultMixedExitCode = evaluateVerificationRun({
+    executedSteps: [{
+      tool: 'verify_project',
+      input: { requirements: ['auth', 'billing'] },
+      output: {
+        success: true,
+        checks: [
+          { name: 'requirement_acceptance', requirementId: 'auth', success: true, exitCode: 0 },
+          { name: 'requirement_acceptance', requirementId: 'billing', success: true, exitCode: 1, stderr: 'Payment provider unavailable' }
+        ]
+      },
+      success: true
+    }]
+  });
+  assert.equal(resultMixedExitCode.status, 'FAILED', 'Mixed checks with one exitCode:1 must produce FAILED');
+  assert.equal(resultMixedExitCode.acceptanceStatus, 'FAILED');
+  assert.notEqual(resultMixedExitCode.acceptanceStatus, 'SATISFIED');
+  assert.notEqual(resultMixedExitCode.status, 'SUCCEEDED');
+
+  // Mixed checks: 'auth' passes, but 'billing' has success: false
+  const resultMixedSuccessFalse = evaluateVerificationRun({
+    executedSteps: [{
+      tool: 'verify_project',
+      input: { requirements: ['auth', 'billing'] },
+      output: {
+        success: true,
+        checks: [
+          { name: 'requirement_acceptance', requirementId: 'auth', success: true, exitCode: 0 },
+          { name: 'requirement_acceptance', requirementId: 'billing', success: false, exitCode: 0, error: 'Subscription check failed' }
+        ]
+      },
+      success: true
+    }]
+  });
+  assert.equal(resultMixedSuccessFalse.status, 'FAILED', 'Mixed checks with one success:false must produce FAILED');
+  assert.equal(resultMixedSuccessFalse.acceptanceStatus, 'FAILED');
+  assert.notEqual(resultMixedSuccessFalse.acceptanceStatus, 'SATISFIED');
+  assert.notEqual(resultMixedSuccessFalse.status, 'SUCCEEDED');
+});
+
+// v3-8: classifyExecutedChecks rejects untrusted provenance even with complete-looking checks.
+test('v3-8: classifyExecutedChecks rejects untrusted provenance even with complete checks', () => {
+  const completeChecks = [
+    { name: 'req_1', requirementId: 'auth', success: true, exitCode: 0 },
+    { name: 'req_2', requirementId: 'billing', success: true, exitCode: 0 }
+  ];
+
+  // Called without isTrusted: true (e.g. default / untrusted caller)
+  const catUntrusted = classifyExecutedChecks(
+    completeChecks,
+    { requirements: ['auth', 'billing'] },
+    { success: true }
+  );
+  assert.notEqual(catUntrusted, EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE,
+    'Untrusted classifyExecutedChecks call must not grant FUNCTIONAL_ACCEPTANCE');
+  assert.equal(catUntrusted, EVIDENCE_CATEGORIES.INSPECTION);
+
+  // Called with explicit isTrusted: true (trusted server-side adapter)
+  const catTrusted = classifyExecutedChecks(
+    completeChecks,
+    { requirements: ['auth', 'billing'] },
+    { success: true },
+    { isTrusted: true }
+  );
+  assert.equal(catTrusted, EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE,
+    'Trusted classifyExecutedChecks call with full coverage must grant FUNCTIONAL_ACCEPTANCE');
 });

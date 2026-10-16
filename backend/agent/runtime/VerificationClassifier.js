@@ -128,17 +128,37 @@ function isDummyCheck(check) {
 /**
  * Returns true when a check should count as passing.
  *
- * SECURITY: success:false is a definitive failure signal and overrides exitCode.
- * A check with { success: false, exitCode: 0 } is FAILED.
- * A check with { success: true, exitCode: 0 } or { success: true } is PASSED.
- * Absence of success field (undefined) is treated as passed when exitCode is 0,
- * but explicit false always wins.
+ * SECURITY:
+ * - success:false is a definitive failure signal and overrides exitCode (even exitCode: 0).
+ * - Any explicit non-zero exitCode is a definitive failure signal (even success: true).
+ * - Missing or malformed execution evidence fails closed (returns false).
+ * - A check passes ONLY when it has explicit success:true (and no non-zero exitCode)
+ *   OR explicit exitCode:0 (and not success:false).
  */
 function isCheckPassing(c) {
-  if (c.success === false) return false;          // explicit failure — exitCode cannot override
-  if (c.success === true)  return true;           // explicit pass
-  // success is absent — fall back to exitCode
-  return typeof c.exitCode === 'number' && c.exitCode === 0;
+  if (!c || typeof c !== 'object') return false;
+
+  // 1. Explicit failure flag always fails (exitCode cannot override)
+  if (c.success === false) return false;
+
+  // 2. Explicit non-zero exitCode always fails (success: true cannot override)
+  if (typeof c.exitCode === 'number' && (c.exitCode !== 0 || Number.isNaN(c.exitCode))) return false;
+  if (typeof c.exitCode === 'string' && c.exitCode.trim() !== '' && !Number.isNaN(Number(c.exitCode)) && Number(c.exitCode) !== 0) return false;
+
+  // 3. Explicit error property indicates failure
+  if (c.error) return false;
+
+  // 4. Missing or malformed execution evidence must not count as passing
+  const hasExplicitSuccessTrue = c.success === true;
+  const hasExplicitExitCodeZero = (typeof c.exitCode === 'number' && c.exitCode === 0) ||
+                                  (typeof c.exitCode === 'string' && c.exitCode.trim() !== '' && Number(c.exitCode) === 0);
+
+  if (hasExplicitSuccessTrue || hasExplicitExitCodeZero) {
+    return true;
+  }
+
+  // Neither success: true nor exitCode: 0 present (e.g. {}, { name: 'foo' }, malformed types)
+  return false;
 }
 
 /**
@@ -277,7 +297,7 @@ function isIdentityBoundRequirementCheck(c) {
 /**
  * Classifies executed sub-checks into an evidence category.
  */
-function classifyExecutedChecks(checks = [], input = {}, _output = {}) {
+function classifyExecutedChecks(checks = [], input = {}, _output = {}, options = {}) {
   const realChecks = Array.isArray(checks)
     ? checks.filter((c) => c && !isDummyCheck(c))
     : [];
@@ -311,6 +331,15 @@ function classifyExecutedChecks(checks = [], input = {}, _output = {}) {
   // SECURITY: Boolean output flags cannot boost hasFunctional here.
 
   if (hasFunctional) {
+    // SECURITY: Only trusted server-side adapters with verified execution provenance
+    // may earn FUNCTIONAL_ACCEPTANCE. Custom tools or untrusted calls must remain below FUNCTIONAL_ACCEPTANCE.
+    if (!options.isTrusted) {
+      if (hasTest)   return EVIDENCE_CATEGORIES.TEST;
+      if (hasBuild)  return EVIDENCE_CATEGORIES.BUILD;
+      if (hasVisual) return EVIDENCE_CATEGORIES.VISUAL;
+      return EVIDENCE_CATEGORIES.INSPECTION;
+    }
+
     const coverage = hasValidRequirementCoverage(input, {}, realChecks);
     // coverage === null → no explicit requirement scope → functional checks with
     //   identity bindings are sufficient; acceptance is based on executed check structure.
@@ -345,17 +374,18 @@ function classifyTool(toolName, input = {}, output = null, options = {}) {
   if (FUNCTIONAL_ACCEPTANCE_TOOLS.has(name)) {
     if (output && typeof output === 'object' && !Array.isArray(output)) {
       if (Array.isArray(output.checks)) {
-        // Delegate to executed-checks classifier; flags inside output are ignored.
-        return classifyExecutedChecks(output.checks, input, output);
+        // Delegate to executed-checks classifier with trusted server-side identity; flags inside output are ignored.
+        return classifyExecutedChecks(output.checks, input, output, { isTrusted: true, toolName: name });
       }
       // Output present but no checks array → no executed evidence.
       return EVIDENCE_CATEGORIES.INSPECTION;
     }
     // No output (plan-time). Accept only when explicit requirement scope is defined.
     // SECURITY: Tool name alone does not promote to FUNCTIONAL_ACCEPTANCE.
+    // Empty scope [] must never qualify as a valid scope.
     if (options.isPlan) {
       const scope = resolveRequirementScope(input);
-      if (scope !== null) return EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE;
+      if (scope !== null && scope.length > 0) return EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE;
     }
     return EVIDENCE_CATEGORIES.INSPECTION;
   }
@@ -367,10 +397,16 @@ function classifyTool(toolName, input = {}, output = null, options = {}) {
   if (/^(test|run_test)/i.test(name))                            return EVIDENCE_CATEGORIES.TEST;
 
   // SECURITY: verify_acceptance_* / verify_functional_* / assert_requirement_* name prefixes
-  // are NOT in the trusted allowlist.  They require output.checks — name alone is insufficient.
+  // are NOT in the trusted server-side allowlist. Custom untrusted tools must NEVER grant
+  // FUNCTIONAL_ACCEPTANCE, even if output contains fabricated checks with matching requirement IDs and success: true.
   if (/^(verify_acceptance|verify_functional|assert_requirement)/i.test(name)) {
     if (output && typeof output === 'object' && !Array.isArray(output) && Array.isArray(output.checks)) {
-      return classifyExecutedChecks(output.checks, input, output);
+      const cat = classifyExecutedChecks(output.checks, input, output, { isTrusted: false, toolName: name });
+      // Strictly remain below FUNCTIONAL_ACCEPTANCE
+      if (cat === EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE) {
+        return EVIDENCE_CATEGORIES.INSPECTION;
+      }
+      return cat;
     }
     return EVIDENCE_CATEGORIES.INSPECTION;
   }
@@ -437,19 +473,30 @@ function evaluateVerificationRun({ executedSteps = [], plan = null, fallbackReas
     const category = classifyTool(step.tool, step.input, step.output);
 
     // Sub-check failure propagation (verify_project sub-checks or test failures).
-    // SECURITY: success:false overrides exitCode.
+    // SECURITY: Authoritative result semantics via isCheckPassing:
+    // - Any non-zero exitCode or success:false in sub-checks is a failure
+    // - Contradictory results ({success:true, exitCode:1} or {success:false, exitCode:0}) must fail
+    // - Missing execution evidence in sub-checks fails
     let subCheckFailure = null;
     if (step.output && typeof step.output === 'object' && Array.isArray(step.output.checks)) {
       const realChecks = step.output.checks.filter((c) => c && !isDummyCheck(c));
       const failingCheck = realChecks.find((c) => !isCheckPassing(c));
       if (failingCheck) {
         subCheckFailure = failingCheck.stderr || failingCheck.stdout || failingCheck.error
-          || `Check "${failingCheck.name || 'unnamed'}" failed`;
+          || `Check "${failingCheck.name || failingCheck.requirementId || 'unnamed'}" failed or had contradictory/missing execution evidence`;
       }
     }
 
-    const success = step.success !== false
-      && !(step.output && typeof step.output === 'object' && step.output.success === false)
+    // Step-level and output-level contradictory / failure checks:
+    const stepExitCode = typeof step.exitCode === 'number' ? step.exitCode
+      : (step.output && typeof step.output === 'object' && typeof step.output.exitCode === 'number' ? step.output.exitCode : null);
+    const hasExitCodeFailure = stepExitCode !== null && stepExitCode !== 0;
+
+    const stepSuccessFalse = step.success === false
+      || (step.output && typeof step.output === 'object' && step.output.success === false);
+
+    const success = !stepSuccessFalse
+      && !hasExitCodeFailure
       && !step.error
       && !subCheckFailure;
 
@@ -457,7 +504,7 @@ function evaluateVerificationRun({ executedSteps = [], plan = null, fallbackReas
       ...step,
       category,
       success,
-      error: step.error || subCheckFailure || (step.output && typeof step.output === 'object' ? step.output.error : null)
+      error: step.error || subCheckFailure || (hasExitCodeFailure ? `Process exited with code ${stepExitCode}` : null) || (step.output && typeof step.output === 'object' ? step.output.error : null)
     };
   });
 
