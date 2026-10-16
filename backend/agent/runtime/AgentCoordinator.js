@@ -329,23 +329,26 @@ class AgentCoordinator {
       }
 
       // Complete run
-      await this.executionController.completeRun(workerRunId, 'SUCCEEDED');
+      const workerStatus = (executionResult?.status === 'UNVERIFIED' || executionResult?.status === 'PARTIAL')
+        ? executionResult.status
+        : 'SUCCEEDED';
+      await this.executionController.completeRun(workerRunId, workerStatus === 'SUCCEEDED' ? 'SUCCEEDED' : 'COMPLETED');
 
       // Canonical result validation & handoff completion
       if (handoff && handoff.status !== 'CANCELLED') {
         const canonicalResult = ResultValidator.validate({
           status: 'COMPLETED',
-          summary: executionResult.summary || `Worker completed ${role} task`,
-          artifact_refs: executionResult.artifact_refs || [],
-          context_refs: executionResult.context_refs || [],
-          verification_status: executionResult.verification_status || 'PASSED',
-          errors: executionResult.errors || []
+          summary: executionResult?.summary || `Worker completed ${role} task`,
+          artifact_refs: executionResult?.artifact_refs || [],
+          context_refs: executionResult?.context_refs || [],
+          verification_status: executionResult?.verification_status || (workerStatus === 'UNVERIFIED' ? 'UNVERIFIED' : 'PASSED'),
+          errors: executionResult?.errors || []
         });
 
         await this.agentHandoffService.completeHandoff(handoff.id, canonicalResult);
       }
 
-      return { runId: workerRunId, status: 'SUCCEEDED', result: executionResult };
+      return { runId: workerRunId, status: workerStatus, result: executionResult };
     } catch (err) {
       const currentRun = this.agentRunDao.getById(workerRunId);
       if (currentRun.status !== 'CANCELLED') {

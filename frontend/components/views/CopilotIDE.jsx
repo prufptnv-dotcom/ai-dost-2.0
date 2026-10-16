@@ -2167,16 +2167,22 @@ const animate = () => {
             // ── Director Verification: Show verification gate status ──
             else if (data.type === 'director_verification') {
               const vStatus = data.status || 'running';
-              const vEmoji = vStatus === 'SUCCEEDED' ? '✅' : vStatus === 'DELEGATING' ? '🔍' : '⚠️';
+              const isPassed = vStatus === 'SUCCEEDED' || vStatus === 'PASSED';
+              const isUnverified = vStatus === 'UNVERIFIED' || vStatus === 'PARTIAL' || vStatus === 'SKIPPED';
+              const vEmoji = isPassed ? '✅' : isUnverified ? '⚠️' : vStatus === 'DELEGATING' ? '🔍' : '❌';
               setCopilotMessages(prev => [...prev, { role: 'assistant', kind: 'thought', content: `${vEmoji} Final Verification Gate: ${vStatus}` }]);
-              setCopilotStatus({ label: `${vEmoji} Verification: ${vStatus}`, tone: 'work' });
-              setQaStatus(vStatus === 'SUCCEEDED' ? 'passed' : vStatus === 'DELEGATING' ? 'running' : 'failed');
+              setCopilotStatus({ label: `${vEmoji} Verification: ${vStatus}`, tone: isPassed ? 'success' : isUnverified ? 'work' : 'error' });
+              setQaStatus(isPassed ? 'passed' : isUnverified ? 'unverified' : vStatus === 'DELEGATING' ? 'running' : 'failed');
             }
             // ── Director Complete: CRITICAL — Map to done, reset running state ──
             else if (data.type === 'director_complete') {
               const taskCount = data.taskCount || '?';
+              const isUnverified = data.status === 'UNVERIFIED' || data.verificationStatus === 'UNVERIFIED';
               setPlanTasks(prev => prev.map(t => ({ ...t, status: 'completed' })));
-              setCopilotStatus({ label: `✅ Director completed — ${taskCount} tasks`, tone: 'success' });
+              setCopilotStatus({
+                label: isUnverified ? `⚠️ Director completed — ${taskCount} tasks (UNVERIFIED)` : `✅ Director completed — ${taskCount} tasks`,
+                tone: isUnverified ? 'work' : 'success'
+              });
 
               const finalFiles = createdFilesTracker.length > 0 ? createdFilesTracker : files.map(f => f.path);
               setCopilotMessages(prev => [

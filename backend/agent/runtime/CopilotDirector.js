@@ -329,7 +329,7 @@ class CopilotDirector {
         );
 
         // Execution completed all steps successfully
-        if (lastResult?.status === 'SUCCEEDED') {
+        if (lastResult?.status === 'SUCCEEDED' || lastResult?.status === 'COMPLETED' || lastResult?.status === 'UNVERIFIED' || lastResult?.status === 'PARTIAL') {
           return lastResult;
         } else {
           lastError = lastResult?.error || lastResult?.reason || 'Unknown execution failure';
@@ -435,7 +435,7 @@ class CopilotDirector {
           const executionStatus = String(executionResult?.status || '').toUpperCase();
           const taskStatus = executionStatus === 'CANCELLED'
             ? 'CANCELLED'
-            : ['SUCCEEDED', 'COMPLETED'].includes(executionStatus)
+            : ['SUCCEEDED', 'COMPLETED', 'UNVERIFIED', 'PARTIAL'].includes(executionStatus)
               ? 'SUCCEEDED'
               : 'FAILED';
           if (taskStatus === 'FAILED') {
@@ -476,10 +476,35 @@ class CopilotDirector {
       }
       onEvent({ type: 'director_verification', status: 'DELEGATING' });
       const verifier = await this.coordinator.delegate({ supervisorRunId, role: 'VERIFIER', objective: `Perform the final read-only verification gate for the requested outcome: ${request}. Inspect the current workspace state and confirm tests/build/runtime evidence where supported. Do not mutate the workspace.`, constraints: { specialty: 'verification', generatedByDirector: true }, expectedOutput: 'Final verification evidence and any remaining blockers.' });
-      const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, { runner: async () => { const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER' }); return this.plannerExecutionLoop.runWithPlan(projectId, userId, verificationPlan, 0, () => Boolean(signal?.aborted), `copilot_verify_${verifier.workerRun.id}`, { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined }); } });
-      const verificationStatus = String(finalVerification?.status || 'FAILED').toUpperCase();
+      const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, {
+        runner: async () => {
+          const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER' });
+          if (verificationPlan && typeof verificationPlan === 'object') {
+            verificationPlan.isVerification = true;
+          }
+          return this.plannerExecutionLoop.runWithPlan(
+            projectId,
+            userId,
+            verificationPlan,
+            0,
+            () => Boolean(signal?.aborted),
+            `copilot_verify_${verifier.workerRun.id}`,
+            { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined, role: 'VERIFIER' }
+          );
+        }
+      });
+      const rawVerificationStatus = String(
+        finalVerification?.result?.verification_status ||
+        finalVerification?.result?.status ||
+        finalVerification?.status ||
+        'FAILED'
+      ).toUpperCase();
+      const isVerifiedPassed = (rawVerificationStatus === 'SUCCEEDED' || rawVerificationStatus === 'PASSED');
+      const isPartial = (rawVerificationStatus === 'PARTIAL');
+      const isUnverified = (rawVerificationStatus === 'UNVERIFIED' || rawVerificationStatus === 'SKIPPED');
+      const verificationStatus = isVerifiedPassed ? 'SUCCEEDED' : isPartial ? 'PARTIAL' : isUnverified ? 'UNVERIFIED' : 'FAILED';
       const verificationSummary = String(
-        finalVerification?.summary || finalVerification?.result?.summary || finalVerification?.message || ''
+        finalVerification?.result?.summary || finalVerification?.summary || finalVerification?.message || ''
       ).trim().slice(0, 400);
       const verificationArtifacts = Array.isArray(finalVerification?.artifact_refs)
         ? finalVerification.artifact_refs.filter((ref) => typeof ref === 'string' && ref.trim()).slice(0, 10)
@@ -488,17 +513,23 @@ class CopilotDirector {
         type: 'director_verification',
         status: verificationStatus,
         workerRunId: verifier.workerRun.id,
-        summary: verificationSummary || undefined,
+        summary: verificationSummary || (isUnverified
+          ? 'Verification unverified: only passive workspace file inspection was performed; no build, automated tests, or functional checks executed.'
+          : isPartial
+            ? 'Verification partial: build, visual, or automated test checks passed, but requirement functional acceptance checks remain untested.'
+            : undefined),
         artifact_refs: verificationArtifacts,
         result: finalVerification
       });
-      if (verificationStatus !== 'SUCCEEDED') throw new Error('Final Director verification gate did not pass');
+      if (verificationStatus === 'FAILED') {
+        throw new Error(`Final Director verification gate did not pass: ${verificationSummary || 'Checks failed'}`);
+      }
 
       const artifactRefs = [
         ...results.flatMap((item) => item.result?.result?.artifact_refs || item.result?.artifact_refs || []),
         ...verificationArtifacts
       ].filter((ref, index, all) => typeof ref === 'string' && ref.trim() && all.indexOf(ref) === index).slice(0, 10);
-      const incompleteTasks = results.filter((item) => item.status !== 'SUCCEEDED');
+      const incompleteTasks = results.filter((item) => !['SUCCEEDED', 'COMPLETED', 'UNVERIFIED', 'PARTIAL'].includes(item.status));
       if (incompleteTasks.length > 0) {
         const taskSummary = incompleteTasks
           .slice(0, 8)
@@ -529,32 +560,43 @@ class CopilotDirector {
           summary,
           artifact_refs: artifactRefs,
           context_refs: [],
-          verification_status: 'PASSED',
+          verification_status: isUnverified ? 'UNVERIFIED' : isPartial ? 'PARTIAL' : 'PASSED',
           errors: [{ code: 'INCOMPLETE_PLAN', message: summary.slice(0, 256) }]
         });
       }
 
+      const directorStatus = isPartial ? 'PARTIAL' : isUnverified ? 'UNVERIFIED' : 'SUCCEEDED';
+      const canonicalVerificationStatus = isPartial ? 'PARTIAL' : isUnverified ? 'UNVERIFIED' : 'PASSED';
+
       this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
-      this.agentRunDao.updateStatus(supervisorRunId, 'SUCCEEDED');
+      this.agentRunDao.updateStatus(supervisorRunId, directorStatus);
       const completion = {
         type: 'director_complete',
-        status: 'SUCCEEDED',
+        status: directorStatus,
         taskId: supervisorTaskId,
         runId: supervisorRunId,
         taskCount: plan.tasks.length,
         verification: {
           status: verificationStatus,
-          summary: verificationSummary || 'Final verification passed.',
+          summary: verificationSummary || (isUnverified
+            ? 'Verification unverified: only passive workspace file inspection was performed; no build, automated tests, or functional checks executed.'
+            : isPartial
+              ? 'Verification partial: build, visual, or automated test checks passed, but requirement functional acceptance checks remain untested.'
+              : 'Final verification passed.'),
           artifact_refs: verificationArtifacts
         }
       };
       onEvent(completion);
       return ResultValidator.validate({
         status: 'COMPLETED',
-        summary: `Director completed ${plan.tasks.length} adaptive task(s) and final verification.`,
+        summary: isUnverified
+          ? `Director completed ${plan.tasks.length} adaptive task(s); verification UNVERIFIED (passive file inspection only, no build or automated tests executed).`
+          : isPartial
+            ? `Director completed ${plan.tasks.length} adaptive task(s); verification PARTIAL (build/tests passed, requirement acceptance untested).`
+            : `Director completed ${plan.tasks.length} adaptive task(s) and final verification.`,
         artifact_refs: artifactRefs,
         context_refs: [],
-        verification_status: 'PASSED',
+        verification_status: canonicalVerificationStatus,
         errors: []
       });
     } catch (error) {

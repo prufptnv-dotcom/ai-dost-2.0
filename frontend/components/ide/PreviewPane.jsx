@@ -106,12 +106,16 @@ export function PreviewPane({
                 <span className="flex items-center gap-1 text-emerald-500 font-medium">
                   <AppIcon name="check" size={11} /> QA passed
                 </span>
+              ) : qaStatus === 'unverified' ? (
+                <span className="flex items-center gap-1 text-amber-400 font-medium">
+                  <AppIcon name="alert" size={11} /> QA unverified
+                </span>
               ) : qaStatus === 'failed' ? (
                 <span className="flex items-center gap-1 text-red-400 font-medium">
                   <AppIcon name="alert" size={11} /> QA failed
                 </span>
               ) : (
-                <span className="flex items-center gap-1 text-amber-400 font-medium">
+                <span className="flex items-center gap-1 text-sky-400 font-medium">
                   <AppIcon name="loader" size={11} /> QA running
                 </span>
               )}

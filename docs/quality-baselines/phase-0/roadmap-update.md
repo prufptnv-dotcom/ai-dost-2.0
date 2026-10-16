@@ -1,0 +1,36 @@
+# Roadmap Progress & Phase 0 Exit Audit
+
+**Authoritative Document:** [`docs/AI_DOST_QUALITY_UPGRADE_ROADMAP.md`](file:///c:/Users/vikash%20kumar/Pictures/ai%20dost%203.1/docs/AI_DOST_QUALITY_UPGRADE_ROADMAP.md)
+**Investigation Branch:** `audit/phase-0-execution-path-baseline-2026-10`
+**Date:** 2026-10-15
+
+---
+
+## 1. Phase Status Summary
+
+| Phase | Description | Prior Status | Updated Status | Justification & Evidence |
+| :--- | :--- | :--- | :--- | :--- |
+| **Phase 0** | Establish real execution path and baseline | IN PROGRESS | **IN PROGRESS** | Execution path traced & documented; false QA success defect eliminated & regression-tested; live 6-case baseline outputs remain honestly labeled `NOT_EVALUATED` until live model runs occur. |
+| **Phase 1** | Structured specification & high-quality output | IN PROGRESS | **IN PROGRESS** | Implemented on PR #18 (ready for review, unmerged into `main`). Baseline on `main` lacks AppSpecification until PR #18 is integrated. |
+| **Phase 2** | Planning, reasoning & requirements coverage | NOT STARTED | **NOT STARTED** | Dependency DAG and requirement verification gates pending Phase 1 integration. |
+| **Phase 3** | Real specialist multi-agent execution | NOT STARTED | **NOT STARTED** | Role contracts defined; conflict-free parallel execution pending. |
+| **Phase 4** | Evidence-based verification & self-healing | IN PROGRESS | **IN PROGRESS** | Minimum output-status honesty gate patched; false QA success eliminated; full verification suite remains incomplete. |
+| **Phase 5** | Model/provider routing & capability honesty | NOT STARTED | **NOT STARTED** | PreferredModel propagation implemented on PR #18; routing telemetry pending. |
+| **Phase 6** | Competition-grade evaluation and evidence | NOT STARTED | **NOT STARTED** | Holdout evaluation and 24-run live benchmark pending. |
+
+---
+
+## 2. Phase 0 Exit Criteria Checklist
+
+- [x] **Criterion 1 — Real Forge Studio UI-to-output path traced:**
+  Documented in [`execution-path.md`](file:///c:/Users/vikash%20kumar/Pictures/ai%20dost%203.1/docs/quality-baselines/phase-0/execution-path.md): `ForgeCopilot.jsx` -> `server.js` -> `chatAgentRouteBridge.js` -> `copilotDirectorHandler.js` -> `CopilotDirector.js` -> `taskPlanner.js` -> `structuredAgentPlanner.js` -> `PlannerExecutionLoop.js` -> `ExecutionController.js`.
+- [x] **Criterion 2 — Overlapping and legacy paths mapped:**
+  Documented in [`execution-path.md`](file:///c:/Users/vikash%20kumar/Pictures/ai%20dost%203.1/docs/quality-baselines/phase-0/execution-path.md): Traced Canonical Forge Studio path, Legacy ReAct loop (`agent.js:3219`), Chat Task Gateway, Project Wizard (`routes/agent.js:scaffold`), and Planner Service template route (`plannerService.js`).
+- [x] **Criterion 3 — Fixed six-case request set created:**
+  Documented in [`request-set.json`](file:///c:/Users/vikash%20kumar/Pictures/ai%20dost%203.1/docs/quality-baselines/phase-0/request-set.json): Cases A (Landing page), B (SaaS dashboard), C (E-commerce), D (Educational quiz), E (API-backed CRUD), and F (Multi-step repair).
+- [ ] **Criterion 4 — Baseline artifacts saved with missing runs recorded honestly:**
+  Documented in [`baseline-results.json`](file:///c:/Users/vikash%20kumar/Pictures/ai%20dost%203.1/docs/quality-baselines/phase-0/baseline-results.json): Live generation runs recorded as `NOT_EVALUATED` rather than falsely claiming simulated success. Genuine outputs will be captured once live model execution is performed.
+- [x] **Criterion 5 — Highest-impact defect reproduced and eliminated with evidence:**
+  Documented in [`root-cause-analysis.md`](file:///c:/Users/vikash%20kumar/Pictures/ai%20dost%203.1/docs/quality-baselines/phase-0/root-cause-analysis.md): The confirmed risk where fallback verification executing only `list_directory`, `read_file`, or `search_codebase` was misclassified as functional evidence has been eliminated across `VerificationClassifier.js`, `TaskPlanner.js`, `PlannerExecutionLoop.js`, `CopilotDirector.js`, and `copilotDirectorHandler.js`. Explicitly categorizes `INSPECTION`, `BUILD`, `VISUAL`, `TEST`, and `FUNCTIONAL_ACCEPTANCE` evidence, returning `UNVERIFIED` for inspection-only runs and `PARTIAL` when build/tests pass but acceptance criteria remain untested. Independently verified by passing 15-case regression test `tests/verificationHonestyEliminateFalseSuccess.test.js` and `tests/phase0VerificationHonesty.test.js`.
+- [x] **Criterion 6 — Single evidence-backed next engineering task identified:**
+  Review and integrate **PR #18 (`feat/codegen-ultrafast-quality-gates-2026-10`)** into `main` to provide the structured AppSpecification and workspace-manifest context prerequisite before advancing to PR #19.

@@ -348,7 +348,13 @@ function createStructuredAgentPlanner({ toolRegistry, openai = AgentCascadeAiSer
         if (tools.has('list_directory')) {
           steps.push({ id: 'step-verify-files', tool: 'list_directory', description: 'Inspect workspace files', input: { path: '.' } });
         }
-        return { goal: String(goal || 'Verify outcome'), steps };
+        return {
+          goal: String(goal || 'Verify outcome'),
+          isFallback: true,
+          evidenceLevel: 'INSPECTION_ONLY',
+          fallbackReason: `Verification plan generation failed: ${err.message}`,
+          steps
+        };
       }
     },
   };

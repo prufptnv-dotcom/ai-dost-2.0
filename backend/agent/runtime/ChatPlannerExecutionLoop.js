@@ -29,6 +29,7 @@ class ChatPlannerExecutionLoop extends PlannerExecutionLoop {
     context.workspaceManager = context.workspaceManager || this.workspaceManager || this.contextAssembler?.workspaceManager;
     if (options && typeof options.onEvent === 'function') context.onEvent = options.onEvent;
     if (options && options.permissionLevel) context.permissionLevel = options.permissionLevel;
+    if (options && options.role) context.role = options.role;
     // P12.3: the user-approved token must reach the per-step CapabilityGatekeeper
     // (validateApproval) — without this, even an approved run died at its first
     // gated tool because ExecutionController saw no token in context.
@@ -87,7 +88,8 @@ class ChatPlannerExecutionLoop extends PlannerExecutionLoop {
         0,
         plan.goal,
         maxRepairs,
-        isCanceled
+        isCanceled,
+        plan
       );
 
       return { ...result, taskId, runId };

@@ -257,6 +257,14 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
       if (filesWritten > 0) {
         message += ` ${filesWritten} file(s) changed before completion was marked failed.`;
       }
+    } else if (result?.status === 'UNVERIFIED' || result?.verification_status === 'UNVERIFIED') {
+      const shown = changedPaths.slice(0, 6).join(', ');
+      const more = filesWritten > 6 ? ` +${filesWritten - 6} more` : '';
+      message = `⚠️ Copilot Director completed ${taskCount} task(s) [UNVERIFIED] — ${filesWritten > 0 ? `${filesWritten} file(s) changed: ${shown}${more}. ` : ''}Passive file inspection occurred, but no build, automated tests, or acceptance checks were executed.`;
+    } else if (result?.status === 'PARTIAL' || result?.verification_status === 'PARTIAL') {
+      const shown = changedPaths.slice(0, 6).join(', ');
+      const more = filesWritten > 6 ? ` +${filesWritten - 6} more` : '';
+      message = `⚠️ Copilot Director completed ${taskCount} task(s) [PARTIAL VERIFICATION] — ${filesWritten > 0 ? `${filesWritten} file(s) changed: ${shown}${more}. ` : ''}Build, visual, or test checks passed, but requirement-level functional acceptance checks remain untested.`;
     } else if (filesWritten > 0) {
       const shown = changedPaths.slice(0, 6).join(', ');
       const more = filesWritten > 6 ? ` +${filesWritten - 6} more` : '';
@@ -272,11 +280,13 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
       message += ` (${tasksSkipped} plan task(s) were skipped — worker/dependency limits)`;
     }
 
+    const directorFinalStatus = result?.status || (result?.verification_status === 'PARTIAL' ? 'PARTIAL' : result?.verification_status === 'UNVERIFIED' ? 'UNVERIFIED' : 'SUCCEEDED');
     writeSse(res, {
       type: canceled ? 'director_canceled' : 'director_complete',
       taskId,
       runId,
-      status: result?.status || 'SUCCEEDED',
+      status: directorFinalStatus,
+      verificationStatus: result?.verification_status || (directorFinalStatus === 'PARTIAL' ? 'PARTIAL' : directorFinalStatus === 'UNVERIFIED' ? 'UNVERIFIED' : 'PASSED'),
       taskCount,
       filesWritten,
       writeAttempts,

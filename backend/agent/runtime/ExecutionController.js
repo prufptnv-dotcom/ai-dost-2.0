@@ -27,10 +27,13 @@ class ExecutionController {
 
     this.VALID_TRANSITIONS = {
       'PENDING': ['RUNNING', 'CANCELLED', 'FAILED'],
-      'RUNNING': ['WAITING', 'VERIFYING', 'SUCCEEDED', 'FAILED', 'CANCELLED'],
+      'RUNNING': ['WAITING', 'VERIFYING', 'SUCCEEDED', 'COMPLETED', 'UNVERIFIED', 'PARTIAL', 'FAILED', 'CANCELLED'],
       'WAITING': ['RUNNING', 'CANCELLED', 'FAILED'],
-      'VERIFYING': ['RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'],
+      'VERIFYING': ['RUNNING', 'SUCCEEDED', 'COMPLETED', 'UNVERIFIED', 'PARTIAL', 'FAILED', 'CANCELLED'],
       'SUCCEEDED': [],
+      'COMPLETED': [],
+      'UNVERIFIED': [],
+      'PARTIAL': [],
       'FAILED': [],
       'CANCELLED': []
     };
@@ -65,7 +68,7 @@ class ExecutionController {
   }
 
   async completeRun(runId, status, errorInfo = null) {
-    if (!['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(status)) {
+    if (!['SUCCEEDED', 'FAILED', 'CANCELLED', 'COMPLETED', 'UNVERIFIED', 'PARTIAL'].includes(status)) {
       throw new Error(`Invalid completion status: ${status}`);
     }
 

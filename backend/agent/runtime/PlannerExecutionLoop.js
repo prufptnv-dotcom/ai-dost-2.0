@@ -10,6 +10,8 @@ function assertToolOutputSucceeded(toolName, output) {
   throw error;
 }
 
+const { evaluateVerificationRun } = require('./VerificationClassifier');
+
 class PlannerExecutionLoop {
   constructor({ contextAssembler, taskPlanner, executionController, toolRegistry, agentTaskDao, agentRunDao }) {
     this.contextAssembler = contextAssembler;
@@ -93,6 +95,7 @@ class PlannerExecutionLoop {
     } else if (options && options.approvalToken) {
       context.approvalToken = options.approvalToken;
     }
+    if (options && options.role) context.role = options.role;
     const taskId = this.executionController.generateId('task');
     this.agentTaskDao.create({
       id: taskId,
@@ -116,18 +119,21 @@ class PlannerExecutionLoop {
       0,
       plan.goal,
       maxRepairs,
-      isCanceled
+      isCanceled,
+      plan
     );
 
     return { ...result, taskId, runId };
   }
 
-  async executeQueueWithCancellation(runId, taskId, context, stepQueue, repairAttempts, goal, maxRepairs, isCanceled) {
+  async executeQueueWithCancellation(runId, taskId, context, stepQueue, repairAttempts, goal, maxRepairs, isCanceled, plan = null) {
     const cancelGuard = () => {
       if (isCanceled()) {
         throw Object.assign(new Error('Chat task canceled by user'), { code: 'TASK_CANCELED' });
       }
     };
+
+    const executedSteps = [];
 
     try {
       cancelGuard();
@@ -151,8 +157,9 @@ class PlannerExecutionLoop {
           );
           cancelGuard();
           assertToolOutputSucceeded(stepDef.tool, output);
-await this.executionController.recordObservation(step.id, 'TOOL_OUTPUT', output);
+          await this.executionController.recordObservation(step.id, 'TOOL_OUTPUT', output);
           await this.executionController.completeStep(step.id, 'SUCCEEDED', output);
+          executedSteps.push({ tool: stepDef.tool, input: stepDef.input, output, success: true });
           if (context && typeof context.onEvent === 'function') {
             context.onEvent({
               type: 'step',
@@ -165,6 +172,7 @@ await this.executionController.recordObservation(step.id, 'TOOL_OUTPUT', output)
           console.error(`❌ [PlannerExecutionLoop] Step ${stepDef?.id} (${stepDef?.tool}) execution error: ${err.message}`);
           await this.executionController.recordObservation(step.id, 'TOOL_ERROR', err.message);
           await this.executionController.completeStep(step.id, 'FAILED', null, err.message).catch(() => {});
+          executedSteps.push({ tool: stepDef.tool, input: stepDef.input, error: err.message, success: false });
           // P12.4: surface the failed step honestly in the run stream (status
           // 'failed' → warn row in Aurora; silent fall-through used to leave the
           // failure invisible until the run-level error).
@@ -218,60 +226,111 @@ await this.executionController.recordObservation(step.id, 'TOOL_OUTPUT', output)
 
       cancelGuard();
       await this.executionController.verifyRun(runId);
-      // P12.4: HONEST verification gate. The old block swallowed every
-      // verification error (and never inspected output.success) and then
-      // reported SUCCEEDED unconditionally — a run whose reads all came back
-      // "File not found" still passed the director's final gate. Evidence that
-      // does not confirm (success:false) or a throwing verify step now fails
-      // the run with the real reason; cancellation still maps to CANCELLED.
+
+      const isVerificationRun = Boolean(
+        plan?.isVerification ||
+        plan?.isFallback ||
+        context?.role === 'VERIFIER'
+      );
+
+      // P12.4: HONEST verification gate. If this run is not already a verification
+      // worker, generate and execute verification checks. Evidence that does not
+      // confirm (success:false) or a throwing verify step fails the run.
       let verificationError = null;
-      try {
-        const verifyPlan = await this.taskPlanner.generateVerificationPlan(goal, context);
-        if (verifyPlan && Array.isArray(verifyPlan.steps) && verifyPlan.steps.length > 0) {
-          for (const vStep of verifyPlan.steps) {
-            cancelGuard();
-            const step = await this.executionController.recordStep(runId, 'VERIFY', vStep.input);
-            await this.executionController.startStep(step.id);
-            try {
-              const output = await this.executionController.executeTool(
-                step.id, vStep.tool, vStep.input, context, this.toolRegistry
-              );
+      let verificationSteps = [];
+      if (!isVerificationRun) {
+        try {
+          const verifyPlan = await this.taskPlanner.generateVerificationPlan(goal, context);
+          if (verifyPlan && Array.isArray(verifyPlan.steps) && verifyPlan.steps.length > 0) {
+            for (const vStep of verifyPlan.steps) {
               cancelGuard();
-              await this.executionController.recordObservation(step.id, 'VERIFICATION_OUTPUT', output);
-              if (output && typeof output === 'object' && output.success === false) {
-                const reason = `${vStep.tool} did not confirm: ${output.error || output.code || 'verification evidence check failed'}`;
-                await this.executionController.recordVerificationResult(step.id, 'FAILED', reason, output).catch(() => {});
-                await this.executionController.completeStep(step.id, 'FAILED', null, reason).catch(() => {});
-                verificationError = reason;
+              const step = await this.executionController.recordStep(runId, 'VERIFY', vStep.input);
+              await this.executionController.startStep(step.id);
+              try {
+                const output = await this.executionController.executeTool(
+                  step.id, vStep.tool, vStep.input, context, this.toolRegistry
+                );
+                cancelGuard();
+                await this.executionController.recordObservation(step.id, 'VERIFICATION_OUTPUT', output);
+                if (output && typeof output === 'object' && output.success === false) {
+                  const reason = `${vStep.tool} did not confirm: ${output.error || output.code || 'verification evidence check failed'}`;
+                  await this.executionController.recordVerificationResult(step.id, 'FAILED', reason, output).catch(() => {});
+                  await this.executionController.completeStep(step.id, 'FAILED', null, reason).catch(() => {});
+                  verificationSteps.push({ tool: vStep.tool, input: vStep.input, output, error: reason, success: false });
+                  verificationError = reason;
+                  break;
+                }
+                await this.executionController.recordVerificationResult(step.id, 'PASSED', 'Tool executed successfully', output);
+                await this.executionController.completeStep(step.id, 'SUCCEEDED', output);
+                verificationSteps.push({ tool: vStep.tool, input: vStep.input, output, success: true });
+              } catch (err) {
+                await this.executionController.recordObservation(step.id, 'VERIFICATION_FAILED', err.message);
+                await this.executionController.recordVerificationResult(step.id, 'FAILED', err.message).catch(() => {});
+                await this.executionController.completeStep(step.id, 'FAILED', null, err.message).catch(() => {});
+                verificationSteps.push({ tool: vStep.tool, input: vStep.input, error: err.message, success: false });
+                if (err.code === 'TASK_CANCELED' || isCanceled()) throw Object.assign(new Error('Chat task canceled by user'), { code: 'TASK_CANCELED' });
+                verificationError = err.message;
                 break;
               }
-              await this.executionController.recordVerificationResult(step.id, 'PASSED', 'Tool executed successfully', output);
-              await this.executionController.completeStep(step.id, 'SUCCEEDED', output);
-            } catch (err) {
-              await this.executionController.recordObservation(step.id, 'VERIFICATION_FAILED', err.message);
-              await this.executionController.recordVerificationResult(step.id, 'FAILED', err.message).catch(() => {});
-              await this.executionController.completeStep(step.id, 'FAILED', null, err.message).catch(() => {});
-              if (err.code === 'TASK_CANCELED' || isCanceled()) throw Object.assign(new Error('Chat task canceled by user'), { code: 'TASK_CANCELED' });
-              verificationError = err.message;
-              break;
             }
           }
+        } catch (vErr) {
+          if (vErr.code === 'TASK_CANCELED' || isCanceled()) throw vErr;
+          verificationError = vErr.message || 'verification planning failed';
         }
-      } catch (vErr) {
-        if (vErr.code === 'TASK_CANCELED' || isCanceled()) throw vErr;
-        verificationError = vErr.message || 'verification planning failed';
       }
 
       if (verificationError) {
         const reason = `Verification failed: ${verificationError}`;
         await this.executionController.completeRun(runId, 'FAILED', reason).catch(() => {});
         this.agentTaskDao.updateStatus(taskId, 'FAILED');
-        return { status: 'FAILED', reason };
+        return {
+          status: 'FAILED',
+          reason,
+          verification_status: 'FAILED',
+          evidenceLevel: 'FAILED',
+          acceptanceStatus: 'FAILED',
+          summary: reason
+        };
+      }
+
+      const evalSteps = isVerificationRun
+        ? executedSteps
+        : (verificationSteps.length > 0 ? verificationSteps : executedSteps.filter((s) => s.success));
+      const evalResult = evaluateVerificationRun({
+        executedSteps: evalSteps,
+        plan,
+        fallbackReason: plan?.fallbackReason
+      });
+
+      if (evalResult.status === 'FAILED') {
+        await this.executionController.completeRun(runId, 'FAILED', evalResult.summary).catch(() => {});
+        this.agentTaskDao.updateStatus(taskId, 'FAILED');
+        return {
+          status: 'FAILED',
+          reason: evalResult.summary,
+          ...evalResult
+        };
+      }
+
+      if (isVerificationRun && (evalResult.status === 'UNVERIFIED' || evalResult.status === 'PARTIAL')) {
+        await this.executionController.completeRun(runId, 'COMPLETED', evalResult.summary).catch(() => {});
+        this.agentTaskDao.updateStatus(taskId, 'COMPLETED');
+        return {
+          status: evalResult.status,
+          verification_status: evalResult.status,
+          ...evalResult
+        };
       }
 
       await this.executionController.completeRun(runId, 'SUCCEEDED');
       this.agentTaskDao.updateStatus(taskId, 'COMPLETED');
-      return { status: 'SUCCEEDED' };
+      return {
+        status: isVerificationRun ? evalResult.status : 'SUCCEEDED',
+        verification_status: evalResult.verification_status,
+        ...evalResult,
+        status: isVerificationRun ? evalResult.status : 'SUCCEEDED'
+      };
     } catch (err) {
       if (err.code === 'TASK_CANCELED' || isCanceled()) {
         await this.executionController.completeRun(runId, 'CANCELLED', 'Canceled by user').catch(() => {});
