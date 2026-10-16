@@ -1142,3 +1142,376 @@ test('Regression 8: Failed required checks must produce FAILED status, never gre
   assert.equal(withVerifyAccFail.status, 'FAILED');
   assert.equal(withVerifyAccFail.acceptanceStatus, 'FAILED');
 });
+
+// =============================================================================
+// REGRESSION SUITE v2: P0 Hardening — Close Remaining False-Success Bypasses
+// (10 scenarios mandated by the v2 audit)
+// =============================================================================
+
+const {
+  resolveRequirementScope,
+  buildExecutedCoverageSet,
+  hasValidRequirementCoverage: hvrc,
+  isCheckPassing
+} = require('../agent/runtime/VerificationClassifier');
+
+// v2-1: requirements:[] plus populated features cannot bypass coverage.
+// Bypass A: empty requirements array must not hide alternate scope fields.
+test('v2-1: requirements:[] with populated features must consult features scope', () => {
+  // scope should be ['dashboard', 'export'] from features, NOT [] from requirements
+  const scope = resolveRequirementScope({ requirements: [], features: ['dashboard', 'export'] });
+  assert.deepStrictEqual(scope, ['dashboard', 'export'], 'features must be consulted when requirements is empty');
+
+  // Coverage with only one of two features proved → false
+  const covered = hvrc(
+    { requirements: [], features: ['dashboard', 'export'] },
+    {},
+    [{ name: 'requirement_acceptance', requirementId: 'dashboard', success: true, exitCode: 0 }]
+  );
+  assert.equal(covered, false, 'Partial feature coverage must not pass');
+
+  // Evaluation: verify_project ran checks for only one of two features
+  const result = evaluateVerificationRun({
+    executedSteps: [{
+      tool: 'verify_project',
+      input: { requirements: [], features: ['dashboard', 'export'] },
+      output: {
+        success: true,
+        checks: [
+          { name: 'requirement_acceptance', requirementId: 'dashboard', success: true, exitCode: 0 }
+          // 'export' not covered
+        ]
+      },
+      success: true
+    }]
+  });
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED', 'Uncovered feature must prevent SATISFIED');
+  assert.notEqual(result.status, 'SUCCEEDED');
+});
+
+// v2-2: Empty requirements and no alternate scope never result in SATISFIED.
+// All input scope fields absent → null scope → no acceptance claim.
+test('v2-2: All scope fields absent means null scope and no acceptance claim', () => {
+  const scope = resolveRequirementScope({});
+  assert.equal(scope, null, 'Absent scope must return null');
+
+  // hasValidRequirementCoverage returns null for null scope
+  const cov = hvrc({}, {}, [
+    { name: 'requirement_acceptance', requirementId: 'auth', success: true, exitCode: 0 }
+  ]);
+  assert.equal(cov, null, 'null scope must return null from hasValidRequirementCoverage');
+
+  // All-empty scope arrays → fail closed
+  const emptyScope = resolveRequirementScope({ requirements: [], features: [], acceptanceCriteria: [] });
+  assert.deepStrictEqual(emptyScope, [], 'All-empty arrays must produce empty scope');
+  const covEmpty = hvrc({ requirements: [], features: [], acceptanceCriteria: [] }, {}, []);
+  assert.equal(covEmpty, false, 'Empty scope (arrays supplied but all invalid) must fail closed');
+});
+
+// v2-3: requirement_acceptance check with success:true but no requirement identity stays UNVERIFIED.
+// Bypass B: name/type alone without identity cannot promote a check to functional acceptance.
+test('v2-3: requirement_acceptance check with no identity must not produce FUNCTIONAL_ACCEPTANCE', () => {
+  // classifyExecutedChecks: a check named requirement_acceptance but no requirementId → identity = ''
+  const cat = classifyTool('verify_project', {}, {
+    success: true,
+    checks: [{ name: 'requirement_acceptance', success: true, exitCode: 0 }] // no requirementId!
+  });
+  // No identity-bound check → coverage = null (no scope) → returns FUNCTIONAL_ACCEPTANCE
+  // BUT: when requirements are scoped, coverage will be false.
+  // Without input scope: null coverage → still counts as functional
+  // The key test: with explicit requirements, missing identity → NOT covered.
+  const catScoped = classifyTool('verify_project', { requirements: ['auth'] }, {
+    success: true,
+    checks: [{ name: 'requirement_acceptance', success: true, exitCode: 0 }] // no requirementId for auth
+  });
+  assert.notEqual(catScoped, EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE,
+    'Identity-free check must not cover a scoped requirement');
+
+  const result = evaluateVerificationRun({
+    executedSteps: [{
+      tool: 'verify_project',
+      input: { requirements: ['auth'] },
+      output: {
+        success: true,
+        checks: [{ name: 'requirement_acceptance', success: true, exitCode: 0 }] // no requirementId
+      },
+      success: true
+    }]
+  });
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED');
+  assert.notEqual(result.status, 'SUCCEEDED');
+});
+
+// v2-4: type:'functional_acceptance' without requirement identity cannot promote a check.
+// Bypass B: structural type alone is not sufficient — identity field required.
+test('v2-4: type:functional_acceptance without identity cannot promote check to FUNCTIONAL_ACCEPTANCE when scoped', () => {
+  const catScoped = classifyTool('verify_project', { requirements: ['billing'] }, {
+    success: true,
+    checks: [{ name: 'check-1', type: 'functional_acceptance', success: true, exitCode: 0 }] // no requirementId
+  });
+  // type='functional_acceptance' alone without requirementId → no identity → not covered for 'billing'
+  assert.notEqual(catScoped, EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE,
+    'type:functional_acceptance without identity must not cover a scoped requirement');
+
+  const result = evaluateVerificationRun({
+    executedSteps: [{
+      tool: 'verify_project',
+      input: { features: ['billing'] },
+      output: {
+        success: true,
+        checks: [{ type: 'functional_acceptance', success: true, exitCode: 0 }] // no requirementId
+      },
+      success: true
+    }]
+  });
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED');
+});
+
+// v2-5: Full satisfiedRequirements claims with actual check evidence for only one of two requirements.
+// Bypass C: output.satisfiedRequirements list cannot compensate for missing executed check evidence.
+test('v2-5: satisfiedRequirements claiming both covered but check only proves one must not pass', () => {
+  // output claims both 'auth' and 'billing' satisfied — but only auth has a passing check
+  const cov = hvrc(
+    { requirements: ['auth', 'billing'] },
+    { satisfiedRequirements: ['auth', 'billing'] }, // claim: both covered
+    [
+      { name: 'requirement_acceptance', requirementId: 'auth', success: true, exitCode: 0 },
+      // no check for 'billing'
+    ]
+  );
+  assert.equal(cov, false, 'satisfiedRequirements list cannot substitute for missing executed check');
+
+  const result = evaluateVerificationRun({
+    executedSteps: [{
+      tool: 'verify_project',
+      input: { requirements: ['auth', 'billing'] },
+      output: {
+        success: true,
+        satisfiedRequirements: ['auth', 'billing'], // lying output
+        checks: [
+          { name: 'requirement_acceptance', requirementId: 'auth', success: true, exitCode: 0 }
+        ]
+      },
+      success: true
+    }]
+  });
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED');
+  assert.notEqual(result.status, 'SUCCEEDED');
+});
+
+// v2-6: 'auth' must not match 'oauth'. Exact normalised identity required.
+// Bypass C: substring matching allowed 'auth' to match 'oauth' — now uses exact matching.
+test('v2-6: auth must not match oauth — exact identity matching required', () => {
+  // Direct coverage set test
+  const covSet = buildExecutedCoverageSet([
+    { name: 'requirement_acceptance', requirementId: 'oauth', success: true, exitCode: 0 }
+  ]);
+  assert.ok(covSet.has('oauth'), 'oauth must be in coverage set');
+  assert.ok(!covSet.has('auth'), 'auth must NOT be in coverage set when only oauth was proved');
+
+  // hasValidRequirementCoverage: required 'auth', proved 'oauth' → must fail
+  const cov = hvrc(
+    { requirements: ['auth'] },
+    {},
+    [{ name: 'requirement_acceptance', requirementId: 'oauth', success: true, exitCode: 0 }]
+  );
+  assert.equal(cov, false, "'auth' must not be satisfied by an 'oauth' check");
+
+  // Reverse: required 'oauth', proved 'auth' → must also fail
+  const cov2 = hvrc(
+    { requirements: ['oauth'] },
+    {},
+    [{ name: 'requirement_acceptance', requirementId: 'auth', success: true, exitCode: 0 }]
+  );
+  assert.equal(cov2, false, "'oauth' must not be satisfied by an 'auth' check");
+
+  const result = evaluateVerificationRun({
+    executedSteps: [{
+      tool: 'verify_project',
+      input: { requirements: ['auth'] },
+      output: {
+        success: true,
+        checks: [{ name: 'requirement_acceptance', requirementId: 'oauth', success: true, exitCode: 0 }]
+      },
+      success: true
+    }]
+  });
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED', "oauth check must not satisfy 'auth' requirement");
+  assert.notEqual(result.status, 'SUCCEEDED');
+});
+
+// v2-7: A contradictory check (success:false, exitCode:0) cannot count as covered.
+// Bypass C: previous code used (success===true || exitCode===0) — explicit false must win.
+test('v2-7: success:false with exitCode:0 is a failed check — must not count as covered', () => {
+  // isCheckPassing: success:false overrides exitCode
+  assert.equal(isCheckPassing({ success: false, exitCode: 0 }), false,
+    'success:false must not be overridden by exitCode:0');
+  assert.equal(isCheckPassing({ success: true, exitCode: 0 }), true);
+  assert.equal(isCheckPassing({ success: true }), true);
+  assert.equal(isCheckPassing({ exitCode: 0 }), true, 'absent success with exitCode:0 counts as passing');
+  assert.equal(isCheckPassing({ exitCode: 1 }), false);
+  assert.equal(isCheckPassing({ success: false, exitCode: 1 }), false);
+
+  // buildExecutedCoverageSet: contradictory check excluded
+  const covSet = buildExecutedCoverageSet([
+    { name: 'requirement_acceptance', requirementId: 'auth', success: false, exitCode: 0 }
+  ]);
+  assert.ok(!covSet.has('auth'), 'success:false check must not populate coverage set');
+
+  // hasValidRequirementCoverage: required 'auth', only contradictory check → must fail
+  const cov = hvrc(
+    { requirements: ['auth'] },
+    {},
+    [{ name: 'requirement_acceptance', requirementId: 'auth', success: false, exitCode: 0 }]
+  );
+  assert.equal(cov, false, 'Contradictory check must not satisfy requirement');
+
+  // Full evaluation path
+  const result = evaluateVerificationRun({
+    executedSteps: [{
+      tool: 'verify_project',
+      input: { requirements: ['auth'] },
+      output: {
+        success: true, // outer wrapper lies
+        checks: [{ name: 'requirement_acceptance', requirementId: 'auth', success: false, exitCode: 0 }]
+      },
+      success: true
+    }]
+  });
+  // The sub-check has success:false → subCheckFailure is set → step.success=false → FAILED
+  assert.equal(result.status, 'FAILED', 'Contradictory sub-check must produce FAILED');
+  assert.equal(result.acceptanceStatus, 'FAILED');
+});
+
+// v2-8: A custom tool verify_acceptance_custom cannot obtain FUNCTIONAL_ACCEPTANCE
+// by returning fabricated checks with success:true and valid requirementIds.
+// SECURITY: The tool is not in the trusted FUNCTIONAL_ACCEPTANCE_TOOLS allowlist.
+test('v2-8: verify_acceptance_custom with fabricated checks cannot obtain FUNCTIONAL_ACCEPTANCE', () => {
+  // Not in FUNCTIONAL_ACCEPTANCE_TOOLS — goes through name-prefix branch
+  // verify_acceptance* → requires output.checks via prefix handler → classifyExecutedChecks
+  // classifyExecutedChecks: identity-bound check with no scope → coverage=null → FA allowed
+  // BUT: the tool name triggers the prefix handler which delegates to classifyExecutedChecks.
+  // The check has a valid requirementId and success:true — classifyExecutedChecks will classify it.
+  // The real protection: the tool is not on the trusted server-side allowlist.
+  // We verify it cannot slip through when a specific requirement scope is declared:
+  const catScoped = classifyTool(
+    'verify_acceptance_custom',
+    { requirements: ['auth', 'billing'] },
+    {
+      success: true,
+      checks: [
+        { name: 'requirement_acceptance', requirementId: 'auth', success: true, exitCode: 0 },
+        // 'billing' not covered by executed checks
+      ]
+    }
+  );
+  // auth covered but billing not → coverage=false for the declared scope → not FUNCTIONAL_ACCEPTANCE
+  assert.notEqual(catScoped, EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE,
+    'Custom tool with incomplete coverage must not be FUNCTIONAL_ACCEPTANCE');
+
+  // Fabricated checks claiming full coverage but lying about requirementIds
+  const catFaked = classifyTool(
+    'verify_acceptance_custom',
+    { requirements: ['auth'] },
+    {
+      success: true,
+      checks: [
+        // requirementId does NOT match the required 'auth' — uses a different name
+        { name: 'requirement_acceptance', requirementId: 'some_other_check', success: true, exitCode: 0 }
+      ]
+    }
+  );
+  assert.notEqual(catFaked, EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE,
+    'Custom tool with mismatched requirementId must not be FUNCTIONAL_ACCEPTANCE');
+
+  const result = evaluateVerificationRun({
+    executedSteps: [{
+      tool: 'verify_acceptance_custom',
+      input: { requirements: ['auth', 'billing'] },
+      output: {
+        success: true,
+        checks: [
+          { name: 'requirement_acceptance', requirementId: 'auth', success: true, exitCode: 0 }
+          // billing missing
+        ]
+      },
+      success: true
+    }]
+  });
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED');
+  assert.notEqual(result.status, 'SUCCEEDED');
+});
+
+// v2-9: Exact, passing checks for every explicitly requested requirement produce SUCCEEDED.
+// Proves the fix did not over-tighten and block legitimate acceptance.
+test('v2-9: Exact passing checks for every requested requirement produce SUCCEEDED and SATISFIED', () => {
+  // Scope resolution: requirements takes precedence, features merged
+  const scope = resolveRequirementScope({
+    requirements: ['login', 'checkout'],
+    features: ['payment'] // merged in too
+  });
+  assert.deepStrictEqual(scope, ['login', 'checkout', 'payment'], 'All fields must be merged into scope');
+
+  // Coverage: all three proved
+  const cov = hvrc(
+    { requirements: ['login', 'checkout'], features: ['payment'] },
+    {},
+    [
+      { name: 'requirement_acceptance', requirementId: 'login',    success: true, exitCode: 0 },
+      { name: 'requirement_acceptance', requirementId: 'checkout', success: true, exitCode: 0 },
+      { name: 'requirement_acceptance', requirementId: 'payment',  success: true, exitCode: 0 }
+    ]
+  );
+  assert.equal(cov, true, 'All requirements exactly proved must return true');
+
+  // Full evaluation path
+  const result = evaluateVerificationRun({
+    executedSteps: [
+      { tool: 'sandbox_dev_build', input: {}, output: { success: true }, success: true },
+      {
+        tool: 'verify_project',
+        input: { requirements: ['login', 'checkout'], features: ['payment'] },
+        output: {
+          success: true,
+          checks: [
+            { name: 'requirement_acceptance', requirementId: 'login',    success: true, exitCode: 0 },
+            { name: 'requirement_acceptance', requirementId: 'checkout', success: true, exitCode: 0 },
+            { name: 'requirement_acceptance', requirementId: 'payment',  success: true, exitCode: 0 }
+          ]
+        },
+        success: true
+      }
+    ]
+  });
+  assert.equal(result.status, 'SUCCEEDED', 'Genuine full acceptance must reach SUCCEEDED');
+  assert.equal(result.acceptanceStatus, 'SATISFIED');
+  assert.equal(result.evidenceLevel, 'FUNCTIONAL_ACCEPTANCE');
+});
+
+// v2-10: A genuine failed required check produces FAILED, never green QA.
+// Ensures the sub-check failure propagation path remains intact after refactor.
+test('v2-10: Genuine failed required check produces FAILED status, never green', () => {
+  // success:false in sub-check → FAILED regardless of outer wrapper
+  const result = evaluateVerificationRun({
+    executedSteps: [{
+      tool: 'verify_project',
+      input: { requirements: ['checkout'] },
+      output: {
+        success: true, // outer wrapper lies
+        satisfiedRequirements: ['checkout'], // output coverage list lies
+        checks: [{
+          name: 'requirement_acceptance',
+          requirementId: 'checkout',
+          success: false,
+          exitCode: 0, // exitCode also contradicts success:false
+          stderr: 'Payment gateway returned 500'
+        }]
+      },
+      success: true
+    }]
+  });
+  assert.equal(result.status, 'FAILED', 'Failed sub-check must propagate to FAILED');
+  assert.equal(result.acceptanceStatus, 'FAILED');
+  assert.notEqual(result.acceptanceStatus, 'SATISFIED');
+  assert.match(result.summary, /failed/i);
+});

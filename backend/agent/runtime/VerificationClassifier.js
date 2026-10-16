@@ -16,6 +16,16 @@
  * 5. FUNCTIONAL_ACCEPTANCE: Requirement-level functional acceptance checks or end-to-end
  *    verified application checks (e.g. verify_project with verified requirement checks).
  *    Evidence proves specific requested functional features are verified working.
+ *
+ * Security invariants:
+ * - Tool names, check names, type/category fields, success/satisfied/verified flags, and
+ *   output coverage lists are NEVER sufficient proof of functional acceptance on their own.
+ * - Only explicitly identified, executed, and passing requirement-level checks constitute evidence.
+ * - Requirements scope is resolved from all supplied input fields; empty arrays do not hide others.
+ * - Requirement matching uses exact normalized identity comparison — no substring fuzzy matching.
+ * - A check with success:false is failed, regardless of exitCode value.
+ * - output.satisfiedRequirements/verifiedRequirements/coveredRequirements are not independent
+ *   proof; a requirement is only "covered" when a passing executed check carries that same identity.
  */
 
 const EVIDENCE_CATEGORIES = Object.freeze({
@@ -63,12 +73,43 @@ const TEST_TOOLS = new Set([
   'test_project'
 ]);
 
+/**
+ * Exact set of server-side trusted functional-acceptance tool names.
+ * SECURITY: Adding a name here does NOT grant acceptance — output.checks must still
+ * carry valid, identity-bound, passing requirement checks.
+ */
 const FUNCTIONAL_ACCEPTANCE_TOOLS = new Set([
   'verify_project',
   'verify_functional_acceptance',
   'verify_acceptance_criteria',
   'verify_user_flow'
 ]);
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a normalised identity string for a requirement descriptor.
+ * Returns '' for anything that cannot produce a valid identity.
+ */
+function normalizeRequirementId(r) {
+  if (typeof r === 'string') return r.trim().toLowerCase();
+  if (r && typeof r === 'object') {
+    const raw = r.id || r.requirementId || r.name;
+    return raw ? String(raw).trim().toLowerCase() : '';
+  }
+  return '';
+}
+
+/**
+ * Returns a normalised identity string for a check's requirement binding.
+ * Returns '' when no identity field is present.
+ */
+function normalizeCheckIdentity(c) {
+  const raw = c.requirementId || c.requirement || c.feature || c.criteria;
+  return raw ? String(raw).trim().toLowerCase() : '';
+}
 
 /**
  * Checks whether a check result is a dummy or placeholder check
@@ -77,7 +118,7 @@ const FUNCTIONAL_ACCEPTANCE_TOOLS = new Set([
 function isDummyCheck(check) {
   if (!check || typeof check !== 'object') return true;
   const name = String(check.name || '').trim().toLowerCase();
-  const cmd = String(check.command || '').trim().toLowerCase();
+  const cmd  = String(check.command || '').trim().toLowerCase();
   const stdout = String(check.stdout || '').toLowerCase();
   if (name === 'none' || cmd === 'none' || name === 'dummy' || name === 'empty') return true;
   if (/no verification scripts found/i.test(stdout)) return true;
@@ -85,98 +126,177 @@ function isDummyCheck(check) {
 }
 
 /**
- * Validates requirement coverage when specific requirements were requested.
+ * Returns true when a check should count as passing.
+ *
+ * SECURITY: success:false is a definitive failure signal and overrides exitCode.
+ * A check with { success: false, exitCode: 0 } is FAILED.
+ * A check with { success: true, exitCode: 0 } or { success: true } is PASSED.
+ * Absence of success field (undefined) is treated as passed when exitCode is 0,
+ * but explicit false always wins.
  */
-function hasValidRequirementCoverage(input = {}, output = {}, checks = []) {
-  const reqs = input?.requirements || input?.explicitRequirements || input?.features || input?.acceptanceCriteria;
-  if (!reqs || !Array.isArray(reqs) || reqs.length === 0) {
-    return true;
-  }
+function isCheckPassing(c) {
+  if (c.success === false) return false;          // explicit failure — exitCode cannot override
+  if (c.success === true)  return true;           // explicit pass
+  // success is absent — fall back to exitCode
+  return typeof c.exitCode === 'number' && c.exitCode === 0;
+}
 
-  // SECURITY: Boolean flags like satisfied/verified/allRequirementsSatisfied are NOT proof of
-  // per-requirement coverage. They may be planner-generated or set by tool output without backing
-  // evidence. Only explicit, matched requirement identities in executed checks or named coverage
-  // lists count toward coverage.
-  const coveredSet = new Set();
+/**
+ * Resolves the full requirement scope from the input object.
+ *
+ * Bypass A fix: requirements:[] does NOT hide populated features/explicitRequirements/
+ * acceptanceCriteria.  We collect from ALL four fields and merge into one list,
+ * filtering out empty/null identities.  Returns null when no usable scope exists.
+ */
+function resolveRequirementScope(input = {}) {
+  const sources = [
+    input?.requirements,
+    input?.explicitRequirements,
+    input?.features,
+    input?.acceptanceCriteria
+  ];
 
-  // Named coverage lists from output (array of strings or objects with identity fields)
-  const outputCovered = output?.satisfiedRequirements || output?.verifiedRequirements || output?.coveredRequirements;
-  if (Array.isArray(outputCovered)) {
-    outputCovered.forEach((r) => {
-      if (typeof r === 'string' && r.trim()) {
-        coveredSet.add(r.trim().toLowerCase());
-      } else if (r && typeof r === 'object') {
-        const id = r.id || r.requirementId || r.name;
-        if (id && String(id).trim()) {
-          coveredSet.add(String(id).trim().toLowerCase());
-        }
-      }
-    });
-  }
+  // Track whether any array was present at all
+  let anyArrayPresent = false;
+  const merged = [];
+  const seen = new Set();
 
-  // Executed checks that passed and carry an explicit requirement identity
-  if (Array.isArray(checks)) {
-    checks.forEach((c) => {
-      if (c && !isDummyCheck(c) && (c.success === true || c.exitCode === 0)) {
-        const id = c.requirementId || c.requirement || c.feature || c.criteria;
-        if (id && String(id).trim()) {
-          coveredSet.add(String(id).trim().toLowerCase());
-        }
-      }
-    });
-  }
-
-  // Every explicitly requested requirement must have matching coverage evidence
-  for (const r of reqs) {
-    const rawTarget = typeof r === 'string' ? r : (r?.id || r?.requirementId || r?.name || '');
-    const target = String(rawTarget).trim().toLowerCase();
-    // Empty or missing identity = unverifiable → fail closed
-    if (!target) return false;
-    let found = false;
-    for (const covered of coveredSet) {
-      if (covered.includes(target) || target.includes(covered)) {
-        found = true;
-        break;
+  for (const src of sources) {
+    if (!Array.isArray(src)) continue;
+    anyArrayPresent = true;
+    for (const r of src) {
+      const id = normalizeRequirementId(r);
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        merged.push(id);
       }
     }
-    if (!found) return false;
+  }
+
+  // No array supplied at all → truly absent scope → null
+  if (!anyArrayPresent) return null;
+
+  // Arrays were supplied but all entries were empty/null/invalid
+  // → scope was explicitly requested but is unresolvable → empty array (fail closed)
+  return merged;
+}
+
+/**
+ * Builds the set of requirement identities that are proved by passing, identity-bound
+ * executed checks.
+ *
+ * Bypass C fix:
+ * - Uses exact normalised identity matching (no substring/fuzzy logic).
+ * - output.satisfiedRequirements/verifiedRequirements/coveredRequirements are NOT
+ *   counted as independent proof.  Every entry in those arrays is only accepted when
+ *   a passing executed check with the same normalised identity exists.
+ * - success:false overrides exitCode (see isCheckPassing).
+ *
+ * @param {Array} checks  - Real (non-dummy) executed sub-checks
+ * @returns {Set<string>} - Set of exactly-matched, proven requirement identities
+ */
+function buildExecutedCoverageSet(checks) {
+  const covered = new Set();
+  if (!Array.isArray(checks)) return covered;
+  for (const c of checks) {
+    if (!c || isDummyCheck(c)) continue;
+    if (!isCheckPassing(c)) continue;           // failed check — cannot contribute
+    const id = normalizeCheckIdentity(c);
+    if (id) covered.add(id);
+  }
+  return covered;
+}
+
+/**
+ * Validates that every requirement in the resolved scope has been proved by an
+ * executed, passing, identity-bound check.
+ *
+ * Returns true  → all requirements have executed evidence.
+ * Returns false → any requirement is unproved, or scope resolution fails.
+ * Returns null  → no requirement scope is defined (caller decides what to do).
+ *
+ * SECURITY:
+ * - Empty requirements array plus other populated arrays is handled by resolveRequirementScope.
+ * - Output coverage-list claims (satisfiedRequirements etc.) are NOT independent proof.
+ * - Matching is exact (normalized lowercase) — no substring fuzzy matching.
+ * - Empty/null identities in the scope are treated as unresolvable → fail closed.
+ */
+function hasValidRequirementCoverage(input = {}, _output = {}, checks = []) {
+  // Bypass A fix: resolve full scope across all input fields
+  const scope = resolveRequirementScope(input);
+
+  // null → no scope supplied at all → no requirement-level claims either way
+  if (scope === null) return null;
+
+  // [] → scope was explicitly requested but all entries were invalid → fail closed
+  if (scope.length === 0) return false;
+
+  // Build coverage set exclusively from executed, passing, identity-bound checks
+  const executedCoverage = buildExecutedCoverageSet(checks);
+
+  // Every scoped requirement must appear in the executed coverage set (exact match)
+  for (const reqId of scope) {
+    if (!executedCoverage.has(reqId)) return false;
   }
 
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// Check and tool classifiers
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when a check has an explicit requirement identity AND indicates
+ * it is a functional/requirement-level check (by type, name, or identity presence).
+ *
+ * Bypass B fix: type/name of 'functional_acceptance' or 'requirement_acceptance' WITHOUT
+ * an explicit requirement identity does NOT make a check functional.  An explicit identity
+ * field (requirementId/requirement/feature/criteria) is required.
+ */
+function isIdentityBoundRequirementCheck(c) {
+  const identity = normalizeCheckIdentity(c);
+  // Identity must be present — structural name/type alone is insufficient
+  if (!identity) return false;
+
+  const type = String(c.type || '').toLowerCase();
+  const name = String(c.name || '').toLowerCase();
+
+  return (
+    type === 'functional_acceptance' ||
+    type === 'requirement'           ||
+    type === 'acceptance_criteria'   ||
+    name === 'requirement_acceptance' ||
+    name === 'functional_acceptance'  ||
+    name === 'acceptance'             ||
+    // Presence of identity field alone is sufficient structural evidence
+    true   // identity was already confirmed above; any check with an identity is req-level
+  );
+}
+
 /**
  * Classifies executed sub-checks into an evidence category.
  */
-function classifyExecutedChecks(checks = [], input = {}, output = {}) {
-  const realChecks = Array.isArray(checks) ? checks.filter((c) => c && !isDummyCheck(c)) : [];
-  // SECURITY: No real checks = no functional acceptance, regardless of output flags.
-  // Boolean flags (satisfied/verified) in output cannot substitute for executed check evidence.
-  if (realChecks.length === 0) {
-    return EVIDENCE_CATEGORIES.INSPECTION;
-  }
+function classifyExecutedChecks(checks = [], input = {}, _output = {}) {
+  const realChecks = Array.isArray(checks)
+    ? checks.filter((c) => c && !isDummyCheck(c))
+    : [];
+
+  // SECURITY: No real checks = INSPECTION regardless of output flags.
+  if (realChecks.length === 0) return EVIDENCE_CATEGORIES.INSPECTION;
 
   let hasFunctional = false;
-  let hasTest = false;
-  let hasBuild = false;
-  let hasVisual = false;
+  let hasTest       = false;
+  let hasBuild      = false;
+  let hasVisual     = false;
 
   for (const c of realChecks) {
     const name = String(c.name || '').toLowerCase();
     const type = String(c.type || '').toLowerCase();
-    const cmd = String(c.command || '').toLowerCase();
+    const cmd  = String(c.command || '').toLowerCase();
 
-    const isExplicitReqCheck = (
-      type === 'functional_acceptance' ||
-      type === 'requirement' ||
-      type === 'acceptance_criteria' ||
-      name === 'requirement_acceptance' ||
-      name === 'functional_acceptance' ||
-      name === 'acceptance' ||
-      Boolean(c.requirementId || c.requirement || c.criteria || c.acceptanceCriteria)
-    );
-
-    if (isExplicitReqCheck) {
+    // Bypass B fix: a check is only functional when it carries an explicit requirement identity.
+    if (isIdentityBoundRequirementCheck(c)) {
       hasFunctional = true;
     } else if (name === 'test' || type === 'test' || /test|pytest|unittest|jest|vitest|mocha/.test(cmd)) {
       hasTest = true;
@@ -185,28 +305,29 @@ function classifyExecutedChecks(checks = [], input = {}, output = {}) {
     } else if (name === 'build' || name === 'lint' || type === 'build' || /build|compile|lint/.test(cmd)) {
       hasBuild = true;
     }
-    // SECURITY: c.type/c.category from tool output cannot self-promote to functional acceptance;
-    // only explicit structural fields (requirementId/requirement/criteria) are trusted.
+    // Unknown check type: ignore for upward promotion; treated as build-level at most.
   }
 
-  // SECURITY: Output-level boolean flags (satisfied/verified/functionalAcceptanceSatisfied) must
-  // not boost hasFunctional. Only executed check structure (above) determines this. Flags may be
-  // set by planner input or tool output without real backing evidence.
+  // SECURITY: Boolean output flags cannot boost hasFunctional here.
 
   if (hasFunctional) {
-    if (!hasValidRequirementCoverage(input, output, realChecks)) {
-      if (hasTest) return EVIDENCE_CATEGORIES.TEST;
-      if (hasBuild) return EVIDENCE_CATEGORIES.BUILD;
+    const coverage = hasValidRequirementCoverage(input, {}, realChecks);
+    // coverage === null → no explicit requirement scope → functional checks with
+    //   identity bindings are sufficient; acceptance is based on executed check structure.
+    // coverage === true → all scoped requirements have executed evidence.
+    // coverage === false → explicit scope defined but some requirements uncovered.
+    if (coverage === false) {
+      if (hasTest)   return EVIDENCE_CATEGORIES.TEST;
+      if (hasBuild)  return EVIDENCE_CATEGORIES.BUILD;
       if (hasVisual) return EVIDENCE_CATEGORIES.VISUAL;
       return EVIDENCE_CATEGORIES.INSPECTION;
     }
     return EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE;
   }
 
-  if (hasTest) return EVIDENCE_CATEGORIES.TEST;
-  if (hasBuild) return EVIDENCE_CATEGORIES.BUILD;
+  if (hasTest)   return EVIDENCE_CATEGORIES.TEST;
+  if (hasBuild)  return EVIDENCE_CATEGORIES.BUILD;
   if (hasVisual) return EVIDENCE_CATEGORIES.VISUAL;
-
   return EVIDENCE_CATEGORIES.INSPECTION;
 }
 
@@ -215,58 +336,54 @@ function classifyTool(toolName, input = {}, output = null, options = {}) {
   const name = toolName.trim().toLowerCase();
 
   // SECURITY: Never trust input.category or arbitrary output.evidenceCategory overrides.
-  // Planner-generated inputs or untrusted tool outputs cannot promote passive tools.
   if (INSPECTION_TOOLS.has(name)) return EVIDENCE_CATEGORIES.INSPECTION;
-  if (BUILD_TOOLS.has(name)) return EVIDENCE_CATEGORIES.BUILD;
-  if (VISUAL_TOOLS.has(name)) return EVIDENCE_CATEGORIES.VISUAL;
-  if (TEST_TOOLS.has(name)) return EVIDENCE_CATEGORIES.TEST;
+  if (BUILD_TOOLS.has(name))      return EVIDENCE_CATEGORIES.BUILD;
+  if (VISUAL_TOOLS.has(name))     return EVIDENCE_CATEGORIES.VISUAL;
+  if (TEST_TOOLS.has(name))       return EVIDENCE_CATEGORIES.TEST;
 
-  // Functional acceptance tools require actual executed output evidence, not just a tool name.
-  // SECURITY: A tool name alone — whether in FUNCTIONAL_ACCEPTANCE_TOOLS or matching verify_*
-  // prefixes — does NOT prove functional acceptance. Only validated sub-check execution evidence
-  // (output.checks with real check entries) establishes acceptance.
+  // Trusted functional-acceptance tools — require executed output.checks evidence.
   if (FUNCTIONAL_ACCEPTANCE_TOOLS.has(name)) {
-    if (output && typeof output === 'object') {
+    if (output && typeof output === 'object' && !Array.isArray(output)) {
       if (Array.isArray(output.checks)) {
-        // Delegate to executed-checks classifier — boolean flags inside output are ignored there
+        // Delegate to executed-checks classifier; flags inside output are ignored.
         return classifyExecutedChecks(output.checks, input, output);
       }
-      // Output present but no checks array → no executed evidence regardless of flags
+      // Output present but no checks array → no executed evidence.
       return EVIDENCE_CATEGORIES.INSPECTION;
     }
-    // No output at all: plan-time classification. All tools (including verify_functional_acceptance)
-    // can only claim FUNCTIONAL_ACCEPTANCE in plan mode if explicit requirements are scoped.
-    // SECURITY: No tool name alone promotes to FUNCTIONAL_ACCEPTANCE without requirement scope.
-    if (options.isPlan && (input?.requirements?.length || input?.features?.length || input?.acceptanceCriteria?.length)) {
-      return EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE;
+    // No output (plan-time). Accept only when explicit requirement scope is defined.
+    // SECURITY: Tool name alone does not promote to FUNCTIONAL_ACCEPTANCE.
+    if (options.isPlan) {
+      const scope = resolveRequirementScope(input);
+      if (scope !== null) return EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE;
     }
     return EVIDENCE_CATEGORIES.INSPECTION;
   }
 
-  // Name heuristic prefix matches
+  // Name-prefix heuristics for unlisted tools
   if (/^(read|list|search|fetch|get|probe|inspect)/i.test(name)) return EVIDENCE_CATEGORIES.INSPECTION;
-  if (/^(build|compile)/i.test(name)) return EVIDENCE_CATEGORIES.BUILD;
-  if (/^(screenshot|snapshot)/i.test(name)) return EVIDENCE_CATEGORIES.VISUAL;
-  if (/^(test|run_test)/i.test(name)) return EVIDENCE_CATEGORIES.TEST;
-  // SECURITY: verify_acceptance/verify_functional name prefixes cannot self-promote to
-  // FUNCTIONAL_ACCEPTANCE by name alone. Require actual checks output just like any other tool.
+  if (/^(build|compile)/i.test(name))                            return EVIDENCE_CATEGORIES.BUILD;
+  if (/^(screenshot|snapshot)/i.test(name))                      return EVIDENCE_CATEGORIES.VISUAL;
+  if (/^(test|run_test)/i.test(name))                            return EVIDENCE_CATEGORIES.TEST;
+
+  // SECURITY: verify_acceptance_* / verify_functional_* / assert_requirement_* name prefixes
+  // are NOT in the trusted allowlist.  They require output.checks — name alone is insufficient.
   if (/^(verify_acceptance|verify_functional|assert_requirement)/i.test(name)) {
-    if (output && typeof output === 'object' && Array.isArray(output.checks)) {
+    if (output && typeof output === 'object' && !Array.isArray(output) && Array.isArray(output.checks)) {
       return classifyExecutedChecks(output.checks, input, output);
     }
-    // No checks array present → treat as INSPECTION; name is insufficient proof
     return EVIDENCE_CATEGORIES.INSPECTION;
   }
 
-  // Terminal tool inspection: check command
+  // Terminal tool: classify by command content
   if (name === 'run_terminal' || name === 'sandbox_exec') {
     const cmd = String(input?.command || input?.cmd || '').toLowerCase();
     if (/npm\s+(run\s+)?(build|compile)|vite\s+build|tsc|webpack|next\s+build/.test(cmd)) return EVIDENCE_CATEGORIES.BUILD;
-    if (/npm\s+(test|run\s+test)|jest|pytest|vitest|playwright\s+test|mocha/.test(cmd)) return EVIDENCE_CATEGORIES.TEST;
-    if (/ls|dir|cat|grep|find|head|tail|pwd/.test(cmd)) return EVIDENCE_CATEGORIES.INSPECTION;
+    if (/npm\s+(test|run\s+test)|jest|pytest|vitest|playwright\s+test|mocha/.test(cmd))   return EVIDENCE_CATEGORIES.TEST;
+    if (/ls|dir|cat|grep|find|head|tail|pwd/.test(cmd))                                    return EVIDENCE_CATEGORIES.INSPECTION;
   }
 
-  // Safe conservative fallback for unknown tools: treat as INSPECTION, never assume functional!
+  // Conservative fallback — never assume functional for unknown tools.
   return EVIDENCE_CATEGORIES.INSPECTION;
 }
 
@@ -284,34 +401,20 @@ function classifyPlan(steps = []) {
   }
 
   const categories = steps.map((s) => classifyTool(s.tool, s.input, null, { isPlan: true }));
-  const hasInspection = categories.includes(EVIDENCE_CATEGORIES.INSPECTION);
-  const hasBuild = categories.includes(EVIDENCE_CATEGORIES.BUILD);
-  const hasVisual = categories.includes(EVIDENCE_CATEGORIES.VISUAL);
-  const hasTest = categories.includes(EVIDENCE_CATEGORIES.TEST);
+  const hasInspection        = categories.includes(EVIDENCE_CATEGORIES.INSPECTION);
+  const hasBuild             = categories.includes(EVIDENCE_CATEGORIES.BUILD);
+  const hasVisual            = categories.includes(EVIDENCE_CATEGORIES.VISUAL);
+  const hasTest              = categories.includes(EVIDENCE_CATEGORIES.TEST);
   const hasFunctionalAcceptance = categories.includes(EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE);
-
-  const isInspectionOnly = !hasBuild && !hasVisual && !hasTest && !hasFunctionalAcceptance;
+  const isInspectionOnly     = !hasBuild && !hasVisual && !hasTest && !hasFunctionalAcceptance;
 
   let evidenceLevel = 'INSPECTION_ONLY';
-  if (hasFunctionalAcceptance) {
-    evidenceLevel = 'FUNCTIONAL_ACCEPTANCE';
-  } else if (hasTest) {
-    evidenceLevel = 'TEST_ONLY';
-  } else if (hasBuild) {
-    evidenceLevel = 'BUILD_ONLY';
-  } else if (hasVisual) {
-    evidenceLevel = 'VISUAL_ONLY';
-  }
+  if (hasFunctionalAcceptance) evidenceLevel = 'FUNCTIONAL_ACCEPTANCE';
+  else if (hasTest)            evidenceLevel = 'TEST_ONLY';
+  else if (hasBuild)           evidenceLevel = 'BUILD_ONLY';
+  else if (hasVisual)          evidenceLevel = 'VISUAL_ONLY';
 
-  return {
-    evidenceLevel,
-    hasInspection,
-    hasBuild,
-    hasVisual,
-    hasTest,
-    hasFunctionalAcceptance,
-    isInspectionOnly
-  };
+  return { evidenceLevel, hasInspection, hasBuild, hasVisual, hasTest, hasFunctionalAcceptance, isInspectionOnly };
 }
 
 function evaluateVerificationRun({ executedSteps = [], plan = null, fallbackReason = null }) {
@@ -330,24 +433,25 @@ function evaluateVerificationRun({ executedSteps = [], plan = null, fallbackReas
   }
 
   const classifiedSteps = executedSteps.map((step) => {
-    // SECURITY: Always derive category using trusted server-side tool classification.
-    // Never trust arbitrary step.category or caller overrides.
+    // SECURITY: Always classify via trusted server-side logic; ignore step.category.
     const category = classifyTool(step.tool, step.input, step.output);
 
-    // Sub-check failure propagation (e.g. verify_project sub-checks or test failures)
+    // Sub-check failure propagation (verify_project sub-checks or test failures).
+    // SECURITY: success:false overrides exitCode.
     let subCheckFailure = null;
     if (step.output && typeof step.output === 'object' && Array.isArray(step.output.checks)) {
       const realChecks = step.output.checks.filter((c) => c && !isDummyCheck(c));
-      const failingCheck = realChecks.find((c) => c.success === false || (typeof c.exitCode === 'number' && c.exitCode !== 0));
+      const failingCheck = realChecks.find((c) => !isCheckPassing(c));
       if (failingCheck) {
-        subCheckFailure = failingCheck.stderr || failingCheck.stdout || failingCheck.error || `Check "${failingCheck.name || 'unnamed'}" failed`;
+        subCheckFailure = failingCheck.stderr || failingCheck.stdout || failingCheck.error
+          || `Check "${failingCheck.name || 'unnamed'}" failed`;
       }
     }
 
-    const success = step.success !== false &&
-      !(step.output && typeof step.output === 'object' && step.output.success === false) &&
-      !step.error &&
-      !subCheckFailure;
+    const success = step.success !== false
+      && !(step.output && typeof step.output === 'object' && step.output.success === false)
+      && !step.error
+      && !subCheckFailure;
 
     return {
       ...step,
@@ -360,9 +464,9 @@ function evaluateVerificationRun({ executedSteps = [], plan = null, fallbackReas
   const failedSteps = classifiedSteps.filter((s) => !s.success);
   if (failedSteps.length > 0) {
     const firstFail = failedSteps[0];
-    const failureMsg = firstFail.error ||
-      (firstFail.output && typeof firstFail.output === 'object' && (firstFail.output.error || firstFail.output.message)) ||
-      `${firstFail.tool} did not confirm or failed execution`;
+    const failureMsg = firstFail.error
+      || (firstFail.output && typeof firstFail.output === 'object' && (firstFail.output.error || firstFail.output.message))
+      || `${firstFail.tool} did not confirm or failed execution`;
     return {
       status: 'FAILED',
       verification_status: 'FAILED',
@@ -375,15 +479,15 @@ function evaluateVerificationRun({ executedSteps = [], plan = null, fallbackReas
     };
   }
 
-  const passedSteps = classifiedSteps.filter((s) => s.success);
-  const passedCategories = new Set(passedSteps.map((s) => s.category));
+  const passedSteps       = classifiedSteps.filter((s) => s.success);
+  const passedCategories  = new Set(passedSteps.map((s) => s.category));
   const hasFunctionalAcceptance = passedCategories.has(EVIDENCE_CATEGORIES.FUNCTIONAL_ACCEPTANCE);
-  const hasTest = passedCategories.has(EVIDENCE_CATEGORIES.TEST);
-  const hasBuild = passedCategories.has(EVIDENCE_CATEGORIES.BUILD);
-  const hasVisual = passedCategories.has(EVIDENCE_CATEGORIES.VISUAL);
-  const isInspectionOnly = passedCategories.size === 1 && passedCategories.has(EVIDENCE_CATEGORIES.INSPECTION);
+  const hasTest           = passedCategories.has(EVIDENCE_CATEGORIES.TEST);
+  const hasBuild          = passedCategories.has(EVIDENCE_CATEGORIES.BUILD);
+  const hasVisual         = passedCategories.has(EVIDENCE_CATEGORIES.VISUAL);
+  const isInspectionOnly  = passedCategories.size === 1 && passedCategories.has(EVIDENCE_CATEGORIES.INSPECTION);
 
-  // Case 1: ONLY inspection evidence (read_file, list_directory, search_codebase, empty/dummy verify_project)
+  // Case 1: Inspection-only evidence
   if (isInspectionOnly || (!hasBuild && !hasVisual && !hasTest && !hasFunctionalAcceptance)) {
     const reason = fallbackReason || plan?.fallbackReason;
     const msg = reason
@@ -401,7 +505,7 @@ function evaluateVerificationRun({ executedSteps = [], plan = null, fallbackReas
     };
   }
 
-  // Case 2: Explicit functional acceptance check executed and passed
+  // Case 2: Functional acceptance checks passed
   if (hasFunctionalAcceptance) {
     return {
       status: 'SUCCEEDED',
@@ -415,9 +519,10 @@ function evaluateVerificationRun({ executedSteps = [], plan = null, fallbackReas
     };
   }
 
-  // Case 3: Build, visual, or test passed, but requirement functional acceptance checks remain untested
-  const evidenceLabel = hasTest ? 'Automated tests' : hasBuild ? 'Build' : 'Visual check';
-  const evidenceLevel = hasTest ? 'TEST_PASSED_ACCEPTANCE_UNTESTED' : hasBuild ? 'BUILD_PASSED_ACCEPTANCE_UNTESTED' : 'VISUAL_PASSED_ACCEPTANCE_UNTESTED';
+  // Case 3: Build/visual/test passed, but requirement-level acceptance untested
+  const evidenceLabel  = hasTest ? 'Automated tests' : hasBuild ? 'Build' : 'Visual check';
+  const evidenceLevel  = hasTest ? 'TEST_PASSED_ACCEPTANCE_UNTESTED'
+    : hasBuild ? 'BUILD_PASSED_ACCEPTANCE_UNTESTED' : 'VISUAL_PASSED_ACCEPTANCE_UNTESTED';
   return {
     status: 'PARTIAL',
     verification_status: 'PARTIAL',
@@ -438,6 +543,11 @@ module.exports = {
   TEST_TOOLS,
   FUNCTIONAL_ACCEPTANCE_TOOLS,
   isDummyCheck,
+  isCheckPassing,
+  normalizeRequirementId,
+  normalizeCheckIdentity,
+  resolveRequirementScope,
+  buildExecutedCoverageSet,
   hasValidRequirementCoverage,
   classifyExecutedChecks,
   classifyTool,
