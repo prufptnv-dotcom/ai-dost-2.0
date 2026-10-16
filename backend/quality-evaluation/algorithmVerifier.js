@@ -388,8 +388,24 @@ class AlgorithmVerifier {
     const runResult = await executeCandidateRunner({
       code: candidateCode,
       spec: oracle.spec,
-      timeoutMs
+      timeoutMs,
+      requireOsIsolation: Boolean(options.requireOsIsolation || options.strictIsolation)
     });
+
+    if (runResult.status === 'SANDBOX_UNAVAILABLE') {
+      return {
+        name,
+        family: oracle.family,
+        lang: oracle.lang,
+        verified: false,
+        status: 'SANDBOX_UNAVAILABLE',
+        durationMs: 0,
+        error: runResult.error || 'Required OS-level container isolation is unavailable on this host.',
+        isolation: runResult.isolation,
+        scope: 'specific_problem',
+        familyWideClaim: false
+      };
+    }
 
     if (runResult.status === 'TIMEOUT') {
       return {
@@ -406,6 +422,21 @@ class AlgorithmVerifier {
       };
     }
 
+    if (runResult.status === 'OUTPUT_LIMIT_EXCEEDED') {
+      return {
+        name,
+        family: oracle.family,
+        lang: oracle.lang,
+        verified: false,
+        status: 'OUTPUT_LIMIT_EXCEEDED',
+        durationMs: runResult.durationMs,
+        error: runResult.error || 'Candidate output exceeded maximum allowable buffer limit',
+        isolation: runResult.isolation,
+        scope: 'specific_problem',
+        familyWideClaim: false
+      };
+    }
+
     const runnerOutput = runResult.runnerOutput;
     if (!runnerOutput || runnerOutput.runnerStatus !== 'EXECUTED') {
       const errDetail = runnerOutput?.error || runResult.error || runResult.stderr || 'Candidate runner failed to produce execution protocol output';
@@ -414,6 +445,8 @@ class AlgorithmVerifier {
         status = 'SYNTAX_ERROR';
       } else if (runnerOutput?.runnerStatus === 'TARGET_NOT_FOUND') {
         status = 'TARGET_NOT_FOUND';
+      } else if (runnerOutput?.runnerStatus === 'RUNNER_EXCEPTION') {
+        status = 'RUNTIME_ERROR';
       }
 
       return {
@@ -430,9 +463,91 @@ class AlgorithmVerifier {
       };
     }
 
-    // Inspect case results
+    // Independently validate complete expected test-case set and result schema
+    const expectedIds = (oracle.spec.mode === 'class' ? oracle.spec.operations : oracle.spec.cases).map((c) => c.id);
+    const expectedSet = new Set(expectedIds);
+
+    if (!Array.isArray(runnerOutput.results)) {
+      return {
+        name,
+        family: oracle.family,
+        lang: oracle.lang,
+        verified: false,
+        status: 'MALFORMED_OUTPUT',
+        durationMs: runResult.durationMs,
+        error: 'Runner output results must be an array of test case outcomes',
+        isolation: runResult.isolation,
+        scope: 'specific_problem',
+        familyWideClaim: false
+      };
+    }
+
+    if (runnerOutput.results.length !== expectedIds.length) {
+      return {
+        name,
+        family: oracle.family,
+        lang: oracle.lang,
+        verified: false,
+        status: 'MALFORMED_OUTPUT',
+        durationMs: runResult.durationMs,
+        error: `Test case count mismatch: expected ${expectedIds.length} cases, got ${runnerOutput.results.length}`,
+        isolation: runResult.isolation,
+        scope: 'specific_problem',
+        familyWideClaim: false
+      };
+    }
+
+    const seenIds = new Set();
     const resultsMap = new Map();
-    for (const item of (runnerOutput.results || [])) {
+
+    for (const item of runnerOutput.results) {
+      if (!item || typeof item !== 'object' || typeof item.id !== 'string') {
+        return {
+          name,
+          family: oracle.family,
+          lang: oracle.lang,
+          verified: false,
+          status: 'MALFORMED_OUTPUT',
+          durationMs: runResult.durationMs,
+          error: 'Invalid test case outcome schema: missing id or status',
+          isolation: runResult.isolation,
+          scope: 'specific_problem',
+          familyWideClaim: false
+        };
+      }
+
+      if (!expectedSet.has(item.id)) {
+        return {
+          name,
+          family: oracle.family,
+          lang: oracle.lang,
+          verified: false,
+          status: 'MALFORMED_OUTPUT',
+          durationMs: runResult.durationMs,
+          error: `Unexpected test case ID returned by runner: ${item.id}`,
+          isolation: runResult.isolation,
+          scope: 'specific_problem',
+          familyWideClaim: false
+        };
+      }
+
+      if (seenIds.has(item.id)) {
+        return {
+          name,
+          family: oracle.family,
+          lang: oracle.lang,
+          verified: false,
+          status: 'MALFORMED_OUTPUT',
+          durationMs: runResult.durationMs,
+          error: `Duplicate test case ID returned by runner: ${item.id}`,
+          isolation: runResult.isolation,
+          scope: 'specific_problem',
+          familyWideClaim: false
+        };
+      }
+
+      seenIds.add(item.id);
+
       if (item.status === 'ERROR') {
         return {
           name,
@@ -447,7 +562,23 @@ class AlgorithmVerifier {
           familyWideClaim: false
         };
       }
+
       resultsMap.set(item.id, item.result);
+    }
+
+    if (seenIds.size !== expectedSet.size) {
+      return {
+        name,
+        family: oracle.family,
+        lang: oracle.lang,
+        verified: false,
+        status: 'MALFORMED_OUTPUT',
+        durationMs: runResult.durationMs,
+        error: 'Omitted required test cases from verification set',
+        isolation: runResult.isolation,
+        scope: 'specific_problem',
+        familyWideClaim: false
+      };
     }
 
     // Independent parent-process oracle assertion

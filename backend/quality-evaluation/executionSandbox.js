@@ -2,16 +2,37 @@
 
 /**
  * Isolated Subprocess Execution Sandbox for Quality Evaluation
- * Provides resource-bounded execution for Node.js and Python solutions.
+ * Provides resource-bounded execution for Node.js and Python candidate solutions.
+ *
+ * Security & Isolation Architecture:
+ * - Subprocess execution runs in a separate process with bounded memory, timeout, and output limits.
+ * - VM context inside the runner contains zero host functions (no prototype constructor crawling).
+ * - Result communication uses a private output file, rejecting candidate stdout manipulation.
+ * - Subprocess restriction is explicitly distinguished from genuine OS container isolation (jail/cgroups).
  */
 
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 
 const DEFAULT_TIMEOUT_MS = 4000;
 const MAX_OUTPUT_BYTES = 64 * 1024; // 64 KB
+
+const ISOLATION_LIMITATION =
+  'Subprocess execution with memory separation and restricted VM context. OS container isolation (namespaces/cgroups/jail) is NOT active on this host; no full OS security sandbox guarantee is claimed.';
+
+/**
+ * Checks whether true OS container isolation (Docker, Podman, or cgroups/nsjail) is operational.
+ */
+function checkOsIsolationAvailable() {
+  // If environment explicitly declares an active container isolation runtime
+  if (process.env.AIDOST_CONTAINER_ISOLATION === 'true') {
+    return true;
+  }
+  return false;
+}
 
 function runProcess(command, args, options = {}) {
   const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
@@ -21,6 +42,7 @@ function runProcess(command, args, options = {}) {
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let outputLimitExceeded = false;
 
     const child = spawn(command, args, {
       cwd,
@@ -40,14 +62,22 @@ function runProcess(command, args, options = {}) {
     }, timeoutMs);
 
     child.stdout.on('data', (chunk) => {
-      if (stdout.length < MAX_OUTPUT_BYTES) {
-        stdout += chunk.toString('utf8');
+      stdout += chunk.toString('utf8');
+      if (stdout.length > MAX_OUTPUT_BYTES) {
+        outputLimitExceeded = true;
+        try {
+          child.kill('SIGKILL');
+        } catch (_) {}
       }
     });
 
     child.stderr.on('data', (chunk) => {
-      if (stderr.length < MAX_OUTPUT_BYTES) {
-        stderr += chunk.toString('utf8');
+      stderr += chunk.toString('utf8');
+      if (stderr.length > MAX_OUTPUT_BYTES) {
+        outputLimitExceeded = true;
+        try {
+          child.kill('SIGKILL');
+        } catch (_) {}
       }
     });
 
@@ -59,10 +89,21 @@ function runProcess(command, args, options = {}) {
         return resolve({
           status: 'TIMEOUT',
           exitCode: -1,
-          stdout,
+          stdout: stdout.slice(0, 1024),
           stderr: `Execution timed out after ${timeoutMs}ms`,
           durationMs: timeoutMs,
           error: `TIMEOUT: Exceeded ${timeoutMs}ms limit`
+        });
+      }
+
+      if (outputLimitExceeded) {
+        return resolve({
+          status: 'OUTPUT_LIMIT_EXCEEDED',
+          exitCode: -1,
+          stdout: stdout.slice(0, 1024),
+          stderr: `Process exceeded maximum output limit of ${MAX_OUTPUT_BYTES} bytes`,
+          durationMs,
+          error: `OUTPUT_LIMIT_EXCEEDED: Exceeded ${MAX_OUTPUT_BYTES} bytes limit`
         });
       }
 
@@ -108,85 +149,103 @@ function runProcess(command, args, options = {}) {
   });
 }
 
-const ISOLATION_LIMITATION = 'Subprocess execution without OS containerization (jail/cgroups). Filesystem access is bounded by process environment; no full security sandbox guarantee is claimed.';
+/**
+ * Executes candidate code out-of-process in a strictly bounded runner.
+ * Results are communicated strictly out-of-band via private output file.
+ */
+async function executeCandidateRunner({ code, spec, timeoutMs = DEFAULT_TIMEOUT_MS, requireOsIsolation = false }) {
+  if (requireOsIsolation && !checkOsIsolationAvailable()) {
+    return {
+      status: 'SANDBOX_UNAVAILABLE',
+      exitCode: -1,
+      stdout: '',
+      stderr: 'Required OS-level container isolation is unavailable on this host.',
+      durationMs: 0,
+      error: 'SANDBOX_UNAVAILABLE: Execution blocked because strict container isolation is required but unavailable.',
+      runnerOutput: null,
+      isolation: {
+        level: 'NONE',
+        securityGuarantee: false,
+        containerIsolation: false,
+        limitation: 'Host lacks container/jail isolation'
+      }
+    };
+  }
 
-async function executeCandidateRunner({ code, spec, timeoutMs = DEFAULT_TIMEOUT_MS }) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidost-eval-runner-'));
   const candidatePath = path.join(tmpDir, 'candidate.js');
   const specPath = path.join(tmpDir, 'spec.json');
   const runnerPath = path.join(tmpDir, 'runner.js');
+  const runNonce = crypto.randomBytes(16).toString('hex');
+  const outputPath = path.join(tmpDir, `result_${runNonce}.json`);
 
   const runnerScript = `'use strict';
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const originalWrite = process.stdout.write.bind(process.stdout);
+const specPath = process.argv[2];
+const outputPath = process.argv[3];
 
-function emitResult(payload) {
-  originalWrite('\\n__AIDOST_RESULT__:' + JSON.stringify(payload) + '\\n');
+function writeResult(payload) {
+  try {
+    fs.writeFileSync(outputPath, JSON.stringify(payload), 'utf8');
+  } catch (_) {}
 }
 
 try {
-  const spec = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+  const spec = JSON.parse(fs.readFileSync(specPath, 'utf8'));
   const candidateCode = fs.readFileSync(path.join(__dirname, 'candidate.js'), 'utf8');
 
-  function ListNode(val, next = null) {
-    this.val = val;
-    this.next = next;
-  }
-  function TreeNode(val, left = null, right = null) {
-    this.val = val;
-    this.left = left;
-    this.right = right;
-  }
+  // Create isolated context with null prototype - NO host functions injected!
+  const context = vm.createContext(Object.create(null));
 
-  function buildLinkedList(values, cycleIndex) {
-    if (!values || values.length === 0) return null;
-    const nodes = values.map((v) => new ListNode(v));
-    for (let i = 0; i < nodes.length - 1; i++) {
-      nodes[i].next = nodes[i + 1];
+  // Initialize environment INSIDE the context so constructors and prototypes belong to context
+  vm.runInContext(\`
+    'use strict';
+    globalThis.console = {
+      log: function() {},
+      info: function() {},
+      warn: function() {},
+      error: function() {}
+    };
+
+    function ListNode(val, next) {
+      this.val = val;
+      this.next = next === undefined ? null : next;
     }
-    if (cycleIndex >= 0 && cycleIndex < nodes.length) {
-      nodes[nodes.length - 1].next = nodes[cycleIndex];
+    function TreeNode(val, left, right) {
+      this.val = val;
+      this.left = left === undefined ? null : left;
+      this.right = right === undefined ? null : right;
     }
-    return nodes[0];
-  }
+    globalThis.ListNode = ListNode;
+    globalThis.TreeNode = TreeNode;
+    globalThis.Node = ListNode;
+    globalThis.global = globalThis;
 
-  function buildTree(nodeDef) {
-    if (!nodeDef || typeof nodeDef !== 'object') return null;
-    return new TreeNode(nodeDef.val, buildTree(nodeDef.left), buildTree(nodeDef.right));
-  }
+    globalThis.__buildLinkedList = function(values, cycleIndex) {
+      if (!values || values.length === 0) return null;
+      var nodes = values.map(function(v) { return new ListNode(v); });
+      for (var i = 0; i < nodes.length - 1; i++) {
+        nodes[i].next = nodes[i + 1];
+      }
+      if (cycleIndex >= 0 && cycleIndex < nodes.length) {
+        nodes[nodes.length - 1].next = nodes[cycleIndex];
+      }
+      return nodes[0];
+    };
 
-  const sandbox = {
-    console: {
-      log: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {}
-    },
-    Math,
-    Array,
-    Object,
-    Number,
-    String,
-    Boolean,
-    Set,
-    Map,
-    Date,
-    JSON,
-    parseInt,
-    parseFloat,
-    isNaN,
-    isFinite,
-    ListNode,
-    TreeNode,
-    Node: ListNode
-  };
-  sandbox.global = sandbox;
-  sandbox.globalThis = sandbox;
+    globalThis.__buildTree = function(nodeDef) {
+      if (!nodeDef || typeof nodeDef !== 'object') return null;
+      return new TreeNode(nodeDef.val, __buildTree(nodeDef.left), __buildTree(nodeDef.right));
+    };
 
-  const context = vm.createContext(sandbox);
+    // Deep freeze prototypes to prevent constructor crawling and prototype tampering
+    Object.freeze(Object.prototype);
+    Object.freeze(Function.prototype);
+    Object.freeze(Array.prototype);
+  \`, context);
 
   const exportCollector = (spec.names || []).map(function(n) {
     return 'if (typeof ' + n + ' !== "undefined") __aidost_exports["' + n + '"] = ' + n + ';';
@@ -195,6 +254,19 @@ try {
 
   // Execute candidate code in VM context with strict execution timeout
   const collectedExports = vm.runInContext(wrappedCode, context, { timeout: 3500 });
+
+  function safeClone(val, seen) {
+    seen = seen || new WeakSet();
+    if (val === null || typeof val !== 'object') return val;
+    if (seen.has(val)) return '[Circular]';
+    seen.add(val);
+    if (Array.isArray(val)) return val.map(function(x) { return safeClone(x, seen); });
+    var res = {};
+    for (var k of Object.keys(val)) {
+      res[k] = safeClone(val[k], seen);
+    }
+    return res;
+  }
 
   const results = [];
 
@@ -211,7 +283,7 @@ try {
       }
     }
     if (!fn) {
-      emitResult({ runnerStatus: 'TARGET_NOT_FOUND', error: 'Function [' + (spec.names || []).join(', ') + '] not defined by candidate.' });
+      writeResult({ runnerStatus: 'TARGET_NOT_FOUND', error: 'Function [' + (spec.names || []).join(', ') + '] not defined by candidate.' });
       process.exit(0);
     }
 
@@ -219,12 +291,12 @@ try {
       try {
         let args = testCase.args || [];
         if (testCase.customType === 'linked_list') {
-          args = [buildLinkedList(testCase.listValues, testCase.cycleIndex)];
+          args = [context.__buildLinkedList(testCase.listValues, testCase.cycleIndex)];
         } else if (testCase.customType === 'tree') {
-          args = [buildTree(testCase.treeDef)];
+          args = [context.__buildTree(testCase.treeDef)];
         }
         const res = fn.apply(null, args);
-        results.push({ id: testCase.id, status: 'SUCCESS', result: res });
+        results.push({ id: testCase.id, status: 'SUCCESS', result: safeClone(res) });
       } catch (caseErr) {
         results.push({ id: testCase.id, status: 'ERROR', error: caseErr.message });
       }
@@ -242,7 +314,7 @@ try {
       }
     }
     if (!Cls) {
-      emitResult({ runnerStatus: 'TARGET_NOT_FOUND', error: 'Class [' + (spec.names || []).join(', ') + '] not defined by candidate.' });
+      writeResult({ runnerStatus: 'TARGET_NOT_FOUND', error: 'Class [' + (spec.names || []).join(', ') + '] not defined by candidate.' });
       process.exit(0);
     }
 
@@ -257,7 +329,7 @@ try {
             results.push({ id: op.id, status: 'ERROR', error: 'Method ' + op.op + ' not found on instance' });
           } else {
             const res = instance[op.op](...(op.args || []));
-            results.push({ id: op.id, status: 'SUCCESS', result: res });
+            results.push({ id: op.id, status: 'SUCCESS', result: safeClone(res) });
           }
         }
       } catch (opErr) {
@@ -266,14 +338,13 @@ try {
     }
   }
 
-  emitResult({ runnerStatus: 'EXECUTED', results });
+  writeResult({ runnerStatus: 'EXECUTED', results });
   process.exit(0);
 } catch (err) {
   const isSyntax = err.name === 'SyntaxError' || (err.message && err.message.includes('SyntaxError'));
-  emitResult({ runnerStatus: isSyntax ? 'SYNTAX_ERROR' : 'RUNNER_EXCEPTION', error: err.message, stack: err.stack });
+  writeResult({ runnerStatus: isSyntax ? 'SYNTAX_ERROR' : 'RUNNER_EXCEPTION', error: err.message });
   process.exit(0);
 }
-
 `;
 
   try {
@@ -282,17 +353,28 @@ try {
     fs.writeFileSync(runnerPath, runnerScript, 'utf8');
 
     const startTime = Date.now();
-    const runRes = await runProcess(process.execPath, ['--no-addons', runnerPath, specPath], {
-      cwd: tmpDir,
-      timeoutMs,
-      startTime
-    });
+    const runRes = await runProcess(
+      process.execPath,
+      [
+        '--no-addons',
+        '--max-old-space-size=64',
+        '--disallow-code-generation-from-strings',
+        runnerPath,
+        specPath,
+        outputPath
+      ],
+      {
+        cwd: tmpDir,
+        timeoutMs,
+        startTime
+      }
+    );
 
     let runnerOutput = null;
-    const match = runRes.stdout.match(/__AIDOST_RESULT__:([^\r\n]+)/);
-    if (match) {
+    if (fs.existsSync(outputPath)) {
       try {
-        runnerOutput = JSON.parse(match[1]);
+        const rawOutput = fs.readFileSync(outputPath, 'utf8');
+        runnerOutput = JSON.parse(rawOutput);
       } catch (_) {}
     }
 
@@ -307,6 +389,7 @@ try {
       isolation: {
         level: 'SUBPROCESS_RESTRICTED',
         securityGuarantee: false,
+        containerIsolation: false,
         limitation: ISOLATION_LIMITATION
       }
     };
@@ -369,5 +452,6 @@ module.exports = {
   executeNodeScript,
   executePythonScript,
   runProcess,
+  checkOsIsolationAvailable,
   ISOLATION_LIMITATION
 };

@@ -24,7 +24,13 @@ const STATUS = {
   NOT_EVALUATED: 'NOT_EVALUATED'
 };
 
-const TRUSTED_RUNNER_SECRET = process.env.AIDOST_RUNNER_SECRET || 'aidost-trusted-runner-internal-2026';
+function getRunnerSecret() {
+  const secret = process.env.AIDOST_RUNNER_SECRET;
+  if (!secret || typeof secret !== 'string' || secret.trim().length < 16) {
+    return null;
+  }
+  return secret.trim();
+}
 
 /**
  * Computes canonical SHA-256 artifact hash across all evaluated project files.
@@ -42,101 +48,106 @@ function computeArtifactHash(fileMap = {}) {
 }
 
 /**
- * Mints an authentic server-side execution receipt signed by a trusted test runner.
+ * Canonicalizes receipt payload deterministically for signing and verification.
  */
-function mintExecutionReceipt({
-  runId,
-  artifactHash,
-  runnerId = 'aidost-trusted-runner',
-  command = 'npm test',
-  exitCode = 0,
-  tests = { testsRun: 0, testsPassed: 0, testsFailed: 0 },
-  build = { success: true, exitCode: 0, output: '' },
-  runtime = { started: false, port: null },
-  acceptance = { passed: false, flowsTested: 0, flowsFailed: 0, flows: [] }
-}) {
-  const timestamp = new Date().toISOString();
-  const payload = {
-    runId: String(runId || `run-${Date.now()}`),
-    artifactHash: String(artifactHash || ''),
-    runnerId: String(runnerId),
-    command: String(command),
-    exitCode: Number(exitCode),
-    tests: {
-      testsRun: Number(tests?.testsRun || 0),
-      testsPassed: Number(tests?.testsPassed || 0),
-      testsFailed: Number(tests?.testsFailed || 0)
-    },
-    build: {
-      success: Boolean(build?.success),
-      exitCode: Number(build?.exitCode || 0),
-      output: String(build?.output || '')
-    },
-    runtime: {
-      started: Boolean(runtime?.started),
-      port: runtime?.port ? Number(runtime.port) : null
-    },
+function canonicalizeReceiptPayload(payload = {}) {
+  if (!payload || typeof payload !== 'object') return '';
+  const canonicalObj = {
     acceptance: {
-      passed: Boolean(acceptance?.passed),
-      flowsTested: Number(acceptance?.flowsTested || acceptance?.flowsChecked || 0),
-      flowsFailed: Number(acceptance?.flowsFailed || 0),
-      flows: Array.isArray(acceptance?.flows) ? acceptance.flows : []
+      flows: Array.isArray(payload.acceptance?.flows)
+        ? payload.acceptance.flows.map((f) => ({
+            id: String(f?.id || ''),
+            name: String(f?.name || ''),
+            passed: Boolean(f?.passed)
+          })).sort((a, b) => a.id.localeCompare(b.id))
+        : [],
+      flowsFailed: Number(payload.acceptance?.flowsFailed || 0),
+      flowsTested: Number(payload.acceptance?.flowsTested || payload.acceptance?.flowsChecked || 0),
+      passed: Boolean(payload.acceptance?.passed)
     },
-    timestamp
+    artifactHash: String(payload.artifactHash || ''),
+    build: {
+      exitCode: Number(payload.build?.exitCode || 0),
+      output: String(payload.build?.output || ''),
+      success: Boolean(payload.build?.success)
+    },
+    command: String(payload.command || ''),
+    exitCode: Number(payload.exitCode || 0),
+    runId: String(payload.runId || ''),
+    runnerId: String(payload.runnerId || ''),
+    runtime: {
+      port: payload.runtime?.port != null ? Number(payload.runtime.port) : null,
+      started: Boolean(payload.runtime?.started)
+    },
+    tests: {
+      testsFailed: Number(payload.tests?.testsFailed || 0),
+      testsPassed: Number(payload.tests?.testsPassed || 0),
+      testsRun: Number(payload.tests?.testsRun || 0)
+    },
+    timestamp: String(payload.timestamp || '')
   };
-
-  const signature = crypto
-    .createHmac('sha256', TRUSTED_RUNNER_SECRET)
-    .update(`${payload.runId}:${payload.artifactHash}:${payload.runnerId}:${payload.exitCode}:${payload.timestamp}`)
-    .digest('hex');
-
-  return {
-    ...payload,
-    receiptSignature: signature
-  };
+  return JSON.stringify(canonicalObj);
 }
 
-/**
- * Creates a complete trusted execution evidence wrapper including artifact hash and signed receipt.
- */
-function createTrustedExecutionEvidence({ files, runId = 'trusted-run-1', ...details }) {
-  const artifactHash = computeArtifactHash(files);
-  const receipt = mintExecutionReceipt({
-    runId,
-    artifactHash,
-    ...details
-  });
-  return {
-    receipt,
-    build: receipt.build,
-    tests: receipt.tests,
-    runtime: receipt.runtime,
-    acceptance: receipt.acceptance
-  };
+// Replay protection registry
+const consumedReceiptSignatures = new Set();
+function _clearConsumedReceiptsForTesting() {
+  consumedReceiptSignatures.clear();
 }
 
 /**
  * Verifies that an execution receipt was minted by a trusted runner for the exact artifact evaluated.
  */
-function verifyExecutionReceipt(receipt, expectedArtifactHash, expectedRunId = null) {
+function verifyExecutionReceipt(receipt, expectedArtifactHash, expectedRunId = null, options = {}) {
+  const secret = options.secret !== undefined ? options.secret : getRunnerSecret();
+  if (!secret || typeof secret !== 'string' || secret.trim().length < 16) {
+    return { valid: false, reason: 'RUNNER_SECRET_UNAVAILABLE' };
+  }
+
   if (!receipt || typeof receipt !== 'object') {
     return { valid: false, reason: 'MISSING_RECEIPT' };
   }
-  if (!receipt.receiptSignature || !receipt.artifactHash || !receipt.runId) {
+  if (!receipt.receiptSignature || !receipt.artifactHash || !receipt.runId || !receipt.timestamp) {
     return { valid: false, reason: 'UNTRUSTED_OR_MALFORMED_RECEIPT' };
   }
 
-  // Verify HMAC signature
-  const expectedSig = crypto
-    .createHmac('sha256', TRUSTED_RUNNER_SECRET)
-    .update(`${receipt.runId}:${receipt.artifactHash}:${receipt.runnerId}:${receipt.exitCode}:${receipt.timestamp}`)
-    .digest('hex');
-
-  if (expectedSig !== receipt.receiptSignature) {
-    return { valid: false, reason: 'FABRICATED_RECEIPT_SIGNATURE' };
+  // Signature format validation: must be 64-char hex string
+  if (typeof receipt.receiptSignature !== 'string' || !/^[0-9a-f]{64}$/i.test(receipt.receiptSignature)) {
+    return { valid: false, reason: 'MALFORMED_RECEIPT_SIGNATURE' };
   }
 
-  // Validate exact artifact hash match
+  // Required expected run ID validation
+  if (!expectedRunId || typeof expectedRunId !== 'string' || !expectedRunId.trim()) {
+    return { valid: false, reason: 'EXPECTED_RUN_ID_REQUIRED' };
+  }
+  if (receipt.runId !== expectedRunId) {
+    return {
+      valid: false,
+      reason: 'RUN_ID_MISMATCH',
+      detail: `Receipt run ID (${receipt.runId}) does not match expected run ID (${expectedRunId})`
+    };
+  }
+
+  // Freshness check: timestamp must be valid ISO, within freshness limit, not in future
+  const receiptTime = new Date(receipt.timestamp).getTime();
+  if (isNaN(receiptTime)) {
+    return { valid: false, reason: 'INVALID_RECEIPT_TIMESTAMP' };
+  }
+  const maxAgeMs = options.maxAgeMs || 300000; // 5 minutes
+  const now = options.now || Date.now();
+  if (receiptTime > now + 5000) {
+    return { valid: false, reason: 'RECEIPT_TIMESTAMP_IN_FUTURE' };
+  }
+  if (now - receiptTime > maxAgeMs) {
+    return { valid: false, reason: 'RECEIPT_EXPIRED' };
+  }
+
+  // Replay protection: check if signature was already consumed
+  if (consumedReceiptSignatures.has(receipt.receiptSignature)) {
+    return { valid: false, reason: 'RECEIPT_REPLAY_DETECTED' };
+  }
+
+  // Exact artifact hash match
   if (expectedArtifactHash && receipt.artifactHash !== expectedArtifactHash) {
     return {
       valid: false,
@@ -145,13 +156,24 @@ function verifyExecutionReceipt(receipt, expectedArtifactHash, expectedRunId = n
     };
   }
 
-  // Validate run ID match if provided
-  if (expectedRunId && receipt.runId !== expectedRunId) {
-    return {
-      valid: false,
-      reason: 'RUN_ID_MISMATCH',
-      detail: `Receipt run ID (${receipt.runId}) does not match expected run ID (${expectedRunId})`
-    };
+  // Constant-time HMAC comparison
+  const expectedSig = crypto
+    .createHmac('sha256', secret)
+    .update(canonicalizeReceiptPayload(receipt))
+    .digest('hex');
+
+  const expectedBuf = Buffer.from(expectedSig, 'hex');
+  const actualBuf = Buffer.from(receipt.receiptSignature, 'hex');
+
+  if (expectedBuf.length !== actualBuf.length || !crypto.timingSafeEqual(expectedBuf, actualBuf)) {
+    return { valid: false, reason: 'FABRICATED_RECEIPT_SIGNATURE' };
+  }
+
+  // Mark signature consumed for replay protection
+  consumedReceiptSignatures.add(receipt.receiptSignature);
+  if (consumedReceiptSignatures.size > 10000) {
+    const oldest = consumedReceiptSignatures.values().next().value;
+    consumedReceiptSignatures.delete(oldest);
   }
 
   return { valid: true, receipt };
@@ -553,7 +575,8 @@ module.exports = {
   GeneratedAppQualityGate,
   STATUS,
   computeArtifactHash,
-  mintExecutionReceipt,
-  createTrustedExecutionEvidence,
-  verifyExecutionReceipt
+  verifyExecutionReceipt,
+  canonicalizeReceiptPayload,
+  getRunnerSecret,
+  _clearConsumedReceiptsForTesting
 };

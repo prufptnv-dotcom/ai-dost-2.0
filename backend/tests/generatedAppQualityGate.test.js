@@ -5,10 +5,17 @@ const assert = require('node:assert');
 const {
   GeneratedAppQualityGate,
   STATUS,
-  createTrustedExecutionEvidence,
-  mintExecutionReceipt,
-  computeArtifactHash
+  computeArtifactHash,
+  verifyExecutionReceipt,
+  _clearConsumedReceiptsForTesting
 } = require('../quality-evaluation/generatedAppQualityGate');
+const {
+  TEST_RUNNER_SECRET,
+  createTestEvidence: createTrustedExecutionEvidence,
+  mintTestReceipt: mintExecutionReceipt
+} = require('./helpers/receiptTestHelper');
+
+process.env.AIDOST_RUNNER_SECRET = TEST_RUNNER_SECRET;
 
 test('GeneratedAppQualityGate: Execution-Backed Evidence Gate', async (t) => {
   const gate = new GeneratedAppQualityGate();
@@ -23,49 +30,59 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const handleExportCSV = () => {
-    const csvContent = 'data:text/csv;charset=utf-8,id,name,amount\\n1,salary,5000';
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', 'export.csv');
-    document.body.appendChild(link);
-    link.click();
+  const data = [
+    { id: 1, name: 'Alice', role: 'Engineer' },
+    { id: 2, name: 'Bob', role: 'Designer' }
+  ];
+
+  const filtered = data.filter((item) => item.name.toLowerCase().includes(searchQuery.toLowerCase()));
+
+  const exportCsv = () => {
+    const csv = 'id,name,role\\n1,Alice,Engineer';
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'export.csv';
+    a.click();
   };
 
   return (
     <div className="dashboard-container">
-      <h1>Financial Analytics Dashboard</h1>
-      <input 
-        type="text" 
-        placeholder="Search transactions..." 
-        value={searchQuery} 
-        onChange={(e) => setSearchQuery(e.target.value)} 
-      />
-      <select value={category} onChange={(e) => setCategory(e.target.value)}>
-        <option value="all">All</option>
-        <option value="income">Income</option>
-      </select>
-      <button onClick={handleExportCSV}>Export CSV</button>
-      <div className="chart-container">
-        <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" /></svg>
+      <header>
+        <h1>SaaS Dashboard</h1>
+      </header>
+      <div className="controls">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search items..."
+        />
+        <button onClick={exportCsv}>Export CSV</button>
       </div>
+      <svg className="chart-preview" width="200" height="100">
+        <rect width="50" height="80" fill="blue" />
+      </svg>
       <table>
-        <thead><tr><th>ID</th><th>Name</th></tr></thead>
-        <tbody><tr><td>1</td><td>Salary</td></tr></tbody>
+        <tbody>
+          {filtered.map((row) => (
+            <tr key={row.id}><td>{row.name}</td><td>{row.role}</td></tr>
+          ))}
+        </tbody>
       </table>
     </div>
   );
 }
-`,
-    'package.json': JSON.stringify({ name: 'finance-dashboard', dependencies: { react: '^18.0.0' } })
+`
   };
 
   await t.test('1. Static analysis alone yields STATIC_DIAGNOSTIC_PASS, never false VERIFIED_PASS', async () => {
+    _clearConsumedReceiptsForTesting();
     const res = await gate.evaluate({
       files: validDashboardFiles,
       caseId: 'dashboard-search-charts-csv',
-      executionEvidence: null // No execution evidence
+      executionEvidence: null
     });
 
     assert.strictEqual(res.status, STATUS.STATIC_DIAGNOSTIC_PASS, 'Static-only tokens must produce STATIC_DIAGNOSTIC_PASS, not VERIFIED_PASS');
@@ -76,6 +93,7 @@ export default function App() {
   });
 
   await t.test('2. Real passing execution evidence with valid receipt elevates status to VERIFIED_PASS', async () => {
+    _clearConsumedReceiptsForTesting();
     const evidence = createTrustedExecutionEvidence({
       files: validDashboardFiles,
       runId: 'run-valid-1',
@@ -88,6 +106,7 @@ export default function App() {
     const res = await gate.evaluate({
       files: validDashboardFiles,
       caseId: 'dashboard-search-charts-csv',
+      runId: 'run-valid-1',
       executionEvidence: evidence
     });
 
@@ -99,6 +118,7 @@ export default function App() {
   });
 
   await t.test('3. Fabricated or caller-supplied execution evidence without receipt is rejected', async () => {
+    _clearConsumedReceiptsForTesting();
     const fabricatedEvidence = {
       build: { success: true, exitCode: 0 },
       tests: { testsRun: 10, testsPassed: 10, testsFailed: 0 },
@@ -108,6 +128,7 @@ export default function App() {
     const res = await gate.evaluate({
       files: validDashboardFiles,
       caseId: 'dashboard-search-charts-csv',
+      runId: 'run-fabricated-1',
       executionEvidence: fabricatedEvidence
     });
 
@@ -117,6 +138,7 @@ export default function App() {
   });
 
   await t.test('4. Evidence with mismatched artifact hash is rejected with ARTIFACT_HASH_MISMATCH', async () => {
+    _clearConsumedReceiptsForTesting();
     const otherFiles = {
       'src/App.jsx': 'export default function Other() { return <div>Other</div>; }'
     };
@@ -130,6 +152,7 @@ export default function App() {
     const res = await gate.evaluate({
       files: validDashboardFiles,
       caseId: 'dashboard-search-charts-csv',
+      runId: 'run-other-1',
       executionEvidence: otherEvidence
     });
 
@@ -139,6 +162,7 @@ export default function App() {
   });
 
   await t.test('5. Complex application with build passing but acceptance flow failing yields FAILED', async () => {
+    _clearConsumedReceiptsForTesting();
     const evidenceWithFailingAcceptance = createTrustedExecutionEvidence({
       files: validDashboardFiles,
       runId: 'run-fail-acceptance-1',
@@ -150,6 +174,7 @@ export default function App() {
     const res = await gate.evaluate({
       files: validDashboardFiles,
       caseId: 'dashboard-search-charts-csv',
+      runId: 'run-fail-acceptance-1',
       executionEvidence: evidenceWithFailingAcceptance
     });
 
@@ -158,6 +183,7 @@ export default function App() {
   });
 
   await t.test('6. Complex application with build passing but unexecuted acceptance flow yields PARTIAL', async () => {
+    _clearConsumedReceiptsForTesting();
     const evidenceWithoutAcceptance = createTrustedExecutionEvidence({
       files: validDashboardFiles,
       runId: 'run-no-acceptance-1',
@@ -169,6 +195,7 @@ export default function App() {
     const res = await gate.evaluate({
       files: validDashboardFiles,
       caseId: 'dashboard-search-charts-csv',
+      runId: 'run-no-acceptance-1',
       executionEvidence: evidenceWithoutAcceptance
     });
 
@@ -178,6 +205,7 @@ export default function App() {
   });
 
   await t.test('7. Forbidden placeholder anti-pattern yields FAILED status', async () => {
+    _clearConsumedReceiptsForTesting();
     const antiPatternFiles = {
       'src/App.jsx': `
 export default function App() {
@@ -202,6 +230,7 @@ export default function App() {
   });
 
   await t.test('8. Missing or unknown canonical case ID returns FAILED cleanly', async () => {
+    _clearConsumedReceiptsForTesting();
     const res = await gate.evaluate({
       files: validDashboardFiles,
       caseId: 'non-existent-case-id'

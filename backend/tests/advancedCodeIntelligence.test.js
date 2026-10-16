@@ -23,8 +23,16 @@ const {
 const {
   GeneratedAppQualityGate,
   STATUS,
-  createTrustedExecutionEvidence
+  computeArtifactHash,
+  verifyExecutionReceipt,
+  _clearConsumedReceiptsForTesting
 } = require('../quality-evaluation/generatedAppQualityGate');
+const {
+  TEST_RUNNER_SECRET,
+  createTestEvidence: createTrustedExecutionEvidence
+} = require('./helpers/receiptTestHelper');
+
+process.env.AIDOST_RUNNER_SECRET = TEST_RUNNER_SECRET;
 
 const {
   WorkspaceFrameworkIntelligence
@@ -254,9 +262,11 @@ export default function App() {
 `
     };
 
+    _clearConsumedReceiptsForTesting();
     const evalResult = await gate.evaluate({
       files: validFiles,
       caseId: 'dashboard-search-charts-csv',
+      runId: 'trusted-test-8',
       executionEvidence: createTrustedExecutionEvidence({
         files: validFiles,
         runId: 'trusted-test-8',
@@ -475,6 +485,7 @@ export default function App() {
       'src/App.jsx': originalFiles['src/App.jsx'] + '\n// Tampered content'
     };
 
+    _clearConsumedReceiptsForTesting();
     // Evidence minted for originalFiles
     const evidenceForOriginal = createTrustedExecutionEvidence({
       files: originalFiles,
@@ -488,6 +499,7 @@ export default function App() {
     const res = await gate.evaluate({
       files: modifiedFiles,
       caseId: 'dashboard-search-charts-csv',
+      runId: 'run-hash-1',
       executionEvidence: evidenceForOriginal
     });
 
@@ -497,6 +509,7 @@ export default function App() {
   });
 
   await t.test('19. Section 6: Build passing while an acceptance-critical flow fails is rejected', async () => {
+    _clearConsumedReceiptsForTesting();
     const gate = new GeneratedAppQualityGate();
     const appFiles = {
       'src/App.jsx': `
@@ -526,6 +539,7 @@ export default function App() {
     const res = await gate.evaluate({
       files: appFiles,
       caseId: 'dashboard-search-charts-csv',
+      runId: 'run-acc-fail-1',
       executionEvidence: evidenceWithFailedAcceptance
     });
 
@@ -534,6 +548,7 @@ export default function App() {
   });
 
   await t.test('20. Section 6: Genuine trusted evidence still passes cleanly', async () => {
+    _clearConsumedReceiptsForTesting();
     const gate = new GeneratedAppQualityGate();
     const appFiles = {
       'src/App.jsx': `
@@ -572,6 +587,7 @@ export default function App() {
     const res = await gate.evaluate({
       files: appFiles,
       caseId: 'dashboard-search-charts-csv',
+      runId: 'run-genuine-1',
       executionEvidence: trustedEvidence
     });
 

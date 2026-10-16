@@ -16,6 +16,9 @@ const {
   buildAlgorithmGuidanceBlock,
   validateTaskPlanSchema
 } = require('./codeGenerationStrategy');
+const { AlgorithmVerifier } = require('../../quality-evaluation/algorithmVerifier');
+const { GeneratedAppQualityGate, STATUS } = require('../../quality-evaluation/generatedAppQualityGate');
+const { TrustedExecutionService } = require('../../quality-evaluation/trustedExecutionService');
 
 // The planner decides the actual count. This is only a defensive ceiling against
 // malformed or adversarial model output, not a workflow rule.
@@ -107,6 +110,59 @@ function extractAffectedFilesFromContractErrors(errors = []) {
     }
   }
   return Array.from(affected);
+}
+
+function detectSupportedAlgorithmOracle(request = '', files = {}) {
+  const text = String(request).toLowerCase();
+  const oracleMap = [
+    { name: 'two_sum', pattern: /\b(two\s*sum|pair\s*sum)\b/i },
+    { name: 'hash_map', pattern: /\b(hash\s*map|hashmap|myhashmap)\b/i },
+    { name: 'binary_search', pattern: /\b(binary\s*search)\b/i },
+    { name: 'valid_parentheses', pattern: /\b(valid\s*parenthes[ei]s|balanced\s*bracket|isvalidparentheses)\b/i },
+    { name: 'linked_list_cycle', pattern: /\b(linked\s*list\s*cycle|detect\s*cycle|hascycle)\b/i },
+    { name: 'bst_validation', pattern: /\b(bst\s*validation|validate\s*bst|isvalidbst)\b/i },
+    { name: 'lru_cache', pattern: /\b(lru\s*cache|least\s*recently\s*used)\b/i },
+    { name: 'merge_intervals', pattern: /\b(merge\s*intervals?)\b/i },
+    { name: 'graph_bfs', pattern: /\b(graph\s*bfs|shortest\s*path.*bfs|breadth\s*first)\b/i },
+    { name: 'coin_change', pattern: /\b(coin\s*change|min\s*coins)\b/i },
+    { name: 'trie', pattern: /\b(trie|prefix\s*tree)\b/i },
+    { name: 'topological_sort', pattern: /\b(topological\s*sort|topo\s*sort|course\s*schedule)\b/i }
+  ];
+
+  for (const item of oracleMap) {
+    if (item.pattern.test(text)) return item.name;
+  }
+  for (const [filePath, content] of Object.entries(files)) {
+    for (const item of oracleMap) {
+      if (filePath.toLowerCase().includes(item.name) || item.pattern.test(content)) {
+        return item.name;
+      }
+    }
+  }
+  return null;
+}
+
+function extractCandidateCode(files = {}, oracleName = null) {
+  const keys = Object.keys(files);
+  const prioritized = keys.slice().sort((a, b) => {
+    const aLower = a.toLowerCase();
+    const bLower = b.toLowerCase();
+    if (aLower.includes('solution') && !bLower.includes('solution')) return -1;
+    if (bLower.includes('solution') && !aLower.includes('solution')) return 1;
+    if (oracleName && aLower.includes(oracleName)) return -1;
+    if (oracleName && bLower.includes(oracleName)) return 1;
+    return 0;
+  });
+
+  for (const key of prioritized) {
+    if (/\.(jsx?|tsx?|mjs|cjs)$/i.test(key) && !key.includes('.test.') && !key.includes('.spec.')) {
+      return files[key];
+    }
+  }
+  for (const [key, content] of Object.entries(files)) {
+    if (/\.(jsx?|tsx?|mjs|cjs)$/i.test(key)) return content;
+  }
+  return '';
 }
 
 function readKeyFileContents(diskPath, files) {
@@ -336,7 +392,7 @@ function normalizePlan(raw, request) {
 }
 
 class CopilotDirector {
-  constructor({ db, projectAuthorization, workspaceManager, toolRegistry, plannerExecutionLoop, contextAssembler, taskPlanner, executionController, agentTaskDao, agentRunDao, aiService = AgentCascadeAiService, coordinator = null } = {}) {
+  constructor({ db, projectAuthorization, workspaceManager, toolRegistry, plannerExecutionLoop, contextAssembler, taskPlanner, executionController, agentTaskDao, agentRunDao, aiService = AgentCascadeAiService, coordinator = null, algorithmVerifier = null, qualityGate = null, trustedRunner = null } = {}) {
     this.db = db;
     this.projectAuthorization = projectAuthorization;
     this.workspaceManager = workspaceManager;
@@ -349,6 +405,9 @@ class CopilotDirector {
     this.agentRunDao = agentRunDao;
     this.aiService = aiService;
     this.coordinator = coordinator || new AgentCoordinator({ db, projectAuthService: projectAuthorization, workspaceManager, toolRegistry, plannerExecutionLoop, contextAssembler, executionController, agentTaskDao, agentRunDao });
+    this.algorithmVerifier = algorithmVerifier || new AlgorithmVerifier();
+    this.qualityGate = qualityGate || new GeneratedAppQualityGate();
+    this.trustedRunner = trustedRunner || new TrustedExecutionService();
   }
 
   async createPlan(request, context = {}, preferredModel = 'auto') {
@@ -619,10 +678,11 @@ class CopilotDirector {
       }
       onEvent({ type: 'director_verification', status: 'DELEGATING' });
       // Final cross-file contract validation across the entire workspace
+      const meta = this.workspaceManager?.getWorkspaceMetadata?.(projectId, userId);
+      let finalFiles = {};
       try {
-        const meta = this.workspaceManager?.getWorkspaceMetadata?.(projectId, userId);
         if (meta?.diskPath && fs.existsSync(meta.diskPath)) {
-          const finalFiles = collectWorkspaceFilesBounded(meta.diskPath);
+          finalFiles = collectWorkspaceFilesBounded(meta.diskPath);
           if (Object.keys(finalFiles).length > 0) {
             const finalValidation = validateCrossFileContracts(finalFiles);
             if (!finalValidation.valid && finalValidation.errors.length > 0) {
@@ -637,6 +697,74 @@ class CopilotDirector {
           throw err;
         }
       }
+
+      const classification = classifyRequest(request);
+      let algorithmVerificationOutcome = null;
+
+      // ── Layer A: Algorithm Oracle Verification Path ──
+      if (classification.category === 'ALGORITHMIC_PROBLEM' || classification.isAlgorithm) {
+        const oracleName = detectSupportedAlgorithmOracle(request, finalFiles);
+        if (oracleName) {
+          const candidateCode = extractCandidateCode(finalFiles, oracleName);
+          if (candidateCode) {
+            onEvent({ type: 'director_verification', phase: 'algorithm_oracle', oracle: oracleName });
+            const algoResult = await this.algorithmVerifier.verifyAlgorithm(oracleName, candidateCode);
+            if (!algoResult.verified) {
+              const err = `Algorithm oracle verification failed for [${oracleName}]: ${algoResult.error || 'Test failure'}`;
+              onEvent({ type: 'director_verification', status: 'FAILED', error: err, algorithmResult: algoResult });
+              throw new Error(err);
+            }
+            algorithmVerificationOutcome = { verified: true, oracle: oracleName, algoResult };
+            onEvent({ type: 'director_verification', status: 'SUCCEEDED', oracle: oracleName, algorithmResult: algoResult });
+          } else {
+            const err = `No candidate implementation found for algorithm [${oracleName}] in workspace`;
+            onEvent({ type: 'director_verification', status: 'FAILED', error: err });
+            throw new Error(err);
+          }
+        } else {
+          // Explicitly UNVERIFIED: do not claim verification when no matching oracle exists
+          algorithmVerificationOutcome = { verified: false, unverified: true, reason: 'No matching independent algorithm oracle for this problem' };
+          onEvent({ type: 'director_verification', status: 'UNVERIFIED', reason: algorithmVerificationOutcome.reason });
+        }
+      }
+
+      // ── Layer B: Generated App Quality Gate Path ──
+      let qualityGateOutcome = null;
+      const isAppGeneration = Boolean(
+        classification.category === 'APPLICATION_FEATURE' &&
+        meta?.diskPath &&
+        (fs.existsSync(path.join(meta.diskPath, 'package.json')) || Object.keys(finalFiles).length >= 2)
+      );
+
+      if (isAppGeneration && meta?.diskPath) {
+        try {
+          const evidence = await this.trustedRunner.execute({
+            projectDir: meta.diskPath,
+            files: finalFiles,
+            runId: supervisorRunId
+          });
+          const gateResult = await this.qualityGate.evaluate({
+            projectDir: meta.diskPath,
+            files: finalFiles,
+            caseId: classification.canonicalCase || 'landing_page',
+            runId: supervisorRunId,
+            executionEvidence: evidence
+          });
+          qualityGateOutcome = gateResult;
+          onEvent({ type: 'quality_gate_evaluation', status: gateResult.status, gateResult });
+
+          if (gateResult.status === STATUS.FAILED) {
+            const detail = (gateResult.defects || []).map((d) => d.detail).join('; ') || 'Quality gate validation failed';
+            throw new Error(`Generated app quality gate failed: ${detail}`);
+          }
+        } catch (err) {
+          if (err.message && err.message.startsWith('Generated app quality gate failed')) {
+            throw err;
+          }
+          logger.warn(`[CopilotDirector] Quality gate warning: ${err.message}`);
+        }
+      }
+
       const verifier = await this.coordinator.delegate({ supervisorRunId, role: 'VERIFIER', objective: `Perform the final read-only verification gate for the requested outcome: ${request}. Inspect the current workspace state and confirm tests/build/runtime evidence where supported. Do not mutate the workspace.`, constraints: { specialty: 'verification', generatedByDirector: true }, expectedOutput: 'Final verification evidence and any remaining blockers.' });
       const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, { runner: async () => { const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER', ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) }); return this.plannerExecutionLoop.runWithPlan(projectId, userId, verificationPlan, 0, () => Boolean(signal?.aborted), `copilot_verify_${verifier.workerRun.id}`, { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined, ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) }); } });
       const verificationStatus = String(finalVerification?.status || 'FAILED').toUpperCase();
@@ -693,6 +821,60 @@ class CopilotDirector {
           context_refs: [],
           verification_status: 'PASSED',
           errors: [{ code: 'INCOMPLETE_PLAN', message: summary.slice(0, 256) }]
+        });
+      }
+
+      if (qualityGateOutcome && qualityGateOutcome.status === STATUS.PARTIAL) {
+        const summary = `Director completed tasks with PARTIAL verification (acceptance criteria or build evidence incomplete).`;
+        this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
+        this.agentRunDao.updateStatus(supervisorRunId, 'SUCCEEDED');
+        const completion = {
+          type: 'director_complete',
+          status: 'PARTIAL',
+          taskId: supervisorTaskId,
+          runId: supervisorRunId,
+          taskCount: plan.tasks.length,
+          verification: {
+            status: 'PARTIAL',
+            summary,
+            artifact_refs: verificationArtifacts
+          }
+        };
+        onEvent(completion);
+        return ResultValidator.validate({
+          status: 'PARTIAL',
+          summary,
+          artifact_refs: artifactRefs,
+          context_refs: [],
+          verification_status: 'PARTIAL',
+          errors: [{ code: 'PARTIAL_VERIFICATION', message: 'Required acceptance criteria or execution evidence incomplete.' }]
+        });
+      }
+
+      if (algorithmVerificationOutcome && algorithmVerificationOutcome.unverified) {
+        const summary = `Director completed tasks, but outcome is UNVERIFIED (no matching oracle).`;
+        this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
+        this.agentRunDao.updateStatus(supervisorRunId, 'SUCCEEDED');
+        const completion = {
+          type: 'director_complete',
+          status: 'UNVERIFIED',
+          taskId: supervisorTaskId,
+          runId: supervisorRunId,
+          taskCount: plan.tasks.length,
+          verification: {
+            status: 'UNVERIFIED',
+            summary,
+            artifact_refs: verificationArtifacts
+          }
+        };
+        onEvent(completion);
+        return ResultValidator.validate({
+          status: 'UNVERIFIED',
+          summary,
+          artifact_refs: artifactRefs,
+          context_refs: [],
+          verification_status: 'UNVERIFIED',
+          errors: []
         });
       }
 
