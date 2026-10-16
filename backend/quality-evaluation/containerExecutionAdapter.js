@@ -17,6 +17,7 @@ const { spawn, execSync, spawnSync } = require('child_process');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const crypto = require('crypto');
 
 class ContainerExecutionAdapter {
   constructor(options = {}) {
@@ -104,19 +105,31 @@ class ContainerExecutionAdapter {
 
     // Convert Windows paths to forward slashes for container volume mounting if needed
     const normalizedMountPath = path.resolve(stagedDir).replace(/\\/g, '/');
+    const containerNonce = crypto.randomBytes(8).toString('hex');
+    const containerName = `aidost-exec-${containerNonce}`;
 
     // Build hardened container run arguments
     const dockerArgs = [
       'run',
       '--rm',
+      `--name=${containerName}`,
       `--network=${network}`,
       `--memory=${memoryLimit}`,
       `--cpus=${cpus}`,
       `--pids-limit=${pidsLimit}`,
       '--security-opt=no-new-privileges',
       '--cap-drop=ALL',
-      '--tmpfs=/tmp:rw,noexec,nosuid,size=64m',
-      `-v`, `${normalizedMountPath}:/workspace:rw`,
+      '--tmpfs=/tmp:rw,noexec,nosuid,size=64m'
+    ];
+
+    if (readOnly) {
+      dockerArgs.push('-v', `${normalizedMountPath}:/workspace:ro`);
+      dockerArgs.push('--read-only');
+    } else {
+      dockerArgs.push('-v', `${normalizedMountPath}:/workspace:rw`);
+    }
+
+    dockerArgs.push(
       `-w`, `/workspace`,
       `--user=${user}`,
       // Sanitize environment: NO host secrets!
@@ -125,7 +138,9 @@ class ContainerExecutionAdapter {
       this.image,
       command,
       ...args
-    ];
+    );
+
+    this.lastArgs = dockerArgs;
 
     return new Promise((resolve) => {
       let stdout = '';
@@ -141,6 +156,9 @@ class ContainerExecutionAdapter {
         timedOut = true;
         try {
           child.kill('SIGKILL');
+        } catch (_) {}
+        try {
+          spawnSync(probe.runtime, ['rm', '-f', containerName], { timeout: 3000, windowsHide: true });
         } catch (_) {}
       }, timeoutMs);
 
@@ -160,6 +178,9 @@ class ContainerExecutionAdapter {
 
       child.on('error', (err) => {
         clearTimeout(timer);
+        try {
+          spawnSync(probe.runtime, ['rm', '-f', containerName], { timeout: 3000, windowsHide: true });
+        } catch (_) {}
         resolve({
           executed: false,
           exitCode: -1,
@@ -174,6 +195,9 @@ class ContainerExecutionAdapter {
       child.on('close', (code) => {
         clearTimeout(timer);
         if (timedOut) {
+          try {
+            spawnSync(probe.runtime, ['rm', '-f', containerName], { timeout: 3000, windowsHide: true });
+          } catch (_) {}
           resolve({
             executed: true,
             exitCode: -1,

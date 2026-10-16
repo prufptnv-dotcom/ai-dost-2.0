@@ -68,7 +68,7 @@ const CANONICAL_MATCHERS = [
       // Full-stack REST API with Express and React CRUD
       if (/\b(?:api-backed\s+crud|full-?stack\s+(?:api-backed\s+)?crud)\b/i.test(text)) return true;
       if (/\b(?:express\s+backend|rest\s+api)\b/i.test(text) && /\bcrud\b/i.test(text)) return true;
-      if (/\b\/api\/items\b/i.test(text)) return true;
+      if (/\/api\/items\b/i.test(text)) return true;
       if (/\bcrud\s+mutations?\b/i.test(text) && /\b(?:express|react|rest)\b/i.test(text)) return true;
       return false;
     }
@@ -127,7 +127,23 @@ function resolveCanonicalCase(request = '', workspaceFiles = {}) {
     }
   }
 
-  // 3. Fallback: Request does not match any of the 6 canonical benchmarks
+  // 3. Optional workspaceFiles check if provided
+  if (workspaceFiles && typeof workspaceFiles === 'object') {
+    const fileContents = Object.values(workspaceFiles).join('\n');
+    for (const { id, matcher } of CANONICAL_MATCHERS) {
+      if (matcher(fileContents)) {
+        const caseDef = CANONICAL_CASE_MAP.get(id);
+        return {
+          canonicalCase: id,
+          caseDef,
+          status: 'EVALUABLE',
+          reason: null
+        };
+      }
+    }
+  }
+
+  // 4. Fallback: Request does not match any of the 6 canonical benchmarks
   return {
     canonicalCase: null,
     caseDef: null,

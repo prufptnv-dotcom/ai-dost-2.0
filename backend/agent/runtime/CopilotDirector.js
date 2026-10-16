@@ -21,6 +21,7 @@ const { AlgorithmVerifier } = require('../../quality-evaluation/algorithmVerifie
 const { GeneratedAppQualityGate, STATUS } = require('../../quality-evaluation/generatedAppQualityGate');
 const { TrustedExecutionService } = require('../../quality-evaluation/trustedExecutionService');
 const { getAcceptanceFlows } = require('../../quality-evaluation/canonicalAcceptanceFlows');
+const { createWorkspaceSnapshot } = require('../../quality-evaluation/workspaceManifest');
 
 // The planner decides the actual count. This is only a defensive ceiling against
 // malformed or adversarial model output, not a workflow rule.
@@ -67,35 +68,17 @@ function listExistingFilesBounded(root, max = 100) {
 // SEARCH is copied verbatim, not recalled. Bounded: priority names first,
 // ≤6 files, ≤2600 chars each (truncated marker beyond), ≤9000 chars total.
 
-function collectWorkspaceFilesBounded(rootDir, maxFiles = 100) {
-  const files = {};
-  if (!rootDir || !fs.existsSync(rootDir)) return files;
-  let count = 0;
-  function walk(dir) {
-    if (count >= maxFiles) return;
-    try {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-      for (const ent of entries) {
-        if (count >= maxFiles) return;
-        if (['node_modules', '.git', '.checkpoints', 'dist', 'build', '.next'].includes(ent.name)) continue;
-        const full = path.join(dir, ent.name);
-        if (ent.isDirectory()) {
-          walk(full);
-        } else if (ent.isFile() && /\.(jsx?|tsx?|mjs|cjs|json|html|css)$/i.test(ent.name)) {
-          const rel = path.relative(rootDir, full).replace(/\\/g, '/');
-          try {
-            const stat = fs.statSync(full);
-            if (stat.size <= 256 * 1024) {
-              files[rel] = fs.readFileSync(full, 'utf8');
-              count++;
-            }
-          } catch (_) {}
-        }
-      }
-    } catch (_) {}
+function collectWorkspaceFilesBounded(rootDir) {
+  if (!rootDir || !fs.existsSync(rootDir)) return {};
+  try {
+    const snapshot = createWorkspaceSnapshot(rootDir);
+    return snapshot.files;
+  } catch (err) {
+    if (err && err.message && err.message.startsWith('MANIFEST_LIMIT_EXCEEDED')) {
+      throw err;
+    }
+    return {};
   }
-  walk(rootDir);
-  return files;
 }
 
 function extractAffectedFilesFromContractErrors(errors = []) {

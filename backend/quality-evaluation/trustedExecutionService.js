@@ -66,7 +66,8 @@ class TrustedExecutionService {
     testCommand = null,
     acceptanceFlows = [],
     caseId = null,
-    caseDef = null
+    caseDef = null,
+    adapter = null
   }) {
     if (!this.secret) {
       throw new Error('TRUSTED_RUNNER_SECRET_UNAVAILABLE: Valid AIDOST_RUNNER_SECRET must be configured with at least 16 characters.');
@@ -74,6 +75,8 @@ class TrustedExecutionService {
     if (!runId || typeof runId !== 'string' || !runId.trim()) {
       throw new Error('INVALID_RUN_ID: A non-empty runId string is required.');
     }
+
+    const effectiveAdapter = adapter || this.adapter;
 
     // 1. Create authoritative workspace snapshot (enforcing size & manifest limits)
     const source = files || projectDir;
@@ -126,11 +129,11 @@ class TrustedExecutionService {
         executedCommand = bCmd;
         buildResult.executed = true;
 
-        if (this.strictIsolation && !this.adapter.isAvailable()) {
+        if (this.strictIsolation && !effectiveAdapter.isAvailable()) {
           throw new Error('SANDBOX_UNAVAILABLE: OS container isolation required for build execution but unavailable.');
         }
 
-        const buildRun = await this.adapter.execute({
+        const buildRun = await effectiveAdapter.execute({
           stagedDir,
           command: bCmd.split(' ')[0],
           args: bCmd.split(' ').slice(1),
@@ -158,11 +161,11 @@ class TrustedExecutionService {
         executedCommand = executedCommand !== 'evaluation_gate' ? `${executedCommand}; ${effectiveTestCmd}` : effectiveTestCmd;
         testResult.executed = true;
 
-        if (this.strictIsolation && !this.adapter.isAvailable()) {
+        if (this.strictIsolation && !effectiveAdapter.isAvailable()) {
           throw new Error('SANDBOX_UNAVAILABLE: OS container isolation required for test execution but unavailable.');
         }
 
-        const testRun = await this.adapter.execute({
+        const testRun = await effectiveAdapter.execute({
           stagedDir,
           command: effectiveTestCmd.split(' ')[0],
           args: effectiveTestCmd.split(' ').slice(1),
@@ -187,12 +190,51 @@ class TrustedExecutionService {
 
         if (tapTotalMatch) {
           const total = parseInt(tapTotalMatch[1], 10);
-          const passed = tapPassMatch ? parseInt(tapPassMatch[1], 10) : (testRun.exitCode === 0 ? total : 0);
-          const failed = tapFailMatch ? parseInt(tapFailMatch[1], 10) : (total - passed);
-          testResult.countsMeasured = true;
-          testResult.testsRun = total;
-          testResult.testsPassed = passed;
-          testResult.testsFailed = failed;
+          const hasPass = Boolean(tapPassMatch);
+          const hasFail = Boolean(tapFailMatch);
+
+          // If TAP reports total count but omits BOTH pass and fail counts, do not invent either count!
+          if (!hasPass && !hasFail) {
+            testResult.countsMeasured = false;
+            testResult.testsRun = null;
+            testResult.testsPassed = null;
+            testResult.testsFailed = testRun.exitCode === 0 ? null : 1;
+            testResult.malformed = 'TAP_INCOMPLETE_MISSING_PASS_AND_FAIL_COUNTS';
+          } else {
+            const passed = hasPass ? parseInt(tapPassMatch[1], 10) : (hasFail && testRun.exitCode !== 0 ? total - parseInt(tapFailMatch[1], 10) : null);
+            const failed = hasFail ? parseInt(tapFailMatch[1], 10) : (hasPass && passed === total ? 0 : null);
+
+            if (passed === null || failed === null) {
+              testResult.countsMeasured = false;
+              testResult.testsRun = null;
+              testResult.testsPassed = null;
+              testResult.testsFailed = testRun.exitCode === 0 ? null : 1;
+              testResult.malformed = 'TAP_INCOMPLETE_INDETERMINATE_COUNTS';
+            } else {
+              const skippedMatch = combined.match(/#\s*skip(?:ped)?\s+(\d+)/i);
+              const todoMatch = combined.match(/#\s*todo\s+(\d+)/i);
+              const cancelledMatch = combined.match(/#\s*cancelled\s+(\d+)/i);
+              const skipped = skippedMatch ? parseInt(skippedMatch[1], 10) : 0;
+              const todo = todoMatch ? parseInt(todoMatch[1], 10) : 0;
+              const cancelled = cancelledMatch ? parseInt(cancelledMatch[1], 10) : 0;
+
+              const accounted = passed + failed + skipped + todo + cancelled;
+              if (accounted !== total) {
+                // Contradictory/malformed test report! Reject and mark unmeasured.
+                testResult.countsMeasured = false;
+                testResult.testsRun = null;
+                testResult.testsPassed = null;
+                testResult.testsFailed = testRun.exitCode === 0 ? null : 1;
+                testResult.malformed = `TAP_CONTRADICTORY_COUNTS: total (${total}) !== accounted (${accounted})`;
+              } else {
+                testResult.countsMeasured = true;
+                testResult.testsRun = total;
+                testResult.testsPassed = passed;
+                testResult.testsFailed = failed;
+                testResult.testsSkipped = skipped;
+              }
+            }
+          }
         } else {
           // Do NOT fabricate test counts from exit code zero!
           testResult.countsMeasured = false;
@@ -215,9 +257,17 @@ class TrustedExecutionService {
           let flowError = null;
           try {
             if (typeof flow.test === 'function') {
-              passed = Boolean(await flow.test(snapshot.files, stagedDir));
+              const flowRes = await flow.test(snapshot.files, stagedDir);
+              passed = typeof flowRes === 'object' && flowRes !== null ? Boolean(flowRes.passed) : Boolean(flowRes);
+              if (typeof flowRes === 'object' && flowRes !== null && flowRes.error) {
+                flowError = flowRes.error;
+              }
             } else if (typeof flow.run === 'function') {
-              passed = Boolean(await flow.run(snapshot.files, stagedDir));
+              const flowRes = await flow.run(snapshot.files, stagedDir);
+              passed = typeof flowRes === 'object' && flowRes !== null ? Boolean(flowRes.passed) : Boolean(flowRes);
+              if (typeof flowRes === 'object' && flowRes !== null && flowRes.error) {
+                flowError = flowRes.error;
+              }
             } else {
               // Strict rejection of caller-supplied booleans without an executable function
               passed = false;

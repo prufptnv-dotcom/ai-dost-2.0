@@ -12,8 +12,13 @@ const os = require('os');
 const fs = require('fs');
 const { DatabaseSync } = require('node:sqlite');
 
-let defaultDbPath = path.join(os.tmpdir(), 'aidost_receipt_replay.db');
+let defaultDbPath = process.env.AIDOST_REPLAY_DB_PATH || path.join(__dirname, '..', 'data', 'receipt_replay.db');
 let dbInstance = null;
+
+function _setDefaultDbPathForTesting(customPath) {
+  defaultDbPath = customPath;
+  dbInstance = null;
+}
 
 function getReplayDatabase(customPath = null) {
   if (customPath) {
@@ -85,6 +90,7 @@ function consumeReceiptSignature(signature, runId = 'unknown', artifactHash = 'u
 
 /**
  * Checks whether a signature has already been consumed.
+ * Throws REPLAY_REGISTRY_ERROR on database lookup error (fail closed).
  */
 function isReceiptSignatureConsumed(signature, customDb = null) {
   if (!signature || typeof signature !== 'string') return false;
@@ -95,8 +101,10 @@ function isReceiptSignatureConsumed(signature, customDb = null) {
     const stmt = db.prepare('SELECT 1 FROM consumed_receipts WHERE signature = ? LIMIT 1');
     const row = stmt.get(sig);
     return Boolean(row);
-  } catch (_) {
-    return false;
+  } catch (err) {
+    const regError = new Error(`REPLAY_REGISTRY_ERROR: Failed to query replay registry: ${err.message}`);
+    regError.code = 'REPLAY_REGISTRY_ERROR';
+    throw regError;
   }
 }
 
@@ -114,5 +122,6 @@ module.exports = {
   consumeReceiptSignature,
   isReceiptSignatureConsumed,
   getReplayDatabase,
-  _clearConsumedReceiptsForTesting
+  _clearConsumedReceiptsForTesting,
+  _setDefaultDbPathForTesting
 };

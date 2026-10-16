@@ -27,13 +27,50 @@ const DEFAULT_LIMITS = {
 };
 
 /**
- * Normalizes a relative file path using POSIX forward slashes.
+ * Validates and normalizes a relative file path using POSIX forward slashes.
+ * Rejects NUL bytes, absolute paths, traversal (..), and ambiguous normalization.
  */
 function normalizeRelativePath(relPath) {
-  return String(relPath || '')
-    .replace(/\\/g, '/')
-    .replace(/^\.\//, '')
-    .trim();
+  if (typeof relPath !== 'string') {
+    throw new Error('PATH_TRAVERSAL_DETECTED: Path must be a string');
+  }
+
+  // 1. NUL byte check
+  if (relPath.includes('\0')) {
+    throw new Error('PATH_TRAVERSAL_DETECTED: NUL bytes are forbidden in paths');
+  }
+
+  const raw = relPath.trim();
+  if (!raw) {
+    throw new Error('PATH_TRAVERSAL_DETECTED: Empty path is not allowed');
+  }
+
+  // 2. Absolute path check (POSIX root or Windows drive letter)
+  if (path.isAbsolute(raw) || raw.startsWith('/') || raw.startsWith('\\') || /^[a-zA-Z]:[/\\]/.test(raw)) {
+    throw new Error(`PATH_TRAVERSAL_DETECTED: Absolute path not allowed: "${raw}"`);
+  }
+
+  // 3. Normalize separators to POSIX
+  let cleaned = raw.replace(/\\/g, '/');
+
+  // Strip leading './'
+  if (cleaned.startsWith('./')) {
+    cleaned = cleaned.slice(2);
+  }
+
+  // 4. Check for traversal segments and ambiguous duplicates
+  const segments = cleaned.split('/');
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    if (seg === '..') {
+      throw new Error(`PATH_TRAVERSAL_DETECTED: Directory traversal (..) is forbidden in "${raw}"`);
+    }
+    if (seg === '.' || (seg === '' && i < segments.length)) {
+      throw new Error(`PATH_TRAVERSAL_DETECTED: Ambiguous path normalization (empty or '.' segment) in "${raw}"`);
+    }
+  }
+
+  return cleaned;
 }
 
 /**
@@ -62,6 +99,10 @@ function createWorkspaceSnapshot(source, options = {}) {
   let fileCount = 0;
 
   function addFile(normalizedPath, content) {
+    if (fileMap[normalizedPath] !== undefined) {
+      throw new Error(`MANIFEST_DUPLICATE_FILE: File "${normalizedPath}" appears more than once in snapshot.`);
+    }
+
     if (typeof content !== 'string') {
       content = String(content || '');
     }
@@ -93,11 +134,41 @@ function createWorkspaceSnapshot(source, options = {}) {
   if (typeof source === 'string') {
     // Directory path
     if (fs.existsSync(source)) {
+      const rootResolved = fs.realpathSync(source);
+
       function scanDir(currentDir, rootDir) {
         const entries = fs.readdirSync(currentDir, { withFileTypes: true });
         for (const ent of entries) {
           if (EXCLUDED_DIRS.has(ent.name)) continue;
           const full = path.join(currentDir, ent.name);
+
+          // Handle symbolic links: verify target does not escape workspace root
+          if (ent.isSymbolicLink()) {
+            let targetReal;
+            try {
+              targetReal = fs.realpathSync(full);
+            } catch (_) {
+              throw new Error(`PATH_TRAVERSAL_DETECTED: Broken symbolic link "${ent.name}"`);
+            }
+            if (!targetReal.startsWith(rootResolved + path.sep) && targetReal !== rootResolved) {
+              throw new Error(
+                `PATH_TRAVERSAL_DETECTED: Symbolic link "${ent.name}" points outside workspace root (${targetReal})`
+              );
+            }
+            const stat = fs.statSync(targetReal);
+            if (stat.isDirectory()) {
+              scanDir(full, rootDir);
+            } else if (stat.isFile()) {
+              const ext = path.extname(ent.name).toLowerCase();
+              if (SUPPORTED_EXTENSIONS.has(ext)) {
+                const rel = normalizeRelativePath(path.relative(rootDir, full));
+                const content = fs.readFileSync(full, 'utf8');
+                addFile(rel, content);
+              }
+            }
+            continue;
+          }
+
           if (ent.isDirectory()) {
             scanDir(full, rootDir);
           } else if (ent.isFile()) {
@@ -139,6 +210,7 @@ function createWorkspaceSnapshot(source, options = {}) {
 
 /**
  * Stages an exact snapshot into a destination directory.
+ * Strictly enforces that no files escape destination directory.
  */
 function stageWorkspaceSnapshot(snapshot, destinationDir) {
   if (!snapshot || !snapshot.files || typeof snapshot.files !== 'object') {
@@ -148,17 +220,26 @@ function stageWorkspaceSnapshot(snapshot, destinationDir) {
     throw new Error('INVALID_DESTINATION: Destination directory string is required.');
   }
 
-  if (!fs.existsSync(destinationDir)) {
-    fs.mkdirSync(destinationDir, { recursive: true });
+  const resolvedDest = path.resolve(destinationDir);
+
+  if (!fs.existsSync(resolvedDest)) {
+    fs.mkdirSync(resolvedDest, { recursive: true });
   }
 
   for (const [relPath, content] of Object.entries(snapshot.files)) {
-    const full = path.join(destinationDir, relPath);
+    const normalizedRel = normalizeRelativePath(relPath);
+    const full = path.resolve(resolvedDest, normalizedRel);
+
+    // Verify path does not escape destination directory
+    if (!full.startsWith(resolvedDest + path.sep) && full !== resolvedDest) {
+      throw new Error(`PATH_TRAVERSAL_DETECTED: Target path "${full}" escapes destination directory "${resolvedDest}"`);
+    }
+
     const dir = path.dirname(full);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(full, content, 'utf8');
+    fs.writeFileSync(full, typeof content === 'string' ? content : String(content || ''), 'utf8');
   }
 
   return destinationDir;
@@ -215,6 +296,7 @@ module.exports = {
   computeSnapshotHash,
   stageWorkspaceSnapshot,
   verifyWorkspaceImmutability,
+  normalizeRelativePath,
   SUPPORTED_EXTENSIONS,
   EXCLUDED_DIRS,
   DEFAULT_LIMITS

@@ -178,8 +178,12 @@ function verifyExecutionReceipt(receipt, expectedArtifactHash, expectedRunId = n
   }
 
   // Replay protection: check if signature was already consumed
-  if (isReceiptSignatureConsumed(receipt.receiptSignature)) {
-    return { valid: false, reason: 'RECEIPT_REPLAY_DETECTED' };
+  try {
+    if (isReceiptSignatureConsumed(receipt.receiptSignature)) {
+      return { valid: false, reason: 'RECEIPT_REPLAY_DETECTED' };
+    }
+  } catch (err) {
+    return { valid: false, reason: 'REPLAY_REGISTRY_ERROR', detail: err.message };
   }
 
   // Exact artifact hash match
