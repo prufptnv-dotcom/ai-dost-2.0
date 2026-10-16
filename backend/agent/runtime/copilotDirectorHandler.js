@@ -7,6 +7,7 @@ const { capabilityDiscovery } = require('../../agent/registry/CapabilityDiscover
 const { capabilityGatekeeper } = require('../../agent/policy/CapabilityGatekeeper');
 const logger = require('../../logger');
 const { buildAppSpecification, formatAppSpecificationForPrompt } = require('../../services/appSpecificationService');
+const { classifyRequest, deriveAlgorithmTaskContract, buildAlgorithmGuidanceBlock } = require('./codeGenerationStrategy');
 
 const PERMISSION_LEVELS = ['ask', 'auto', 'turbo'];
 
@@ -239,7 +240,20 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
   // only the execution/planning context receives the additional spec.
   const appSpecification = buildAppSpecification(request);
   const specificationContext = appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '';
-  const directorRequest = [baseDirectorRequest, specificationContext].filter(Boolean).join('\n\n');
+
+  // Algorithmic contract injection when applicable
+  const classification = classifyRequest(request);
+  let algorithmContext = '';
+  if (classification.category === 'ALGORITHMIC_PROBLEM') {
+    const algorithmContract = deriveAlgorithmTaskContract(request, classification);
+    algorithmContext = buildAlgorithmGuidanceBlock(algorithmContract);
+    writeSse(res, {
+      type: 'thinking',
+      message: `📐 Formulated algorithm contract for ${algorithmContract.algorithmFamily} (${algorithmContract.selectedAlgorithm?.name || 'Selected'}) with invariant and falsification tests.`,
+    });
+  }
+
+  const directorRequest = [baseDirectorRequest, specificationContext, algorithmContext].filter(Boolean).join('\n\n');
   if (appSpecification) {
     writeSse(res, {
       type: 'thinking',

@@ -7,7 +7,14 @@ const AgentCascadeAiService = require('./AgentCascadeAiService');
 const AgentCoordinator = require('./AgentCoordinator');
 const { ResultValidator } = require('./resultValidator');
 const logger = require('../../logger');
-const { analyzeCodeGenerationRequest, formatCodeGenerationStrategy } = require('./codeGenerationStrategy');
+const {
+  analyzeCodeGenerationRequest,
+  formatCodeGenerationStrategy,
+  classifyRequest,
+  deriveAlgorithmTaskContract,
+  buildAlgorithmGuidanceBlock,
+  validateTaskPlanSchema
+} = require('./codeGenerationStrategy');
 
 // The planner decides the actual count. This is only a defensive ceiling against
 // malformed or adversarial model output, not a workflow rule.
@@ -181,26 +188,25 @@ function extractJson(text) {
 function fallbackPlan(request) {
   const strategy = analyzeCodeGenerationRequest(request);
   const text = String(request || '').toLowerCase();
-  if (strategy.intent.algorithmic && !strategy.intent.ui && !strategy.intent.fullStack) {
-    return {
-      summary: 'Algorithm-focused fallback execution',
-      tasks: [
-        {
-          id: 'task-1',
-          specialty: 'integration',
-          objective: `Implement the requested algorithm for: ${request}. ${strategy.algorithmRules.join(' ')}`,
-          dependsOn: [],
-          expectedOutput: 'Correct implementation with stated assumptions, complexity analysis, and edge-case handling.'
-        },
-        {
-          id: 'task-2',
-          specialty: 'testing',
-          objective: `Create and run focused tests for the algorithm requested here: ${request}. Cover normal, boundary, empty, duplicate, and adversarial inputs where applicable; compare against a simple independent oracle for small inputs when feasible.`,
-          dependsOn: ['task-1'],
-          expectedOutput: 'Repeatable test evidence and any remaining correctness failures.'
-        }
-      ]
-    };
+  const classification = classifyRequest(request);
+
+  if (classification.category === 'ALGORITHMIC_PROBLEM' || (strategy.intent.algorithmic && !strategy.intent.ui && !strategy.intent.fullStack)) {
+    const contract = deriveAlgorithmTaskContract(request, classification);
+    if (contract && contract.tasks && contract.tasks.length) {
+      return {
+        summary: 'Algorithm-focused fallback execution',
+        contract,
+        tasks: contract.tasks.map((t) => ({
+          id: t.id,
+          specialty: t.specialty || 'integration',
+          role: SPECIALTY_TO_ROLE[t.specialty] || 'CODER',
+          objective: t.objective,
+          dependsOn: t.dependsOn || [],
+          expectedOutput: t.expectedOutput || 'Evidence-backed verified implementation.',
+          requirements: t.requirements || []
+        }))
+      };
+    }
   }
   const complex = strategy.intent.fullStack || strategy.intent.securitySensitive || /\b(full|complete|entire|platform|app|application|website|dashboard|integrat|database|backend|frontend|deploy|production|security)\b/.test(text) || /पूरा ऐप|ऐप बनाओ|वेबसाइट बनाओ|डैशबोर्ड बनाओ|फुल.?स्टैक|प्रोजेक्ट बनाओ|बैक.?एंड|डेटाबेस|लॉगिन सिस्टम/i.test(String(request || ''));
   if (!complex) return {
@@ -216,6 +222,7 @@ function fallbackPlan(request) {
     ]
   };
 }
+
 function hasDependencyCycle(tasks) {
   const graph = new Map(tasks.map((task) => [task.id, task.dependsOn]));
   const visiting = new Set();
@@ -258,7 +265,9 @@ function normalizePlan(raw, request) {
       role: ALLOWED_ROLES.has(role) ? role : 'CODER',
       objective: taskObjective.slice(0, 12000),
       dependsOn: Array.isArray(task.dependsOn) ? [...new Set(task.dependsOn.map(String).map((dep) => dep.trim()).filter(Boolean))] : [],
-      expectedOutput: String(task.expectedOutput || 'Evidence-backed completion of the objective.').trim().slice(0, 4000)
+      expectedOutput: String(task.expectedOutput || 'Evidence-backed completion of the objective.').trim().slice(0, 4000),
+      ...(Array.isArray(task.requirements) ? { requirements: task.requirements } : {}),
+      ...(Array.isArray(task.files) ? { files: task.files } : {})
     });
     ids.add(id);
   }
@@ -267,6 +276,13 @@ function normalizePlan(raw, request) {
     task.dependsOn = task.dependsOn.filter((dep) => validIds.has(dep) && dep !== task.id);
   }
   if (!tasks.length || hasDependencyCycle(tasks)) return fallbackPlan(request);
+
+  const schemaValidation = validateTaskPlanSchema(tasks);
+  if (!schemaValidation.valid) {
+    logger.warn(`[CopilotDirector] Task plan schema invalid (${schemaValidation.errors.join('; ')}). Falling back to safe sequential plan.`);
+    return fallbackPlan(request);
+  }
+
   return { summary: String(input.summary || 'Adaptive Copilot Director plan').slice(0, 2000), tasks };
 }
 
@@ -290,7 +306,13 @@ class CopilotDirector {
     if (!String(request || '').trim()) throw new Error('Director request is required');
     try {
       const strategy = analyzeCodeGenerationRequest(request, context);
-      const prompt = `${DIRECTOR_PLANNER_PROMPT}\n\n${formatCodeGenerationStrategy(strategy)}\n\nREQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
+      const classification = classifyRequest(request);
+      let algorithmGuidance = '';
+      if (classification.category === 'ALGORITHMIC_PROBLEM' || strategy.intent.algorithmic) {
+        const contract = deriveAlgorithmTaskContract(request, classification, context);
+        algorithmGuidance = buildAlgorithmGuidanceBlock(contract);
+      }
+      const prompt = `${DIRECTOR_PLANNER_PROMPT}\n\n${formatCodeGenerationStrategy(strategy)}${algorithmGuidance ? `\n\n${algorithmGuidance}` : ''}\n\nREQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
       // P12.4: mode 'planner' (no system prompt) — 'agent' mode's FILE: format
       // instruction fights this prompt's "respond with valid JSON" contract.
       const response = preferredModel && preferredModel !== 'auto'
