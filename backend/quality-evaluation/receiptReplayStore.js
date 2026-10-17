@@ -7,9 +7,9 @@
  * requests or service restarts.
  */
 
-const path = require('path');
-const os = require('os');
-const fs = require('fs');
+const path = require('node:path');
+const os = require('node:os');
+const fs = require('node:fs');
 const { DatabaseSync } = require('node:sqlite');
 
 let defaultDbPath = process.env.AIDOST_REPLAY_DB_PATH || path.join(__dirname, '..', 'data', 'receipt_replay.db');
@@ -43,7 +43,9 @@ function initReplaySchema(db) {
   try {
     db.exec('PRAGMA journal_mode = WAL;');
     db.exec('PRAGMA synchronous = NORMAL;');
-  } catch (_) {}
+  } catch (_) {
+    // In-memory or temporary SQLite instances may ignore WAL mode pragma
+  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS consumed_receipts (
@@ -115,7 +117,9 @@ function _clearConsumedReceiptsForTesting(customDb = null) {
   try {
     const db = customDb || getReplayDatabase();
     db.exec('DELETE FROM consumed_receipts;');
-  } catch (_) {}
+  } catch (_) {
+    // Database table may not exist yet in fresh test environment
+  }
 }
 
 module.exports = {

@@ -6,9 +6,9 @@
  * staging into isolated runtimes, and post-execution mutation detection.
  */
 
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
 
 const SUPPORTED_EXTENSIONS = new Set([
   '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs',
@@ -32,7 +32,7 @@ const DEFAULT_LIMITS = {
  */
 function normalizeRelativePath(relPath) {
   if (typeof relPath !== 'string') {
-    throw new Error('PATH_TRAVERSAL_DETECTED: Path must be a string');
+    throw new TypeError('PATH_TRAVERSAL_DETECTED: Path must be a string');
   }
 
   // 1. NUL byte check
@@ -51,7 +51,7 @@ function normalizeRelativePath(relPath) {
   }
 
   // 3. Normalize separators to POSIX
-  let cleaned = raw.replace(/\\/g, '/');
+  let cleaned = raw.replaceAll('\\', '/');
 
   // Strip leading './'
   if (cleaned.startsWith('./')) {
@@ -136,6 +136,56 @@ function createWorkspaceSnapshot(source, options = {}) {
     if (fs.existsSync(source)) {
       const rootResolved = fs.realpathSync(source);
 
+function processSymlinkEntry(ent, full, rootResolved, scanDir, addFile, rootDir) {
+  let targetReal;
+  try {
+    targetReal = fs.realpathSync(full);
+  } catch (_) {
+    throw new Error(`PATH_TRAVERSAL_DETECTED: Broken symbolic link "${ent.name}"`);
+  }
+  if (!targetReal.startsWith(rootResolved + path.sep) && targetReal !== rootResolved) {
+    throw new Error(
+      `PATH_TRAVERSAL_DETECTED: Symbolic link "${ent.name}" points outside workspace root (${targetReal})`
+    );
+  }
+  const stat = fs.statSync(targetReal);
+  if (stat.isDirectory()) {
+    scanDir(full, rootDir);
+  } else if (stat.isFile()) {
+    const ext = path.extname(ent.name).toLowerCase();
+    if (SUPPORTED_EXTENSIONS.has(ext)) {
+      const rel = normalizeRelativePath(path.relative(rootDir, full));
+      const content = fs.readFileSync(full, 'utf8');
+      addFile(rel, content);
+    }
+  }
+}
+
+function computeSnapshotDifferences(initialFiles, postFiles) {
+  const initialKeys = new Set(Object.keys(initialFiles));
+  const postKeys = new Set(Object.keys(postFiles));
+
+  const added = [];
+  const deleted = [];
+  const modified = [];
+
+  for (const key of postKeys) {
+    if (!initialKeys.has(key)) {
+      added.push(key);
+    } else if (initialFiles[key] !== postFiles[key]) {
+      modified.push(key);
+    }
+  }
+
+  for (const key of initialKeys) {
+    if (!postKeys.has(key)) {
+      deleted.push(key);
+    }
+  }
+
+  return { added, deleted, modified };
+}
+
       function scanDir(currentDir, rootDir) {
         const entries = fs.readdirSync(currentDir, { withFileTypes: true });
         for (const ent of entries) {
@@ -144,28 +194,7 @@ function createWorkspaceSnapshot(source, options = {}) {
 
           // Handle symbolic links: verify target does not escape workspace root
           if (ent.isSymbolicLink()) {
-            let targetReal;
-            try {
-              targetReal = fs.realpathSync(full);
-            } catch (_) {
-              throw new Error(`PATH_TRAVERSAL_DETECTED: Broken symbolic link "${ent.name}"`);
-            }
-            if (!targetReal.startsWith(rootResolved + path.sep) && targetReal !== rootResolved) {
-              throw new Error(
-                `PATH_TRAVERSAL_DETECTED: Symbolic link "${ent.name}" points outside workspace root (${targetReal})`
-              );
-            }
-            const stat = fs.statSync(targetReal);
-            if (stat.isDirectory()) {
-              scanDir(full, rootDir);
-            } else if (stat.isFile()) {
-              const ext = path.extname(ent.name).toLowerCase();
-              if (SUPPORTED_EXTENSIONS.has(ext)) {
-                const rel = normalizeRelativePath(path.relative(rootDir, full));
-                const content = fs.readFileSync(full, 'utf8');
-                addFile(rel, content);
-              }
-            }
+            processSymlinkEntry(ent, full, rootResolved, scanDir, addFile, rootDir);
             continue;
           }
 
@@ -189,7 +218,7 @@ function createWorkspaceSnapshot(source, options = {}) {
     }
   } else if (source && typeof source === 'object') {
     // In-memory file map
-    const sortedPaths = Object.keys(source).sort();
+    const sortedPaths = Object.keys(source).sort((a, b) => a.localeCompare(b));
     for (const rawPath of sortedPaths) {
       const rel = normalizeRelativePath(rawPath);
       const ext = path.extname(rel).toLowerCase();
@@ -213,7 +242,7 @@ function createWorkspaceSnapshot(source, options = {}) {
  * Strictly enforces that no files escape destination directory.
  */
 function stageWorkspaceSnapshot(snapshot, destinationDir) {
-  if (!snapshot || !snapshot.files || typeof snapshot.files !== 'object') {
+  if (!snapshot?.files || typeof snapshot.files !== 'object') {
     throw new Error('INVALID_SNAPSHOT: Snapshot object with files map is required.');
   }
   if (!destinationDir || typeof destinationDir !== 'string') {
@@ -250,33 +279,14 @@ function stageWorkspaceSnapshot(snapshot, destinationDir) {
  * Detects modified, added, deleted, or renamed files.
  */
 function verifyWorkspaceImmutability(initialSnapshot, stagedDir) {
-  if (!initialSnapshot || !initialSnapshot.hash) {
+  if (!initialSnapshot?.hash) {
     throw new Error('INVALID_INITIAL_SNAPSHOT: Initial snapshot with valid hash is required.');
   }
 
   const postSnapshot = createWorkspaceSnapshot(stagedDir);
 
   if (postSnapshot.hash !== initialSnapshot.hash) {
-    const initialKeys = new Set(Object.keys(initialSnapshot.files));
-    const postKeys = new Set(Object.keys(postSnapshot.files));
-
-    const added = [];
-    const deleted = [];
-    const modified = [];
-
-    for (const key of postKeys) {
-      if (!initialKeys.has(key)) {
-        added.push(key);
-      } else if (initialSnapshot.files[key] !== postSnapshot.files[key]) {
-        modified.push(key);
-      }
-    }
-
-    for (const key of initialKeys) {
-      if (!postKeys.has(key)) {
-        deleted.push(key);
-      }
-    }
+    const { added, deleted, modified } = computeSnapshotDifferences(initialSnapshot.files, postSnapshot.files);
 
     const mutations = [];
     if (modified.length > 0) mutations.push(`modified: [${modified.join(', ')}]`);

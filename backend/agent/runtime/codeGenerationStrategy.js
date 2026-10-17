@@ -72,9 +72,7 @@ const FRAMEWORK_PACKAGE_MAP = [
   ['laravel/framework', 'Laravel'],
 ];
 
-function detectFrameworkFromFiles(context = {}) {
-  const files = context && context.files && typeof context.files === 'object' ? context.files : null;
-  if (!files) return null;
+function detectFrameworkFromPackageJson(files) {
   for (const fileName of ['frontend/package.json', 'web/package.json', 'package.json']) {
     const source = files[fileName];
     if (typeof source !== 'string') continue;
@@ -85,9 +83,18 @@ function detectFrameworkFromFiles(context = {}) {
         if (Object.hasOwn(deps, packageName)) return framework;
       }
     } catch (_) {
-      // An unreadable package manifest must not block code generation.
+      // Ignored: an unreadable package manifest must not block code generation.
     }
   }
+  return null;
+}
+
+function detectFrameworkFromFiles(context = {}) {
+  const files = context?.files && typeof context.files === 'object' ? context.files : null;
+  if (!files) return null;
+  const pkgFramework = detectFrameworkFromPackageJson(files);
+  if (pkgFramework) return pkgFramework;
+
   // Config files are lower-confidence hints; Vite alone is not a UI framework.
   const names = Object.keys(files).map((name) => name.replaceAll('\\', '/'));
   if (names.some((name) => /(^|\/)next\.config\.[^/]+$/.test(name))) return 'Next.js';
@@ -235,9 +242,12 @@ function analyzeCodeGenerationRequest(request, context = {}) {
   const isSecuritySensitive = /\b(auth|authentication|authorization|permission|role|secret|token|password|payment|checkout|personal data|upload|sql|injection|security)\b/i.test(original);
   const isPerformanceSensitive = /\b(fast|ultra.?fast|performance|scale|scalable|high.?load|latency|throughput|memory|large dataset|optimi[sz]e)\b|à¤¤à¥‡à¤œ|à¤œà¤²à¥à¤¦à¥€|à¤«à¤¾à¤¸à¥à¤Ÿ|à¤•à¤® à¤¸à¤®à¤¯|à¤•à¤® à¤®à¥‡à¤®à¥‹à¤°à¥€|à¤ªà¤°à¤«à¥‰à¤°à¥à¤®à¥‡à¤‚à¤¸|à¤‘à¤ªà¥à¤Ÿà¤¿à¤®à¤¾à¤‡à¤œà¤¼/i.test(original);
 
-  const complexity = isAlgorithmic || isSecuritySensitive || isFullStack
-    ? 'high'
-    : (isUi || isModification ? 'medium' : 'low');
+  let complexity = 'low';
+  if (isAlgorithmic || isSecuritySensitive || isFullStack) {
+    complexity = 'high';
+  } else if (isUi || isModification) {
+    complexity = 'medium';
+  }
 
   const architectureRules = [
     'Honor explicit framework/language requests; otherwise inspect the existing workspace and preserve its stack and conventions.',
@@ -288,11 +298,15 @@ function analyzeCodeGenerationRequest(request, context = {}) {
       explicitFramework,
       explicitLanguage,
       workspaceStack,
-      policy: explicitFramework || explicitLanguage
-        ? 'Honor the explicitly requested stack unless technically incompatible; explain any blocker.'
-        : workspaceStack
-          ? 'Preserve the detected workspace stack; do not migrate frameworks without explicit authorization.'
-          : 'Choose a well-supported, minimal stack from requirements and available tools.',
+      policy: (function getStackPolicy() {
+        if (explicitFramework || explicitLanguage) {
+          return 'Honor the explicitly requested stack unless technically incompatible; explain any blocker.';
+        }
+        if (workspaceStack) {
+          return 'Preserve the detected workspace stack; do not migrate frameworks without explicit authorization.';
+        }
+        return 'Choose a well-supported, minimal stack from requirements and available tools.';
+      })(),
     },
     frameworkGuidance: frameworkRules,
     architectureRules,
@@ -324,7 +338,7 @@ function formatCodeGenerationStrategy(strategy) {
 const ALGORITHM_FAMILIES = new Map();
 
 function registerAlgorithmFamily(def) {
-  if (!def || !def.id || !def.name) {
+  if (!def?.id || !def?.name) {
     throw new Error('Algorithm family definition must include id and name');
   }
   ALGORITHM_FAMILIES.set(def.id, def);
@@ -900,6 +914,27 @@ registerAlgorithmFamily({
   ]
 });
 
+const PRIORITY_ALGORITHM_ORDER = [
+  'graphs',
+  'dynamic_programming',
+  'backtracking',
+  'range_queries',
+  'greedy',
+  'caching',
+  'concurrency_streaming',
+  'union_find',
+  'string_matching',
+  'numerical_geometry',
+  'trees',
+  'heaps',
+  'linked_lists',
+  'sorting_searching',
+  'stacks_queues',
+  'hashing',
+  'arrays_strings'
+];
+const PRIORITY_ALGORITHM_SET = new Set(PRIORITY_ALGORITHM_ORDER);
+
 /**
  * Classify a prompt into routine edit vs algorithmic vs application feature.
  */
@@ -928,29 +963,9 @@ function classifyRequest(request = '', context = {}) {
   }
 
   // Check algorithmic families with domain-specific algorithms prioritized over lower-level structures
-  const priorityOrder = [
-    'graphs',
-    'dynamic_programming',
-    'backtracking',
-    'range_queries',
-    'greedy',
-    'caching',
-    'concurrency_streaming',
-    'union_find',
-    'string_matching',
-    'numerical_geometry',
-    'trees',
-    'heaps',
-    'linked_lists',
-    'sorting_searching',
-    'stacks_queues',
-    'hashing',
-    'arrays_strings'
-  ];
-
-  for (const id of priorityOrder) {
+  for (const id of PRIORITY_ALGORITHM_ORDER) {
     const fam = ALGORITHM_FAMILIES.get(id);
-    if (fam && fam.matcher(lower)) {
+    if (fam?.matcher(lower)) {
       return {
         kind: 'ALGORITHMIC_PROBLEM',
         category: 'ALGORITHMIC_PROBLEM',
@@ -964,7 +979,7 @@ function classifyRequest(request = '', context = {}) {
   }
 
   for (const [id, fam] of ALGORITHM_FAMILIES.entries()) {
-    if (!priorityOrder.includes(id) && fam.matcher(lower)) {
+    if (!PRIORITY_ALGORITHM_SET.has(id) && fam?.matcher(lower)) {
       return {
         kind: 'ALGORITHMIC_PROBLEM',
         category: 'ALGORITHMIC_PROBLEM',
@@ -1010,7 +1025,7 @@ function deriveAlgorithmTaskContract(request, classification = null, context = {
 
   // Detect explicit constraints from request text
   const text = String(request || '').toLowerCase();
-  const hasKnownBounds = /\b(\d+\s*(?:<=|<|to|-)\s*[nN]|[nN]\s*(?:<=|<|to|-)\s*\d+|1e\d|10\^\d)\b/.test(text);
+  const hasKnownBounds = /\b(?:\d+\s*(?:<=|<|to|-)\s*[nN]|[nN]\s*(?:<=|<|to|-)\s*\d+|1e\d|10\^\d)\b/.test(text);
   const isFixedWindow = /\b(fixed|window size|length k|size k)\b/i.test(text);
   const isRangeSum = /\b(range sum|prefix sum|cumulative sum)\b/i.test(text);
   const isMaxSubarray = /\b(maximum subarray|largest sum subarray|kadane)\b/i.test(text);
@@ -1160,7 +1175,7 @@ function deriveAlgorithmTaskContract(request, classification = null, context = {
  * Emits the comprehensive 9-stage structured algorithm reasoning pipeline.
  */
 function buildAlgorithmGuidanceBlock(spec) {
-  if (!spec || !spec.specificationNeeded || !spec.contract) return '';
+  if (!spec?.specificationNeeded || !spec?.contract) return '';
 
   const c = spec.contract;
   return `
@@ -1210,6 +1225,115 @@ ${c.falsificationTests.map((ft) => `  * ${ft}`).join('\n')}
 `;
 }
 
+function getTaskAssignedFiles(task) {
+  if (Array.isArray(task.files)) return task.files;
+  if (typeof task.file === 'string') return [task.file];
+  if (task.input?.path) return [task.input.path];
+  return [];
+}
+
+function getTaskDependencies(task) {
+  if (Array.isArray(task.dependsOn)) return task.dependsOn;
+  if (Array.isArray(task.dependencies)) return task.dependencies;
+  return [];
+}
+
+function validateTaskEntry(task, index, taskIds, taskMap, fileOwnership, errors, warnings) {
+  if (!task || typeof task !== 'object' || Array.isArray(task)) {
+    errors.push(`Task at index ${index} must be a valid object`);
+    return;
+  }
+
+  const id = String(task.id || '').trim();
+  if (!id) {
+    errors.push(`Task at index ${index} is missing mandatory 'id' field`);
+    return;
+  }
+
+  if (taskIds.has(id)) {
+    errors.push(`Duplicate task ID: "${id}"`);
+    return;
+  }
+
+  taskIds.add(id);
+  taskMap.set(id, task);
+
+  const title = String(task.title || task.description || task.goal || task.objective || '').trim();
+  if (!title) {
+    errors.push(`Task "${id}" is missing mandatory description or title`);
+  }
+
+  const role = String(task.role || task.specialty || '').trim();
+  if (!role && !task.tool) {
+    warnings.push(`Task "${id}" has neither role nor tool specified`);
+  }
+
+  const assignedFiles = getTaskAssignedFiles(task);
+  for (const file of assignedFiles) {
+    const normFile = String(file).replaceAll('\\', '/').trim();
+    if (!normFile) continue;
+    if (fileOwnership.has(normFile)) {
+      const prevTaskId = fileOwnership.get(normFile);
+      const deps = getTaskDependencies(task);
+      if (!deps.includes(prevTaskId)) {
+        errors.push(`Uncoordinated concurrent file write conflict on "${normFile}" between tasks "${prevTaskId}" and "${id}" without explicit dependency order`);
+      }
+    }
+    fileOwnership.set(normFile, id);
+  }
+}
+
+function buildTaskDependencyGraph(taskMap, taskIds, errors) {
+  const adjList = new Map();
+  const inDegree = new Map();
+  for (const id of taskIds) {
+    adjList.set(id, []);
+    inDegree.set(id, 0);
+  }
+
+  for (const [id, task] of taskMap.entries()) {
+    const deps = getTaskDependencies(task);
+    for (const depId of deps) {
+      const normDep = String(depId).trim();
+      if (normDep === id) {
+        errors.push(`Task "${id}" cannot depend on itself (self-dependency)`);
+        continue;
+      }
+      if (!taskIds.has(normDep)) {
+        errors.push(`Task "${id}" references unknown dependency "${normDep}"`);
+        continue;
+      }
+      adjList.get(normDep).push(id);
+      inDegree.set(id, (inDegree.get(id) || 0) + 1);
+    }
+  }
+  return { adjList, inDegree };
+}
+
+function sortTasksKahn(adjList, inDegree, taskIds, errors) {
+  const queue = [];
+  for (const [id, deg] of inDegree.entries()) {
+    if (deg === 0) queue.push(id);
+  }
+
+  const sortedTaskIds = [];
+  while (queue.length > 0) {
+    const curr = queue.shift();
+    sortedTaskIds.push(curr);
+    for (const neighbor of adjList.get(curr) || []) {
+      const nextDeg = inDegree.get(neighbor) - 1;
+      inDegree.set(neighbor, nextDeg);
+      if (nextDeg === 0) queue.push(neighbor);
+    }
+  }
+
+  if (sortedTaskIds.length < taskIds.size && taskIds.size > 0) {
+    const cyclicNodes = Array.from(taskIds).filter((id) => (inDegree.get(id) || 0) > 0);
+    errors.push(`Cyclic dependency detected among tasks: ${cyclicNodes.join(', ')}`);
+  }
+  return sortedTaskIds;
+}
+
 /**
  * Validates task plan structure, dependencies, duplicate IDs, and file conflicts deterministically.
  */
@@ -1230,106 +1354,12 @@ function validateTaskPlanSchema(tasks, options = {}) {
   const taskMap = new Map();
   const fileOwnership = new Map(); // filePath -> taskId
 
-  // Pass 1: Validate individual task shapes and detect duplicates
   for (let i = 0; i < tasks.length; i++) {
-    const task = tasks[i];
-    if (!task || typeof task !== 'object' || Array.isArray(task)) {
-      errors.push(`Task at index ${i} must be a valid object`);
-      continue;
-    }
-
-    const id = String(task.id || '').trim();
-    if (!id) {
-      errors.push(`Task at index ${i} is missing mandatory 'id' field`);
-      continue;
-    }
-
-    if (taskIds.has(id)) {
-      errors.push(`Duplicate task ID: "${id}"`);
-      continue;
-    }
-
-    taskIds.add(id);
-    taskMap.set(id, task);
-
-    const title = String(task.title || task.description || task.goal || task.objective || '').trim();
-    if (!title) {
-      errors.push(`Task "${id}" is missing mandatory description or title`);
-    }
-
-    const role = String(task.role || task.specialty || '').trim();
-    if (!role && !task.tool) {
-      warnings.push(`Task "${id}" has neither role nor tool specified`);
-    }
-
-    // Check file assignments if specified
-    const assignedFiles = Array.isArray(task.files)
-      ? task.files
-      : (typeof task.file === 'string' ? [task.file] : (task.input?.path ? [task.input.path] : []));
-
-    for (const file of assignedFiles) {
-      const normFile = String(file).replaceAll('\\', '/').trim();
-      if (!normFile) continue;
-      // If task has dependencies on the previous owner, that is a coordinated handover.
-      // If tasks are independent/parallel and target the same file, flag collision.
-      if (fileOwnership.has(normFile)) {
-        const prevTaskId = fileOwnership.get(normFile);
-        const deps = Array.isArray(task.dependsOn) ? task.dependsOn : (Array.isArray(task.dependencies) ? task.dependencies : []);
-        if (!deps.includes(prevTaskId)) {
-          errors.push(`Uncoordinated concurrent file write conflict on "${normFile}" between tasks "${prevTaskId}" and "${id}" without explicit dependency order`);
-        }
-      }
-      fileOwnership.set(normFile, id);
-    }
+    validateTaskEntry(tasks[i], i, taskIds, taskMap, fileOwnership, errors, warnings);
   }
 
-  // Pass 2: Dependency validation and cycle detection
-  const adjList = new Map();
-  const inDegree = new Map();
-  for (const id of taskIds) {
-    adjList.set(id, []);
-    inDegree.set(id, 0);
-  }
-
-  for (const [id, task] of taskMap.entries()) {
-    const deps = Array.isArray(task.dependsOn) ? task.dependsOn : (Array.isArray(task.dependencies) ? task.dependencies : []);
-    for (const depId of deps) {
-      const normDep = String(depId).trim();
-      if (normDep === id) {
-        errors.push(`Task "${id}" cannot depend on itself (self-dependency)`);
-        continue;
-      }
-      if (!taskIds.has(normDep)) {
-        errors.push(`Task "${id}" references unknown dependency "${normDep}"`);
-        continue;
-      }
-      adjList.get(normDep).push(id);
-      inDegree.set(id, (inDegree.get(id) || 0) + 1);
-    }
-  }
-
-  // Topological sort via Kahn's algorithm
-  const queue = [];
-  for (const [id, deg] of inDegree.entries()) {
-    if (deg === 0) queue.push(id);
-  }
-
-  const sortedTaskIds = [];
-  while (queue.length > 0) {
-    const curr = queue.shift();
-    sortedTaskIds.push(curr);
-    for (const neighbor of adjList.get(curr) || []) {
-      const nextDeg = inDegree.get(neighbor) - 1;
-      inDegree.set(neighbor, nextDeg);
-      if (nextDeg === 0) queue.push(neighbor);
-    }
-  }
-
-  if (sortedTaskIds.length < taskIds.size && taskIds.size > 0) {
-    // Cycle detected
-    const cyclicNodes = Array.from(taskIds).filter((id) => (inDegree.get(id) || 0) > 0);
-    errors.push(`Cyclic dependency detected among tasks: ${cyclicNodes.join(', ')}`);
-  }
+  const { adjList, inDegree } = buildTaskDependencyGraph(taskMap, taskIds, errors);
+  const sortedTaskIds = sortTasksKahn(adjList, inDegree, taskIds, errors);
 
   return {
     valid: errors.length === 0,

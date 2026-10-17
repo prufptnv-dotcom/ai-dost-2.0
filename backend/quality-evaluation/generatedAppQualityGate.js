@@ -11,10 +11,10 @@
  * 4. For complex applications, a successful build alone is not sufficient without verified acceptance flows.
  */
 
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const os = require('os');
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const os = require('node:os');
 
 const {
   createWorkspaceSnapshot,
@@ -67,14 +67,18 @@ function collectCanonicalWorkspaceFiles(dir, rootDir = dir, fileMap = {}) {
       } else if (ent.isFile()) {
         const ext = path.extname(ent.name).toLowerCase();
         if (CANONICAL_EXTENSIONS.has(ext)) {
-          const rel = path.relative(rootDir, full).replace(/\\/g, '/');
+          const rel = path.relative(rootDir, full).replaceAll('\\', '/');
           try {
             fileMap[rel] = fs.readFileSync(full, 'utf8');
-          } catch (_) {}
+          } catch (_) {
+            // Unreadable individual file ignored
+          }
         }
       }
     }
-  } catch (_) {}
+  } catch (_) {
+    // Directory traversal failure ignored
+  }
   return fileMap;
 }
 
@@ -165,7 +169,7 @@ function verifyExecutionReceipt(receipt, expectedArtifactHash, expectedRunId = n
 
   // Freshness check: timestamp must be valid ISO, within freshness limit, not in future
   const receiptTime = new Date(receipt.timestamp).getTime();
-  if (isNaN(receiptTime)) {
+  if (Number.isNaN(receiptTime)) {
     return { valid: false, reason: 'INVALID_RECEIPT_TIMESTAMP' };
   }
   const maxAgeMs = options.maxAgeMs || 300000; // 5 minutes
@@ -212,7 +216,7 @@ function verifyExecutionReceipt(receipt, expectedArtifactHash, expectedRunId = n
   try {
     consumeReceiptSignature(receipt.receiptSignature, receipt.runId, receipt.artifactHash);
   } catch (err) {
-    if (err && err.code === 'RECEIPT_REPLAY_DETECTED') {
+    if (err?.code === 'RECEIPT_REPLAY_DETECTED') {
       return { valid: false, reason: 'RECEIPT_REPLAY_DETECTED' };
     }
     return { valid: false, reason: 'REPLAY_REGISTRY_ERROR', detail: err.message };
@@ -221,9 +225,29 @@ function verifyExecutionReceipt(receipt, expectedArtifactHash, expectedRunId = n
   return { valid: true, receipt };
 }
 
+function checkRequiredElement(elemName, source) {
+  if (elemName.includes('button') && /<button|type="submit"/i.test(source)) return true;
+  if (elemName.includes('input') && /<input|<textarea/i.test(source)) return true;
+  if (elemName.includes('table') && /<table|<table>/i.test(source)) return true;
+  if (elemName.includes('chart') && /<svg|<canvas|recharts|chart/i.test(source)) return true;
+  if (elemName.includes('modal') && /modal|dialog|drawer/i.test(source)) return true;
+  if (elemName.includes('pricing') && /pricing|tier|plan/i.test(source)) return true;
+  if (elemName.includes('faq') && /faq|question|answer/i.test(source)) return true;
+  if (elemName.includes('email') && /email|subscribe|input/i.test(source)) return true;
+  return /input|button|select/i.test(source);
+}
+
+function resolveBuildStatusDisplay(receipt, buildPassed, buildNotRequired) {
+  if (receipt?.build?.status) return receipt.build.status;
+  if (buildPassed) return 'PASSED';
+  if (buildNotRequired) return 'NOT_REQUIRED';
+  return 'FAILED';
+}
+
 class GeneratedAppQualityGate {
+  version = '2.1.0-trusted-evidence';
+
   constructor(options = {}) {
-    this.version = '2.1.0-trusted-evidence';
     const casesPath = options.casesPath || path.join(__dirname, 'canonicalCases.json');
     this.cases = this._loadCases(casesPath);
   }
@@ -414,18 +438,7 @@ class GeneratedAppQualityGate {
     }
 
     for (const elem of caseDef.requiredElements || []) {
-      const elemName = elem.name.toLowerCase();
-      let found = false;
-      if (elemName.includes('button') && /<button|type="submit"/i.test(combinedSource)) found = true;
-      else if (elemName.includes('input') && /<input|<textarea/i.test(combinedSource)) found = true;
-      else if (elemName.includes('table') && /<table|<table>/i.test(combinedSource)) found = true;
-      else if (elemName.includes('chart') && /<svg|<canvas|recharts|chart/i.test(combinedSource)) found = true;
-      else if (elemName.includes('modal') && /modal|dialog|drawer/i.test(combinedSource)) found = true;
-      else if (elemName.includes('pricing') && /pricing|tier|plan/i.test(combinedSource)) found = true;
-      else if (elemName.includes('faq') && /faq|question|answer/i.test(combinedSource)) found = true;
-      else if (elemName.includes('email') && /email|subscribe|input/i.test(combinedSource)) found = true;
-      else if (/input|button|select/i.test(combinedSource)) found = true;
-
+      const found = checkRequiredElement(elem.name.toLowerCase(), combinedSource);
       if (found) {
         detectedElements.add(elem.name);
       } else {
@@ -502,13 +515,10 @@ class GeneratedAppQualityGate {
 
           if (buildStatus === 'PASSED' || (verifiedReceipt.build?.success === true && (verifiedReceipt.build?.exitCode === 0 || verifiedReceipt.build?.exitCode == null))) {
             buildPassed = true;
-            buildFailed = false;
           } else if (buildStatus === 'FAILED' || (buildExecuted && verifiedReceipt.build?.success === false) || (verifiedReceipt.build?.exitCode != null && verifiedReceipt.build?.exitCode > 0)) {
-            buildPassed = false;
             buildFailed = true;
           } else if (buildStatus === 'NOT_REQUIRED' || (!buildExecuted && !verifiedReceipt.build?.success)) {
             buildNotRequired = true;
-            buildFailed = false;
           }
 
           countsMeasured = Boolean(verifiedReceipt.tests?.countsMeasured);
@@ -527,14 +537,13 @@ class GeneratedAppQualityGate {
           runtimeStarted = Boolean(verifiedReceipt.runtime?.started === true);
 
           acceptancePassed = Boolean(
-            verifiedReceipt.acceptance &&
-            verifiedReceipt.acceptance.passed === true &&
-            (verifiedReceipt.acceptance.flowsFailed || 0) === 0 &&
-            (verifiedReceipt.acceptance.flowsTested || 0) > 0
+            verifiedReceipt.acceptance?.passed === true &&
+            (verifiedReceipt.acceptance?.flowsFailed || 0) === 0 &&
+            (verifiedReceipt.acceptance?.flowsTested || 0) > 0
           );
           acceptanceFailed = Boolean(
             verifiedReceipt.acceptance &&
-            (verifiedReceipt.acceptance.flowsFailed > 0 ||
+            ((verifiedReceipt.acceptance.flowsFailed || 0) > 0 ||
               ((verifiedReceipt.acceptance.flowsTested || 0) > 0 && verifiedReceipt.acceptance.passed === false))
           );
         }
@@ -568,16 +577,13 @@ class GeneratedAppQualityGate {
       } else {
         status = STATUS.FAILED;
       }
+    } else if (staticPass) {
+      // No execution evidence provided: static diagnostics alone can NEVER yield VERIFIED_PASS
+      status = STATUS.STATIC_DIAGNOSTIC_PASS;
+    } else if (coveragePercent >= 50) {
+      status = STATUS.PARTIAL;
     } else {
-      // No execution evidence provided
-      // Strict rule: static diagnostics alone can NEVER yield VERIFIED_PASS
-      if (staticPass) {
-        status = STATUS.STATIC_DIAGNOSTIC_PASS;
-      } else if (coveragePercent >= 50) {
-        status = STATUS.PARTIAL;
-      } else {
-        status = STATUS.FAILED;
-      }
+      status = STATUS.FAILED;
     }
 
     const latencyMs = Date.now() - startTime;
@@ -619,7 +625,7 @@ class GeneratedAppQualityGate {
         buildExecution: {
           executed: Boolean(receipt?.build?.executed || (receipt?.build && receipt?.build?.status !== 'NOT_REQUIRED')),
           passed: buildPassed,
-          status: receipt?.build?.status || (buildPassed ? 'PASSED' : (buildNotRequired ? 'NOT_REQUIRED' : 'FAILED')),
+          status: resolveBuildStatusDisplay(receipt, buildPassed, buildNotRequired),
           output: receipt?.build?.output || null
         },
         unitTests: {

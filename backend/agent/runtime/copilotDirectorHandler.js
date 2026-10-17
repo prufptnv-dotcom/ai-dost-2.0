@@ -153,26 +153,7 @@ function buildCompletionMessage({ result, taskCount, filesWritten, changedPaths,
   return message;
 }
 
-async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
-  const body = req.body || {};
-  if (!body.copilotDirector) return next();
-
-  const projectId = resolveProjectId(body);
-  const taskId = String(req.get('x-ai-dost-task-id') || body.taskId || `copilot-${Date.now().toString(36)}`);
-  const runId = `director-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-  const request = String(body.userPrompt || body.prompt || '').trim();
-  const preferredModel = typeof body.preferredModel === 'string' && body.preferredModel.trim()
-    ? body.preferredModel.trim()
-    : 'auto';
-  if (!request) return res.status(400).json({ success: false, error: 'Director request is required', taskId });
-
-  const authorization = (dependencies.projectAuthorization || projectAuthorization).authorize(projectId, req, {
-    autoCreateIfMissing: true,
-  });
-  if (!authorization.authorized) {
-    return res.status(authorization.status || 403).json({ success: false, error: authorization.error || 'Project access denied', taskId });
-  }
-
+function initSseResponse(res, taskId) {
   res.statusCode = 200;
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -194,6 +175,85 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
     res.on('close', stopPing);
     res.on('finish', stopPing);
   }
+}
+
+function resolveWorkspaceIntelligence(dependencies, runtime, authorization, res) {
+  try {
+    const meta = dependencies.workspaceManager?.getWorkspaceMetadata?.(authorization.project.id, authorization.user.id)
+      || runtime?.director?.workspaceManager?.getWorkspaceMetadata?.(authorization.project.id, authorization.user.id);
+    if (!meta?.diskPath) return '';
+    const workspaceIntelligence = inspectWorkspace(meta.diskPath);
+    writeSse(res, {
+      type: 'thinking',
+      message: `🔍 Discovered workspace framework: ${workspaceIntelligence.effectiveFramework || workspaceIntelligence.frontend?.framework || 'standard'} (endpoints: ${workspaceIntelligence.existingRoutes?.length || 0}, DB: ${workspaceIntelligence.databaseAndOrm?.orm || 'None'}).`,
+    });
+    return buildPromptDirective(workspaceIntelligence);
+  } catch (err) {
+    logger.warn('[copilotDirectorHandler] Workspace discovery failed:', err?.message || err);
+    writeSse(res, {
+      type: 'thinking',
+      message: `⚠️ Workspace discovery notice: ${err?.message || 'Failed to inspect workspace'}`,
+    });
+    return '';
+  }
+}
+
+function buildEnrichedDirectorRequest({ request, body, dependencies, authorization, runtime, res }) {
+  const contextFiles = (Array.isArray(body.contextFiles) ? body.contextFiles : [])
+    .filter((p) => typeof p === 'string' && p.trim() && !p.includes('..') && p.length < 400)
+    .slice(0, 20);
+  const baseDirectorRequest = contextFiles.length
+    ? `${request}\n\nUser @-mentioned files (prioritize reading/editing these): ${contextFiles.join(', ')}`
+    : request;
+
+  const appSpecification = buildAppSpecification(request);
+  const specificationContext = appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '';
+
+  const classification = classifyRequest(request);
+  let algorithmContext = '';
+  if (classification.category === 'ALGORITHMIC_PROBLEM') {
+    const algorithmContract = deriveAlgorithmTaskContract(request, classification);
+    algorithmContext = buildAlgorithmGuidanceBlock(algorithmContract);
+    writeSse(res, {
+      type: 'thinking',
+      message: `📌 Formulated algorithm contract for ${algorithmContract.algorithmFamily} (${algorithmContract.selectedAlgorithm?.name || 'Selected'}) with invariant and falsification tests.`,
+    });
+  }
+
+  const workspaceContext = resolveWorkspaceIntelligence(dependencies, runtime, authorization, res);
+
+  const directorRequest = [baseDirectorRequest, specificationContext, algorithmContext, workspaceContext].filter(Boolean).join('\n\n');
+  if (appSpecification) {
+    writeSse(res, {
+      type: 'thinking',
+      message: `🧩 Mapped ${appSpecification.requirements.length} requirement(s) to ${appSpecification.acceptanceCriteria.length} acceptance checks before planning.`,
+    });
+  }
+
+  return { directorRequest, appSpecification };
+}
+
+async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
+  const body = req.body || {};
+  if (!body.copilotDirector) return next();
+
+  const projectId = resolveProjectId(body);
+  const taskId = String(req.get('x-ai-dost-task-id') || body.taskId || `copilot-${Date.now().toString(36)}`);
+  const runId = `director-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  const request = String(body.userPrompt || body.prompt || '').trim();
+  const preferredModel = typeof body.preferredModel === 'string' && body.preferredModel.trim()
+    ? body.preferredModel.trim()
+    : 'auto';
+  if (!request) return res.status(400).json({ success: false, error: 'Director request is required', taskId });
+
+  const authorization = (dependencies.projectAuthorization || projectAuthorization).authorize(projectId, req, {
+    autoCreateIfMissing: true,
+  });
+  if (!authorization.authorized) {
+    return res.status(authorization.status || 403).json({ success: false, error: authorization.error || 'Project access denied', taskId });
+  }
+
+  initSseResponse(res, taskId);
 
   const activeTask = getActiveTask(taskId);
   const signal = activeTask?.controller?.signal;
@@ -204,7 +264,7 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
 
   const rawLevel = String(body.permissionLevel || '').toLowerCase();
   const permissionLevel = PERMISSION_LEVELS.has(rawLevel) ? rawLevel : 'auto';
-  let runApprovalToken = body.approvalToken || req.headers?.['x-approval-token'] || null;
+  const initialApprovalToken = body.approvalToken || req.headers?.['x-approval-token'] || null;
 
   const gateResult = executeAskPermissionGate({
     req,
@@ -214,10 +274,10 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
     taskId,
     dependencies,
     permissionLevel,
-    runApprovalToken,
+    runApprovalToken: initialApprovalToken,
   });
   if (gateResult.blocked) return;
-  runApprovalToken = gateResult.runApprovalToken;
+  const runApprovalToken = gateResult.runApprovalToken;
 
   const writtenPaths = new Set();
   let writeAttempts = 0;
@@ -256,54 +316,14 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
       ? body.plan
       : null;
 
-    const contextFiles = (Array.isArray(body.contextFiles) ? body.contextFiles : [])
-      .filter((p) => typeof p === 'string' && p.trim() && !p.includes('..') && p.length < 400)
-      .slice(0, 20);
-    const baseDirectorRequest = contextFiles.length
-      ? `${request}\n\nUser @-mentioned files (prioritize reading/editing these): ${contextFiles.join(', ')}`
-      : request;
-
-    const appSpecification = buildAppSpecification(request);
-    const specificationContext = appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '';
-
-    const classification = classifyRequest(request);
-    let algorithmContext = '';
-    if (classification.category === 'ALGORITHMIC_PROBLEM') {
-      const algorithmContract = deriveAlgorithmTaskContract(request, classification);
-      algorithmContext = buildAlgorithmGuidanceBlock(algorithmContract);
-      writeSse(res, {
-        type: 'thinking',
-        message: `📌 Formulated algorithm contract for ${algorithmContract.algorithmFamily} (${algorithmContract.selectedAlgorithm?.name || 'Selected'}) with invariant and falsification tests.`,
-      });
-    }
-
-    let workspaceContext = '';
-    try {
-      const meta = dependencies.workspaceManager?.getWorkspaceMetadata?.(authorization.project.id, authorization.user.id)
-        || runtime?.director?.workspaceManager?.getWorkspaceMetadata?.(authorization.project.id, authorization.user.id);
-      if (meta?.diskPath) {
-        const workspaceIntelligence = inspectWorkspace(meta.diskPath);
-        workspaceContext = buildPromptDirective(workspaceIntelligence);
-        writeSse(res, {
-          type: 'thinking',
-          message: `🔍 Discovered workspace framework: ${workspaceIntelligence.effectiveFramework || workspaceIntelligence.frontend?.framework || 'standard'} (endpoints: ${workspaceIntelligence.existingRoutes?.length || 0}, DB: ${workspaceIntelligence.databaseAndOrm?.orm || 'None'}).`,
-        });
-      }
-    } catch (err) {
-      logger.warn('[copilotDirectorHandler] Workspace discovery failed:', err?.message || err);
-      writeSse(res, {
-        type: 'thinking',
-        message: `⚠️ Workspace discovery notice: ${err?.message || 'Failed to inspect workspace'}`,
-      });
-    }
-
-    const directorRequest = [baseDirectorRequest, specificationContext, algorithmContext, workspaceContext].filter(Boolean).join('\n\n');
-    if (appSpecification) {
-      writeSse(res, {
-        type: 'thinking',
-        message: '🧩 Mapped ' + appSpecification.requirements.length + ' requirement(s) to ' + appSpecification.acceptanceCriteria.length + ' acceptance checks before planning.',
-      });
-    }
+    const { directorRequest, appSpecification } = buildEnrichedDirectorRequest({
+      request,
+      body,
+      dependencies,
+      authorization,
+      runtime,
+      res,
+    });
 
     const result = await runtime.director.run({
       userId: authorization.user.id,
@@ -333,11 +353,6 @@ async function handleCopilotDirectorRequest(req, res, next, dependencies = {}) {
       tasksSkipped,
       canceled,
     });
-    // P12.3: say when tasks could not be delegated (worker cap / blocked deps)
-    // instead of silently implying every plan task ran.
-    if (tasksSkipped > 0) {
-      message += ` (${tasksSkipped} plan task(s) were skipped — worker/dependency limits)`;
-    }
 
     writeSse(res, {
       type: canceled ? 'director_canceled' : 'director_complete',

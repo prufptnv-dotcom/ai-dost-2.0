@@ -49,7 +49,7 @@ const SECURITY_PATTERNS = [
   { pattern: /\beval\s*\(/, message: 'Unsafe eval() usage detected; potential arbitrary code execution vulnerability.' },
   { pattern: /new\s+Function\s*\(/, message: 'Unsafe Function constructor usage detected.' },
   { pattern: /dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?!DOMPurify\.sanitize)/, message: 'Unsanitized dangerouslySetInnerHTML usage creates XSS vulnerability.' },
-  { pattern: /SELECT\s+[\s\S]+?\bFROM\b[\s\S]+?\bWHERE\b[\s\S]*?=\s*['"]?\s*\+\s*[\w$]+/i, message: 'Potential SQL injection risk: raw string concatenation in SQL statement.' }
+  { pattern: /SELECT\b[^;\n]*?\bFROM\b[^;\n]*?\bWHERE\b[^;\n]*?=\s*['"]?\s*\+\s*[\w$]+/i, message: 'Potential SQL injection risk: raw string concatenation in SQL statement.' }
 ];
 
 const RESOURCE_PATTERNS = [
@@ -86,7 +86,7 @@ function auditSpecCoverage(spec, entries, findings) {
   }
 }
 
-function auditFilePatterns(filePath, content, lines, findings) {
+function auditLinePatterns(filePath, lines, findings) {
   for (const p of PLACEHOLDER_PATTERNS) {
     for (let i = 0; i < lines.length; i++) {
       if (p.pattern.test(lines[i])) {
@@ -118,7 +118,9 @@ function auditFilePatterns(filePath, content, lines, findings) {
       }
     }
   }
+}
 
+function auditResourcePatterns(filePath, content, findings) {
   for (const res of RESOURCE_PATTERNS) {
     if (res.pattern.test(content)) {
       if (res.mustHave && !res.mustHave.test(content)) {
@@ -143,7 +145,7 @@ function auditFilePatterns(filePath, content, lines, findings) {
     }
   }
 
-  if (/\b(?:map|filter|forEach)\s*\([^)=]*=>\s*[^().]*\.(?:find|filter|map|includes)\s*\(/.test(content)) {
+  if (/\b(?:map|filter|forEach)\(\s*(?:\([^)]*\)|[\w$]+)\s*=>\s*[^;\n]*?\.(?:find|filter|map|includes)\(/.test(content)) {
     findings.push({
       ruleId: 'QUADRATIC-COMPLEXITY-RISK',
       stage: STAGES.ALGORITHMIC_PERFORMANCE,
@@ -153,6 +155,11 @@ function auditFilePatterns(filePath, content, lines, findings) {
       suggestion: 'Convert the inner collection into a Set or Map for O(1) lookup.'
     });
   }
+}
+
+function auditFilePatterns(filePath, content, lines, findings) {
+  auditLinePatterns(filePath, lines, findings);
+  auditResourcePatterns(filePath, content, findings);
 }
 
 function auditSyntax(filePath, content, findings) {

@@ -13,10 +13,10 @@
  * - Missing or broken harnesses fail closed with UNVERIFIED / FAILED.
  */
 
-const vm = require('vm');
-const path = require('path');
-const fs = require('fs');
-const assert = require('assert');
+const vm = require('node:vm');
+const path = require('node:path');
+const fs = require('node:fs');
+const assert = require('node:assert');
 
 /**
  * Strips JSX tags from return statements to produce executable JavaScript
@@ -29,8 +29,8 @@ function stripJsxForExecution(source) {
     .replace(/export\s+default\s+/g, 'module.exports = exports.default = ')
     .replace(/export\s+(?:const|let|var)\s+(\w+)\s*=/g, 'exports.$1 =')
     .replace(/export\s+function\s+(\w+)/g, 'exports.$1 = function $1')
-    .replace(/import\s+.*?from\s+['"].*?['"];?/g, '')
-    .replace(/import\s+['"].*?['"];?/g, '');
+    .replace(/import\s+[^;'\n]+?from\s+['"][^'"]+['"];?/g, '')
+    .replace(/import\s+['"][^'"]+['"];?/g, '');
 
   const captureSnippet = `
     try {
@@ -84,9 +84,45 @@ function stripJsxForExecution(source) {
   }
 
   // Handle return <...> without wrapping parentheses
-  cleaned = cleaned.replace(/return\s*<[\s\S]*?(?:;|\n(?=\s*\}))/g, captureSnippet);
+  cleaned = cleaned.replace(/return\s*<[^;\n]*?(?:;|\n(?=\s*\}))/g, captureSnippet);
 
   return cleaned;
+}
+
+function calculateDiscount(subtotal, code) {
+  if (String(code).toUpperCase() === 'SAVE20') return subtotal * 0.2;
+  return 0;
+}
+
+function tickCountdown(current) {
+  return Math.max(0, current - 1);
+}
+
+function calculateQuizProgress(current, total) {
+  if (!total || total <= 0) return 0;
+  return Math.round((current / total) * 100);
+}
+
+function resolveFaqToggle(sym, source, ctx) {
+  if (typeof sym.toggleFaq === 'function') return sym.toggleFaq;
+  const inlineMatch = /onClick=\{([^}]+)\}[^>]*>[^<]*?faq/i.exec(source) ||
+                      /(?:<div|<button|<summary)[^>]*onClick=\{([^}]+)\}/i.exec(source);
+  if (inlineMatch?.[1]) {
+    try {
+      return vm.runInContext(`(${inlineMatch[1]})`, ctx);
+    } catch (_) {
+      // Inline accordion handler could not be evaluated in context
+    }
+  }
+  const setMatch = /setOpenIndex\s*\(\s*([^)]+)\s*\)/i.exec(source);
+  if (setMatch) {
+    try {
+      return vm.runInContext(`() => { ${setMatch[0]}; }`, ctx);
+    } catch (_) {
+      // Setter-based accordion toggle could not be synthesized
+    }
+  }
+  return null;
 }
 
 /**
@@ -238,11 +274,13 @@ const CANONICAL_FLOWS = {
         const source = Object.values(files).join('\n');
         let ctaHandler = sym.handleCta || sym.onCtaClick || sym.startTrial;
         if (typeof ctaHandler !== 'function') {
-          const inlineMatch = source.match(/<button[^>]*onClick=\{([^}]+)\}/i);
+          const inlineMatch = /<button[^>]*onClick=\{([^}]+)\}/i.exec(source);
           if (inlineMatch) {
             try {
               ctaHandler = vm.runInContext(`(${inlineMatch[1]})`, ctx);
-            } catch (_) {}
+            } catch (_) {
+              // Failed to evaluate inline CTA handler
+            }
           }
         }
 
@@ -279,12 +317,14 @@ const CANONICAL_FLOWS = {
         const source = Object.values(files).join('\n');
         let toggle = sym.togglePricing || sym.toggleBilling || sym.setIsAnnual;
         if (typeof toggle !== 'function') {
-          const inlineMatch = source.match(/onClick=\{([^}]+)\}[^>]*>[\s\S]*?(?:billing|pricing|monthly|annual|toggle)/i) ||
-                              source.match(/<button[^>]*onClick=\{([^}]+)\}/i);
+          const inlineMatch = /onClick=\{([^}]+)\}[^>]*>[^<]*?(?:billing|pricing|monthly|annual|toggle)/i.exec(source) ||
+                              /<button[^>]*onClick=\{([^}]+)\}/i.exec(source);
           if (inlineMatch) {
             try {
               toggle = vm.runInContext(`(${inlineMatch[1]})`, ctx);
-            } catch (_) {}
+            } catch (_) {
+              // Failed to evaluate inline pricing toggle handler
+            }
           }
         }
 
@@ -315,26 +355,8 @@ const CANONICAL_FLOWS = {
           return { passed: false, assertionsRun: 0, assertionsPassed: 0, error: 'UNVERIFIED: Candidate files could not be evaluated.' };
         }
 
-        const sym = ctx.__aidost_symbols;
         const source = Object.values(files).join('\n');
-        let toggleFaq = sym.toggleFaq;
-        if (typeof toggleFaq !== 'function') {
-          const inlineMatch = source.match(/onClick=\{([^}]+)\}[^>]*>[\s\S]*?faq/i) ||
-                              source.match(/(?:<div|<button|<summary)[^>]*onClick=\{([^}]+)\}/i);
-          if (inlineMatch && inlineMatch[1]) {
-            try {
-              toggleFaq = vm.runInContext(`(${inlineMatch[1]})`, ctx);
-            } catch (_) {}
-          }
-          if (typeof toggleFaq !== 'function') {
-            const setMatch = source.match(/setOpenIndex\s*\(\s*([^)]+)\s*\)/i);
-            if (setMatch) {
-              try {
-                toggleFaq = vm.runInContext(`() => { ${setMatch[0]}; }`, ctx);
-              } catch (_) {}
-            }
-          }
-        }
+        const toggleFaq = resolveFaqToggle(ctx.__aidost_symbols, source, ctx);
 
         if (typeof toggleFaq !== 'function') {
           return { passed: false, assertionsRun: 0, assertionsPassed: 0, error: 'UNVERIFIED: Accordion toggle function was not found.' };
@@ -369,7 +391,7 @@ const CANONICAL_FLOWS = {
         if (typeof validator !== 'function') {
           const hasEmailInput = /<input[^>]*type=["']email["'][^>]*required/i.test(source) || /<input[^>]*required[^>]*type=["']email["']/i.test(source) || /type=["']email["']/i.test(source);
           if (hasEmailInput) {
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            const emailRegex = /^[^\s@]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
             validator = (email) => Boolean(email && emailRegex.test(email));
           }
         }
@@ -572,12 +594,6 @@ const CANONICAL_FLOWS = {
           return { passed: false, assertionsRun: 0, assertionsPassed: 0, error: 'UNVERIFIED: Promo code logic not found in application.' };
         }
 
-        // Test promo discount calculation
-        function calculateDiscount(subtotal, code) {
-          if (String(code).toUpperCase() === 'SAVE20') return subtotal * 0.2;
-          return 0;
-        }
-
         const validDisc = calculateDiscount(100, 'SAVE20');
         const invalidDisc = calculateDiscount(100, 'FAKE');
 
@@ -638,13 +654,8 @@ const CANONICAL_FLOWS = {
           return { passed: false, assertionsRun: 0, assertionsPassed: 0, error: 'UNVERIFIED: Timer countdown logic not found.' };
         }
 
-        // Test countdown tick state transition
-        function tick(current) {
-          return Math.max(0, current - 1);
-        }
-
-        assert.strictEqual(tick(30), 29);
-        assert.strictEqual(tick(0), 0);
+        assert.strictEqual(tickCountdown(30), 29);
+        assert.strictEqual(tickCountdown(0), 0);
 
         return {
           passed: true,
@@ -695,13 +706,8 @@ const CANONICAL_FLOWS = {
           return { passed: false, assertionsRun: 0, assertionsPassed: 0, error: 'UNVERIFIED: Progress calculation not found.' };
         }
 
-        function calculateProgress(current, total) {
-          if (!total || total <= 0) return 0;
-          return Math.round((current / total) * 100);
-        }
-
-        assert.strictEqual(calculateProgress(1, 4), 25);
-        assert.strictEqual(calculateProgress(3, 4), 75);
+        assert.strictEqual(calculateQuizProgress(1, 4), 25);
+        assert.strictEqual(calculateQuizProgress(3, 4), 75);
 
         return {
           passed: true,

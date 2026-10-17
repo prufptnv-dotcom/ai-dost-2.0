@@ -10,7 +10,7 @@
  * - Never returns nonexistent case IDs (such as 'landing_page').
  */
 
-const path = require('path');
+const path = require('node:path');
 const canonicalCasesData = require('./canonicalCases.json');
 
 const CANONICAL_CASES = canonicalCasesData.cases || [];

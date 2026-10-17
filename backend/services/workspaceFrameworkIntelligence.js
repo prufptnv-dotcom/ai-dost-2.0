@@ -155,6 +155,7 @@ class WorkspaceFrameworkIntelligence {
               parsed
             });
           } catch (_err) {
+            // Ignored: invalid or unparseable package.json
             results.push({ type: 'npm', name: entry.name, fullPath, relativePath, parsed: null });
           }
         } else if (entry.name === 'requirements.txt' || entry.name === 'pyproject.toml') {
@@ -433,7 +434,12 @@ class WorkspaceFrameworkIntelligence {
     const scanDir = (dir, depth = 0) => {
       if (depth > 4 || endpoints.length >= 25) return;
       let entries = [];
-      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch (_) {
+        // Ignored: unreadable route dir
+        return;
+      }
       for (const e of entries) {
         if (skip.has(e.name)) continue;
         const full = path.join(dir, e.name);
@@ -469,7 +475,12 @@ class WorkspaceFrameworkIntelligence {
       const scanDir = (dir, depth = 0) => {
         if (depth > 2) return [];
         let entries = [];
-        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return []; }
+        try {
+          entries = fs.readdirSync(dir, { withFileTypes: true });
+        } catch (_) {
+          // Ignored: unreadable conventions dir
+          return [];
+        }
         let found = [];
         for (const e of entries) {
           if (IGNORED_DIRS.has(e.name)) continue;

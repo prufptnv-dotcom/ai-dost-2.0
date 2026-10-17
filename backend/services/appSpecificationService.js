@@ -59,7 +59,7 @@ const EXPLICIT_PAGE_RULES = [
 ];
 
 function cleanPrompt(prompt) {
-  return String(prompt || '').replace(/\u0000/g, '').trim().slice(0, MAX_PROMPT_LENGTH);
+  return String(prompt || '').replaceAll('\u0000', '').trim().slice(0, MAX_PROMPT_LENGTH);
 }
 
 function shouldCreateAppSpecification(prompt) {
@@ -85,13 +85,13 @@ function featureSignalIsRequested(prompt, pattern) {
       .split(/\b(?:but|however|except|instead|rather)\b/i).pop()
       // Normalize comma-separated exclusions ("no search, charts, or login")
       // before testing the negation scope.
-      .replace(/,/g, ' ')
+      .replaceAll(',', ' ')
       .replace(/\s+/g, ' ')
       .trim();
     const after = source.slice(matcher.lastIndex, clauseEnd).replace(/^[\s,]+/g, '');
     const negatedPrefix = /\b(?:no|without|exclude|excluding|omit|omitting|avoid|avoiding|remove|removing|don't|do not|shouldn't|should not|must not|never|not(?!\s+only)|nahi|mat)\b(?:\s+[\w'-]+){0,24}\s*$/i;
     const negatedSuffix = /^(?:(?:is|are|was|were|should be|must be)\s+)?(?:not\s+(?:needed|required|necessary|wanted)|(?:isn't|aren't|wasn't|weren't)\s+(?:needed|required|necessary|wanted)|unnecessary|unwanted|nahi|na|mat)\b/i;
-    const negationMarker = before.match(/\b(?:no|without|exclude|excluding|omit|omitting|avoid|avoiding|remove|removing|don't|do not|shouldn't|should not|must not|never|not(?!\s+only)|nahi|mat)\b/i);
+    const negationMarker = /\b(?:no|without|exclude|excluding|omit|omitting|avoid|avoiding|remove|removing|don't|do not|shouldn't|should not|must not|never|not(?!\s+only)|nahi|mat)\b/i.exec(before);
     const exclusionStyle = negationMarker && /^(?:no|without|exclude|excluding|omit|omitting|avoid|avoiding|remove|removing|nahi|mat)$/i.test(negationMarker[0]);
     // A later positive verb can explicitly re-enable a feature: "without login and include search".
     const positiveOverride = exclusionStyle && /\b(?:and|also)\s+(?:include|add|enable|support|require)\b/i.test(before.slice(negationMarker.index + negationMarker[0].length));
@@ -479,7 +479,7 @@ function findMissingFeatureSignals(spec, files) {
     'booking': /\b(bookAppointment|createBooking|selectedDate|timeSlot|reservation)\b/i,
     'notifications': /\b(notification|toast|notify|showAlert|reminder)\b/i,
     'chat': /\b(sendMessage|messages|chatMessages|conversation|websocket|socket\.io)\b/i,
-    'file-upload': /\b(inputType=[\"']file|type=[\"']file|onDrop|dropzone|uploadFile|FormData)\b/i,
+    'file-upload': /\b(inputType=["']file|type=["']file|onDrop|dropzone|uploadFile|FormData)\b/i,
     'dark-mode': /\b(darkMode|themeMode|toggleTheme|setTheme|prefers-color-scheme)\b/i,
     'multi-language': /\b(i18n|useTranslation|changeLanguage|locale|translations)\b/i,
     'forms-validation': /\b(required|validationSchema|validateForm|setError|formErrors|aria-invalid)\b/i,
@@ -520,7 +520,6 @@ function buildAppSpecification(prompt, options = {}) {
     .map((entry) => entry[0]);
   const explicitClauses = extractExplicitClauses(request);
   const matchedFeatures = FEATURE_RULES.filter((feature) => featureSignalIsRequested(request, feature.pattern)).slice(0, MAX_REQUIREMENTS - 1);
-  const explicitFeaturePatterns = matchedFeatures.map((feature) => feature.pattern);
   const unmatchedExplicitClauses = explicitClauses.filter((clause) =>
     !matchedFeatures.some((feature) => featureSignalIsRequested(clause, feature.pattern))
   );

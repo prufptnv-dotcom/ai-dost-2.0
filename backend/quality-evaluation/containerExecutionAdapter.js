@@ -13,11 +13,11 @@
  * - fail-closed SANDBOX_UNAVAILABLE when isolation is required but unavailable
  */
 
-const { spawn, execSync, spawnSync } = require('child_process');
-const path = require('path');
-const os = require('os');
-const fs = require('fs');
-const crypto = require('crypto');
+const { spawn, execSync, spawnSync } = require('node:child_process');
+const path = require('node:path');
+const os = require('node:os');
+const fs = require('node:fs');
+const crypto = require('node:crypto');
 
 class ContainerExecutionAdapter {
   constructor(options = {}) {
@@ -45,13 +45,15 @@ class ContainerExecutionAdapter {
           stdio: 'pipe',
           windowsHide: true
         });
-        if (res && res.status === 0) {
+        if (res?.status === 0) {
           this.runtime = bin;
           this._available = true;
           this._probed = true;
           return { available: true, runtime: bin };
         }
-      } catch (_) {}
+      } catch (_) {
+        // Container binary not present on host PATH or daemon inactive
+      }
     }
 
     this._available = false;
@@ -104,7 +106,7 @@ class ContainerExecutionAdapter {
     }
 
     // Convert Windows paths to forward slashes for container volume mounting if needed
-    const normalizedMountPath = path.resolve(stagedDir).replace(/\\/g, '/');
+    const normalizedMountPath = path.resolve(stagedDir).replaceAll('\\', '/');
     const containerNonce = crypto.randomBytes(8).toString('hex');
     const containerName = `aidost-exec-${containerNonce}`;
 
@@ -123,8 +125,7 @@ class ContainerExecutionAdapter {
     ];
 
     if (readOnly) {
-      dockerArgs.push('-v', `${normalizedMountPath}:/workspace:ro`);
-      dockerArgs.push('--read-only');
+      dockerArgs.push('-v', `${normalizedMountPath}:/workspace:ro`, '--read-only');
     } else {
       dockerArgs.push('-v', `${normalizedMountPath}:/workspace:rw`);
     }

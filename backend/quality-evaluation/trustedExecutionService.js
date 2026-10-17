@@ -7,10 +7,10 @@
  * immutability, evaluates executable acceptance flows, and mints signed evidence receipts.
  */
 
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const crypto = require('crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const crypto = require('node:crypto');
 const {
   createWorkspaceSnapshot,
   stageWorkspaceSnapshot,
@@ -26,6 +26,231 @@ function getRunnerSecret() {
     return null;
   }
   return secret.trim();
+}
+
+function parseTapOutput(combined, testRun, testResult) {
+  const tapTotalMatch = /#\s*tests\s+(\d+)/i.exec(combined);
+  const tapPassMatch = /#\s*pass\s+(\d+)/i.exec(combined);
+  const tapFailMatch = /#\s*fail\s+(\d+)/i.exec(combined);
+
+  if (!tapTotalMatch) {
+    testResult.countsMeasured = false;
+    testResult.testsRun = null;
+    testResult.testsPassed = null;
+    testResult.testsFailed = testRun.exitCode === 0 ? null : 1;
+    return;
+  }
+
+  const total = Number.parseInt(tapTotalMatch[1], 10);
+  const hasPass = Boolean(tapPassMatch);
+  const hasFail = Boolean(tapFailMatch);
+
+  if (!hasPass && !hasFail) {
+    testResult.countsMeasured = false;
+    testResult.testsRun = null;
+    testResult.testsPassed = null;
+    testResult.testsFailed = testRun.exitCode === 0 ? null : 1;
+    testResult.malformed = 'TAP_INCOMPLETE_MISSING_PASS_AND_FAIL_COUNTS';
+    return;
+  }
+
+  let passed = null;
+  if (hasPass) {
+    passed = Number.parseInt(tapPassMatch[1], 10);
+  } else if (hasFail && testRun.exitCode !== 0) {
+    passed = total - Number.parseInt(tapFailMatch[1], 10);
+  }
+
+  let failed = null;
+  if (hasFail) {
+    failed = Number.parseInt(tapFailMatch[1], 10);
+  } else if (hasPass && passed === total) {
+    failed = 0;
+  }
+
+  if (passed === null || failed === null) {
+    testResult.countsMeasured = false;
+    testResult.testsRun = null;
+    testResult.testsPassed = null;
+    testResult.testsFailed = testRun.exitCode === 0 ? null : 1;
+    testResult.malformed = 'TAP_INCOMPLETE_INDETERMINATE_COUNTS';
+    return;
+  }
+
+  const skippedMatch = /#\s*skip(?:ped)?\s+(\d+)/i.exec(combined);
+  const todoMatch = /#\s*todo\s+(\d+)/i.exec(combined);
+  const cancelledMatch = /#\s*cancelled\s+(\d+)/i.exec(combined);
+  const skipped = skippedMatch ? Number.parseInt(skippedMatch[1], 10) : 0;
+  const todo = todoMatch ? Number.parseInt(todoMatch[1], 10) : 0;
+  const cancelled = cancelledMatch ? Number.parseInt(cancelledMatch[1], 10) : 0;
+
+  const accounted = passed + failed + skipped + todo + cancelled;
+  if (accounted !== total) {
+    testResult.countsMeasured = false;
+    testResult.testsRun = null;
+    testResult.testsPassed = null;
+    testResult.testsFailed = testRun.exitCode === 0 ? null : 1;
+    testResult.malformed = `TAP_CONTRADICTORY_COUNTS: total (${total}) !== accounted (${accounted})`;
+  } else {
+    testResult.countsMeasured = true;
+    testResult.testsRun = total;
+    testResult.testsPassed = passed;
+    testResult.testsFailed = failed;
+    testResult.testsSkipped = skipped;
+  }
+}
+
+async function executeSingleAcceptanceFlow(flow, files, stagedDir) {
+  try {
+    const fn = typeof flow.test === 'function' ? flow.test : (typeof flow.run === 'function' ? flow.run : null);
+    if (!fn) {
+      return {
+        passed: false,
+        flowError: 'STATIC_ASSERTION_REJECTED: Acceptance flow lacked executable test function or runner'
+      };
+    }
+    const flowRes = await fn(files, stagedDir);
+    const passed = typeof flowRes === 'object' && flowRes !== null ? Boolean(flowRes.passed) : Boolean(flowRes);
+    const flowError = typeof flowRes === 'object' && flowRes?.error ? flowRes.error : null;
+    return { passed, flowError };
+  } catch (err) {
+    return { passed: false, flowError: err.message };
+  }
+}
+
+async function executeAcceptanceFlowsStep({ acceptanceFlows, caseId, snapshot, stagedDir }) {
+  let flowsToRun = [];
+  if (Array.isArray(acceptanceFlows) && acceptanceFlows.length > 0) {
+    flowsToRun = acceptanceFlows;
+  } else if (caseId) {
+    flowsToRun = getAcceptanceFlows(caseId);
+  }
+
+  if (!Array.isArray(flowsToRun) || flowsToRun.length === 0) {
+    return { passed: false, flowsTested: 0, flowsFailed: 0, flows: [] };
+  }
+
+  const flows = [];
+  let allPassed = true;
+  for (const flow of flowsToRun) {
+    const { passed, flowError } = await executeSingleAcceptanceFlow(flow, snapshot.files, stagedDir);
+    if (!passed) allPassed = false;
+    flows.push({
+      id: String(flow.id || flow.name || `flow-${flows.length}`),
+      name: String(flow.name || flow.id || 'Acceptance Flow'),
+      passed,
+      error: flowError || undefined
+    });
+  }
+
+  const flowsFailed = flows.filter((f) => !f.passed).length;
+  return {
+    passed: allPassed && flows.length > 0,
+    flowsTested: flows.length,
+    flowsFailed,
+    flows
+  };
+}
+
+async function executeBuildStep({ buildCommand, pkg, strictIsolation, effectiveAdapter, stagedDir, timeoutMs }) {
+  const requiresBuild = Boolean(buildCommand || pkg?.scripts?.build);
+  if (!requiresBuild) {
+    return {
+      executed: false,
+      buildResult: {
+        status: 'NOT_REQUIRED',
+        executed: false,
+        success: false,
+        exitCode: null,
+        output: 'No build required for this project'
+      },
+      exitCode: 0,
+      command: null
+    };
+  }
+
+  const bCmd = buildCommand || 'npm run build';
+  if (strictIsolation && !effectiveAdapter.isAvailable()) {
+    throw new Error('SANDBOX_UNAVAILABLE: OS container isolation required for build execution but unavailable.');
+  }
+
+  const buildRun = await effectiveAdapter.execute({
+    stagedDir,
+    command: bCmd.split(' ')[0],
+    args: bCmd.split(' ').slice(1),
+    timeoutMs
+  });
+
+  if (buildRun.status === 'SANDBOX_UNAVAILABLE') {
+    throw new Error('SANDBOX_UNAVAILABLE: OS container isolation is required but unavailable.');
+  }
+
+  const passed = buildRun.exitCode === 0;
+  return {
+    executed: true,
+    buildResult: {
+      status: passed ? 'PASSED' : 'FAILED',
+      executed: true,
+      success: passed,
+      exitCode: buildRun.exitCode,
+      output: (buildRun.stdout + '\n' + buildRun.stderr).slice(0, 4000)
+    },
+    exitCode: buildRun.exitCode,
+    command: bCmd
+  };
+}
+
+async function executeTestStep({ testCommand, pkg, strictIsolation, effectiveAdapter, stagedDir, timeoutMs }) {
+  const effectiveTestCmd = testCommand || (pkg?.scripts?.test ? 'npm test' : null);
+  if (!effectiveTestCmd) {
+    return {
+      executed: false,
+      testResult: {
+        executed: false,
+        commandPassed: false,
+        countsMeasured: false,
+        testsRun: null,
+        testsPassed: null,
+        testsFailed: null
+      },
+      exitCode: 0,
+      command: null
+    };
+  }
+
+  if (strictIsolation && !effectiveAdapter.isAvailable()) {
+    throw new Error('SANDBOX_UNAVAILABLE: OS container isolation required for test execution but unavailable.');
+  }
+
+  const testRun = await effectiveAdapter.execute({
+    stagedDir,
+    command: effectiveTestCmd.split(' ')[0],
+    args: effectiveTestCmd.split(' ').slice(1),
+    timeoutMs
+  });
+
+  if (testRun.status === 'SANDBOX_UNAVAILABLE') {
+    throw new Error('SANDBOX_UNAVAILABLE: OS container isolation is required but unavailable.');
+  }
+
+  const testResult = {
+    executed: true,
+    commandPassed: testRun.exitCode === 0,
+    countsMeasured: false,
+    testsRun: null,
+    testsPassed: null,
+    testsFailed: null
+  };
+
+  const combined = testRun.stdout + '\n' + testRun.stderr;
+  parseTapOutput(combined, testRun, testResult);
+
+  return {
+    executed: true,
+    testResult,
+    exitCode: testRun.exitCode,
+    command: effectiveTestCmd
+  };
 }
 
 class TrustedExecutionService {
@@ -108,7 +333,7 @@ class TrustedExecutionService {
       testsFailed: null
     };
 
-    let runtimeResult = { started: false, port: null };
+    const runtimeResult = { started: false, port: null };
     let acceptanceResult = { passed: false, flowsTested: 0, flowsFailed: 0, flows: [] };
     let finalExitCode = 0;
     let executedCommand = command || 'evaluation_gate';
@@ -119,179 +344,48 @@ class TrustedExecutionService {
       if (fs.existsSync(pkgPath)) {
         try {
           pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-        } catch (_) {}
+        } catch (_) {
+          // Ignore invalid package.json in staged workspace
+        }
       }
 
       // ── Build Execution ──
-      const requiresBuild = Boolean(buildCommand || pkg?.scripts?.build);
-      if (requiresBuild) {
-        const bCmd = buildCommand || 'npm run build';
-        executedCommand = bCmd;
-        buildResult.executed = true;
-
-        if (this.strictIsolation && !effectiveAdapter.isAvailable()) {
-          throw new Error('SANDBOX_UNAVAILABLE: OS container isolation required for build execution but unavailable.');
-        }
-
-        const buildRun = await effectiveAdapter.execute({
-          stagedDir,
-          command: bCmd.split(' ')[0],
-          args: bCmd.split(' ').slice(1),
-          timeoutMs: this.timeoutMs
-        });
-
-        if (buildRun.status === 'SANDBOX_UNAVAILABLE') {
-          throw new Error('SANDBOX_UNAVAILABLE: OS container isolation is required but unavailable.');
-        }
-
-        finalExitCode = buildRun.exitCode;
-        const passed = buildRun.exitCode === 0;
-        buildResult = {
-          status: passed ? 'PASSED' : 'FAILED',
-          executed: true,
-          success: passed,
-          exitCode: buildRun.exitCode,
-          output: (buildRun.stdout + '\n' + buildRun.stderr).slice(0, 4000)
-        };
+      const buildStep = await executeBuildStep({
+        buildCommand,
+        pkg,
+        strictIsolation: this.strictIsolation,
+        effectiveAdapter,
+        stagedDir,
+        timeoutMs: this.timeoutMs
+      });
+      if (buildStep.executed) {
+        executedCommand = buildStep.command;
+        buildResult = buildStep.buildResult;
+        if (buildStep.exitCode !== 0) finalExitCode = buildStep.exitCode;
       }
 
-      // ── Test Execution (Separated from Build!) ──
-      const effectiveTestCmd = testCommand || (pkg?.scripts?.test ? 'npm test' : null);
-      if (effectiveTestCmd) {
-        executedCommand = executedCommand !== 'evaluation_gate' ? `${executedCommand}; ${effectiveTestCmd}` : effectiveTestCmd;
-        testResult.executed = true;
-
-        if (this.strictIsolation && !effectiveAdapter.isAvailable()) {
-          throw new Error('SANDBOX_UNAVAILABLE: OS container isolation required for test execution but unavailable.');
-        }
-
-        const testRun = await effectiveAdapter.execute({
-          stagedDir,
-          command: effectiveTestCmd.split(' ')[0],
-          args: effectiveTestCmd.split(' ').slice(1),
-          timeoutMs: this.timeoutMs
-        });
-
-        if (testRun.status === 'SANDBOX_UNAVAILABLE') {
-          throw new Error('SANDBOX_UNAVAILABLE: OS container isolation is required but unavailable.');
-        }
-
-        if (testRun.exitCode !== 0) {
-          finalExitCode = testRun.exitCode;
-        }
-
-        testResult.commandPassed = testRun.exitCode === 0;
-
-        // Parse structured machine-readable test output (TAP / spec / summary)
-        const combined = testRun.stdout + '\n' + testRun.stderr;
-        const tapTotalMatch = combined.match(/#\s*tests\s+(\d+)/i);
-        const tapPassMatch = combined.match(/#\s*pass\s+(\d+)/i);
-        const tapFailMatch = combined.match(/#\s*fail\s+(\d+)/i);
-
-        if (tapTotalMatch) {
-          const total = parseInt(tapTotalMatch[1], 10);
-          const hasPass = Boolean(tapPassMatch);
-          const hasFail = Boolean(tapFailMatch);
-
-          // If TAP reports total count but omits BOTH pass and fail counts, do not invent either count!
-          if (!hasPass && !hasFail) {
-            testResult.countsMeasured = false;
-            testResult.testsRun = null;
-            testResult.testsPassed = null;
-            testResult.testsFailed = testRun.exitCode === 0 ? null : 1;
-            testResult.malformed = 'TAP_INCOMPLETE_MISSING_PASS_AND_FAIL_COUNTS';
-          } else {
-            const passed = hasPass ? parseInt(tapPassMatch[1], 10) : (hasFail && testRun.exitCode !== 0 ? total - parseInt(tapFailMatch[1], 10) : null);
-            const failed = hasFail ? parseInt(tapFailMatch[1], 10) : (hasPass && passed === total ? 0 : null);
-
-            if (passed === null || failed === null) {
-              testResult.countsMeasured = false;
-              testResult.testsRun = null;
-              testResult.testsPassed = null;
-              testResult.testsFailed = testRun.exitCode === 0 ? null : 1;
-              testResult.malformed = 'TAP_INCOMPLETE_INDETERMINATE_COUNTS';
-            } else {
-              const skippedMatch = combined.match(/#\s*skip(?:ped)?\s+(\d+)/i);
-              const todoMatch = combined.match(/#\s*todo\s+(\d+)/i);
-              const cancelledMatch = combined.match(/#\s*cancelled\s+(\d+)/i);
-              const skipped = skippedMatch ? parseInt(skippedMatch[1], 10) : 0;
-              const todo = todoMatch ? parseInt(todoMatch[1], 10) : 0;
-              const cancelled = cancelledMatch ? parseInt(cancelledMatch[1], 10) : 0;
-
-              const accounted = passed + failed + skipped + todo + cancelled;
-              if (accounted !== total) {
-                // Contradictory/malformed test report! Reject and mark unmeasured.
-                testResult.countsMeasured = false;
-                testResult.testsRun = null;
-                testResult.testsPassed = null;
-                testResult.testsFailed = testRun.exitCode === 0 ? null : 1;
-                testResult.malformed = `TAP_CONTRADICTORY_COUNTS: total (${total}) !== accounted (${accounted})`;
-              } else {
-                testResult.countsMeasured = true;
-                testResult.testsRun = total;
-                testResult.testsPassed = passed;
-                testResult.testsFailed = failed;
-                testResult.testsSkipped = skipped;
-              }
-            }
-          }
-        } else {
-          // Do NOT fabricate test counts from exit code zero!
-          testResult.countsMeasured = false;
-          testResult.testsRun = null;
-          testResult.testsPassed = null;
-          testResult.testsFailed = testRun.exitCode === 0 ? null : 1;
-        }
+      // ── Test Execution ──
+      const testStep = await executeTestStep({
+        testCommand,
+        pkg,
+        strictIsolation: this.strictIsolation,
+        effectiveAdapter,
+        stagedDir,
+        timeoutMs: this.timeoutMs
+      });
+      if (testStep.executed) {
+        executedCommand = executedCommand !== 'evaluation_gate' ? `${executedCommand}; ${testStep.command}` : testStep.command;
+        testResult = testStep.testResult;
+        if (testStep.exitCode !== 0) finalExitCode = testStep.exitCode;
       }
 
       // ── Executable Acceptance Flows ──
-      const flowsToRun = Array.isArray(acceptanceFlows) && acceptanceFlows.length > 0
-        ? acceptanceFlows
-        : (caseId ? getAcceptanceFlows(caseId) : []);
-
-      if (Array.isArray(flowsToRun) && flowsToRun.length > 0) {
-        const flows = [];
-        let allPassed = true;
-        for (const flow of flowsToRun) {
-          let passed = false;
-          let flowError = null;
-          try {
-            if (typeof flow.test === 'function') {
-              const flowRes = await flow.test(snapshot.files, stagedDir);
-              passed = typeof flowRes === 'object' && flowRes !== null ? Boolean(flowRes.passed) : Boolean(flowRes);
-              if (typeof flowRes === 'object' && flowRes !== null && flowRes.error) {
-                flowError = flowRes.error;
-              }
-            } else if (typeof flow.run === 'function') {
-              const flowRes = await flow.run(snapshot.files, stagedDir);
-              passed = typeof flowRes === 'object' && flowRes !== null ? Boolean(flowRes.passed) : Boolean(flowRes);
-              if (typeof flowRes === 'object' && flowRes !== null && flowRes.error) {
-                flowError = flowRes.error;
-              }
-            } else {
-              // Strict rejection of caller-supplied booleans without an executable function
-              passed = false;
-              flowError = 'STATIC_ASSERTION_REJECTED: Acceptance flow lacked executable test function or runner';
-            }
-          } catch (err) {
-            passed = false;
-            flowError = err.message;
-          }
-          if (!passed) allPassed = false;
-          flows.push({
-            id: String(flow.id || flow.name || `flow-${flows.length}`),
-            name: String(flow.name || flow.id || 'Acceptance Flow'),
-            passed,
-            error: flowError || undefined
-          });
-        }
-        acceptanceResult = {
-          passed: allPassed && flows.length > 0,
-          flowsTested: flows.length,
-          flowsFailed: flows.filter((f) => !f.passed).length,
-          flows
-        };
-      }
+      acceptanceResult = await executeAcceptanceFlowsStep({
+        acceptanceFlows,
+        caseId,
+        snapshot,
+        stagedDir
+      });
 
       // ── Immutability Validation ──
       verifyWorkspaceImmutability(snapshot, stagedDir);
@@ -300,7 +394,9 @@ class TrustedExecutionService {
       // Clean up staged workspace directory
       try {
         fs.rmSync(stagedDir, { recursive: true, force: true });
-      } catch (_) {}
+      } catch (_) {
+        // Staged workspace directory cleanup failure ignored
+      }
     }
 
     const receiptPayload = {

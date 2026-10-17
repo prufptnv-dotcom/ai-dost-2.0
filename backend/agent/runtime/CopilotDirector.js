@@ -1,7 +1,7 @@
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
+const path = require('node:path');
 const OpenAIService = require('../../services/openaiService');
 const AgentCascadeAiService = require('./AgentCascadeAiService');
 const AgentCoordinator = require('./AgentCoordinator');
@@ -48,7 +48,7 @@ function listExistingFilesBounded(root, max = 100) {
   const walk = (dir, depth) => {
     if (out.length >= max || depth > 6) return;
     let entries = [];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { /* Ignored: unreadable directory */ return; }
     for (const e of entries) {
       if (skip.has(e.name)) continue;
       const full = path.join(dir, e.name);
@@ -60,7 +60,7 @@ function listExistingFilesBounded(root, max = 100) {
     }
   };
   walk(root, 0);
-  return out.sort();
+  return out.sort((a, b) => a.localeCompare(b));
 }
 
 // P12.9 (E2E run #15): knowing the file LIST was not enough — the specialist
@@ -76,7 +76,7 @@ function collectWorkspaceFilesBounded(rootDir) {
     const snapshot = createWorkspaceSnapshot(rootDir);
     return snapshot.files;
   } catch (err) {
-    if (err && err.message && err.message.startsWith('MANIFEST_LIMIT_EXCEEDED')) {
+    if (err?.message?.startsWith('MANIFEST_LIMIT_EXCEEDED')) {
       throw err;
     }
     return {};
@@ -225,8 +225,7 @@ function escapeControlCharsInStrings(str) {
   let inStr = false;
   let esc = false;
   let out = '';
-  for (let i = 0; i < str.length; i++) {
-    const c = str[i];
+  for (const c of str) {
     if (c === '"' && !esc) {
       inStr = !inStr;
       out += c;
@@ -237,13 +236,13 @@ function escapeControlCharsInStrings(str) {
       } else {
         esc = false;
         if (c === '\n') {
-          out += '\n';
+          out += String.raw`\n`;
         } else if (c === '\r') {
           // ignore
         } else if (c === '\t') {
-          out += '\\t';
-        } else if (c.charCodeAt(0) < 32) {
-          out += '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0');
+          out += String.raw`\t`;
+        } else if (c.codePointAt(0) < 32) {
+          out += String.raw`\u` + c.codePointAt(0).toString(16).padStart(4, '0');
         } else {
           out += c;
         }
@@ -263,12 +262,16 @@ function extractJson(text) {
   source = source.trim();
   try {
     return JSON.parse(source);
-  } catch (_) {}
+  } catch (_) {
+    // Ignored: try escaping control characters
+  }
 
   const sanitized = escapeControlCharsInStrings(source);
   try {
     return JSON.parse(sanitized);
-  } catch (_) {}
+  } catch (_) {
+    // Ignored: try delimited slices
+  }
 
   const start = sanitized.indexOf('{');
   const end = sanitized.lastIndexOf('}');
@@ -279,7 +282,9 @@ function extractJson(text) {
     } catch (_) {
       try {
         return JSON.parse(slice.replace(/,\s*([}\]])/g, '$1'));
-      } catch (_) {}
+      } catch (_) {
+        // Ignored: fall through to throw Error
+      }
     }
   }
   throw new Error('Director planner returned invalid JSON');
@@ -287,12 +292,11 @@ function extractJson(text) {
 
 function fallbackPlan(request) {
   const strategy = analyzeCodeGenerationRequest(request);
-  const text = String(request || '').toLowerCase();
   const classification = classifyRequest(request);
 
   if (classification.category === 'ALGORITHMIC_PROBLEM' || (strategy.intent.algorithmic && !strategy.intent.ui && !strategy.intent.fullStack)) {
     const contract = deriveAlgorithmTaskContract(request, classification);
-    if (contract && contract.tasks && contract.tasks.length) {
+    if (contract?.tasks?.length) {
       return {
         summary: 'Algorithm-focused fallback execution',
         contract,
@@ -439,14 +443,19 @@ class CopilotDirector {
         }
       }
 
-      const prompt = `${DIRECTOR_PLANNER_PROMPT}\n\n${workspaceDirective ? `${workspaceDirective}\n\n` : ''}${formatCodeGenerationStrategy(strategy)}${algorithmGuidance ? `\n\n${algorithmGuidance}` : ''}\n\nREQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
+      const workspacePart = workspaceDirective ? `${workspaceDirective}\n\n` : '';
+      const algoPart = algorithmGuidance ? `\n\n${algorithmGuidance}` : '';
+      const prompt = `${DIRECTOR_PLANNER_PROMPT}\n\n${workspacePart}${formatCodeGenerationStrategy(strategy)}${algoPart}\n\nREQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
       // P12.4: mode 'planner' (no system prompt) - 'agent' mode's FILE: format
       // instruction fights this prompt's "respond with valid JSON" contract.
       const response = effectiveModel && effectiveModel !== 'auto'
         ? await this.aiService.chat(prompt, [], 'planner', null, effectiveModel)
         : await this.aiService.chat(prompt, [], 'planner');
       return normalizePlan(extractJson(response), request);
-    } catch (_) { return normalizePlan(null, request); }
+    } catch (_) {
+      // Ignored: fall back to normalized fallback plan
+      return normalizePlan(null, request);
+    }
   }
 
   async executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent = () => {}, permissionLevel = 'auto', approvalToken = null, approvalState = null, preferredModel = 'auto' }) {
@@ -754,7 +763,7 @@ class CopilotDirector {
           }
         }
       } catch (err) {
-        if (err.message && err.message.startsWith('Final workspace contract validation failed')) {
+        if (err?.message?.startsWith('Final workspace contract validation failed')) {
           throw err;
         }
       }
@@ -833,7 +842,7 @@ class CopilotDirector {
             // Fail closed! Missing runner secret, artifact mutation, failed build/tests must NOT be swallowed as warnings
             onEvent({ type: 'quality_gate_evaluation', status: STATUS.FAILED, error: err.message });
             logger.warn(`[CopilotDirector] Quality gate failure recorded: ${err.message}`);
-            if (err.message && err.message.startsWith('Generated app quality gate failed')) {
+            if (err?.message?.startsWith('Generated app quality gate failed')) {
               throw err;
             }
             throw new Error(`Generated app quality gate failed: ${err.message}`);

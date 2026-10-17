@@ -58,6 +58,27 @@ function resolveWorkspaceDirective(effectiveProjectPath) {
   }
 }
 
+function initChatTaskSse(res, taskId) {
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-AI-Dost-Task-Id', taskId);
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+  writeSse(res, { type: 'task_start', phase: 'queued', taskId, status: 'Canonical agent task accepted' });
+}
+
+function handleChatTaskError(res, taskId, error, signal) {
+  const canceled = Boolean(signal?.aborted) || error?.code === 'TASK_CANCELED';
+  writeSse(res, {
+    type: canceled ? 'task_canceled' : 'task_error',
+    taskId,
+    status: canceled ? 'CANCELLED' : 'FAILED',
+    error: canceled ? 'Task canceled by user' : (error?.message || 'Agent task failed'),
+  });
+  return res.end();
+}
+
 async function handleChatTaskRequest(req, res, next, dependencies = {}) {
   const body = req.body || {};
   if (!body.chatTaskPlan) return next();
@@ -81,16 +102,10 @@ async function handleChatTaskRequest(req, res, next, dependencies = {}) {
     return next();
   }
 
-  res.statusCode = 200;
-  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-AI-Dost-Task-Id', taskId);
-  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+  initChatTaskSse(res, taskId);
 
   const activeTask = getActiveTask(taskId);
   const signal = activeTask?.controller?.signal;
-  writeSse(res, { type: 'task_start', phase: 'queued', taskId, status: 'Canonical agent task accepted' });
 
   try {
     const gateway = dependencies.gateway || await getChatTaskGateway({
@@ -141,14 +156,7 @@ async function handleChatTaskRequest(req, res, next, dependencies = {}) {
     });
     return res.end();
   } catch (error) {
-    const canceled = Boolean(signal?.aborted) || error?.code === 'TASK_CANCELED';
-    writeSse(res, {
-      type: canceled ? 'task_canceled' : 'task_error',
-      taskId,
-      status: canceled ? 'CANCELLED' : 'FAILED',
-      error: canceled ? 'Task canceled by user' : (error?.message || 'Agent task failed'),
-    });
-    return res.end();
+    return handleChatTaskError(res, taskId, error, signal);
   }
 }
 

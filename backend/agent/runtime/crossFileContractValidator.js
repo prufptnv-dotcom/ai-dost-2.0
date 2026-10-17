@@ -39,33 +39,38 @@ function resolveImportPath(importerPath, importSpecifier, fileKeys) {
   return null;
 }
 
+function parseImportClause(clause) {
+  let defaultImport = null;
+  const named = [];
+
+  const braceStart = clause.indexOf('{');
+  const braceEnd = clause.indexOf('}');
+  if (braceStart !== -1 && braceEnd > braceStart) {
+    const beforeBrace = clause.slice(0, braceStart).replaceAll(',', '').trim();
+    if (beforeBrace && /^[\w$]+$/.test(beforeBrace)) {
+      defaultImport = beforeBrace;
+    }
+    const rawNamed = clause.slice(braceStart + 1, braceEnd);
+    for (const part of rawNamed.split(',')) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      const asIdx = trimmed.indexOf(' as ');
+      const orig = asIdx !== -1 ? trimmed.slice(0, asIdx).trim() : trimmed;
+      if (orig) named.push(orig);
+    }
+  } else if (/^[\w$]+$/.test(clause)) {
+    defaultImport = clause;
+  }
+  return { defaultImport, named };
+}
+
 function extractEsImports(source, imports) {
-  const esImportRegex = /import\s+([^'"]+?)\s+from\s+['"]([^'"]+)['"]/g;
+  const esImportRegex = /import\s+([^\r\n;'"]+?)\s+from\s+['"]([^'"\r\n]+)['"]/g;
   let match;
   while ((match = esImportRegex.exec(source)) !== null) {
     const clause = match[1].trim();
     const specifier = match[2].trim();
-    let defaultImport = null;
-    const named = [];
-
-    const braceStart = clause.indexOf('{');
-    const braceEnd = clause.indexOf('}');
-    if (braceStart !== -1 && braceEnd > braceStart) {
-      const beforeBrace = clause.slice(0, braceStart).replace(/,/g, '').trim();
-      if (beforeBrace && /^[\w$]+$/.test(beforeBrace)) {
-        defaultImport = beforeBrace;
-      }
-      const rawNamed = clause.slice(braceStart + 1, braceEnd);
-      for (const part of rawNamed.split(',')) {
-        const trimmed = part.trim();
-        if (!trimmed) continue;
-        const asIdx = trimmed.indexOf(' as ');
-        const orig = asIdx !== -1 ? trimmed.slice(0, asIdx).trim() : trimmed;
-        if (orig) named.push(orig);
-      }
-    } else if (/^[\w$]+$/.test(clause)) {
-      defaultImport = clause;
-    }
+    const { defaultImport, named } = parseImportClause(clause);
     imports.push({ specifier, defaultImport, named, isRequire: false });
   }
 }
