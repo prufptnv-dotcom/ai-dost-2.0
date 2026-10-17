@@ -432,20 +432,96 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
     ...filteredTagsList
   ])).filter(name => !declaredComponents.has(name) && !['App', 'Main', 'Root', 'React', 'ReactDOM', 'GlobalErrorBoundary', 'Fragment'].includes(name));
 
-  const iconDeclarations = ALL_DETECTED_ICONS.map(name =>
-    `if (typeof window.${name} === 'undefined') {
+  const LUCIDE_SVG_PATHS = {
+    Search: '<circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>',
+    Plus: '<line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line>',
+    Minus: '<line x1="5" y1="12" x2="19" y2="12"></line>',
+    Check: '<polyline points="20 6 9 17 4 12"></polyline>',
+    CheckCircle: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>',
+    CheckCircle2: '<circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path>',
+    X: '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>',
+    Trash: '<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>',
+    Trash2: '<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line>',
+    Edit: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>',
+    Pencil: '<line x1="18" y1="2" x2="22" y2="6"></line><path d="M7.5 20.5 19 9l-4-4L3.5 16.5 2 22z"></path>',
+    ChevronDown: '<polyline points="6 9 12 15 18 9"></polyline>',
+    ChevronUp: '<polyline points="18 15 12 9 6 15"></polyline>',
+    ChevronRight: '<polyline points="9 18 15 12 9 6"></polyline>',
+    ChevronLeft: '<polyline points="15 18 9 12 15 6"></polyline>',
+    ArrowRight: '<line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline>',
+    ArrowLeft: '<line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline>',
+    ArrowUp: '<line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline>',
+    ArrowDown: '<line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline>',
+    User: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle>',
+    Users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>',
+    Settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>',
+    Lock: '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>',
+    Eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>',
+    EyeOff: '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line>',
+    Bell: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path>',
+    Heart: '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>',
+    Star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>',
+    Sparkles: '<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"></path>',
+    Zap: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>',
+    Activity: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>',
+    TrendingUp: '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline>',
+    BarChart2: '<line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line>',
+    BarChart3: '<path d="M3 3v18h18"></path><path d="M18 17V9"></path><path d="M13 17V5"></path><path d="M8 17v-3"></path>',
+    Calendar: '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line>',
+    Clock: '<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>',
+    Mail: '<path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline>',
+    Phone: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>',
+    MapPin: '<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle>',
+    Globe: '<circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>',
+    Database: '<ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>',
+    Server: '<rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line>',
+    Code: '<polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline>',
+    Play: '<polygon points="5 3 19 12 5 21 5 3"></polygon>',
+    RefreshCw: '<polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>',
+    Filter: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>',
+    Sliders: '<line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line>',
+    ExternalLink: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line>',
+    Download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line>',
+    Upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line>',
+    Copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>',
+    Info: '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line>',
+    AlertCircle: '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line>',
+    ShoppingCart: '<circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>',
+    ShoppingBag: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path>',
+    Folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>',
+    FolderPlus: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line>',
+    FileText: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline>',
+    Home: '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline>',
+    Menu: '<line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="18" x2="20" y2="18"></line>',
+    Shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>',
+    ShieldCheck: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="m9 12 2 2 4-4"></path>'
+  };
+
+  const iconDeclarations = ALL_DETECTED_ICONS.map(name => {
+    const svgPath = LUCIDE_SVG_PATHS[name] || '<circle cx="12" cy="12" r="10"></circle><path d="m12 8 4 4-4 4M8 12h8"></path>';
+    return `if (typeof window.${name} === 'undefined') {
       window.${name} = function ${name}Icon(props) {
         const size = props?.size || 18;
         const className = props?.className || '';
-        return React.createElement('span', {
-          className: 'inline-flex items-center justify-center text-sky-400 font-bold ' + className,
-          style: { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
-          title: '${name}'
-        }, '✦');
+        const strokeWidth = props?.strokeWidth || 2;
+        const color = props?.color || 'currentColor';
+        return React.createElement('svg', {
+          xmlns: 'http://www.w3.org/2000/svg',
+          width: size,
+          height: size,
+          viewBox: '0 0 24 24',
+          fill: 'none',
+          stroke: color,
+          strokeWidth: strokeWidth,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+          className: 'inline-block ' + className,
+          dangerouslySetInnerHTML: { __html: ${JSON.stringify(svgPath)} }
+        });
       };
     }
-    var ${name} = window.${name};`
-  ).join('\n');
+    var ${name} = window.${name};`;
+  }).join('\n');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -514,72 +590,164 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
       if (!window.localStorage) window.localStorage = window.safeStorage;
     } catch(_) {}
 
-    // ── Smart In-Memory REST & Fetch Router for Preview ─────────────────────
+    // ── Smart In-Memory REST & Fetch Router for Preview (Bolt / Lovable Parity) ──
     const _origFetch = window.fetch;
-    const _db = {
+    const _initialDb = {
       notes: [
-        { id: '1', title: 'System Architecture', content: '# Core Design\\n\\n- Reactive state management\\n- Zero-latency preview sync\\n- Dark Linear design tokens', tags: ['architecture', 'saas'], createdAt: new Date().toISOString() },
-        { id: '2', title: 'Roadmap & Specs', content: '## Sprint 1 Goals\\n\\n- SQLite REST API: Completed\\n- Split Editor: Active', tags: ['roadmap', 'product'], createdAt: new Date().toISOString() }
+        { id: '1', title: 'System Architecture', content: '# Core Design\n\n- Reactive state management\n- Zero-latency preview sync\n- Dark Linear design tokens', category: 'Engineering', tags: ['architecture', 'saas'], createdAt: new Date().toISOString() },
+        { id: '2', title: 'Roadmap & Specs', content: '## Sprint 1 Goals\n\n- SQLite REST API: Completed\n- Split Editor: Active', category: 'Product', tags: ['roadmap', 'product'], createdAt: new Date().toISOString() }
       ],
-      tags: ['architecture', 'saas', 'roadmap', 'product', 'design'],
+      tasks: [
+        { id: '1', title: 'Complete project architecture', description: 'Design frontend and backend state flow', status: 'in_progress', priority: 'high', dueDate: '2026-10-25', tags: ['architecture', 'core'], createdAt: new Date().toISOString() },
+        { id: '2', title: 'Implement interactive preview', description: 'Zero-latency live compilation with WebContainer fallback', status: 'done', priority: 'high', dueDate: '2026-10-18', tags: ['ui', 'preview'], createdAt: new Date().toISOString() },
+        { id: '3', title: 'Add search and filtering', description: 'Filter lists dynamically based on user search term', status: 'todo', priority: 'medium', dueDate: '2026-10-30', tags: ['feature'], createdAt: new Date().toISOString() }
+      ],
+      todos: [
+        { id: '1', title: 'Review pull requests', completed: true, status: 'done', priority: 'high', createdAt: new Date().toISOString() },
+        { id: '2', title: 'Integrate real-time telemetry', completed: true, status: 'done', priority: 'medium', createdAt: new Date().toISOString() },
+        { id: '3', title: 'Deploy staging build', completed: false, status: 'todo', priority: 'urgent', createdAt: new Date().toISOString() }
+      ],
+      products: [
+        { id: '1', name: 'Wireless Noise-Canceling Headphones', title: 'Wireless Noise-Canceling Headphones', price: 199.99, category: 'Electronics', rating: 4.8, stock: 24, inStock: true, image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400', description: 'Premium sound with active noise cancelation.' },
+        { id: '2', name: 'Ergonomic Mechanical Keyboard', title: 'Ergonomic Mechanical Keyboard', price: 129.50, category: 'Accessories', rating: 4.9, stock: 15, inStock: true, image: 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=400', description: 'Custom mechanical switches with RGB backlight.' },
+        { id: '3', name: 'Minimalist Smart Watch', title: 'Minimalist Smart Watch', price: 159.00, category: 'Wearables', rating: 4.6, stock: 8, inStock: true, image: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400', description: 'Sleek design with health and fitness tracking.' },
+        { id: '4', name: 'Ultra-Fast USB-C Power Bank', title: 'Ultra-Fast USB-C Power Bank', price: 49.99, category: 'Accessories', rating: 4.7, stock: 30, inStock: true, image: 'https://images.unsplash.com/photo-1609081219090-a6d8173087ec?w=400', description: 'High-capacity 20,000mAh portable charger.' }
+      ],
+      users: [
+        { id: '1', name: 'Alex Johnson', email: 'alex@example.com', role: 'Administrator', status: 'Active', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=120' },
+        { id: '2', name: 'Sarah Chen', email: 'sarah@example.com', role: 'Product Designer', status: 'Active', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120' },
+        { id: '3', name: 'Michael Davis', email: 'michael@example.com', role: 'Full Stack Engineer', status: 'Pending', avatar: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=120' }
+      ],
+      metrics: {
+        totalRevenue: 124500,
+        activeUsers: 8420,
+        conversionRate: 3.8,
+        growth: 24.5,
+        chartData: [
+          { month: 'Jan', revenue: 18000, users: 3200 },
+          { month: 'Feb', revenue: 22000, users: 4100 },
+          { month: 'Mar', revenue: 28000, users: 5600 },
+          { month: 'Apr', revenue: 34000, users: 6900 },
+          { month: 'May', revenue: 42000, users: 8420 }
+        ]
+      },
+      tags: ['architecture', 'saas', 'roadmap', 'product', 'design', 'ui', 'core'],
       items: [
         { id: '1', title: 'Primary Item', name: 'Sample Item 1', status: 'Active', count: 10, price: 99, tags: ['general'] }
       ]
     };
 
+    let _db = _initialDb;
+    try {
+      const savedDb = window.localStorage?.getItem('__aidost_mock_db');
+      if (savedDb) _db = { ..._initialDb, ...JSON.parse(savedDb) };
+    } catch (_) {}
+
+    const _persistDb = () => {
+      try { window.localStorage?.setItem('__aidost_mock_db', JSON.stringify(_db)); } catch (_) {}
+    };
+
     window.fetch = async function(url, options = {}) {
-      const rawUrl = String(url || '').split('?')[0];
-      const withoutProto = rawUrl.indexOf('://') !== -1 ? rawUrl.split('://')[1].split('/').slice(1).join('/') : rawUrl;
+      const urlStr = String(url || '');
+      const [rawPath, rawQuery] = urlStr.split('?');
+      const withoutProto = rawPath.indexOf('://') !== -1 ? rawPath.split('://')[1].split('/').slice(1).join('/') : rawPath;
       const cleanPath = withoutProto.startsWith('api/') ? withoutProto.slice(4) : (withoutProto.startsWith('/') ? withoutProto.slice(1) : withoutProto);
       const method = (options.method || 'GET').toUpperCase();
-      const resource = cleanPath.split('/')[0] || 'items';
+      const pathParts = cleanPath.split('/').filter(Boolean);
+      const resource = pathParts[0] || 'items';
+      const id = pathParts[1] || null;
+
+      // Parse query parameters
+      const params = {};
+      if (rawQuery) {
+        rawQuery.split('&').forEach((pair) => {
+          const [k, v] = pair.split('=');
+          if (k) params[decodeURIComponent(k)] = decodeURIComponent(v || '');
+        });
+      }
 
       if (!_db[resource]) {
         _db[resource] = [
           { id: '1', title: 'Sample ' + resource, name: 'Item 1', status: 'Active', count: 5, tags: ['default'], createdAt: new Date().toISOString() }
         ];
+        _persistDb();
       }
 
       if (method === 'GET') {
-        const id = cleanPath.split('/')[1];
-        const data = Array.isArray(_db[resource]) && id
-          ? _db[resource].find(x => x.id === id) || _db[resource][0]
-          : _db[resource];
-        return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        if (id) {
+          const item = Array.isArray(_db[resource]) ? _db[resource].find(x => String(x.id) === String(id)) : _db[resource];
+          return new Response(JSON.stringify(item || { error: 'Not found' }), {
+            status: item ? 200 : 404,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
+        let dataset = _db[resource];
+        if (Array.isArray(dataset)) {
+          const search = (params.search || params.q || '').toLowerCase();
+          const category = (params.category || '').toLowerCase();
+          const status = (params.status || '').toLowerCase();
+
+          if (search) {
+            dataset = dataset.filter(item => {
+              const text = Object.values(item).map(v => typeof v === 'object' ? JSON.stringify(v) : String(v)).join(' ').toLowerCase();
+              return text.includes(search);
+            });
+          }
+          if (category && category !== 'all') {
+            dataset = dataset.filter(item => String(item.category || '').toLowerCase() === category);
+          }
+          if (status && status !== 'all') {
+            dataset = dataset.filter(item => String(item.status || '').toLowerCase() === status);
+          }
+          if (params.sort) {
+            const sortField = params.sort.replace(/^[-+]/, '');
+            const desc = params.sort.startsWith('-');
+            dataset = [...dataset].sort((a, b) => {
+              const va = a[sortField] ?? '';
+              const vb = b[sortField] ?? '';
+              return (va < vb ? -1 : va > vb ? 1 : 0) * (desc ? -1 : 1);
+            });
+          }
+        }
+        return new Response(JSON.stringify(dataset), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
 
       if (method === 'POST') {
         let body = {};
         try { body = JSON.parse(options.body || '{}'); } catch(_) {}
         const newItem = { id: String(Date.now()), ...body, createdAt: new Date().toISOString() };
-        if (Array.isArray(_db[resource])) _db[resource].unshift(newItem);
+        if (Array.isArray(_db[resource])) {
+          _db[resource].unshift(newItem);
+          _persistDb();
+        }
         return new Response(JSON.stringify(newItem), { status: 201, headers: { 'Content-Type': 'application/json' } });
       }
 
       if (method === 'PUT' || method === 'PATCH') {
         let body = {};
         try { body = JSON.parse(options.body || '{}'); } catch(_) {}
-        const id = cleanPath.split('/')[1];
         let updatedItem = { id: id || '1', ...body };
-        if (Array.isArray(_db[resource])) {
-          const idx = _db[resource].findIndex(x => x.id === id);
+        if (Array.isArray(_db[resource]) && id) {
+          const idx = _db[resource].findIndex(x => String(x.id) === String(id));
           if (idx !== -1) {
-            _db[resource][idx] = { ..._db[resource][idx], ...body };
+            _db[resource][idx] = { ..._db[resource][idx], ...body, updatedAt: new Date().toISOString() };
             updatedItem = _db[resource][idx];
+            _persistDb();
           }
         }
         return new Response(JSON.stringify(updatedItem), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
 
       if (method === 'DELETE') {
-        const id = cleanPath.split('/')[1];
         if (Array.isArray(_db[resource]) && id) {
-          _db[resource] = _db[resource].filter(x => x.id !== id);
+          _db[resource] = _db[resource].filter(x => String(x.id) !== String(id));
+          _persistDb();
         }
         return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
 
-      if (!rawUrl.startsWith('http') || rawUrl.includes('localhost') || rawUrl.includes('127.0.0.1')) {
+      if (!rawPath.startsWith('http') || rawPath.includes('localhost') || rawPath.includes('127.0.0.1')) {
         const dynamicPayload = [
           { id: '1', title: 'Item Active', name: 'Item Alpha', status: 'Active', count: 12, tags: ['general'], createdAt: new Date().toISOString() }
         ];
@@ -621,6 +789,148 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
 
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, useCallback, useContext, useReducer, createContext, Fragment } = React;
+
+    // ── Modern UI Primitives & Motion Polyfill (Bolt/Lovable Parity) ───────
+    window.cn = function(...classes) { return classes.filter(Boolean).join(' '); };
+    window.clsx = window.cn;
+    window.confetti = function(options = {}) {
+      try {
+        const count = 30;
+        const colors = ['#6366f1', '#ec4899', '#3b82f6', '#10b981', '#f59e0b'];
+        for (let i = 0; i < count; i++) {
+          const p = document.createElement('div');
+          p.style.cssText = 'position:fixed;z-index:99999;width:8px;height:8px;pointer-events:none;border-radius:2px;';
+          p.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+          p.style.left = (options.origin?.x !== undefined ? options.origin.x * window.innerWidth : window.innerWidth / 2) + 'px';
+          p.style.top = (options.origin?.y !== undefined ? options.origin.y * window.innerHeight : window.innerHeight / 2) + 'px';
+          document.body.appendChild(p);
+          const angle = Math.random() * Math.PI * 2;
+          const dist = 60 + Math.random() * 150;
+          const tx = Math.cos(angle) * dist;
+          const ty = Math.sin(angle) * dist + 50;
+          p.animate([
+            { transform: 'translate(0, 0) rotate(0deg) scale(1)', opacity: 1 },
+            { transform: 'translate(' + tx + 'px, ' + ty + 'px) rotate(' + (Math.random() * 720) + 'deg) scale(0)', opacity: 0 }
+          ], { duration: 900 + Math.random() * 400, easing: 'cubic-bezier(0.25, 1, 0.5, 1)' }).onfinish = () => p.remove();
+        }
+      } catch(_) {}
+    };
+
+    const _createMotionComponent = (tag) => React.forwardRef((props, ref) => {
+      const { initial, animate, exit, transition, whileHover, whileTap, whileInView, variants, ...rest } = props;
+      return React.createElement(tag, { ref, ...rest });
+    });
+    window.motion = {
+      div: _createMotionComponent('div'),
+      span: _createMotionComponent('span'),
+      button: _createMotionComponent('button'),
+      a: _createMotionComponent('a'),
+      p: _createMotionComponent('p'),
+      section: _createMotionComponent('section'),
+      main: _createMotionComponent('main'),
+      header: _createMotionComponent('header'),
+      footer: _createMotionComponent('footer'),
+      nav: _createMotionComponent('nav'),
+      ul: _createMotionComponent('ul'),
+      li: _createMotionComponent('li'),
+      h1: _createMotionComponent('h1'),
+      h2: _createMotionComponent('h2'),
+      h3: _createMotionComponent('h3'),
+      article: _createMotionComponent('article')
+    };
+    window.AnimatePresence = ({ children }) => children;
+
+    // ── In-Memory React Router DOM Polyfill (Multi-page Apps) ───────────────
+    const RouterContext = createContext({ pathname: '/', navigate: () => {}, params: {} });
+
+    window.useLocation = function() {
+      const ctx = useContext(RouterContext);
+      return { pathname: ctx.pathname || '/', search: '', hash: '', state: null };
+    };
+
+    window.useNavigate = function() {
+      const ctx = useContext(RouterContext);
+      return ctx.navigate || (() => {});
+    };
+
+    window.useParams = function() {
+      const ctx = useContext(RouterContext);
+      return ctx.params || {};
+    };
+
+    window.BrowserRouter = function({ children }) {
+      const [pathname, setPathname] = useState('/');
+      const navigate = useCallback((to) => {
+        if (typeof to === 'string') setPathname(to);
+      }, []);
+      const value = useMemo(() => ({ pathname, navigate, params: {} }), [pathname, navigate]);
+      return React.createElement(RouterContext.Provider, { value }, children);
+    };
+
+    window.MemoryRouter = window.BrowserRouter;
+    window.HashRouter = window.BrowserRouter;
+
+    window.Routes = function({ children }) {
+      const ctx = useContext(RouterContext);
+      const currentPath = ctx.pathname || '/';
+      const childArray = React.Children.toArray(children);
+      for (const child of childArray) {
+        if (!React.isValidElement(child)) continue;
+        const routePath = child.props.path;
+        if (!routePath || routePath === '*' || routePath === currentPath) {
+          return child.props.element || child.props.children || null;
+        }
+      }
+      return childArray[0]?.props?.element || null;
+    };
+
+    window.Route = function(props) {
+      return props.element || props.children || null;
+    };
+
+    window.Link = function({ to, children, className = '', ...rest }) {
+      const ctx = useContext(RouterContext);
+      const handleClick = (e) => {
+        e.preventDefault();
+        ctx.navigate(to);
+      };
+      return React.createElement('a', { href: to, onClick: handleClick, className: 'cursor-pointer ' + className, ...rest }, children);
+    };
+
+    window.NavLink = window.Link;
+    window.Navigate = function({ to }) {
+      const ctx = useContext(RouterContext);
+      useEffect(() => { ctx.navigate(to); }, [to]);
+      return null;
+    };
+    window.Outlet = function() { return null; };
+
+    var BrowserRouter = window.BrowserRouter;
+    var MemoryRouter = window.MemoryRouter;
+    var HashRouter = window.HashRouter;
+    var Routes = window.Routes;
+    var Route = window.Route;
+    var Link = window.Link;
+    var NavLink = window.NavLink;
+    var Navigate = window.Navigate;
+    var Outlet = window.Outlet;
+    var useNavigate = window.useNavigate;
+    var useLocation = window.useLocation;
+    var useParams = window.useParams;
+
+    // ── Sonner / React-Hot-Toast Polyfill ───────────────────────────────────
+    window.toast = Object.assign(
+      function(msg) { try { console.log('[Toast]', msg); } catch(_) {} },
+      {
+        success: (msg) => { try { console.log('[Toast Success]', msg); } catch(_) {} },
+        error: (msg) => { try { console.log('[Toast Error]', msg); } catch(_) {} },
+        info: (msg) => { try { console.log('[Toast Info]', msg); } catch(_) {} },
+        warning: (msg) => { try { console.log('[Toast Warning]', msg); } catch(_) {} },
+      }
+    );
+    window.Toaster = function() { return null; };
+    var toast = window.toast;
+    var Toaster = window.Toaster;
 
     // ── API Functions & Stubs ───────────────────────────────────────────────
     ${apiCode}

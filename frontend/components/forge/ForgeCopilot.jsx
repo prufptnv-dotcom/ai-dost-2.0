@@ -892,6 +892,8 @@ function Toolbar({
   onRun,
   isRunning,
   onToggleAssistant,
+  inspectorActive = false,
+  onToggleInspector,
   mobile,
 }) {
   return (
@@ -938,6 +940,14 @@ function Toolbar({
               onClick={() => setDevice('mobile')}
             >
               <LuSmartphone size={15} />
+            </IconButton>
+            <IconButton
+              title={inspectorActive ? 'Deactivate visual inspector' : 'Click to Inspect & Edit with AI (Lovable Mode)'}
+              active={inspectorActive}
+              onClick={onToggleInspector}
+              className={inspectorActive ? 'active !text-indigo-400 !border-indigo-500' : ''}
+            >
+              <LuSearch size={15} />
             </IconButton>
           </div>
         )}
@@ -1437,6 +1447,10 @@ function AssistantPanel({
   onApprove,
   onOpenFile,
   onRetry,
+  selectedElement = null,
+  onClearSelectedElement,
+  runtimeError = null,
+  onAutoFixRuntimeError,
 }) {
   const listRef = useRef(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
@@ -1679,6 +1693,40 @@ function AssistantPanel({
               <LuPalette size={12} /> CSS variables
             </button>
           </div>
+
+          {selectedElement && (
+            <div className="flex items-center gap-2 px-3 py-1.5 mb-2 rounded-lg bg-indigo-950/70 border border-indigo-500/50 text-xs text-indigo-200">
+              <LuSearch size={13} className="text-indigo-400 shrink-0" />
+              <span className="font-mono text-[11px] truncate flex-1">
+                Target: &lt;{selectedElement.tag}{selectedElement.className ? '.' + String(selectedElement.className).split(' ')[0] : ''}&gt;
+                {selectedElement.text ? ` "${selectedElement.text.slice(0, 24)}"` : ''}
+              </span>
+              <button
+                type="button"
+                onClick={onClearSelectedElement}
+                className="p-1 hover:text-white text-indigo-400 cursor-pointer"
+                title="Clear targeted element"
+              >
+                <LuX size={12} />
+              </button>
+            </div>
+          )}
+
+          {runtimeError && (
+            <div className="flex items-center justify-between gap-2 px-3 py-2 mb-2 rounded-lg bg-red-950/70 border border-red-500/50 text-xs text-red-200">
+              <div className="flex items-center gap-2 truncate">
+                <LuShieldAlert size={14} className="text-red-400 shrink-0" />
+                <span className="truncate font-mono text-[11px]">{runtimeError.error || 'Preview runtime error'}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onAutoFixRuntimeError?.(runtimeError.error)}
+                className="px-2.5 py-1 bg-red-600 hover:bg-red-500 text-white font-semibold text-[11px] rounded-md shrink-0 transition shadow-sm cursor-pointer"
+              >
+                ⚡ Auto-Fix
+              </button>
+            </div>
+          )}
 
           <form className="prompt-composer" onSubmit={onSubmit}>
             <textarea
@@ -2497,9 +2545,89 @@ export default function ForgeCopilot({
   const [gitOpen, setGitOpen] = useState(false);
   const [user, setUser] = useState({ name: 'Developer', initials: 'AI', role: 'Local Workspace' });
 
+  const [inspectorActive, setInspectorActive] = useState(false);
+  const [selectedElement, setSelectedElement] = useState(null);
+  const [runtimeError, setRuntimeError] = useState(null);
+
   const abortRef = useRef(null);
   const currentTaskIdRef = useRef(null);
   const saveTimeoutRef = useRef(null);
+  const iframeRef = useRef(null);
+
+  const toggleInspector = useCallback(() => {
+    setInspectorActive((prev) => {
+      const next = !prev;
+      try {
+        iframeRef.current?.contentWindow?.postMessage({
+          type: 'SET_INSPECTOR_ACTIVE',
+          active: next,
+        }, '*');
+      } catch (_) {}
+      return next;
+    });
+  }, []);
+
+  const submitPromptRef = useRef(null);
+  const autoFixCountRef = useRef(0);
+  const autoFixTimerRef = useRef(null);
+
+  const handleAutoFixRuntimeError = useCallback((errText, triggerRun = false) => {
+    const errorMsg = errText || runtimeError;
+    if (!errorMsg) return;
+    const fixPrompt = `Fix the preview runtime error: "${String(errorMsg).slice(0, 300)}". Check for undefined variables, missing imports, or unhandled null checks in the active components.`;
+    setRuntimeError(null);
+    if (triggerRun && !isAssistantWorking && submitPromptRef.current) {
+      autoFixCountRef.current += 1;
+      setToast(`⚡ Autopilot: Auto-fixing preview runtime error (attempt ${autoFixCountRef.current}/2)...`);
+      submitPromptRef.current(null, { prompt: fixPrompt });
+    } else {
+      setPrompt(fixPrompt);
+      setToast('Auto-Fix prompt loaded. Submit to apply fix.');
+    }
+  }, [runtimeError, isAssistantWorking]);
+
+  useEffect(() => {
+    const handleWindowMessage = (event) => {
+      const data = event?.data;
+      if (!data) return;
+
+      if (data.type === 'INSPECT_ELEMENT' && data.element) {
+        setSelectedElement(data.element);
+        setInspectorActive(false);
+        setToast(`Selected <${data.element.tag}> to edit with AI`);
+      }
+
+      if (data.type === 'AUTO_FIX_ERROR' || (data.channel === 'ai-dost-preview' && data.type === 'RUNTIME_ERROR')) {
+        const err = data.error || data.message || 'Unknown preview error';
+        setRuntimeError(err);
+        if (autopilot && !isAssistantWorking && autoFixCountRef.current < 2) {
+          if (autoFixTimerRef.current) clearTimeout(autoFixTimerRef.current);
+          autoFixTimerRef.current = setTimeout(() => {
+            handleAutoFixRuntimeError(err, true);
+          }, 1200);
+        }
+      }
+
+      if (data.channel === 'ai-dost-preview' && data.type === 'PREVIEW_READY') {
+        setRuntimeError(null);
+        autoFixCountRef.current = 0;
+      }
+
+      if (data.channel === 'ai-dost-preview' && data.type === 'CONSOLE') {
+        const prefix = data.level === 'error' ? '[browser-error] ' : data.level === 'warn' ? '[browser-warn] ' : '[browser-log] ';
+        setTerminalLogs((prev) => {
+          const next = [...prev, `${prefix}${data.text || ''}`];
+          return next.slice(-200);
+        });
+      }
+    };
+
+    window.addEventListener('message', handleWindowMessage);
+    return () => {
+      window.removeEventListener('message', handleWindowMessage);
+      if (autoFixTimerRef.current) clearTimeout(autoFixTimerRef.current);
+    };
+  }, [autopilot, isAssistantWorking, handleAutoFixRuntimeError]);
 
   // Live timer for autonomous run execution
   useEffect(() => {
@@ -2901,7 +3029,33 @@ export default function ForgeCopilot({
     const approvalToken = resumeOptions.approvalToken || null;
     if (!text || (isAssistantWorking && !approvalToken)) return;
 
+    if (!resumeOptions.prompt) {
+      autoFixCountRef.current = 0;
+    }
+
+    let effectivePrompt = text;
+    if (selectedElement && !approvalToken) {
+      effectivePrompt = `[TARGET ELEMENT TO EDIT: <${selectedElement.tag || 'element'} class="${selectedElement.className || ''}"> text="${(selectedElement.text || '').slice(0, 100)}"]\n${text}`;
+      setSelectedElement(null);
+      setInspectorActive(false);
+      try {
+        iframeRef.current?.contentWindow?.postMessage({
+          type: 'SET_INSPECTOR_ACTIVE',
+          active: false,
+        }, '*');
+      } catch (_) {}
+    }
+
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const prevHistory = messages.slice(-8).map((m) => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: String(m.text || '').slice(0, 500),
+    }));
+    const prevFiles = sessionFilesWritten.slice(-10).map((f) => ({
+      path: f.path,
+      summary: f.summary || `Modified ${f.path}`,
+    }));
+
     if (!approvalToken) {
       setMessages((prev) => [...prev, { role: 'user', text, time }]);
       setLastPrompt(text);
@@ -2934,12 +3088,14 @@ export default function ForgeCopilot({
           'x-ai-dost-task-id': taskId,
         },
         body: JSON.stringify({
-          userPrompt: text,
+          userPrompt: effectivePrompt,
           projectId: currentProjectId,
           taskId,
           copilotDirector: true,
           permissionLevel: resumeOptions.permissionLevel || (autopilot ? 'auto' : 'ask'),
           preferredModel,
+          conversationHistory: prevHistory,
+          recentFilesWritten: prevFiles,
           ...(approvalToken ? { approvalToken } : {}),
         }),
         signal: controller.signal,
@@ -3168,9 +3324,13 @@ export default function ForgeCopilot({
               ]);
             }
 
-            // 7. Terminal output event
-            if (data.type === 'terminal_output' && data.text) {
-              setTerminalLogs((prev) => [...prev, data.text]);
+            // 7. Terminal output event & command execution logs
+            if (
+              (data.type === 'terminal_output' || data.type === 'terminal_stream' || data.type === 'command_output') &&
+              (data.text || data.stdout || data.stderr || data.line)
+            ) {
+              const streamLine = data.text || data.stdout || (data.stderr ? `[stderr] ${data.stderr}` : '') || data.line;
+              if (streamLine) setTerminalLogs((prev) => [...prev, streamLine]);
             }
 
             // Explicit terminal events only. A single successful worker is not the end of a multi-task run.
@@ -3350,6 +3510,10 @@ export default function ForgeCopilot({
     }
   };
 
+  useEffect(() => {
+    submitPromptRef.current = submitPrompt;
+  });
+
   const handleApprove = () => {
     const approval = pendingApproval;
     if (!approval?.token || isAssistantWorking) return;
@@ -3391,8 +3555,8 @@ export default function ForgeCopilot({
       };
     });
 
-    return generateLiveAppHtml(mergedFiles, contents, false, activeFile);
-  }, [files, contents, devServer, activeFile]);
+    return generateLiveAppHtml(mergedFiles, contents, inspectorActive, activeFile);
+  }, [files, contents, devServer, activeFile, inspectorActive]);
 
   return (
     <div
@@ -3488,6 +3652,8 @@ export default function ForgeCopilot({
                   isRunning={isRunning}
                   onToggleAssistant={() => setAssistantOpen(!assistantOpen)}
                   mobile={mobile}
+                  inspectorActive={inspectorActive}
+                  onToggleInspector={toggleInspector}
                 />
                 <div className={`workspace-canvas ${mode === 'preview' ? 'preview-canvas' : ''}`}>
                   {mode === 'preview' ? (
@@ -3528,12 +3694,14 @@ export default function ForgeCopilot({
                         >
                           {devServer.state === 'READY' && (devServer.url || devServer.hostPort) ? (
                             <iframe
+                              ref={iframeRef}
                               src={devServer.url || `http://localhost:${devServer.hostPort}`}
                               className="w-full h-full border-0 bg-white"
                               title="Live Preview Server"
                             />
                           ) : Boolean(livePreviewHtml) ? (
                             <iframe
+                              ref={iframeRef}
                               srcDoc={livePreviewHtml}
                               className="w-full h-full border-0 bg-white"
                               title="Instant Compiled Preview"
@@ -3633,6 +3801,10 @@ export default function ForgeCopilot({
             onApprove={handleApprove}
             onOpenFile={handleOpenFileInEditor}
             onRetry={handleRetryRun}
+            selectedElement={selectedElement}
+            onClearSelectedElement={() => setSelectedElement(null)}
+            runtimeError={runtimeError}
+            onAutoFixRuntimeError={handleAutoFixRuntimeError}
           />
         </div>
       </div>

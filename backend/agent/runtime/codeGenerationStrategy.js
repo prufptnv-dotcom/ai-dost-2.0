@@ -261,9 +261,10 @@ function analyzeCodeGenerationRequest(request, context = {}) {
     ? [
         'Design System & Visual Hierarchy: Define a cohesive color palette (primary, secondary, surface, background, border, text, muted), consistent typography scale, and responsive layout wrappers (mobile, tablet, desktop).',
         'Component Decomposition: Structure applications into modular, cohesive components (Header/Navigation, Feature Views, Reusable Form/UI Controls, Modals/Toasts) rather than monolithic single files.',
+        'Component Contract & Import/Export Consistency: Every imported component, hook, utility, or icon must be exported by its source module with matching export semantics (default vs. named export). Never use named import `import { X }` for default exported `export default X`.',
         'Real Functional Interactivity: Every button, input, tab, filter, and modal must be wired with real reactive state and handlers; never leave decorative dead buttons, empty stubs, or alert() popups.',
         'View State Completeness: Explicitly implement loading states (skeleton or spinner), empty states (informative icon/text + primary call to action), error recovery states, and data-loaded states.',
-        'Client Persistence & Data Flow: When no backend is configured, implement client-side persistence via a dedicated storage utility (e.g. localStorage) with JSON serialization, seed fallback, and error handling; never lose user data on page refresh.',
+        'Persistence & Data Flow: For client-only applications, use browser storage (e.g. localStorage / IndexedDB) with robust JSON serialization, seed fallback, and error handling so state survives refreshes. For API- or database-backed applications, use their actual backend persistence architecture (Express endpoints, database models, or ORM migrations); never substitute client localStorage or mock in-memory arrays when real backend storage is required.',
         'Accessibility & Semantics: Use semantic HTML (button, nav, header, main, dialog), proper label associations (htmlFor/id), and keyboard navigation support (Enter/Escape).',
       ]
     : [];
@@ -273,6 +274,7 @@ function analyzeCodeGenerationRequest(request, context = {}) {
   const algorithmRules = isAlgorithmic
     ? [
         'Restate the problem as inputs, outputs, constraints, and invariants before selecting an algorithm.',
+        'Optimal Data Structures & Invariants: Select the optimal data structure (e.g. HashMap for O(1) lookups, Heap/PriorityQueue for top-K/stream order, Monotonic Stack for next-greater, Two Pointers/Sliding Window for linear scan) and maintain invariants strictly.',
         'Compare plausible approaches and choose based on correctness, input size, memory, and required latency.',
         'State time and space complexity where meaningful; avoid claiming an optimization without explaining its trade-off.',
         'Handle empty, singleton, duplicate, boundary, malformed, and worst-case inputs as applicable.',
@@ -469,7 +471,7 @@ registerAlgorithmFamily({
 registerAlgorithmFamily({
   id: 'stacks_queues',
   name: 'Stacks, Queues & Monotonic Sequences',
-  matcher: (text) => /\b(stack|queue|deque|monotonic stack|monotonic queue|next greater element|valid parentheses|min stack|sliding window maximum)\b/i.test(text),
+  matcher: (text) => /(?<!(?:full|tech|mern|mean)[ -])\b(stack|queue|deque|monotonic stack|monotonic queue|next greater element|valid parentheses|min stack|sliding window maximum)\b/i.test(text),
   selectAlgorithm: (constraints = {}) => {
     if (constraints.isNextGreater) {
       return { algorithm: 'Monotonic Stack', rationale: 'Maintains descending elements so the next greater element resolves in aggregate O(N) operations' };
@@ -1601,15 +1603,24 @@ function deriveApplicationTaskContract(request, classification = null, context =
     border: isDarkMode ? '#334155' : '#e2e8f0',
   };
 
+  const isBackendBacked = /\b(backend|api|server|express|database|db|sql|sqlite|postgres(?:ql)?|mongodb|prisma|knex|full.?stack)\b/i.test(lower);
+  const persistenceDescription = isBackendBacked
+    ? 'Implement backend API and database persistence architecture'
+    : 'Implement client-side persistence (localStorage/IndexedDB) with seed data fallback';
+
   const tasks = [
     {
       id: 'task-1',
-      specialty: 'frontend',
+      specialty: isBackendBacked ? 'backend' : 'frontend',
       role: 'CODER',
-      objective: `Implement modular architecture, design system tokens, and storage persistence for ${selectedArchetype.name}: "${request}". Create reusable UI primitives and persistent storage manager (localStorage).`,
+      objective: isBackendBacked
+        ? `Implement modular architecture, schema models, API endpoints, and database persistence for ${selectedArchetype.name}: "${request}". Create backend/storage layer and essential UI primitives.`
+        : `Implement modular architecture, design system tokens, and storage persistence for ${selectedArchetype.name}: "${request}". Create reusable UI primitives and browser storage manager (localStorage).`,
       dependsOn: [],
       requirements: ['REQ-APP-01', 'REQ-APP-02'],
-      expectedOutput: 'Clean modular component structure, design system styles, and storage persistence service.'
+      expectedOutput: isBackendBacked
+        ? 'Clean modular component structure, database models/API routes, and backend persistence architecture.'
+        : 'Clean modular component structure, design system styles, and storage persistence service.'
     },
     {
       id: 'task-2',
@@ -1635,6 +1646,7 @@ function deriveApplicationTaskContract(request, classification = null, context =
     strategy: 'STRUCTURED_APPLICATION_SPEC',
     archetype: selectedArchetype.id,
     archetypeName: selectedArchetype.name,
+    isBackendBacked,
     components: selectedArchetype.components,
     colorPalette,
     storageKey: selectedArchetype.storageKey,
@@ -1642,7 +1654,7 @@ function deriveApplicationTaskContract(request, classification = null, context =
     defaultViewStates: selectedArchetype.defaultViewStates,
     requirements: [
       { id: 'REQ-APP-01', description: 'Decompose into modular components with clean imports and exports' },
-      { id: 'REQ-APP-02', description: 'Implement client-side persistence (localStorage) with seed data fallback' },
+      { id: 'REQ-APP-02', description: persistenceDescription },
       { id: 'REQ-APP-03', description: 'Ensure all buttons, inputs, filters, and modals have real functional state handlers' },
       { id: 'REQ-APP-04', description: 'Provide complete loading, empty, and error states for all data views' },
       { id: 'REQ-APP-05', description: 'Validate cross-component contracts and responsive styling' }
@@ -1666,7 +1678,7 @@ STAGE 1: COMPONENT ARCHITECTURE & MODULAR DECOMPOSITION
 - Structure files cleanly:
   * Entry & Layout: src/App.jsx (or main entry), src/index.css (design tokens)
   * Components: src/components/ (e.g. ${spec.components.slice(0, 4).join(', ')})
-  * Storage Service: src/services/storage.js (persistence layer with storage key "${spec.storageKey}")
+  * Persistence: ${spec.isBackendBacked ? 'API/Database layer (server.js, routes/, db/) with real data models and endpoints' : `Storage Service: src/services/storage.js (browser storage with key "${spec.storageKey}")`}
 - Ensure all component exports match imports across files.
 
 STAGE 2: DESIGN SYSTEM & VISUAL POLISH
@@ -1689,10 +1701,9 @@ STAGE 4: STATE MANAGEMENT & DATA FLOW
 - Keep derived values (filtered items count, active filters, computed totals) computed on the fly.
 - Avoid direct state mutation; use immutable updates (e.g. prev => [...prev, newItem]).
 
-STAGE 5: CLIENT PERSISTENCE CONTRACT (LOCALSTORAGE SYNC)
-- When no remote backend is provided, persist state in localStorage ("${spec.storageKey}") so changes survive page refreshes.
-- Provide initial realistic seed data when localStorage is empty (${spec.sampleEntities}).
-- Handle JSON parse errors safely and wrap quota limits in try/catch.
+STAGE 5: APPLICATION PERSISTENCE ARCHITECTURE
+- For client-only applications: Persist state in browser storage (localStorage or IndexedDB under "${spec.storageKey}") so user changes survive page refreshes. Provide initial realistic seed data when storage is empty (${spec.sampleEntities}). Handle JSON parse errors and quota limits gracefully.
+- For API- or database-backed applications: Implement actual persistence through the application's backend architecture (REST/GraphQL API endpoints, database schema/models, SQLite/PostgreSQL/MongoDB repositories). Never pretend data is saved on the server if it only resides in client localStorage or in-memory arrays.
 
 STAGE 6: VIEW STATES & ERROR HANDLING
 - Loading state: ${spec.defaultViewStates.loading}.

@@ -206,6 +206,28 @@ function buildEnrichedDirectorRequest({ request, body, dependencies, authorizati
     ? `${request}\n\nUser @-mentioned files (prioritize reading/editing these): ${contextFiles.join(', ')}`
     : request;
 
+  let historyContext = '';
+  if (Array.isArray(body.conversationHistory) && body.conversationHistory.length > 0) {
+    const historyLines = body.conversationHistory
+      .filter((m) => m && typeof m.content === 'string' && m.content.trim())
+      .slice(-6)
+      .map((m) => `[${String(m.role || 'USER').toUpperCase()}]: ${m.content.trim()}`);
+    if (historyLines.length > 0) {
+      historyContext = `[CONVERSATION CONTEXT & PREVIOUS TURNS]\n${historyLines.join('\n')}`;
+    }
+  }
+
+  let recentFilesContext = '';
+  if (Array.isArray(body.recentFilesWritten) && body.recentFilesWritten.length > 0) {
+    const fileLines = body.recentFilesWritten
+      .filter((f) => f && f.path)
+      .slice(-8)
+      .map((f) => `- ${f.path}: ${f.summary || 'previously modified'}`);
+    if (fileLines.length > 0) {
+      recentFilesContext = `[RECENTLY CREATED/MODIFIED WORKSPACE FILES]\n${fileLines.join('\n')}\nKeep these existing files and their architecture consistent. Modify them with surgical apply_diff rather than restarting from scratch.`;
+    }
+  }
+
   const appSpecification = buildAppSpecification(request);
   const specificationContext = appSpecification ? formatAppSpecificationForPrompt(appSpecification) : '';
 
@@ -222,7 +244,7 @@ function buildEnrichedDirectorRequest({ request, body, dependencies, authorizati
 
   const workspaceContext = resolveWorkspaceIntelligence(dependencies, runtime, authorization, res);
 
-  const directorRequest = [baseDirectorRequest, specificationContext, algorithmContext, workspaceContext].filter(Boolean).join('\n\n');
+  const directorRequest = [historyContext, recentFilesContext, baseDirectorRequest, specificationContext, algorithmContext, workspaceContext].filter(Boolean).join('\n\n');
   if (appSpecification) {
     writeSse(res, {
       type: 'thinking',

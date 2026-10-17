@@ -162,29 +162,55 @@ function extractCandidateCode(files = {}, oracleName = null) {
   return '';
 }
 
-function readKeyFileContents(diskPath, files) {
+function extractCandidateFilePath(files = {}, oracleName = null) {
+  const keys = Object.keys(files);
+  const prioritized = keys.slice().sort((a, b) => {
+    const aLower = a.toLowerCase();
+    const bLower = b.toLowerCase();
+    if (aLower.includes('solution') && !bLower.includes('solution')) return -1;
+    if (bLower.includes('solution') && !aLower.includes('solution')) return 1;
+    if (oracleName && aLower.includes(oracleName)) return -1;
+    if (oracleName && bLower.includes(oracleName)) return 1;
+    return 0;
+  });
+
+  for (const key of prioritized) {
+    if (/\.(jsx?|tsx?|mjs|cjs|py)$/i.test(key) && !key.includes('.test.') && !key.includes('.spec.')) {
+      return key;
+    }
+  }
+  for (const key of Object.keys(files)) {
+    if (/\.(jsx?|tsx?|mjs|cjs|py)$/i.test(key)) return key;
+  }
+  return keys[0] || null;
+}
+
+function readKeyFileContents(diskPath, files, priorityFiles = []) {
   const PRIORITY = [
+    ...(Array.isArray(priorityFiles) ? priorityFiles : []),
     'package.json', 'frontend/package.json', 'web/package.json',
     'src/styles/global.css', 'src/index.css', 'src/App.jsx',
     'index.html', 'vite.config.js', 'next.config.js', 'next.config.mjs',
     'astro.config.mjs', 'nuxt.config.ts', 'svelte.config.js', 'src/main.jsx'
   ];
   const pick = [];
-  for (const p of PRIORITY) if (files.includes(p) && pick.length < 7) pick.push(p);
+  for (const p of PRIORITY) {
+    if (files.includes(p) && !pick.includes(p) && pick.length < 10) pick.push(p);
+  }
   for (const p of files) {
-    if (pick.length >= 7) break;
+    if (pick.length >= 10) break;
     if (!pick.includes(p) && /(^|\/)(package\.json|next\.config\.[^/]+|astro\.config\.[^/]+|nuxt\.config\.[^/]+|svelte\.config\.[^/]+)$/.test(p)) pick.push(p);
   }
   const out = {};
-  let budget = 6000;
+  let budget = 8000;
   for (const p of pick) {
     if (budget <= 0) break;
     try {
       const full = path.join(diskPath, p);
       const st = fs.statSync(full);
-      if (!st.isFile() || st.size > 60000) continue;
+      if (!st.isFile() || st.size > 80000) continue;
       let c = fs.readFileSync(full, 'utf-8');
-      if (c.length > 1500) c = `${c.slice(0, 1300)}\n… [truncated — ${c.length} chars total — copy the REAL lines you need as SEARCH] …`;
+      if (c.length > 2000) c = `${c.slice(0, 1800)}\n… [truncated — ${c.length} chars total — copy the REAL lines you need as SEARCH] …`;
       out[p] = c;
       budget -= c.length;
     } catch (_) {}
@@ -334,7 +360,7 @@ function fallbackPlan(request) {
       tasks: [
         {
           id: 'task-1',
-          specialty: strategy.intent.ui ? 'frontend' : 'backend',
+          specialty: appContract.tasks[0]?.specialty || (strategy.intent.ui ? 'frontend' : 'backend'),
           objective: appContract.tasks[0]?.objective || `Implement modular component architecture, design system tokens, and storage persistence for: ${request}`,
           dependsOn: [],
           expectedOutput: appContract.tasks[0]?.expectedOutput || 'Clean modular component structure, design system styles, and storage persistence service.'
@@ -509,28 +535,23 @@ class CopilotDirector {
     let existingFiles = [];
     let existingFileContents = null;
     let meta = null;
-    try {
-      meta = this.workspaceManager?.getWorkspaceMetadata?.(projectId, userId);
-      hasExistingFiles = Boolean(meta && meta.fileCount > 0);
-      // P12.8 (E2E run #14): pass the REAL file list to the specialist planner.
-      // The SURGICAL directive alone was not enough — the planner kept emitting
-      // "Create package.json"/"Create App.jsx" for files that already existed
-      // (WRITE_FORBIDDEN ×4 burned the whole repair budget on pass 2). With the
-      // list in AUTHORIZED CONTEXT it can plan read_file + apply_diff instead.
-      if (hasExistingFiles && meta?.diskPath && fs.existsSync(meta.diskPath)) {
-        existingFiles = listExistingFilesBounded(meta.diskPath, 100);
-        // P12.9 (E2E run #15): the LIST alone still left SEARCH guessing —
-        // the planner baked imagined content (31× SEARCH-not-found). Hand it
-        // the actual bytes of the key small files so SEARCH is verbatim.
-        existingFileContents = existingFiles.length ? readKeyFileContents(meta.diskPath, existingFiles) : null;
-      }
-    } catch (_) {}
 
-    const directive = hasExistingFiles
-      ? `[SURGICAL_DIRECTIVE: Inspect existing workspace files first. Apply surgical targeted edits to affected files only without wiping or regenerating unrelated code.` +
-        (existingFiles.length ? ` EXISTING FILES (these paths ALREADY EXIST — never plan write_file for them, it is REJECTED; to change one, read_file it then apply_diff): ${existingFiles.join(', ')}` : '') +
-        `]`
-      : `[GREENFIELD_DIRECTIVE: Workspace is new/empty. Create required source and component files directly using write_file. Do not attempt to read non-existent legacy files.]`;
+    const refreshWorkspaceState = (priorityFiles = []) => {
+      try {
+        meta = this.workspaceManager?.getWorkspaceMetadata?.(projectId, userId);
+        hasExistingFiles = Boolean(meta && meta.fileCount > 0);
+        if (meta?.diskPath && fs.existsSync(meta.diskPath)) {
+          existingFiles = listExistingFilesBounded(meta.diskPath, 100);
+          hasExistingFiles = existingFiles.length > 0;
+          existingFileContents = existingFiles.length ? readKeyFileContents(meta.diskPath, existingFiles, priorityFiles) : null;
+        } else {
+          existingFiles = [];
+          existingFileContents = null;
+        }
+      } catch (_) {}
+    };
+
+    refreshWorkspaceState();
 
     let workspacePackageJson = null;
     try {
@@ -550,19 +571,31 @@ class CopilotDirector {
       const contract = deriveApplicationTaskContract(request || task.objective, classification, { files: existingFileContents });
       extraGuidance = `\n${buildApplicationGuidanceBlock(contract)}`;
     }
-    const objectiveWithDirective = `${directive}\n${formatCodeGenerationStrategy(codeStrategy)}${extraGuidance}\n${task.objective}`;
-    
+
     let attempt = 0;
     let lastResult = null;
     let lastError = null;
+    let currentAffectedFiles = [];
     const maxSelfHealingAttempts = Math.min(maxRepairs || 1, 2);
 
     while (attempt <= maxSelfHealingAttempts) {
       attempt++;
       try {
+        if (attempt > 1) {
+          refreshWorkspaceState(currentAffectedFiles);
+        }
+
+        const currentDirective = (existingFiles.length > 0 || hasExistingFiles)
+          ? `[SURGICAL_DIRECTIVE: Inspect existing workspace files first. Apply surgical targeted edits to affected files only without wiping or regenerating unrelated code.` +
+            (existingFiles.length ? ` EXISTING FILES (these paths ALREADY EXIST — never plan write_file for them, it is REJECTED; to change one, read_file it then apply_diff): ${existingFiles.join(', ')}` : '') +
+            `]`
+          : `[GREENFIELD_DIRECTIVE: Workspace is new/empty. Create required source and component files directly using write_file. Do not attempt to read non-existent legacy files.]`;
+
+        const baseObjective = `${currentDirective}\n${formatCodeGenerationStrategy(codeStrategy)}${extraGuidance}\n${task.objective}`;
+
         const currentObjective = attempt === 1 
-          ? objectiveWithDirective 
-          : `REPAIR ATTEMPT ${attempt}: The previous implementation failed with error: ${lastError}. Please analyze the failure, read the relevant logs, and provide a corrected fix. Original objective: ${objectiveWithDirective}`;
+          ? baseObjective 
+          : `REPAIR ATTEMPT ${attempt}: The previous implementation failed with error: ${lastError}. TARGETED REPAIR: Only inspect and fix the affected files${currentAffectedFiles.length ? ` [${currentAffectedFiles.join(', ')}]` : ''}. Use read_file and apply_diff with exact SEARCH blocks. Do not rewrite working files. Original objective: ${task.objective}`;
 
         onEvent({ type: 'thinking', message: `🛠️ Specialist [${task.id}] planning steps (attempt ${attempt}/${maxSelfHealingAttempts + 1})...` });
 
@@ -602,6 +635,7 @@ class CopilotDirector {
               });
               if (!contractValidation.valid && contractValidation.errors.length > 0) {
                 const affectedFiles = extractAffectedFilesFromContractErrors(contractValidation.errors);
+                currentAffectedFiles = affectedFiles;
                 onEvent({
                   type: 'contract_validation_failed',
                   taskId: task.id,
@@ -621,6 +655,7 @@ class CopilotDirector {
                   .filter(f => f.severity === 'ERROR')
                   .map(f => `${f.filePath ? f.filePath + ': ' : ''}${f.message}`);
                 const affected = staticReview.repairPlan.targetFiles;
+                currentAffectedFiles = affected;
                 onEvent({
                   type: 'code_review_findings',
                   taskId: task.id,
@@ -633,11 +668,43 @@ class CopilotDirector {
                 logger.warn(`[CopilotDirector] Worker ${task.id} static review failure: ${lastError}`);
                 continue;
               }
+
+              // Worker-level algorithm oracle verification for algorithmic tasks
+              if ((classification.category === 'ALGORITHMIC_PROBLEM' || codeStrategy.intent.algorithmic || task.specialty === 'integration' || task.role === 'CODER') && this.algorithmVerifier) {
+                let oracleName = detectSupportedAlgorithmOracle(task.objective || request, currentFiles);
+                if (oracleName && typeof this.algorithmVerifier.hasOracle === 'function' && !this.algorithmVerifier.hasOracle(oracleName)) {
+                  oracleName = null;
+                }
+                if (oracleName) {
+                  const candidateCode = extractCandidateCode(currentFiles, oracleName);
+                  const candidateFilePath = extractCandidateFilePath(currentFiles, oracleName);
+                  if (candidateCode) {
+                    const algoResult = await this.algorithmVerifier.verifyAlgorithm(oracleName, candidateCode);
+                    if (!algoResult.verified) {
+                      currentAffectedFiles = candidateFilePath ? [candidateFilePath] : [];
+                      const failureReason = algoResult.error || algoResult.reason || 'Hidden test cases or constraints failed';
+                      onEvent({
+                        type: 'algorithm_verification_failed',
+                        taskId: task.id,
+                        attempt,
+                        oracle: oracleName,
+                        reason: failureReason,
+                        failedTest: algoResult.failedTest || null,
+                        affectedFiles: currentAffectedFiles
+                      });
+                      lastError = `Algorithm oracle verification failed for [${oracleName}]: ${failureReason}. Fix edge cases and complexity in [${currentAffectedFiles.join(', ')}].`;
+                      logger.warn(`[CopilotDirector] Worker ${task.id} algorithm verification failure: ${lastError}`);
+                      continue;
+                    }
+                  }
+                }
+              }
             }
           }
           return lastResult;
         } else {
           lastError = lastResult?.error || lastResult?.reason || 'Unknown execution failure';
+          currentAffectedFiles = [];
         }
         // P12.3: an approval gate cannot self-heal — a repair plan without a
         // token hits the same gate. Propagate immediately (code preserved) so
@@ -952,8 +1019,9 @@ class CopilotDirector {
           message: summary,
           summary,
           verification: {
-            status: verificationStatus,
-            summary: verificationSummary || 'Partial workspace verification passed; plan incomplete.',
+            status: 'FAILED',
+            verifierStatus: verificationStatus,
+            summary: verificationSummary || 'Partial workspace verification ran; plan incomplete.',
             artifact_refs: verificationArtifacts
           }
         };
@@ -963,7 +1031,7 @@ class CopilotDirector {
           summary,
           artifact_refs: artifactRefs,
           context_refs: [],
-          verification_status: 'PASSED',
+          verification_status: 'FAILED',
           errors: [{ code: 'INCOMPLETE_PLAN', message: summary.slice(0, 256) }]
         });
       }
@@ -1055,6 +1123,35 @@ class CopilotDirector {
         });
       }
 
+      if (qualityGateOutcome && qualityGateOutcome.status === STATUS.STATIC_DIAGNOSTIC_PASS) {
+        const summary = `Director completed tasks with static diagnostic inspection (no execution receipt evaluated).`;
+        this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
+        this.agentRunDao.updateStatus(supervisorRunId, 'SUCCEEDED');
+        const completion = {
+          type: 'director_complete',
+          status: 'COMPLETED',
+          taskId: supervisorTaskId,
+          runId: supervisorRunId,
+          taskCount: plan.tasks.length,
+          verificationMode: 'STATIC_INSPECTION_ONLY',
+          executionVerified: false,
+          verification: {
+            status: 'UNVERIFIED',
+            summary: 'Static diagnostic checks passed; execution unverified.',
+            artifact_refs: verificationArtifacts
+          }
+        };
+        onEvent(completion);
+        return ResultValidator.validate({
+          status: 'COMPLETED',
+          summary,
+          artifact_refs: artifactRefs,
+          context_refs: [],
+          verification_status: 'UNVERIFIED',
+          errors: []
+        });
+      }
+
       if (qualityGateOutcome && qualityGateOutcome.status === STATUS.NOT_EVALUATED) {
         const summary = `Director completed tasks (canonical benchmark: NOT_EVALUATED - ${qualityGateOutcome.reason || 'unmatched scope'}).`;
         this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
@@ -1065,6 +1162,8 @@ class CopilotDirector {
           taskId: supervisorTaskId,
           runId: supervisorRunId,
           taskCount: plan.tasks.length,
+          verificationMode: 'STATIC_INSPECTION_ONLY',
+          executionVerified: false,
           verification: {
             status: 'UNVERIFIED',
             summary: qualityGateOutcome.reason || 'Benchmark scope not evaluated.',
@@ -1092,6 +1191,8 @@ class CopilotDirector {
           taskId: supervisorTaskId,
           runId: supervisorRunId,
           taskCount: plan.tasks.length,
+          verificationMode: 'STATIC_INSPECTION_ONLY',
+          executionVerified: false,
           verification: {
             status: 'UNVERIFIED',
             summary,
@@ -1115,7 +1216,16 @@ class CopilotDirector {
       const fileSummary = fileNames.length > 0
         ? ` Files: ${fileNames.slice(0, 4).join(', ')}${fileNames.length > 4 ? ` (+${fileNames.length - 4} more)` : ''}.`
         : '';
-      const outcomeSummary = `Director completed ${plan.tasks.length} adaptive task(s).${fileSummary} Verification: ${verificationStatus}.`.slice(0, 510);
+      const isExecutionVerified = Boolean(
+        algorithmVerificationOutcome?.verified ||
+        qualityGateOutcome?.status === STATUS.VERIFIED_PASS ||
+        qualityGateOutcome?.status === 'PASSED' ||
+        finalVerification?.executionVerified ||
+        verificationArtifacts.some((ref) => /^(?:verification:build-pass|build:verified|receipt:)/i.test(ref))
+      );
+      const finalVerificationStatus = isExecutionVerified ? 'PASSED' : 'UNVERIFIED';
+      const verificationMode = isExecutionVerified ? 'EXECUTION_VERIFIED' : 'STATIC_INSPECTION_ONLY';
+      const outcomeSummary = `Director completed ${plan.tasks.length} adaptive task(s).${fileSummary} Verification: ${finalVerificationStatus} (${verificationMode}).`.slice(0, 510);
       const completion = {
         type: 'director_complete',
         status: 'SUCCEEDED',
@@ -1123,12 +1233,13 @@ class CopilotDirector {
         runId: supervisorRunId,
         taskCount: plan.tasks.length,
         files: fileNames,
+        verificationMode,
         verification: {
-          status: verificationStatus,
-          summary: verificationSummary || 'Final verification passed.',
+          status: isExecutionVerified ? verificationStatus : 'UNVERIFIED',
+          summary: verificationSummary || (isExecutionVerified ? 'Final verification passed.' : 'Static review completed; execution unverified.'),
           artifact_refs: verificationArtifacts
         },
-        executionVerified: Boolean(algorithmVerificationOutcome?.verified || qualityGateOutcome?.status === STATUS.PASSED),
+        executionVerified: isExecutionVerified,
         staticInspection: true
       };
       onEvent(completion);
@@ -1137,7 +1248,7 @@ class CopilotDirector {
         summary: outcomeSummary,
         artifact_refs: artifactRefs,
         context_refs: [],
-        verification_status: 'PASSED',
+        verification_status: finalVerificationStatus,
         errors: []
       });
     } catch (error) {
