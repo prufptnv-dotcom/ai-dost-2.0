@@ -372,6 +372,143 @@ class AlgorithmVerifier {
         assert.strictEqual(resultsMap.get('empty_text'), -1, 'Non-empty pattern in empty text is -1');
       }
     });
+
+    // 13. Backtracking (Subsets / Combinatorial Search)
+    this.oracles.set('subsets', {
+      family: 'backtracking',
+      lang: 'javascript',
+      spec: {
+        mode: 'function',
+        names: ['subsets', 'generateSubsets'],
+        cases: [
+          { id: 'empty', args: [[]] },
+          { id: 'single', args: [[1]] },
+          { id: 'three', args: [[1, 2, 3]] }
+        ]
+      },
+      verify(resultsMap) {
+        const empty = resultsMap.get('empty');
+        assert.ok(Array.isArray(empty), 'Subsets result must be an array');
+        assert.strictEqual(empty.length, 1, 'Empty array has exactly 1 subset: []');
+
+        const single = resultsMap.get('single');
+        assert.ok(Array.isArray(single) && single.length === 2, 'Single element array has 2 subsets');
+
+        const three = resultsMap.get('three');
+        assert.ok(Array.isArray(three) && three.length === 8, '[1,2,3] must produce 2^3 = 8 subsets');
+        // Validate each subset is valid subset of [1, 2, 3]
+        for (const s of three) {
+          assert.ok(Array.isArray(s), 'Each subset must be an array');
+          assert.ok(s.every((x) => [1, 2, 3].includes(x)), 'Elements must be from original set');
+        }
+      }
+    });
+
+    // 14. Range Queries (Fenwick Tree / Binary Indexed Tree)
+    this.oracles.set('fenwick_tree', {
+      family: 'range_queries',
+      lang: 'javascript',
+      spec: {
+        mode: 'class',
+        names: ['FenwickTree', 'BinaryIndexedTree'],
+        operations: [
+          { id: 'init', op: 'new', args: [5] },
+          { id: 'u1', op: 'update', args: [1, 3] },
+          { id: 'u2', op: 'update', args: [2, 5] },
+          { id: 'u3', op: 'update', args: [3, 2] },
+          { id: 'q1', op: 'query', args: [1] },
+          { id: 'q2', op: 'query', args: [2] },
+          { id: 'q3', op: 'query', args: [3] },
+          { id: 'u2_add', op: 'update', args: [2, 4] },
+          { id: 'q3_after', op: 'query', args: [3] }
+        ]
+      },
+      verify(resultsMap) {
+        assert.strictEqual(resultsMap.get('q1'), 3, 'Prefix sum at index 1');
+        assert.strictEqual(resultsMap.get('q2'), 8, 'Prefix sum at index 2 (3 + 5)');
+        assert.strictEqual(resultsMap.get('q3'), 10, 'Prefix sum at index 3 (3 + 5 + 2)');
+        assert.strictEqual(resultsMap.get('q3_after'), 14, 'Prefix sum after update (10 + 4)');
+      }
+    });
+
+    // 15. Greedy (Merge Intervals)
+    this.oracles.set('merge_intervals', {
+      family: 'greedy',
+      lang: 'javascript',
+      spec: {
+        mode: 'function',
+        names: ['merge', 'mergeIntervals'],
+        cases: [
+          { id: 'std', args: [[[1, 3], [2, 6], [8, 10], [15, 18]]] },
+          { id: 'disjoint', args: [[[1, 2], [3, 4]]] },
+          { id: 'all_overlap', args: [[[1, 4], [2, 3]]] },
+          { id: 'empty', args: [[]] },
+          { id: 'single', args: [[[1, 5]]] }
+        ]
+      },
+      verify(resultsMap) {
+        assert.deepStrictEqual(resultsMap.get('std'), [[1, 6], [8, 10], [15, 18]], 'Standard overlapping merge');
+        assert.deepStrictEqual(resultsMap.get('disjoint'), [[1, 2], [3, 4]], 'Disjoint intervals preserve order');
+        assert.deepStrictEqual(resultsMap.get('all_overlap'), [[1, 4]], 'Completely contained interval');
+        assert.deepStrictEqual(resultsMap.get('empty'), [], 'Empty input returns empty array');
+        assert.deepStrictEqual(resultsMap.get('single'), [[1, 5]], 'Single interval returns identical interval');
+      }
+    });
+
+    // 16. Concurrency & Streaming (Bounded Queue)
+    this.oracles.set('bounded_queue', {
+      family: 'concurrency_streaming',
+      lang: 'javascript',
+      spec: {
+        mode: 'class',
+        names: ['BoundedQueue', 'TaskQueue'],
+        operations: [
+          { id: 'init', op: 'new', args: [2] },
+          { id: 'e1', op: 'enqueue', args: ['A'] },
+          { id: 'e2', op: 'enqueue', args: ['B'] },
+          { id: 'e3_overflow', op: 'enqueue', args: ['C'] },
+          { id: 'size2', op: 'size', args: [] },
+          { id: 'd1', op: 'dequeue', args: [] },
+          { id: 'e4', op: 'enqueue', args: ['D'] },
+          { id: 'd2', op: 'dequeue', args: [] },
+          { id: 'd3', op: 'dequeue', args: [] },
+          { id: 'd4_empty', op: 'dequeue', args: [] }
+        ]
+      },
+      verify(resultsMap) {
+        assert.strictEqual(resultsMap.get('e1'), true, 'Enqueued first item');
+        assert.strictEqual(resultsMap.get('e2'), true, 'Enqueued second item');
+        assert.strictEqual(resultsMap.get('e3_overflow'), false, 'Overflow enqueue rejected when full');
+        assert.strictEqual(resultsMap.get('size2'), 2, 'Queue size is 2');
+        assert.strictEqual(resultsMap.get('d1'), 'A', 'FIFO dequeue item A');
+        assert.strictEqual(resultsMap.get('e4'), true, 'Enqueue item D after space freed');
+        assert.strictEqual(resultsMap.get('d2'), 'B', 'FIFO dequeue item B');
+        assert.strictEqual(resultsMap.get('d3'), 'D', 'FIFO dequeue item D');
+        assert.strictEqual(resultsMap.get('d4_empty'), null, 'Dequeue from empty queue returns null');
+      }
+    });
+
+    // 17. Numerical & Geometry (GCD)
+    this.oracles.set('gcd_lcm', {
+      family: 'numerical_geometry',
+      lang: 'javascript',
+      spec: {
+        mode: 'function',
+        names: ['gcd', 'greatestCommonDivisor'],
+        cases: [
+          { id: 'std', args: [48, 18] },
+          { id: 'prime', args: [17, 13] },
+          { id: 'zero', args: [0, 5] },
+          { id: 'equal', args: [24, 24] }
+        ]
+      },
+      verify(resultsMap) {
+        assert.strictEqual(resultsMap.get('std'), 6, 'gcd(48, 18) = 6');
+        assert.strictEqual(resultsMap.get('prime'), 1, 'gcd(17, 13) = 1');
+        assert.strictEqual(resultsMap.get('zero'), 5, 'gcd(0, 5) = 5');
+        assert.strictEqual(resultsMap.get('equal'), 24, 'gcd(24, 24) = 24');
+      }
+    });
   }
 
   /**

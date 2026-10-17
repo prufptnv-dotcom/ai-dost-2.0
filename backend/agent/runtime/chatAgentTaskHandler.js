@@ -3,6 +3,8 @@
 const projectAuthorization = require('../../services/projectAuthorization');
 const { getChatTaskGateway } = require('./createChatTaskGateway');
 const { getActiveTask } = require('../../taskCancellation');
+const { buildAppSpecification, formatAppSpecificationForPrompt } = require('../../services/appSpecificationService');
+const { inspectWorkspace, buildPromptDirective } = require('../../services/workspaceFrameworkIntelligence');
 
 function writeSse(res, event) {
   if (res.writableEnded) return;
@@ -55,15 +57,27 @@ async function handleChatTaskRequest(req, res, next, dependencies = {}) {
       runtime: dependencies.runtime,
     });
 
+    const promptText = body.userPrompt || plan.intent?.originalMessage || '';
+    const appSpecification = buildAppSpecification(promptText);
+    let workspaceDirective = '';
+    if (body.projectPath) {
+      try {
+        const intelligence = inspectWorkspace(body.projectPath);
+        workspaceDirective = buildPromptDirective(intelligence);
+      } catch (_) {}
+    }
+
     const result = await gateway.run({
       projectId,
       userId: authorization.user.id,
       taskPlan: plan,
       context: {
-        userPrompt: body.userPrompt || plan.intent.originalMessage || '',
+        userPrompt: promptText,
         projectPath: body.projectPath || null,
         projectFiles: Array.isArray(body.projectFiles) ? body.projectFiles.slice(0, 200) : [],
         sessionId: body.sessionId || null,
+        specification: appSpecification,
+        workspaceDirective
       },
       signal,
       maxRepairs: 2,
@@ -75,6 +89,11 @@ async function handleChatTaskRequest(req, res, next, dependencies = {}) {
       taskId,
       status: result?.status || 'FAILED',
       result,
+      specification: appSpecification ? {
+        applicationType: appSpecification.applicationType,
+        unresolvedAssumptions: appSpecification.unresolvedAssumptions,
+        evidenceContract: appSpecification.evidenceContract
+      } : null
     });
     return res.end();
   } catch (error) {

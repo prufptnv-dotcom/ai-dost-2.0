@@ -178,6 +178,37 @@ function reviewProjectFiles(files = {}, spec = null, options = {}) {
         suggestion: 'Verify matching braces around functions and component blocks.'
       });
     }
+
+    // Stage 3 & 4: React rules checks in .jsx / .tsx files
+    if (/\.[jt]sx$/i.test(filePath)) {
+      // 1. Hooks called conditionally
+      if (/if\s*\([^)]*\)\s*\{[^}]*?\buse(?:State|Effect|Memo|Callback|Ref|Context)\s*\(/.test(content)) {
+        findings.push({
+          ruleId: 'REACT-CONDITIONAL-HOOK',
+          stage: STAGES.FRAMEWORK_MANIFEST,
+          severity: SEVERITY.ERROR,
+          filePath,
+          message: 'React hook invoked conditionally inside an if-statement block (violates Rules of Hooks).',
+          suggestion: 'Move all React hook invocations to the top level of the component.'
+        });
+      }
+
+      // 2. Direct state mutation
+      const stateMatch = content.match(/\b(?:const|let)\s*\[\s*(\w+)\s*,\s*set\w+\s*\]\s*=\s*useState/);
+      if (stateMatch && stateMatch[1]) {
+        const stateVar = stateMatch[1];
+        if (new RegExp(`\\b${stateVar}\\.[\\w$]+\\s*=\\s*`).test(content)) {
+          findings.push({
+            ruleId: 'REACT-STATE-MUTATION',
+            stage: STAGES.FRAMEWORK_MANIFEST,
+            severity: SEVERITY.ERROR,
+            filePath,
+            message: `Direct mutation of React state variable '${stateVar}' detected.`,
+            suggestion: 'Use functional setter setState(prev => ({ ...prev, key: value })) instead of direct mutation.'
+          });
+        }
+      }
+    }
   }
 
   // Stage 4: Package manifest consistency

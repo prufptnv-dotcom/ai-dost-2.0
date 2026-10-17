@@ -108,12 +108,20 @@ function detectSupportedAlgorithmOracle(request = '', files = {}) {
     { name: 'valid_parentheses', pattern: /\b(valid\s*parenthes[ei]s|balanced\s*bracket|isvalidparentheses)\b/i },
     { name: 'linked_list_cycle', pattern: /\b(linked\s*list\s*cycle|detect\s*cycle|hascycle)\b/i },
     { name: 'bst_validation', pattern: /\b(bst\s*validation|validate\s*bst|isvalidbst)\b/i },
+    { name: 'min_heap', pattern: /\b(min\s*heap|priority\s*queue)\b/i },
     { name: 'lru_cache', pattern: /\b(lru\s*cache|least\s*recently\s*used)\b/i },
     { name: 'merge_intervals', pattern: /\b(merge\s*intervals?)\b/i },
     { name: 'graph_bfs', pattern: /\b(graph\s*bfs|shortest\s*path.*bfs|breadth\s*first)\b/i },
+    { name: 'climbing_stairs', pattern: /\b(climbing\s*stairs|climb\s*stairs)\b/i },
     { name: 'coin_change', pattern: /\b(coin\s*change|min\s*coins)\b/i },
     { name: 'trie', pattern: /\b(trie|prefix\s*tree)\b/i },
-    { name: 'topological_sort', pattern: /\b(topological\s*sort|topo\s*sort|course\s*schedule)\b/i }
+    { name: 'topological_sort', pattern: /\b(topological\s*sort|topo\s*sort|course\s*schedule)\b/i },
+    { name: 'union_find', pattern: /\b(union\s*find|disjoint\s*set|\bdsu\b)\b/i },
+    { name: 'string_matching', pattern: /\b(kmp|string\s*matching|strstr)\b/i },
+    { name: 'subsets', pattern: /\b(subset|subsets|power\s*set)\b/i },
+    { name: 'fenwick_tree', pattern: /\b(fenwick|binary\s*indexed\s*tree)\b/i },
+    { name: 'bounded_queue', pattern: /\b(bounded\s*queue|task\s*queue)\b/i },
+    { name: 'gcd_lcm', pattern: /\b(gcd|greatest\s*common\s*divisor|lcm)\b/i }
   ];
 
   for (const item of oracleMap) {
