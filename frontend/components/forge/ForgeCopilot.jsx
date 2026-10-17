@@ -647,11 +647,20 @@ function GitSnapshotsModal({ open, onClose, onToast, projectId, projectName }) {
   const [commitMsg, setCommitMsg] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
+  const [activeGitTab, setActiveGitTab] = useState('snapshots');
+  const [remoteUrl, setRemoteUrl] = useState('');
+  const [remoteBranch, setRemoteBranch] = useState('main');
+  const [githubToken, setGithubToken] = useState('');
+  const [pushResult, setPushResult] = useState(null);
+  const [pushing, setPushing] = useState(false);
 
   const fetchLogs = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${BACKEND}/api/git/log`);
+      const url = projectId
+        ? `${BACKEND}/api/git/log?projectId=${encodeURIComponent(projectId)}`
+        : `${BACKEND}/api/git/log`;
+      const res = await fetch(url);
       const data = await res.json();
       if (data?.success && Array.isArray(data.commits)) {
         setCommits(data.commits);
@@ -661,7 +670,7 @@ function GitSnapshotsModal({ open, onClose, onToast, projectId, projectName }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [projectId]);
 
   useEffect(() => {
     if (!open) return;
@@ -677,7 +686,7 @@ function GitSnapshotsModal({ open, onClose, onToast, projectId, projectName }) {
       const res = await fetch(`${BACKEND}/api/git/commit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: commitMsg.trim() }),
+        body: JSON.stringify({ message: commitMsg.trim(), projectId }),
       });
       const data = await res.json();
       if (data?.success) {
@@ -703,7 +712,7 @@ function GitSnapshotsModal({ open, onClose, onToast, projectId, projectName }) {
       const res = await fetch(`${BACKEND}/api/git/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hash }),
+        body: JSON.stringify({ hash, projectId }),
       });
       const data = await res.json();
       if (data?.success) {
@@ -719,6 +728,47 @@ function GitSnapshotsModal({ open, onClose, onToast, projectId, projectName }) {
     }
   };
 
+  const handlePushRemote = async (e) => {
+    e?.preventDefault();
+    const trimmedUrl = remoteUrl.trim();
+    if (!trimmedUrl) {
+      setStatus('Remote URL is required (e.g. https://github.com/user/repo.git)');
+      return;
+    }
+    let urlToPush = trimmedUrl;
+    if (githubToken.trim() && urlToPush.startsWith('https://')) {
+      const token = encodeURIComponent(githubToken.trim());
+      urlToPush = urlToPush.replace('https://', `https://${token}@`);
+    }
+
+    try {
+      setPushing(true);
+      setPushResult(null);
+      setStatus('');
+      const res = await fetch(`${BACKEND}/api/git/push-remote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          remoteUrl: urlToPush,
+          branch: remoteBranch.trim() || 'main',
+          projectId,
+        }),
+      });
+      const data = await res.json();
+      if (data?.success) {
+        setPushResult({ success: true, message: data.message || `Successfully pushed branch [${remoteBranch || 'main'}] to remote!` });
+        onToast?.(`Pushed ${projectName} to remote repository!`);
+        fetchLogs();
+      } else {
+        setPushResult({ success: false, error: data?.error || 'Push failed. Please verify repository URL and access token.' });
+      }
+    } catch (err) {
+      setPushResult({ success: false, error: err.message });
+    } finally {
+      setPushing(false);
+    }
+  };
+
   if (!open) return null;
 
   return (
@@ -730,8 +780,8 @@ function GitSnapshotsModal({ open, onClose, onToast, projectId, projectName }) {
               <LuGitBranch size={16} />
             </span>
             <div>
-              <h2 className="text-sm font-bold text-white">Git Snapshots &amp; Local Commits</h2>
-              <p className="text-[11px] text-zinc-400">Offline repository version control for {projectName}</p>
+              <h2 className="text-sm font-bold text-white">Git Snapshots &amp; Remote Sync</h2>
+              <p className="text-[11px] text-zinc-400">Version control &amp; GitHub integration for {projectName}</p>
             </div>
           </div>
           <button
@@ -742,80 +792,196 @@ function GitSnapshotsModal({ open, onClose, onToast, projectId, projectName }) {
           </button>
         </div>
 
+        {/* Modal Tab Switcher */}
+        <div className="flex border-b border-zinc-800 bg-[#141518] px-5 pt-2.5 gap-4 text-xs select-none">
+          <button
+            onClick={() => setActiveGitTab('snapshots')}
+            className={`pb-2.5 font-medium flex items-center gap-1.5 border-b-2 transition-colors ${
+              activeGitTab === 'snapshots'
+                ? 'border-purple-500 text-white font-semibold'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <LuHistory size={13} />
+            <span>Local Snapshots ({commits.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveGitTab('remote')}
+            className={`pb-2.5 font-medium flex items-center gap-1.5 border-b-2 transition-colors ${
+              activeGitTab === 'remote'
+                ? 'border-purple-500 text-white font-semibold'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <LuUpload size={13} />
+            <span>Push to GitHub</span>
+          </button>
+        </div>
+
         <div className="p-5 flex-1 overflow-y-auto space-y-4">
-          <form onSubmit={handleCreateCommit} className="space-y-2">
-            <label className="text-xs font-semibold text-zinc-300 block">Create New Snapshot</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={commitMsg}
-                onChange={(e) => setCommitMsg(e.target.value)}
-                placeholder="Commit message (e.g. Added dark navbar and icons)..."
-                className="flex-1 bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-purple-500"
-              />
-              <button
-                type="submit"
-                disabled={loading || !commitMsg.trim()}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
-              >
-                <LuSave size={13} /> Commit
-              </button>
-            </div>
-            {status && <div className="text-xs text-amber-400">{status}</div>}
-          </form>
-
-          <div>
-            <div className="flex items-center justify-between text-xs font-semibold text-zinc-400 mb-2">
-              <span>COMMIT HISTORY ({commits.length})</span>
-              <button
-                onClick={fetchLogs}
-                disabled={loading}
-                className="text-purple-400 hover:text-purple-300 flex items-center gap-1"
-              >
-                <LuRefreshCw size={11} className={loading ? 'spin' : ''} /> Refresh
-              </button>
-            </div>
-
-            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-              {commits.length > 0 ? (
-                commits.map((c) => (
-                  <div
-                    key={c.hash}
-                    className="p-3 rounded-xl bg-zinc-900 border border-zinc-800/80 flex items-center justify-between hover:border-zinc-700 transition-colors"
+          {activeGitTab === 'snapshots' ? (
+            <>
+              <form onSubmit={handleCreateCommit} className="space-y-2">
+                <label className="text-xs font-semibold text-zinc-300 block">Create New Snapshot</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={commitMsg}
+                    onChange={(e) => setCommitMsg(e.target.value)}
+                    placeholder="Commit message (e.g. Added dark navbar and icons)..."
+                    className="flex-1 bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-purple-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={loading || !commitMsg.trim()}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <div className="min-w-0 pr-3">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800">
-                          {c.hash}
-                        </span>
-                        <span className="text-xs font-medium text-zinc-200 truncate">{c.message}</span>
+                    <LuSave size={13} /> Commit
+                  </button>
+                </div>
+                {status && <div className="text-xs text-amber-400">{status}</div>}
+              </form>
+
+              <div>
+                <div className="flex items-center justify-between text-xs font-semibold text-zinc-400 mb-2">
+                  <span>COMMIT HISTORY ({commits.length})</span>
+                  <button
+                    onClick={fetchLogs}
+                    disabled={loading}
+                    className="text-purple-400 hover:text-purple-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    <LuRefreshCw size={11} className={loading ? 'spin' : ''} /> Refresh
+                  </button>
+                </div>
+
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {commits.length > 0 ? (
+                    commits.map((c) => (
+                      <div
+                        key={c.hash}
+                        className="p-3 rounded-xl bg-zinc-900 border border-zinc-800/80 flex items-center justify-between hover:border-zinc-700 transition-colors"
+                      >
+                        <div className="min-w-0 pr-3">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800">
+                              {c.hash}
+                            </span>
+                            <span className="text-xs font-medium text-zinc-200 truncate">{c.message}</span>
+                          </div>
+                          <div className="text-[10px] text-zinc-500 mt-1">
+                            {c.author} · {c.date}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRollback(c.hash)}
+                          className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded text-xs flex items-center gap-1 shrink-0 transition-colors cursor-pointer"
+                          title="Rollback workspace to this commit"
+                        >
+                          <LuRotateCcw size={11} /> Rollback
+                        </button>
                       </div>
-                      <div className="text-[10px] text-zinc-500 mt-1">
-                        {c.author} · {c.date}
-                      </div>
+                    ))
+                  ) : (
+                    <div className="p-4 rounded-xl bg-zinc-900/50 border border-zinc-800 text-center text-xs text-zinc-500">
+                      No local commits yet. Create your first snapshot above.
                     </div>
-                    <button
-                      onClick={() => handleRollback(c.hash)}
-                      className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded text-xs flex items-center gap-1 shrink-0 transition-colors"
-                      title="Rollback workspace to this commit"
-                    >
-                      <LuRotateCcw size={11} /> Rollback
-                    </button>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+            <form onSubmit={handlePushRemote} className="space-y-4">
+              <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-xs text-purple-200 flex items-start gap-2">
+                <LuRocket size={15} className="text-purple-400 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-semibold text-white">Direct GitHub Synchronization</div>
+                  <div className="text-[11px] text-zinc-400 mt-0.5">
+                    Push your generated Forge workspace directly into your GitHub, GitLab, or Bitbucket repository.
                   </div>
-                ))
-              ) : (
-                <div className="p-4 rounded-xl bg-zinc-900/50 border border-zinc-800 text-center text-xs text-zinc-500">
-                  No local commits yet. Create your first snapshot above.
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-zinc-300 block">Repository Remote URL *</label>
+                <input
+                  type="text"
+                  value={remoteUrl}
+                  onChange={(e) => setRemoteUrl(e.target.value)}
+                  placeholder="https://github.com/your-username/my-awesome-app.git"
+                  className="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-purple-500 font-mono"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-zinc-300 block">Target Branch</label>
+                  <input
+                    type="text"
+                    value={remoteBranch}
+                    onChange={(e) => setRemoteBranch(e.target.value)}
+                    placeholder="main"
+                    className="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-purple-500 font-mono"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-zinc-300 block">Personal Access Token (PAT)</label>
+                  <input
+                    type="password"
+                    value={githubToken}
+                    onChange={(e) => setGithubToken(e.target.value)}
+                    placeholder="ghp_xxxxxxxxxxxx"
+                    className="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-purple-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="text-[10px] text-zinc-500 leading-relaxed">
+                💡 <b>Tip:</b> If your repository is private or requires authentication, paste a GitHub Token with <code>repo</code> write scope.
+              </div>
+
+              {pushResult && (
+                <div
+                  className={`p-3 rounded-xl border text-xs ${
+                    pushResult.success
+                      ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
+                      : 'bg-red-950/60 border-red-800 text-red-300'
+                  }`}
+                >
+                  <div className="font-semibold flex items-center gap-1.5">
+                    {pushResult.success ? <LuCheck size={14} /> : <LuShieldAlert size={14} />}
+                    {pushResult.success ? 'Push Successful' : 'Push Error'}
+                  </div>
+                  <div className="mt-1 font-mono text-[11px] break-all">
+                    {pushResult.message || pushResult.error}
+                  </div>
                 </div>
               )}
-            </div>
-          </div>
+
+              {status && <div className="text-xs text-amber-400">{status}</div>}
+
+              <button
+                type="submit"
+                disabled={pushing || !remoteUrl.trim()}
+                className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-lg shadow-purple-600/20"
+              >
+                {pushing ? (
+                  <>
+                    <LuLoaderCircle size={14} className="spin" /> Pushing to Remote Repository...
+                  </>
+                ) : (
+                  <>
+                    <LuUpload size={14} /> Push to Remote ({remoteBranch || 'main'})
+                  </>
+                )}
+              </button>
+            </form>
+          )}
         </div>
 
         <div className="px-5 py-3 border-t border-zinc-800 bg-[#1c1d22] flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 font-medium transition-colors"
+            className="px-4 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 font-medium transition-colors cursor-pointer"
           >
             Close
           </button>
@@ -3518,6 +3684,12 @@ export default function ForgeCopilot({
     {
       label: 'Git Snapshots & Commit Log',
       icon: <LuGitBranch size={14} className="text-orange-400" />,
+      action: () => setGitOpen(true),
+    },
+    {
+      label: 'Push to GitHub / Remote...',
+      key: '⌘G',
+      icon: <LuUpload size={14} className="text-purple-400" />,
       action: () => setGitOpen(true),
     },
     {
