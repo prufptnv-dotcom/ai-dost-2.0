@@ -811,6 +811,197 @@ function GitSnapshotsModal({ open, onClose, onToast, projectId, projectName }) {
       </div>
     </div>
   );
+function FileDiffModal({
+  open,
+  onClose,
+  diffData,
+  onRevert,
+  onOpenInEditor,
+}) {
+  const [viewMode, setViewMode] = useState('unified');
+  const [copied, setCopied] = useState(false);
+
+  if (!open || !diffData) return null;
+
+  const { filePath = '', oldContent = '', newContent = '', summary = '' } = diffData;
+  const ops = diffLines(oldContent, newContent);
+  const stats = diffStats(ops);
+
+  const handleCopyNew = () => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(newContent);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 sm:p-6 animate-in fade-in duration-150">
+      <div className="bg-[#121318] border border-zinc-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden text-zinc-200">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-800/80 bg-[#17181f]">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+              <LuCode size={16} />
+            </span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-bold text-white truncate font-mono">{filePath}</h2>
+                <div className="flex items-center gap-1.5 text-[10px] font-mono px-2 py-0.5 rounded-full bg-zinc-800/80 border border-zinc-700/60">
+                  <span className="text-emerald-400 font-semibold">+{stats.added}</span>
+                  <span className="text-rose-400 font-semibold">−{stats.removed}</span>
+                </div>
+              </div>
+              <p className="text-[11px] text-zinc-400 truncate">
+                {summary || 'Reviewing modifications vs previous checkpoint'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center rounded-lg bg-zinc-800/70 p-0.5 border border-zinc-700/60 text-xs">
+              <button
+                type="button"
+                onClick={() => setViewMode('unified')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                  viewMode === 'unified'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                Unified
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('split')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                  viewMode === 'split'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                Split
+              </button>
+            </div>
+
+            {oldContent ? (
+              <button
+                type="button"
+                onClick={() => onRevert?.(filePath)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-semibold transition-colors"
+                title="Roll back this file to previous content"
+              >
+                <LuRotateCcw size={13} />
+                <span>Revert File</span>
+              </button>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => {
+                onOpenInEditor?.(filePath);
+                onClose?.();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 text-xs font-medium transition-colors"
+            >
+              <LuExternalLink size={13} />
+              <span>Editor</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+            >
+              <LuX size={16} />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-auto bg-[#0a0b0e] font-mono text-[12px] leading-relaxed p-0">
+          {viewMode === 'unified' ? (
+            <div className="divide-y divide-zinc-800/30">
+              {ops.map((op, idx) => {
+                const isAdd = op.type === 'add';
+                const isDel = op.type === 'del';
+                return (
+                  <div
+                    key={idx}
+                    className={`flex items-start px-4 py-0.5 select-text ${
+                      isAdd
+                        ? 'bg-emerald-950/25 text-emerald-200 border-l-2 border-emerald-500'
+                        : isDel
+                        ? 'bg-rose-950/25 text-rose-300 border-l-2 border-rose-500'
+                        : 'text-zinc-400 hover:bg-zinc-900/40'
+                    }`}
+                  >
+                    <span className="w-6 shrink-0 text-center select-none text-[10px] font-bold opacity-60">
+                      {isAdd ? '+' : isDel ? '−' : ' '}
+                    </span>
+                    <span className="w-10 shrink-0 text-right pr-3 select-none text-[10px] opacity-35">
+                      {idx + 1}
+                    </span>
+                    <pre className="flex-1 overflow-x-auto whitespace-pre font-mono m-0 py-0.5">
+                      {op.text || ' '}
+                    </pre>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 divide-x divide-zinc-800 min-h-full">
+              <div className="flex flex-col">
+                <div className="px-4 py-1.5 text-[10px] font-semibold text-zinc-400 bg-zinc-900/80 border-b border-zinc-800 sticky top-0 flex items-center justify-between">
+                  <span>PREVIOUS CHECKPOINT</span>
+                  <span>{oldContent ? oldContent.split('\n').length + ' lines' : 'Empty'}</span>
+                </div>
+                <div className="p-3 font-mono text-[11px] leading-relaxed overflow-x-auto">
+                  {oldContent ? (
+                    oldContent.split('\n').map((line, idx) => (
+                      <div key={idx} className="flex hover:bg-zinc-900/40">
+                        <span className="w-8 shrink-0 text-right pr-3 select-none text-zinc-600 text-[10px]">{idx + 1}</span>
+                        <pre className="whitespace-pre text-zinc-400 m-0">{line || ' '}</pre>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-zinc-600 italic py-8 text-center text-xs">No previous revision recorded (New file)</div>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-col">
+                <div className="px-4 py-1.5 text-[10px] font-semibold text-emerald-400 bg-zinc-900/80 border-b border-zinc-800 sticky top-0 flex items-center justify-between">
+                  <span>CURRENT AI REVISION</span>
+                  <span>{newContent ? newContent.split('\n').length + ' lines' : 'Empty'}</span>
+                </div>
+                <div className="p-3 font-mono text-[11px] leading-relaxed overflow-x-auto">
+                  {newContent.split('\n').map((line, idx) => (
+                    <div key={idx} className="flex hover:bg-zinc-900/40">
+                      <span className="w-8 shrink-0 text-right pr-3 select-none text-zinc-600 text-[10px]">{idx + 1}</span>
+                      <pre className="whitespace-pre text-zinc-200 m-0">{line || ' '}</pre>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between px-5 py-2.5 border-t border-zinc-800 bg-[#17181f] text-xs text-zinc-400">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>Diff generated from working tree memory</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleCopyNew}
+            className="flex items-center gap-1 text-xs text-zinc-400 hover:text-white transition-colors"
+          >
+            {copied ? <LuCheck size={12} className="text-emerald-400" /> : <LuCopy size={12} />}
+            <span>{copied ? 'Copied Content!' : 'Copy Current Code'}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function Topbar({
@@ -894,6 +1085,7 @@ function Toolbar({
   onToggleAssistant,
   inspectorActive = false,
   onToggleInspector,
+  onOpenDiff,
   mobile,
 }) {
   return (
@@ -951,6 +1143,15 @@ function Toolbar({
             </IconButton>
           </div>
         )}
+        {onOpenDiff && (
+          <IconButton
+            title="Inspect latest changes & diffs (Unified / Split)"
+            onClick={onOpenDiff}
+            className="hover:!text-indigo-400"
+          >
+            <LuSliders size={15} />
+          </IconButton>
+        )}
         <span className="toolbar-separator" />
         <IconButton title="Refresh preview" onClick={onRefresh}>
           <LuRefreshCw size={15} />
@@ -980,7 +1181,7 @@ function Toolbar({
   );
 }
 
-function CodeEditorView({ activeFile, code, onChangeCode, onSaveCode, saved }) {
+function CodeEditorView({ activeFile, code, onChangeCode, onSaveCode, saved, onOpenDiff }) {
   const lineCount = useMemo(() => (code || '').split('\n').length, [code]);
   const lang = useMemo(() => getMonacoLanguage(activeFile), [activeFile]);
 
@@ -1003,13 +1204,24 @@ function CodeEditorView({ activeFile, code, onChangeCode, onSaveCode, saved }) {
         <span className="truncate font-mono text-zinc-200">{activeFile || 'No file selected'}</span>
         <span className={`code-tab-dot ${saved ? 'bg-emerald-400' : 'bg-amber-400'}`} />
         <span className="text-[10px] text-zinc-400 ml-1">{saved ? 'Saved' : 'Modified'}</span>
-        <button
-          onClick={onSaveCode}
-          className="ml-auto text-xs px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white font-medium flex items-center gap-1 shadow-sm transition-colors"
-          title="Save file (Ctrl+S)"
-        >
-          <LuSave size={12} /> Save
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          {onOpenDiff && activeFile && (
+            <button
+              onClick={() => onOpenDiff(activeFile)}
+              className="text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium flex items-center gap-1 transition-colors border border-zinc-700/80"
+              title="Compare modifications against checkpoint"
+            >
+              <LuSliders size={12} /> Diff
+            </button>
+          )}
+          <button
+            onClick={onSaveCode}
+            className="text-xs px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white font-medium flex items-center gap-1 shadow-sm transition-colors"
+            title="Save file (Ctrl+S)"
+          >
+            <LuSave size={12} /> Save
+          </button>
+        </div>
       </div>
       <div className="code-scroll relative flex-1 min-h-0 bg-[#151619]">
         {typeof window !== 'undefined' && process.env.NODE_ENV !== 'test' ? (
@@ -1202,6 +1414,7 @@ function WorkingActivityCard({
   sessionFilesWritten = [],
   elapsedSeconds = 0,
   onOpenFile,
+  onOpenDiff,
   onRetry,
   lastError,
 }) {
@@ -1361,7 +1574,7 @@ function WorkingActivityCard({
         </div>
       )}
 
-      {/* Files Modified Tray (Click to Inspect) */}
+      {/* Files Modified Tray (Click to Inspect / Diff) */}
       {sessionFilesWritten && sessionFilesWritten.length > 0 && (
         <div className="live-modified-tray mt-2 rounded bg-zinc-900/60 border border-zinc-800 p-1.5">
           <span className="text-[7.5px] font-semibold text-zinc-400 mr-1 flex items-center gap-1">
@@ -1370,17 +1583,27 @@ function WorkingActivityCard({
           </span>
           <div className="flex flex-wrap gap-1">
             {sessionFilesWritten.map((f, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => onOpenFile?.(f.path)}
-                className="live-file-btn"
-                title={`Open ${f.path}`}
-              >
-                <span>{f.path.split('/').pop() || f.path}</span>
-                {f.added !== undefined && <span className="diff-tag-add">+{f.added}</span>}
-                {f.removed !== undefined && <span className="diff-tag-sub">−{f.removed}</span>}
-              </button>
+              <div key={i} className="inline-flex items-center rounded overflow-hidden border border-zinc-700/60 bg-zinc-800/80 text-[9px]">
+                <button
+                  type="button"
+                  onClick={() => onOpenFile?.(f.path)}
+                  className="px-2 py-0.5 hover:bg-zinc-700 text-zinc-300 flex items-center gap-1"
+                  title={`Open ${f.path} in editor`}
+                >
+                  <span>{f.path.split('/').pop() || f.path}</span>
+                </button>
+                {onOpenDiff && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenDiff(f.path)}
+                    className="px-1.5 py-0.5 border-l border-zinc-700/80 hover:bg-indigo-600/30 text-indigo-300 flex items-center gap-0.5 font-mono text-[8px]"
+                    title={`Review Diff & Rollback for ${f.path}`}
+                  >
+                    {f.added !== undefined && <span className="text-emerald-400 font-semibold">+{f.added}</span>}
+                    {f.removed !== undefined && <span className="text-rose-400 font-semibold">−{f.removed}</span>}
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         </div>
@@ -1446,6 +1669,7 @@ function AssistantPanel({
   pendingApproval = null,
   onApprove,
   onOpenFile,
+  onOpenDiff,
   onRetry,
   selectedElement = null,
   onClearSelectedElement,
@@ -1574,7 +1798,11 @@ function AssistantPanel({
 
               {/* Real Last Action Card */}
               {lastAction && (
-                <div className="agent-action-card">
+                <div
+                  className="agent-action-card cursor-pointer hover:border-indigo-500/50 transition-colors"
+                  onClick={() => onOpenDiff?.(lastAction.file)}
+                  title="Click to inspect diff and rollback"
+                >
                   <div className="agent-action-top">
                     <span className="agent-action-icon">
                       <LuCode size={12} />
@@ -1591,6 +1819,11 @@ function AssistantPanel({
                     <span className="diff-added">+{lastAction.added || 0}</span>
                     <span className="diff-removed">−{lastAction.removed || 0}</span>
                     <span className="truncate">{lastAction.summary || 'Code modifications verified'}</span>
+                    {onOpenDiff && (
+                      <span className="ml-auto text-[9px] text-indigo-400 flex items-center gap-0.5 underline">
+                        Diff
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
@@ -1617,18 +1850,32 @@ function AssistantPanel({
                       {message.files && message.files.length > 0 && (
                         <div className="mt-2 pt-2 border-t border-zinc-700/40 flex flex-wrap gap-1">
                           <span className="text-[7.5px] text-zinc-400 font-semibold w-full">Modified Files:</span>
-                          {message.files.map((fp, fi) => (
-                            <button
-                              key={fi}
-                              type="button"
-                              onClick={() => onOpenFile?.(typeof fp === 'string' ? fp : fp.path)}
-                              className="live-file-btn"
-                              title="Open in editor"
-                            >
-                              <LuCode size={9} />
-                              <span>{typeof fp === 'string' ? fp.split('/').pop() : fp.path}</span>
-                            </button>
-                          ))}
+                          {message.files.map((fp, fi) => {
+                            const filePath = typeof fp === 'string' ? fp : fp.path;
+                            return (
+                              <div key={fi} className="inline-flex items-center rounded bg-zinc-800/90 border border-zinc-700/60 overflow-hidden text-[10px]">
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenFile?.(filePath)}
+                                  className="px-2 py-0.5 hover:bg-zinc-700 text-zinc-300 flex items-center gap-1"
+                                  title="Open in editor"
+                                >
+                                  <LuCode size={9} />
+                                  <span>{filePath.split('/').pop()}</span>
+                                </button>
+                                {onOpenDiff && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onOpenDiff(filePath)}
+                                    className="px-1.5 py-0.5 border-l border-zinc-700 hover:bg-indigo-600/30 text-indigo-300"
+                                    title="Inspect changes & rollback"
+                                  >
+                                    <LuSliders size={9} />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                       {message.error && onRetry && (
@@ -1666,6 +1913,7 @@ function AssistantPanel({
                 sessionFilesWritten={sessionFilesWritten}
                 elapsedSeconds={elapsedSeconds}
                 onOpenFile={onOpenFile}
+                onOpenDiff={onOpenDiff}
                 onRetry={onRetry}
                 lastError={lastError}
               />
@@ -2548,11 +2796,13 @@ export default function ForgeCopilot({
   const [inspectorActive, setInspectorActive] = useState(false);
   const [selectedElement, setSelectedElement] = useState(null);
   const [runtimeError, setRuntimeError] = useState(null);
+  const [diffModalFile, setDiffModalFile] = useState(null);
 
   const abortRef = useRef(null);
   const currentTaskIdRef = useRef(null);
   const saveTimeoutRef = useRef(null);
   const iframeRef = useRef(null);
+  const previousContentsRef = useRef({});
 
   const toggleInspector = useCallback(() => {
     setInspectorActive((prev) => {
@@ -2662,6 +2912,43 @@ export default function ForgeCopilot({
     setToast(message);
     externalToast?.(message);
   }, [externalToast]);
+
+  const handleOpenDiff = useCallback((filePath) => {
+    const targetPath = filePath || lastAction?.file || activeFile;
+    if (!targetPath) {
+      showToast('No file selected to compare');
+      return;
+    }
+    const oldCode = previousContentsRef.current[targetPath] ?? '';
+    const newCode = contents[targetPath] ?? '';
+    setDiffModalFile({
+      filePath: targetPath,
+      oldContent: oldCode,
+      newContent: newCode,
+      summary: lastAction?.file === targetPath ? lastAction.summary : `Modifications in ${targetPath}`,
+    });
+  }, [lastAction, activeFile, contents, showToast]);
+
+  const handleRevertFile = useCallback(async (filePath) => {
+    if (!filePath) return;
+    const oldCode = previousContentsRef.current[filePath];
+    if (oldCode === undefined) {
+      showToast(`No prior checkpoint recorded for ${filePath}`);
+      return;
+    }
+    try {
+      if (currentProjectId) {
+        await saveProjectFile(currentProjectId, filePath, oldCode);
+      }
+      setContents((c) => ({ ...c, [filePath]: oldCode }));
+      const currentCode = contents[filePath] || '';
+      previousContentsRef.current[filePath] = currentCode;
+      showToast(`Reverted ${filePath} to prior checkpoint`);
+      setDiffModalFile(null);
+    } catch (err) {
+      showToast(`Revert failed: ${err.message}`);
+    }
+  }, [currentProjectId, contents, showToast]);
 
   useEffect(() => {
     setCurrentProjectId(projectId);
@@ -3057,6 +3344,7 @@ export default function ForgeCopilot({
     }));
 
     if (!approvalToken) {
+      previousContentsRef.current = { ...contents };
       setMessages((prev) => [...prev, { role: 'user', text, time }]);
       setLastPrompt(text);
       setPrompt('');
@@ -3273,15 +3561,21 @@ export default function ForgeCopilot({
               if (filePath) {
                 if (data.type !== 'director_file_diff') terminalChangedPaths.add(String(filePath));
                 if (data.type === 'file_written' && typeof data.content === 'string') terminalExpectedContent.set(String(filePath), data.content);
+                const prior = previousContentsRef.current[filePath] ?? contents[filePath] ?? '';
+                if (previousContentsRef.current[filePath] === undefined) {
+                  previousContentsRef.current[filePath] = prior;
+                }
                 if (content) {
                   setContents((c) => ({ ...c, [filePath]: content }));
                 }
-                const stats = content ? diffStats(diffLines(contents[filePath] || '', content)) : { added: data.added || 1, removed: data.removed || 0 };
+                const stats = content ? diffStats(diffLines(prior, content)) : { added: data.added || 1, removed: data.removed || 0 };
                 setLastAction({
                   file: filePath,
                   added: stats.added,
                   removed: stats.removed,
                   summary: data.summary || `Updated ${filePath}`,
+                  oldContent: prior,
+                  newContent: content,
                 });
                 setSessionFilesWritten((prev) => [
                   ...prev.filter((f) => f.path !== filePath),
@@ -3654,6 +3948,7 @@ export default function ForgeCopilot({
                   mobile={mobile}
                   inspectorActive={inspectorActive}
                   onToggleInspector={toggleInspector}
+                  onOpenDiff={() => handleOpenDiff()}
                 />
                 <div className={`workspace-canvas ${mode === 'preview' ? 'preview-canvas' : ''}`}>
                   {mode === 'preview' ? (
@@ -3759,6 +4054,7 @@ export default function ForgeCopilot({
                       onChangeCode={handleCodeChange}
                       onSaveCode={handleExplicitSave}
                       saved={saved}
+                      onOpenDiff={handleOpenDiff}
                     />
                   ) : (
                     <RealTerminalView
@@ -3800,6 +4096,7 @@ export default function ForgeCopilot({
             pendingApproval={pendingApproval}
             onApprove={handleApprove}
             onOpenFile={handleOpenFileInEditor}
+            onOpenDiff={handleOpenDiff}
             onRetry={handleRetryRun}
             selectedElement={selectedElement}
             onClearSelectedElement={() => setSelectedElement(null)}
@@ -3814,6 +4111,16 @@ export default function ForgeCopilot({
         onToast={showToast}
         projectId={currentProjectId}
         projectName={projectName}
+      />
+      <FileDiffModal
+        open={Boolean(diffModalFile)}
+        onClose={() => setDiffModalFile(null)}
+        diffData={diffModalFile}
+        onRevert={handleRevertFile}
+        onOpenInEditor={(fp) => {
+          handleOpenFileInEditor(fp);
+          setMode('code');
+        }}
       />
       {toast && (
         <div className="toast">

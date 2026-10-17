@@ -932,6 +932,220 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
     var toast = window.toast;
     var Toaster = window.Toaster;
 
+    // ── Recharts / Charting Polyfill (Bolt/Lovable Parity for Dashboards) ───
+    window.ResponsiveContainer = function ResponsiveContainer({ children, width = '100%', height = 260, className = '' }) {
+      return React.createElement('div', {
+        className: 'w-full overflow-hidden flex flex-col items-center justify-center ' + className,
+        style: { width, height: typeof height === 'number' ? height + 'px' : height, minHeight: '180px' }
+      }, children);
+    };
+
+    window.Tooltip = function Tooltip() { return null; };
+    window.Legend = function Legend() { return null; };
+    window.CartesianGrid = function CartesianGrid() { return null; };
+    window.XAxis = function XAxis() { return null; };
+    window.YAxis = function YAxis() { return null; };
+    window.Cell = function Cell() { return null; };
+
+    function _extractSeries(children, tag) {
+      const keys = [];
+      React.Children.forEach(children, child => {
+        if (React.isValidElement(child) && (child.props?.dataKey || child.type?.name === tag)) {
+          keys.push({
+            dataKey: child.props?.dataKey,
+            color: child.props?.stroke || child.props?.fill || '#6366f1',
+            name: child.props?.name || child.props?.dataKey
+          });
+        }
+      });
+      return keys.length ? keys : [{ dataKey: 'value', color: '#6366f1' }];
+    }
+
+    window.LineChart = function LineChart({ data = [], children }) {
+      const series = _extractSeries(children, 'Line');
+      const w = 480;
+      const h = 200;
+      const pad = 24;
+      const count = Math.max(data.length, 1);
+      const stepX = (w - pad * 2) / Math.max(count - 1, 1);
+
+      let maxVal = 10;
+      data.forEach(d => {
+        series.forEach(s => {
+          const v = Number(d[s.dataKey]) || 0;
+          if (v > maxVal) maxVal = v;
+        });
+      });
+
+      return React.createElement('svg', {
+        viewBox: '0 0 ' + w + ' ' + h,
+        className: 'w-full h-full overflow-visible font-sans'
+      }, [
+        [0.25, 0.5, 0.75, 1].map((pct, i) => React.createElement('line', {
+          key: 'grid-' + i,
+          x1: pad, y1: (h - pad) - pct * (h - pad * 2),
+          x2: w - pad, y2: (h - pad) - pct * (h - pad * 2),
+          stroke: 'rgba(255,255,255,0.08)', strokeDasharray: '3 3'
+        })),
+        series.map((s, si) => {
+          const points = data.map((d, i) => {
+            const val = Number(d[s.dataKey]) || 0;
+            const x = pad + i * stepX;
+            const y = (h - pad) - (val / maxVal) * (h - pad * 2);
+            return { x, y };
+          });
+          const pathD = points.map((p, i) => (i === 0 ? 'M ' + p.x + ' ' + p.y : 'L ' + p.x + ' ' + p.y)).join(' ');
+          return React.createElement('g', { key: 'series-' + si }, [
+            React.createElement('path', {
+              key: 'line-' + si,
+              d: pathD,
+              fill: 'none',
+              stroke: s.color,
+              strokeWidth: 2.5,
+              strokeLinecap: 'round',
+              strokeLinejoin: 'round'
+            }),
+            points.map((p, pi) => React.createElement('circle', {
+              key: 'dot-' + pi,
+              cx: p.x, cy: p.y, r: 3.5,
+              fill: s.color, stroke: '#090a0f', strokeWidth: 1.5
+            }))
+          ]);
+        }),
+        data.map((d, i) => {
+          const xLabel = d.name || d.month || d.label || d.date || String(i + 1);
+          return React.createElement('text', {
+            key: 'label-' + i,
+            x: pad + i * stepX,
+            y: h - 6,
+            textAnchor: 'middle',
+            fill: 'rgba(255,255,255,0.4)',
+            fontSize: '9px'
+          }, String(xLabel).slice(0, 4));
+        })
+      ]);
+    };
+
+    window.AreaChart = function AreaChart({ data = [], children }) {
+      const series = _extractSeries(children, 'Area');
+      const w = 480;
+      const h = 200;
+      const pad = 24;
+      const count = Math.max(data.length, 1);
+      const stepX = (w - pad * 2) / Math.max(count - 1, 1);
+
+      let maxVal = 10;
+      data.forEach(d => {
+        series.forEach(s => {
+          const v = Number(d[s.dataKey]) || 0;
+          if (v > maxVal) maxVal = v;
+        });
+      });
+
+      return React.createElement('svg', {
+        viewBox: '0 0 ' + w + ' ' + h,
+        className: 'w-full h-full overflow-visible font-sans'
+      }, [
+        React.createElement('defs', { key: 'defs' },
+          series.map((s, si) => React.createElement('linearGradient', {
+            key: 'grad-' + si, id: 'area-grad-' + si, x1: 0, y1: 0, x2: 0, y2: 1
+          }, [
+            React.createElement('stop', { key: 's1', offset: '5%', stopColor: s.color, stopOpacity: 0.4 }),
+            React.createElement('stop', { key: 's2', offset: '95%', stopColor: s.color, stopOpacity: 0 })
+          ]))
+        ),
+        series.map((s, si) => {
+          const points = data.map((d, i) => {
+            const val = Number(d[s.dataKey]) || 0;
+            const x = pad + i * stepX;
+            const y = (h - pad) - (val / maxVal) * (h - pad * 2);
+            return { x, y };
+          });
+          if (!points.length) return null;
+          const lineD = points.map((p, i) => (i === 0 ? 'M ' + p.x + ' ' + p.y : 'L ' + p.x + ' ' + p.y)).join(' ');
+          const areaD = lineD + ' L ' + (pad + (data.length - 1) * stepX) + ' ' + (h - pad) + ' L ' + pad + ' ' + (h - pad) + ' Z';
+          return React.createElement('g', { key: 'area-series-' + si }, [
+            React.createElement('path', { key: 'area-fill-' + si, d: areaD, fill: 'url(#area-grad-' + si + ')' }),
+            React.createElement('path', { key: 'area-line-' + si, d: lineD, fill: 'none', stroke: s.color, strokeWidth: 2 })
+          ]);
+        })
+      ]);
+    };
+
+    window.BarChart = function BarChart({ data = [], children }) {
+      const series = _extractSeries(children, 'Bar');
+      const w = 480;
+      const h = 200;
+      const pad = 24;
+      const count = Math.max(data.length, 1);
+      const slotW = (w - pad * 2) / count;
+      const barW = Math.max(8, Math.min(28, (slotW * 0.55) / series.length));
+
+      let maxVal = 10;
+      data.forEach(d => {
+        series.forEach(s => {
+          const v = Number(d[s.dataKey]) || 0;
+          if (v > maxVal) maxVal = v;
+        });
+      });
+
+      return React.createElement('svg', {
+        viewBox: '0 0 ' + w + ' ' + h,
+        className: 'w-full h-full overflow-visible font-sans'
+      }, [
+        data.map((d, di) => {
+          const slotX = pad + di * slotW;
+          return React.createElement('g', { key: 'slot-' + di }, [
+            series.map((s, si) => {
+              const val = Number(d[s.dataKey]) || 0;
+              const barH = (val / maxVal) * (h - pad * 2);
+              const bx = slotX + (slotW - barW * series.length) / 2 + si * barW;
+              const by = (h - pad) - barH;
+              return React.createElement('rect', {
+                key: 'bar-' + si,
+                x: bx, y: by, width: barW - 2, height: Math.max(2, barH),
+                fill: s.color, rx: 3
+              });
+            }),
+            React.createElement('text', {
+              key: 'lbl-' + di,
+              x: slotX + slotW / 2, y: h - 6,
+              textAnchor: 'middle', fill: 'rgba(255,255,255,0.4)', fontSize: '9px'
+            }, String(d.name || d.month || d.label || di + 1).slice(0, 4))
+          ]);
+        })
+      ]);
+    };
+
+    window.PieChart = function PieChart() {
+      return React.createElement('div', { className: 'w-full h-full flex items-center justify-center p-4' },
+        React.createElement('div', {
+          className: 'w-28 h-28 rounded-full border-4 border-indigo-500/80 bg-gradient-to-tr from-indigo-500/20 to-purple-500/30 flex items-center justify-center text-xs text-indigo-300 font-bold'
+        }, '100%')
+      );
+    };
+
+    window.Line = function Line() { return null; };
+    window.Bar = function Bar() { return null; };
+    window.Area = function Area() { return null; };
+    window.Pie = function Pie() { return null; };
+
+    var ResponsiveContainer = window.ResponsiveContainer;
+    var LineChart = window.LineChart;
+    var BarChart = window.BarChart;
+    var AreaChart = window.AreaChart;
+    var PieChart = window.PieChart;
+    var Line = window.Line;
+    var Bar = window.Bar;
+    var Area = window.Area;
+    var Pie = window.Pie;
+    var XAxis = window.XAxis;
+    var YAxis = window.YAxis;
+    var Tooltip = window.Tooltip;
+    var Legend = window.Legend;
+    var CartesianGrid = window.CartesianGrid;
+    var Cell = window.Cell;
+
     // ── API Functions & Stubs ───────────────────────────────────────────────
     ${apiCode}
     ${apiStubs}
