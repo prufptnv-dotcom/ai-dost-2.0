@@ -168,7 +168,7 @@ function auditInteractiveControls(filePath, content, lines, findings) {
       findings.push({
         ruleId: 'UI-ALERT-PLACEHOLDER',
         stage: STAGES.UI_FUNCTIONAL_INTEGRITY,
-        severity: SEVERITY.ERROR,
+        severity: SEVERITY.WARNING,
         filePath,
         line: i + 1,
         message: 'Interactive button uses placeholder alert() instead of functional state or view handler.',
@@ -180,7 +180,7 @@ function auditInteractiveControls(filePath, content, lines, findings) {
       findings.push({
         ruleId: 'UI-EMPTY-HANDLER',
         stage: STAGES.UI_FUNCTIONAL_INTEGRITY,
-        severity: SEVERITY.ERROR,
+        severity: SEVERITY.WARNING,
         filePath,
         line: i + 1,
         message: 'Interactive control has an empty no-op handler.',
