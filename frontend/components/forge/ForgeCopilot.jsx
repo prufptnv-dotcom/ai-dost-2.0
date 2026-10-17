@@ -18,6 +18,7 @@ import { generateLiveAppHtml } from '../ide/PreviewEngine';
 import { cancelAgentRun } from '../../lib/copilotStop';
 import { diffLines, diffStats } from '../../lib/lineDiff';
 import CopilotMarkdown from '../ide/CopilotMarkdown';
+import { CommandPalette } from '../views/IDEOverlays';
 import { MCP_REGISTRY, SKILLS_MANIFEST, PROVIDERS_SUPPORT } from './forgePlatformData';
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
@@ -272,6 +273,7 @@ function FileSidebar({
   onDeleteProject,
   currentProjectId,
   onExportZip,
+  onOpenCommandPalette,
 }) {
   const [query, setQuery] = useState('');
   const [openFolders, setOpenFolders] = useState({ src: true, components: true });
@@ -359,9 +361,13 @@ function FileSidebar({
           <LuChevronDown size={14} className="muted-icon" />
         </div>
 
-        <button className="new-project" onClick={onNewProject}>
-          <LuPlus size={15} />
-          <span>New project</span>
+        <button
+          className="new-project"
+          onClick={onOpenCommandPalette || onNewProject}
+          title="Command Palette & Quick Actions (⌘ K / Ctrl+K)"
+        >
+          <LuCommand size={15} />
+          <span>Command Menu</span>
           <span className="shortcut">⌘ K</span>
         </button>
 
@@ -2887,6 +2893,19 @@ export default function ForgeCopilot({
   const [runtimeError, setRuntimeError] = useState(null);
   const [diffModalFile, setDiffModalFile] = useState(null);
   const [openTabs, setOpenTabs] = useState([]);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+
+  // Global shortcut: Ctrl+K / Cmd+K opens Command Palette
+  useEffect(() => {
+    const handleGlobalKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setCommandPaletteOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKey);
+    return () => window.removeEventListener('keydown', handleGlobalKey);
+  }, []);
 
   const abortRef = useRef(null);
   const currentTaskIdRef = useRef(null);
@@ -3424,6 +3443,108 @@ export default function ForgeCopilot({
       setRefreshCount((c) => c + 1);
     }
   };
+
+  const commandList = useMemo(() => [
+    {
+      label: 'New Project...',
+      key: '⌘N',
+      icon: <LuPlus size={14} className="text-purple-400" />,
+      action: () => {
+        const name = typeof window !== 'undefined' ? window.prompt('New Project Name:') : null;
+        if (name) {
+          createProject(name, '', 'default').then((res) => {
+            showToast(`Created ${name}`);
+            loadProjects();
+            if (res?.project_id || res?.id) {
+              setCurrentProjectId(res.project_id || res.id);
+              setProjectName(name);
+            }
+          });
+        }
+      },
+    },
+    {
+      label: 'New File...',
+      key: 'Alt+N',
+      icon: <LuFileCode2 size={14} className="text-blue-400" />,
+      action: handleCreateFile,
+    },
+    {
+      label: 'New Folder...',
+      icon: <LuFolderPlus size={14} className="text-amber-400" />,
+      action: handleNewFolder,
+    },
+    {
+      label: 'Export Project (ZIP)',
+      key: '⌘E',
+      icon: <LuDownload size={14} className="text-emerald-400" />,
+      action: handleExportZip,
+    },
+    {
+      label: 'Inspect Diffs (Unified / Split)',
+      key: '⌘D',
+      icon: <LuSliders size={14} className="text-indigo-400" />,
+      action: () => handleOpenDiff(),
+    },
+    {
+      label: 'Switch to Live Preview',
+      key: 'Alt+1',
+      icon: <LuGlobe size={14} className="text-sky-400" />,
+      action: () => setMode('preview'),
+    },
+    {
+      label: 'Switch to Code Editor',
+      key: 'Alt+2',
+      icon: <LuCode size={14} className="text-violet-400" />,
+      action: () => setMode('code'),
+    },
+    {
+      label: 'Switch to Terminal',
+      key: 'Alt+3',
+      icon: <LuTerminal size={14} className="text-rose-400" />,
+      action: () => setMode('terminal'),
+    },
+    {
+      label: 'Toggle Visual Inspector (Lovable Mode)',
+      icon: <LuSearch size={14} className="text-indigo-400" />,
+      action: toggleInspector,
+    },
+    {
+      label: 'Start / Rebuild Dev Server',
+      key: '⌘R',
+      icon: <LuPlay size={14} className="text-emerald-400" />,
+      action: runBuild,
+    },
+    {
+      label: 'Git Snapshots & Commit Log',
+      icon: <LuGitBranch size={14} className="text-orange-400" />,
+      action: () => setGitOpen(true),
+    },
+    {
+      label: 'Go to Deployments',
+      icon: <LuRocket size={14} className="text-pink-400" />,
+      action: () => setActiveTab('deployments'),
+    },
+    {
+      label: 'Go to MCP Integrations',
+      icon: <LuPlug size={14} className="text-cyan-400" />,
+      action: () => setActiveTab('integrations'),
+    },
+    {
+      label: 'Go to Skills Library',
+      icon: <LuBookOpen size={14} className="text-yellow-400" />,
+      action: () => setActiveTab('skills'),
+    },
+  ], [
+    handleCreateFile,
+    handleNewFolder,
+    handleExportZip,
+    handleOpenDiff,
+    toggleInspector,
+    runBuild,
+    showToast,
+    loadProjects,
+  ]);
 
   // Real Autonomous Agent Run Execution (POST /api/agent/run SSE stream)
   const submitPrompt = async (event, resumeOptions = {}) => {
@@ -4012,6 +4133,7 @@ export default function ForgeCopilot({
         onDeleteProject={handleDeleteProject}
         currentProjectId={currentProjectId}
         onExportZip={handleExportZip}
+        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
       />
       <div className="workspace-main">
         <Topbar
@@ -4251,6 +4373,16 @@ export default function ForgeCopilot({
           setMode('code');
         }}
       />
+      {commandPaletteOpen && (
+        <CommandPalette
+          commands={commandList}
+          onRun={(cmd) => {
+            setCommandPaletteOpen(false);
+            cmd.action?.();
+          }}
+          onClose={() => setCommandPaletteOpen(false)}
+        />
+      )}
       {toast && (
         <div className="toast">
           <LuCircleCheck size={15} />
