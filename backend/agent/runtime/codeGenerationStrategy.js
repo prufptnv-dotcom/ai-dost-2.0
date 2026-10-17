@@ -44,7 +44,7 @@ function detectWorkspaceStack(context = {}) {
 
   const pkg = context.packageJson && typeof context.packageJson === 'object' ? context.packageJson : null;
   if (pkg) {
-    const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
     for (const [packageName, framework] of FRAMEWORK_PACKAGE_MAP) {
       if (!Object.hasOwn(deps, packageName)) continue;
       if (packageName === 'vite') break;
@@ -80,7 +80,7 @@ function detectFrameworkFromFiles(context = {}) {
     if (typeof source !== 'string') continue;
     try {
       const pkg = JSON.parse(source);
-      const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+      const deps = { ...pkg.dependencies, ...pkg.devDependencies };
       for (const [packageName, framework] of FRAMEWORK_PACKAGE_MAP) {
         if (Object.hasOwn(deps, packageName)) return framework;
       }
@@ -89,7 +89,7 @@ function detectFrameworkFromFiles(context = {}) {
     }
   }
   // Config files are lower-confidence hints; Vite alone is not a UI framework.
-  const names = Object.keys(files).map((name) => name.replace(/\\/g, '/'));
+  const names = Object.keys(files).map((name) => name.replaceAll('\\', '/'));
   if (names.some((name) => /(^|\/)next\.config\.[^/]+$/.test(name))) return 'Next.js';
   if (names.some((name) => /(^|\/)astro\.config\.[^/]+$/.test(name))) return 'Astro';
   if (names.some((name) => /(^|\/)nuxt\.config\.[^/]+$/.test(name))) return 'Nuxt';
@@ -181,8 +181,10 @@ function algorithmFamilyGuidance(text) {
   const p = String(text || '').toLowerCase();
   const rules = [];
   if (/shortest path|dijkstra|bellman.?ford|floyd.?warshall|graph/.test(p)) {
-    rules.push('For graph problems, make directedness, weights, disconnected vertices, and negative-edge constraints explicit.');
-    rules.push('Choose BFS for unweighted shortest paths, Dijkstra only for non-negative edge weights, Bellman-Ford when negative edges are allowed, and detect negative cycles when relevant.');
+    rules.push(
+      'For graph problems, make directedness, weights, disconnected vertices, and negative-edge constraints explicit.',
+      'Choose BFS for unweighted shortest paths, Dijkstra only for non-negative edge weights, Bellman-Ford when negative edges are allowed, and detect negative cycles when relevant.'
+    );
   }
   if (/binary search|sorted array|lower bound|upper bound/.test(p)) {
     rules.push('For binary search, state the sorted-input precondition and use one consistent interval convention; test empty input, one element, duplicates, and targets outside the range.');
@@ -1266,7 +1268,7 @@ function validateTaskPlanSchema(tasks, options = {}) {
       : (typeof task.file === 'string' ? [task.file] : (task.input?.path ? [task.input.path] : []));
 
     for (const file of assignedFiles) {
-      const normFile = String(file).replace(/\\/g, '/').trim();
+      const normFile = String(file).replaceAll('\\', '/').trim();
       if (!normFile) continue;
       // If task has dependencies on the previous owner, that is a coordinated handover.
       // If tasks are independent/parallel and target the same file, flag collision.

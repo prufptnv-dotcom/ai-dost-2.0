@@ -1,6 +1,6 @@
 'use strict';
 
-const path = require('path');
+const path = require('node:path');
 const logger = require('../../logger');
 const projectAuthorization = require('../../services/projectAuthorization');
 const { getChatTaskGateway } = require('./createChatTaskGateway');
@@ -16,6 +16,46 @@ function writeSse(res, event) {
 function resolveProjectId(body) {
   const projectId = body?.projectId || body?.project_id;
   return typeof projectId === 'string' && projectId.trim() ? projectId.trim() : 'default';
+}
+
+function resolveAuthorizedDiskPath(dependencies, authorization, gateway) {
+  try {
+    const meta = dependencies.workspaceManager?.getWorkspaceMetadata?.(authorization.project.id, authorization.user.id)
+      || gateway?.runtime?.workspaceManager?.getWorkspaceMetadata?.(authorization.project.id, authorization.user.id);
+    if (meta?.diskPath) return path.resolve(meta.diskPath);
+  } catch (_err) {
+    // Ignore workspace metadata lookup failure when manager is uninitialized
+  }
+  return null;
+}
+
+function resolveEffectiveProjectPath(bodyProjectPath, authorizedDiskPath) {
+  if (!bodyProjectPath || typeof bodyProjectPath !== 'string') {
+    return authorizedDiskPath;
+  }
+  const candidatePath = path.resolve(bodyProjectPath);
+  if (authorizedDiskPath) {
+    if (candidatePath === authorizedDiskPath || candidatePath.startsWith(authorizedDiskPath + path.sep)) {
+      return candidatePath;
+    }
+    logger.warn(`[chatAgentTaskHandler] Rejected unauthorized projectPath traversal attempt: ${bodyProjectPath}`);
+    return authorizedDiskPath;
+  }
+  if (!bodyProjectPath.includes('..') && path.isAbsolute(bodyProjectPath)) {
+    return candidatePath;
+  }
+  return authorizedDiskPath;
+}
+
+function resolveWorkspaceDirective(effectiveProjectPath) {
+  if (!effectiveProjectPath) return '';
+  try {
+    const intelligence = inspectWorkspace(effectiveProjectPath);
+    return buildPromptDirective(intelligence);
+  } catch (err) {
+    logger.warn(`[chatAgentTaskHandler] Workspace discovery failed for ${effectiveProjectPath}:`, err?.message || err);
+    return '';
+  }
 }
 
 async function handleChatTaskRequest(req, res, next, dependencies = {}) {
@@ -66,38 +106,9 @@ async function handleChatTaskRequest(req, res, next, dependencies = {}) {
     const appSpecification = buildAppSpecification(promptText);
 
     // Validate user-supplied project path against authorized workspace root
-    let authorizedDiskPath = null;
-    try {
-      const meta = dependencies.workspaceManager?.getWorkspaceMetadata?.(authorization.project.id, authorization.user.id)
-        || gateway?.runtime?.workspaceManager?.getWorkspaceMetadata?.(authorization.project.id, authorization.user.id);
-      if (meta?.diskPath) authorizedDiskPath = path.resolve(meta.diskPath);
-    } catch (_) {}
-
-    let effectiveProjectPath = authorizedDiskPath;
-    if (body.projectPath && typeof body.projectPath === 'string') {
-      const candidatePath = path.resolve(body.projectPath);
-      if (authorizedDiskPath) {
-        if (candidatePath === authorizedDiskPath || candidatePath.startsWith(authorizedDiskPath + path.sep)) {
-          effectiveProjectPath = candidatePath;
-        } else {
-          logger.warn(`[chatAgentTaskHandler] Rejected unauthorized projectPath traversal attempt: ${body.projectPath}`);
-        }
-      } else {
-        if (!body.projectPath.includes('..') && path.isAbsolute(body.projectPath)) {
-          effectiveProjectPath = candidatePath;
-        }
-      }
-    }
-
-    let workspaceDirective = '';
-    if (effectiveProjectPath) {
-      try {
-        const intelligence = inspectWorkspace(effectiveProjectPath);
-        workspaceDirective = buildPromptDirective(intelligence);
-      } catch (err) {
-        logger.warn(`[chatAgentTaskHandler] Workspace discovery failed for ${effectiveProjectPath}:`, err?.message || err);
-      }
-    }
+    const authorizedDiskPath = resolveAuthorizedDiskPath(dependencies, authorization, gateway);
+    const effectiveProjectPath = resolveEffectiveProjectPath(body.projectPath, authorizedDiskPath);
+    const workspaceDirective = resolveWorkspaceDirective(effectiveProjectPath);
 
     const result = await gateway.run({
       projectId,

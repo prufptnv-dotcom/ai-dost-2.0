@@ -6,8 +6,8 @@
  * installed frameworks vs build tools, icon systems, styling tokens, and conventions.
  */
 
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const IGNORED_DIRS = new Set([
   'node_modules', '.git', '.next', 'dist', 'build', 'out',
@@ -132,14 +132,15 @@ class WorkspaceFrameworkIntelligence {
 
     try {
       entries = fs.readdirSync(currentDir, { withFileTypes: true });
-    } catch (_) {
+    } catch (_err) {
+      // Ignore unreadable directories
       return [];
     }
 
     for (const entry of entries) {
       if (IGNORED_DIRS.has(entry.name)) continue;
       const fullPath = path.join(currentDir, entry.name);
-      const relativePath = path.relative(rootDir, fullPath).replace(/\\/g, '/');
+      const relativePath = path.relative(rootDir, fullPath).replaceAll('\\', '/');
 
       if (entry.isFile()) {
         if (entry.name === 'package.json') {
@@ -153,14 +154,16 @@ class WorkspaceFrameworkIntelligence {
               relativePath,
               parsed
             });
-          } catch (_) {
+          } catch (_err) {
             results.push({ type: 'npm', name: entry.name, fullPath, relativePath, parsed: null });
           }
         } else if (entry.name === 'requirements.txt' || entry.name === 'pyproject.toml') {
           try {
             const content = fs.readFileSync(fullPath, 'utf8');
             results.push({ type: 'python', name: entry.name, fullPath, relativePath, content });
-          } catch (_) {}
+          } catch (_err) {
+            // Ignore unreadable Python manifest
+          }
         } else if (entry.name === 'pom.xml' || entry.name === 'build.gradle') {
           results.push({ type: 'java', name: entry.name, fullPath, relativePath });
         } else if (entry.name === 'go.mod') {
@@ -181,7 +184,7 @@ class WorkspaceFrameworkIntelligence {
     let backendManifest = null;
 
     for (const m of manifests) {
-      const lower = m.fullPath.toLowerCase().replace(/\\/g, '/');
+      const lower = m.fullPath.toLowerCase().replaceAll('\\', '/');
       if (lower.includes('/frontend/') || lower.includes('/client/') || lower.includes('/web/') || lower.includes('/ui/')) {
         frontendManifest = m;
       } else if (lower.includes('/backend/') || lower.includes('/server/') || lower.includes('/api/')) {
@@ -197,7 +200,7 @@ class WorkspaceFrameworkIntelligence {
   _detectFrontendFramework(manifests, workspacePath) {
     for (const m of manifests) {
       if (m.type === 'npm' && m.parsed) {
-        const deps = { ...(m.parsed.dependencies || {}), ...(m.parsed.devDependencies || {}) };
+        const deps = { ...m.parsed.dependencies, ...m.parsed.devDependencies };
 
         if (deps['next']) {
           const isAppRouter = fs.existsSync(path.join(path.dirname(m.fullPath), 'app')) || fs.existsSync(path.join(path.dirname(m.fullPath), 'src/app'));
@@ -234,7 +237,9 @@ class WorkspaceFrameworkIntelligence {
       if (rootFiles.some((f) => /^astro\.config\./i.test(f))) return { framework: 'astro', version: 'unknown' };
       if (rootFiles.some((f) => /^nuxt\.config\./i.test(f))) return { framework: 'nuxt', version: 'unknown' };
       if (rootFiles.some((f) => /^svelte\.config\./i.test(f))) return { framework: 'sveltekit', version: 'unknown' };
-    } catch (_) {}
+    } catch (_err) {
+      // Ignore directory read failure in workspace framework detection
+    }
 
     return { framework: null, version: null };
   }
@@ -242,7 +247,7 @@ class WorkspaceFrameworkIntelligence {
   _detectBackendFramework(manifests, workspacePath) {
     for (const m of manifests) {
       if (m.type === 'npm' && m.parsed) {
-        const deps = { ...(m.parsed.dependencies || {}), ...(m.parsed.devDependencies || {}) };
+        const deps = { ...m.parsed.dependencies, ...m.parsed.devDependencies };
         if (deps['@nestjs/core']) return { framework: 'nestjs', version: deps['@nestjs/core'] };
         if (deps['express']) return { framework: 'express', version: deps['express'] };
         if (deps['fastify']) return { framework: 'fastify', version: deps['fastify'] };
@@ -266,7 +271,7 @@ class WorkspaceFrameworkIntelligence {
   _detectBuildTool(manifests, workspacePath) {
     for (const m of manifests) {
       if (m.type === 'npm' && m.parsed) {
-        const deps = { ...(m.parsed.dependencies || {}), ...(m.parsed.devDependencies || {}) };
+        const deps = { ...m.parsed.dependencies, ...m.parsed.devDependencies };
         if (deps['vite']) return 'vite';
         if (deps['webpack']) return 'webpack';
         if (deps['esbuild']) return 'esbuild';
@@ -279,14 +284,16 @@ class WorkspaceFrameworkIntelligence {
       const rootFiles = fs.readdirSync(workspacePath);
       if (rootFiles.some((f) => /^vite\.config\./i.test(f))) return 'vite';
       if (rootFiles.some((f) => /^webpack\.config\./i.test(f))) return 'webpack';
-    } catch (_) {}
+    } catch (_err) {
+      // Ignore directory read failure in build tool detection
+    }
     return 'unknown';
   }
 
   _detectIconSystem(manifests) {
     for (const m of manifests) {
       if (m.type === 'npm' && m.parsed) {
-        const deps = { ...(m.parsed.dependencies || {}), ...(m.parsed.devDependencies || {}) };
+        const deps = { ...m.parsed.dependencies, ...m.parsed.devDependencies };
         if (deps['@fortawesome/fontawesome-svg-core'] || deps['@fortawesome/react-fontawesome']) {
           return 'fontawesome';
         }
@@ -307,7 +314,7 @@ class WorkspaceFrameworkIntelligence {
   _detectStylingSystem(manifests, workspacePath) {
     for (const m of manifests) {
       if (m.type === 'npm' && m.parsed) {
-        const deps = { ...(m.parsed.dependencies || {}), ...(m.parsed.devDependencies || {}) };
+        const deps = { ...m.parsed.dependencies, ...m.parsed.devDependencies };
         if (deps['tailwindcss']) return 'tailwindcss';
         if (deps['styled-components']) return 'styled-components';
         if (deps['@emotion/react']) return 'emotion';
@@ -318,14 +325,16 @@ class WorkspaceFrameworkIntelligence {
     try {
       const rootFiles = fs.readdirSync(workspacePath);
       if (rootFiles.some((f) => /^tailwind\.config\./i.test(f))) return 'tailwindcss';
-    } catch (_) {}
+    } catch (_err) {
+      // Ignore directory read failure in styling detection
+    }
     return 'vanilla-css';
   }
 
   _detectStateManagement(manifests) {
     for (const m of manifests) {
       if (m.type === 'npm' && m.parsed) {
-        const deps = { ...(m.parsed.dependencies || {}), ...(m.parsed.devDependencies || {}) };
+        const deps = { ...m.parsed.dependencies, ...m.parsed.devDependencies };
         if (deps['zustand']) return 'zustand';
         if (deps['@reduxjs/toolkit'] || deps['redux']) return 'redux';
         if (deps['pinia']) return 'pinia';
@@ -339,7 +348,7 @@ class WorkspaceFrameworkIntelligence {
   _detectTestingFramework(manifests) {
     for (const m of manifests) {
       if (m.type === 'npm' && m.parsed) {
-        const deps = { ...(m.parsed.dependencies || {}), ...(m.parsed.devDependencies || {}) };
+        const deps = { ...m.parsed.dependencies, ...m.parsed.devDependencies };
         if (deps['vitest']) return 'vitest';
         if (deps['jest']) return 'jest';
         if (deps['playwright'] || deps['@playwright/test']) return 'playwright';
@@ -352,7 +361,7 @@ class WorkspaceFrameworkIntelligence {
   _detectPrimaryLanguage(manifests, workspacePath) {
     for (const m of manifests) {
       if (m.type === 'npm' && m.parsed) {
-        const deps = { ...(m.parsed.dependencies || {}), ...(m.parsed.devDependencies || {}) };
+        const deps = { ...m.parsed.dependencies, ...m.parsed.devDependencies };
         if (deps['typescript']) return 'typescript';
       }
     }
@@ -361,7 +370,9 @@ class WorkspaceFrameworkIntelligence {
       if (rootFiles.some((f) => f.endsWith('.ts') || f.endsWith('.tsx') || f === 'tsconfig.json')) {
         return 'typescript';
       }
-    } catch (_) {}
+    } catch (_err) {
+      // Ignore directory read failure in language detection
+    }
     return 'javascript';
   }
 
@@ -372,7 +383,9 @@ class WorkspaceFrameworkIntelligence {
       if (files.includes('yarn.lock')) return 'yarn';
       if (files.includes('bun.lockb') || files.includes('bun.lock')) return 'bun';
       if (files.includes('package-lock.json')) return 'npm';
-    } catch (_) {}
+    } catch (_err) {
+      // Ignore directory read failure in package manager detection
+    }
     return 'npm';
   }
 
@@ -392,7 +405,7 @@ class WorkspaceFrameworkIntelligence {
   _discoverDatabaseAndOrm(manifests, workspacePath) {
     for (const m of manifests) {
       if (m.type === 'npm' && m.parsed) {
-        const deps = { ...(m.parsed.dependencies || {}), ...(m.parsed.devDependencies || {}) };
+        const deps = { ...m.parsed.dependencies, ...m.parsed.devDependencies };
         if (deps['@prisma/client'] || deps['prisma']) return { orm: 'prisma', schema: 'prisma/schema.prisma' };
         if (deps['drizzle-orm']) return { orm: 'drizzle', schema: 'drizzle/schema.ts' };
         if (deps['mongoose']) return { orm: 'mongoose', schema: 'models/' };
@@ -406,7 +419,9 @@ class WorkspaceFrameworkIntelligence {
       if (fs.existsSync(path.join(workspacePath, 'prisma/schema.prisma'))) {
         return { orm: 'prisma', schema: 'prisma/schema.prisma' };
       }
-    } catch (_) {}
+    } catch (_err) {
+      // Ignore missing schema check failure
+    }
     return { orm: 'none', schema: null };
   }
 
@@ -425,14 +440,16 @@ class WorkspaceFrameworkIntelligence {
         if (e.isDirectory()) {
           scanDir(full, depth + 1);
         } else if (e.isFile() && /\.(js|ts|mjs|cjs)$/.test(e.name)) {
-          try {
+            try {
             const content = fs.readFileSync(full, 'utf8');
             let m;
             while ((m = routeRegex.exec(content)) !== null) {
-              endpoints.push({ method: m[1].toUpperCase(), route: m[2], file: path.relative(workspacePath, full).replace(/\\/g, '/') });
+              endpoints.push({ method: m[1].toUpperCase(), route: m[2], file: path.relative(workspacePath, full).replaceAll('\\', '/') });
               if (endpoints.length >= 25) break;
             }
-          } catch (_) {}
+          } catch (_err) {
+            // Ignore unreadable route file
+          }
         }
       }
     };
@@ -473,14 +490,18 @@ class WorkspaceFrameworkIntelligence {
         conventions.style = 'typescript';
       } else {
         let pkg = null;
-        try { pkg = JSON.parse(fs.readFileSync(path.join(workspacePath, 'package.json'), 'utf8')); } catch (_) {}
+        try { pkg = JSON.parse(fs.readFileSync(path.join(workspacePath, 'package.json'), 'utf8')); } catch (_err) {
+          // Ignore unreadable package.json for convention detection
+        }
         if (pkg?.type === 'module') {
           conventions.style = 'esm';
         } else if (pkg?.type === 'commonjs') {
           conventions.style = 'cjs';
         }
       }
-    } catch (_) {}
+    } catch (_err) {
+      // Ignore convention scanning failure
+    }
     return conventions;
   }
 
