@@ -11,7 +11,7 @@ import {
   LuPalette, LuSearch, LuSend, LuSettings2, LuShieldCheck, LuSmartphone, LuSparkles,
   LuSquareTerminal, LuTerminal, LuThumbsUp, LuWandSparkles, LuX, LuZap, LuSliders,
   LuPlug, LuBookOpen, LuCheckCircle2, LuTrash2, LuSquare, LuRotateCcw,
-  LuUpload, LuFolderPlus, LuPen, LuSave, LuShieldAlert
+  LuUpload, LuFolderPlus, LuPen, LuSave, LuShieldAlert, LuDownload
 } from 'react-icons/lu';
 import { fetchProject, fetchProjects, saveProjectFile, addProjectFile, deleteProjectFile, createProject, deleteProject } from '../../services/api';
 import { generateLiveAppHtml } from '../ide/PreviewEngine';
@@ -271,6 +271,7 @@ function FileSidebar({
   onSelectProject,
   onDeleteProject,
   currentProjectId,
+  onExportZip,
 }) {
   const [query, setQuery] = useState('');
   const [openFolders, setOpenFolders] = useState({ src: true, components: true });
@@ -516,6 +517,11 @@ function FileSidebar({
             <IconButton title="Add file" onClick={onNewFile}>
               <LuPlus size={14} />
             </IconButton>
+            {onExportZip && (
+              <IconButton title="Export project ZIP archive" onClick={onExportZip}>
+                <LuDownload size={14} />
+              </IconButton>
+            )}
           </div>
         </div>
 
@@ -1018,6 +1024,7 @@ function Topbar({
   projectName = 'Workspace',
   activeTab,
   saved,
+  onExportZip,
 }) {
   return (
     <header className="topbar">
@@ -1052,6 +1059,16 @@ function Topbar({
           <LuBell size={16} />
           <i />
         </IconButton>
+        {onExportZip && (
+          <button
+            className="export-button px-2.5 py-1 text-xs font-medium rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white flex items-center gap-1.5 transition-colors border border-zinc-700/60"
+            onClick={onExportZip}
+            title="Export project ZIP archive with 1-click launcher scripts"
+          >
+            <LuDownload size={13} />
+            <span>Export</span>
+          </button>
+        )}
         <button className="share-button" onClick={onShare}>
           <LuExternalLink size={14} />
           <span>Share</span>
@@ -1086,6 +1103,7 @@ function Toolbar({
   inspectorActive = false,
   onToggleInspector,
   onOpenDiff,
+  onExportZip,
   mobile,
 }) {
   return (
@@ -1150,6 +1168,15 @@ function Toolbar({
             className="hover:!text-indigo-400"
           >
             <LuSliders size={15} />
+          </IconButton>
+        )}
+        {onExportZip && (
+          <IconButton
+            title="Export project ZIP archive"
+            onClick={onExportZip}
+            className="hover:!text-emerald-400"
+          >
+            <LuDownload size={15} />
           </IconButton>
         )}
         <span className="toolbar-separator" />
@@ -1406,9 +1433,11 @@ function RealTerminalView({ logs = [], projectName, onExecuteCommand, onClearLog
         <span className="text-zinc-500 font-medium shrink-0">Quick:</span>
         {[
           { label: 'npm test', cmd: 'npm test' },
-          { label: 'git status', cmd: 'git status' },
-          { label: 'ls -la', cmd: 'ls' },
+          { label: 'npm run build', cmd: 'npm run build' },
           { label: 'npm run dev', cmd: 'npm run dev' },
+          { label: 'git status', cmd: 'git status' },
+          { label: 'git diff', cmd: 'git diff' },
+          { label: 'ls -la', cmd: 'ls -la' },
           { label: 'node -v', cmd: 'node -v' },
         ].map((pill) => (
           <button
@@ -3023,6 +3052,18 @@ export default function ForgeCopilot({
     }
   }, [currentProjectId, contents, showToast]);
 
+  const handleExportZip = useCallback(() => {
+    if (!currentProjectId) {
+      showToast('No active project to export');
+      return;
+    }
+    const url = `${BACKEND}/api/preview/${encodeURIComponent(currentProjectId)}/zip`;
+    if (typeof window !== 'undefined') {
+      window.open(url, '_blank');
+      showToast(`Exporting ${projectName} workspace as ZIP...`);
+    }
+  }, [currentProjectId, projectName, showToast]);
+
   useEffect(() => {
     setCurrentProjectId(projectId);
   }, [projectId]);
@@ -3970,6 +4011,7 @@ export default function ForgeCopilot({
         onSelectProject={handleSelectProject}
         onDeleteProject={handleDeleteProject}
         currentProjectId={currentProjectId}
+        onExportZip={handleExportZip}
       />
       <div className="workspace-main">
         <Topbar
@@ -3977,6 +4019,7 @@ export default function ForgeCopilot({
           onToggleAssistant={() => setAssistantOpen(!assistantOpen)}
           onDeploy={() => setActiveTab('deployments')}
           onOpenGit={() => setGitOpen(true)}
+          onExportZip={handleExportZip}
           onShare={() => {
             if (typeof window !== 'undefined') {
               navigator.clipboard?.writeText(window.location.href);
@@ -4024,6 +4067,7 @@ export default function ForgeCopilot({
                   inspectorActive={inspectorActive}
                   onToggleInspector={toggleInspector}
                   onOpenDiff={() => handleOpenDiff()}
+                  onExportZip={handleExportZip}
                 />
                 <div className={`workspace-canvas ${mode === 'preview' ? 'preview-canvas' : ''}`}>
                   {mode === 'preview' ? (
@@ -4048,8 +4092,15 @@ export default function ForgeCopilot({
                             title="Open in new tab"
                             onClick={() => {
                               const url = devServer.url || (devServer.hostPort ? `http://localhost:${devServer.hostPort}` : null);
-                              if (url) window.open(url, '_blank');
-                              else showToast('Preview compiles live inside stage');
+                              if (url) {
+                                window.open(url, '_blank');
+                              } else if (livePreviewHtml && typeof window !== 'undefined') {
+                                const blob = new Blob([livePreviewHtml], { type: 'text/html' });
+                                const blobUrl = URL.createObjectURL(blob);
+                                window.open(blobUrl, '_blank');
+                              } else {
+                                showToast('Preview compiles live inside stage');
+                              }
                             }}
                           >
                             <LuExternalLink size={14} />
