@@ -40,7 +40,7 @@ const SPECIALTY_TO_ROLE = {
 // P12.8 (E2E run #14): bounded workspace listing for the specialist planner.
 // Pass 2 of run #14 regenerated the whole plan from scratch and burned its
 // entire repair budget re-creating files that pass 1 had already written
-// ("Create package.json" Ã—4 â†’ WRITE_FORBIDDEN â†’ hallucinated-SEARCH apply_diff).
+// ("Create package.json" ×4 → WRITE_FORBIDDEN → hallucinated-SEARCH apply_diff).
 // The planner knew files EXISTED (SURGICAL directive) but not WHICH ones.
 function listExistingFilesBounded(root, max = 100) {
   const out = [];
@@ -63,12 +63,12 @@ function listExistingFilesBounded(root, max = 100) {
   return out.sort();
 }
 
-// P12.9 (E2E run #15): knowing the file LIST was not enough â€” the specialist
-// still baked SEARCH strings from imagination (31Ã— SEARCH-not-found; it
+// P12.9 (E2E run #15): knowing the file LIST was not enough — the specialist
+// still baked SEARCH strings from imagination (31× SEARCH-not-found; it
 // assumed pretty-printed 2-space package.json while the file was SINGLE-LINE
 // compact JSON). Give the planner the REAL bytes of the key small files so
 // SEARCH is copied verbatim, not recalled. Bounded: priority names first,
-// â‰¤6 files, â‰¤2600 chars each (truncated marker beyond), â‰¤9000 chars total.
+// ≤6 files, ≤2600 chars each (truncated marker beyond), ≤9000 chars total.
 
 function collectWorkspaceFilesBounded(rootDir) {
   if (!rootDir || !fs.existsSync(rootDir)) return {};
@@ -182,7 +182,7 @@ function readKeyFileContents(diskPath, files) {
       const st = fs.statSync(full);
       if (!st.isFile() || st.size > 60000) continue;
       let c = fs.readFileSync(full, 'utf-8');
-      if (c.length > 1500) c = `${c.slice(0, 1300)}\nâ€¦ [truncated â€” ${c.length} chars total â€” copy the REAL lines you need as SEARCH] â€¦`;
+      if (c.length > 1500) c = `${c.slice(0, 1300)}\n… [truncated — ${c.length} chars total — copy the REAL lines you need as SEARCH] …`;
       out[p] = c;
       budget -= c.length;
     } catch (_) {}
@@ -416,7 +416,9 @@ class CopilotDirector {
             const intelligence = inspectWorkspace(meta.diskPath);
             workspaceDirective = buildPromptDirective(intelligence);
           }
-        } catch (_) {}
+        } catch (err) {
+          logger.warn(`[CopilotDirector] Workspace intelligence inspection failed for project ${context.projectId}: ${err?.message || err}`);
+        }
       }
 
       const strategy = analyzeCodeGenerationRequest(request, context);
@@ -456,14 +458,14 @@ class CopilotDirector {
       meta = this.workspaceManager?.getWorkspaceMetadata?.(projectId, userId);
       hasExistingFiles = Boolean(meta && meta.fileCount > 0);
       // P12.8 (E2E run #14): pass the REAL file list to the specialist planner.
-      // The SURGICAL directive alone was not enough â€” the planner kept emitting
+      // The SURGICAL directive alone was not enough — the planner kept emitting
       // "Create package.json"/"Create App.jsx" for files that already existed
-      // (WRITE_FORBIDDEN Ã—4 burned the whole repair budget on pass 2). With the
+      // (WRITE_FORBIDDEN ×4 burned the whole repair budget on pass 2). With the
       // list in AUTHORIZED CONTEXT it can plan read_file + apply_diff instead.
       if (hasExistingFiles && meta?.diskPath && fs.existsSync(meta.diskPath)) {
         existingFiles = listExistingFilesBounded(meta.diskPath, 100);
-        // P12.9 (E2E run #15): the LIST alone still left SEARCH guessing â€”
-        // the planner baked imagined content (31Ã— SEARCH-not-found). Hand it
+        // P12.9 (E2E run #15): the LIST alone still left SEARCH guessing —
+        // the planner baked imagined content (31× SEARCH-not-found). Hand it
         // the actual bytes of the key small files so SEARCH is verbatim.
         existingFileContents = existingFiles.length ? readKeyFileContents(meta.diskPath, existingFiles) : null;
       }
@@ -471,7 +473,7 @@ class CopilotDirector {
 
     const directive = hasExistingFiles
       ? `[SURGICAL_DIRECTIVE: Inspect existing workspace files first. Apply surgical targeted edits to affected files only without wiping or regenerating unrelated code.` +
-        (existingFiles.length ? ` EXISTING FILES (these paths ALREADY EXIST â€” never plan write_file for them, it is REJECTED; to change one, read_file it then apply_diff): ${existingFiles.join(', ')}` : '') +
+        (existingFiles.length ? ` EXISTING FILES (these paths ALREADY EXIST — never plan write_file for them, it is REJECTED; to change one, read_file it then apply_diff): ${existingFiles.join(', ')}` : '') +
         `]`
       : `[GREENFIELD_DIRECTIVE: Workspace is new/empty. Create required source and component files directly using write_file. Do not attempt to read non-existent legacy files.]`;
 
@@ -498,7 +500,7 @@ class CopilotDirector {
           ? objectiveWithDirective 
           : `REPAIR ATTEMPT ${attempt}: The previous implementation failed with error: ${lastError}. Please analyze the failure, read the relevant logs, and provide a corrected fix. Original objective: ${objectiveWithDirective}`;
 
-        onEvent({ type: 'thinking', message: `ðŸ› ï¸ Specialist [${task.id}] planning steps (attempt ${attempt}/${maxSelfHealingAttempts + 1})...` });
+        onEvent({ type: 'thinking', message: `🛠️ Specialist [${task.id}] planning steps (attempt ${attempt}/${maxSelfHealingAttempts + 1})...` });
 
         const workerPlan = await this.taskPlanner.generatePlan(currentObjective, { 
           projectId, 
@@ -512,7 +514,7 @@ class CopilotDirector {
           ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {})
         });
 
-        onEvent({ type: 'thinking', message: `âš¡ Specialist [${task.id}] executing ${workerPlan.steps?.length || 0} step(s)...` });
+        onEvent({ type: 'thinking', message: `⚡ Specialist [${task.id}] executing ${workerPlan.steps?.length || 0} step(s)...` });
 
         // --- VERIFICATION GATE: Execute and then Verify ---
         lastResult = await this.plannerExecutionLoop.runWithPlan(
@@ -573,7 +575,7 @@ class CopilotDirector {
         } else {
           lastError = lastResult?.error || lastResult?.reason || 'Unknown execution failure';
         }
-        // P12.3: an approval gate cannot self-heal â€” a repair plan without a
+        // P12.3: an approval gate cannot self-heal — a repair plan without a
         // token hits the same gate. Propagate immediately (code preserved) so
         // the run pauses honestly instead of burning repair/LLM budget.
         if (typeof lastError === 'string' && lastError.startsWith('APPROVAL_REQUIRED')) {
@@ -591,16 +593,28 @@ class CopilotDirector {
   }
 
   async run({ userId, projectId, request, signal = null, onEvent = () => {}, maxRepairs = 3, plan: presetPlan = null, permissionLevel = 'auto', approvalToken = null, preferredModel = 'auto' }) {
-    // P12.3: ONE shared mutable approval state for this run â€” every worker (and
+    // Propagate adaptive model selection consistently across planning, workers, and verification
+    let effectiveModel = preferredModel;
+    if (preferredModel === 'auto') {
+      const strategy = analyzeCodeGenerationRequest(request, { projectId });
+      const classification = classifyRequest(request);
+      if (classification.category === 'ALGORITHMIC_PROBLEM' || strategy.intent.algorithmic || strategy.intent.fullStack) {
+        effectiveModel = 'reasoning';
+      } else if (classification.isRoutine) {
+        effectiveModel = 'fast';
+      }
+    }
+
+    // P12.3: ONE shared mutable approval state for this run — every worker (and
     // the final verification) gets the SAME holder. ExecutionController's
     // single-use rotation writes through the ChatPlanner context proxy into it,
     // so a worker that builds its context later reads the ROTATED token instead
     // of the original one an earlier worker already consumed
     // ("already consumed (replay rejected)" used to kill every later gated step).
     const approvalState = { token: approvalToken || null };
-    // Plan-mode override: use the user-approved plan (normalized + validated â€”
+    // Plan-mode override: use the user-approved plan (normalized + validated —
     // bad shapes fall back to a generic sequential plan, never crash).
-    const plan = presetPlan ? normalizePlan(presetPlan, request) : await this.createPlan(request, { projectId }, preferredModel);
+    const plan = presetPlan ? normalizePlan(presetPlan, request) : await this.createPlan(request, { projectId }, effectiveModel);
     const supervisorResult = await this.coordinator.createSupervisorTask({ userId, projectId, title: `Copilot Director: ${String(request).slice(0, 180)}`, prompt: request, metadata: { source: 'copilot-director', plannedTaskCount: plan.tasks.length } });
     const supervisorTaskId = supervisorResult.task.id;
     const supervisorRunId = supervisorResult.run.id;
@@ -620,7 +634,7 @@ class CopilotDirector {
         if (signal?.aborted) return markCancelled();
         const ready = plan.tasks.filter((task) => pending.has(task.id) && task.dependsOn.every((dep) => completed.get(dep) === 'SUCCEEDED'));
         if (!ready.length) {
-          // P12.3: remaining tasks are blocked by skipped/failed deps â€” report
+          // P12.3: remaining tasks are blocked by skipped/failed deps — report
           // them honestly and proceed to verification instead of crashing the
           // whole run ("dependency-blocked" used to discard completed work).
           for (const stuck of plan.tasks.filter((task) => pending.has(task.id))) {
@@ -642,14 +656,14 @@ class CopilotDirector {
               delegated = await this.coordinator.delegate({ supervisorRunId, role: task.role, objective: task.objective, constraints: { specialty: task.specialty, directorTaskId: task.id, attempt }, expectedOutput: task.expectedOutput });
             } catch (delegateErr) {
               // P12.3: a spawn failure (worker cap, project limits) must not
-              // nuke completed work â€” skip this task honestly and move on;
+              // nuke completed work — skip this task honestly and move on;
               // its dependents are skipped by the !ready branch above.
               logger.warn(`[CopilotDirector] delegate failed for task ${task.id}: ${delegateErr.message}`);
               delegateFailed = delegateErr;
               break;
             }
             try {
-              executionResult = await this.coordinator.startWorker(delegated.workerRun.id, { autoPlan: false, runner: () => this.executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent, permissionLevel, approvalToken, approvalState, preferredModel }) });
+              executionResult = await this.coordinator.startWorker(delegated.workerRun.id, { autoPlan: false, runner: () => this.executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent, permissionLevel, approvalToken, approvalState, preferredModel: effectiveModel }) });
               lastError = null;
               break;
             } catch (error) {
@@ -749,9 +763,12 @@ class CopilotDirector {
       const canonicalResolution = resolveCanonicalCase(request, finalFiles);
       let algorithmVerificationOutcome = null;
 
-      // â”€â”€ Layer A: Algorithm Oracle Verification Path â”€â”€
+      // ── Layer A: Algorithm Oracle Verification Path ──
       if (classification.category === 'ALGORITHMIC_PROBLEM' || classification.isAlgorithm) {
-        const oracleName = detectSupportedAlgorithmOracle(request, finalFiles);
+        let oracleName = detectSupportedAlgorithmOracle(request, finalFiles);
+        if (oracleName && this.algorithmVerifier && typeof this.algorithmVerifier.hasOracle === 'function' && !this.algorithmVerifier.hasOracle(oracleName)) {
+          oracleName = null;
+        }
         if (oracleName) {
           const candidateCode = extractCandidateCode(finalFiles, oracleName);
           if (candidateCode) {
@@ -777,7 +794,7 @@ class CopilotDirector {
         }
       }
 
-      // â”€â”€ Layer B: Generated App Quality Gate Path â”€â”€
+      // ── Layer B: Generated App Quality Gate Path ──
       let qualityGateOutcome = null;
       const isAppGeneration = Boolean(
         classification.category === 'APPLICATION_FEATURE' &&
@@ -829,7 +846,7 @@ class CopilotDirector {
       }
 
       const verifier = await this.coordinator.delegate({ supervisorRunId, role: 'VERIFIER', objective: `Perform the final read-only verification gate for the requested outcome: ${request}. Inspect the current workspace state and confirm tests/build/runtime evidence where supported. Do not mutate the workspace.`, constraints: { specialty: 'verification', generatedByDirector: true }, expectedOutput: 'Final verification evidence and any remaining blockers.' });
-      const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, { runner: async () => { const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER', ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) }); return this.plannerExecutionLoop.runWithPlan(projectId, userId, verificationPlan, 0, () => Boolean(signal?.aborted), `copilot_verify_${verifier.workerRun.id}`, { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined, ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) }); } });
+      const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, { runner: async () => { const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER', ...(effectiveModel && effectiveModel !== 'auto' ? { preferredModel: effectiveModel } : {}) }); return this.plannerExecutionLoop.runWithPlan(projectId, userId, verificationPlan, 0, () => Boolean(signal?.aborted), `copilot_verify_${verifier.workerRun.id}`, { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined, ...(effectiveModel && effectiveModel !== 'auto' ? { preferredModel: effectiveModel } : {}) }); } });
       const verificationStatus = String(finalVerification?.status || 'FAILED').toUpperCase();
       const verificationSummary = String(
         finalVerification?.summary || finalVerification?.result?.summary || finalVerification?.message || ''

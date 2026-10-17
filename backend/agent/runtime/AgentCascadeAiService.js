@@ -113,14 +113,14 @@ class AgentCascadeAiService {
           if (!isErrorResponse(resp)) return resp;
         } else if (preferredModel === 'ollama') {
           // P12.6: the UI picker offers Ollama but this cascade had no branch
-          // for it â€” "Ollama first" silently degraded to Groqâ†’Geminiâ†’OpenRouterâ†’â€¦
+          // for it — "Ollama first" silently degraded to Groq→Gemini→OpenRouter→…
           // (every dead tier walked first). Same call shape as tier 5 below.
           const ollamaRes = await fetch(`${ollamaBaseUrl()}/api/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model: process.env.OLLAMA_MODEL || 'qwen2.5-coder:7b', prompt, stream: false, keep_alive: '2h' }),
-            // P12.7 (E2E run #13): warm qwen2.5-coder:7b took 140â€“150s for a
-            // long plan JSON at ~14 tok/s â€” the old 150s limit timed out twice
+            // P12.7 (E2E run #13): warm qwen2.5-coder:7b took 140–150s for a
+            // long plan JSON at ~14 tok/s — the old 150s limit timed out twice
             // ("All AI providers in cascade failed") and only squeaked through
             // at 149s on the third try. 240s = cold load (115s) + long
             // generation with real headroom.
@@ -240,8 +240,8 @@ class AgentCascadeAiService {
 
     // 6. Cascade Tier 5: Local Ollama (if running)
     //   keep_alive pins the model after a successful load (default unload is
-    //   5min â€” a cold 4.7GB reload takes ~115s). 240s (P12.7) covers that cold
-    //   load PLUS a long warm generation: run #13 measured 140â€“150s for plan
+    //   5min — a cold 4.7GB reload takes ~115s). 240s (P12.7) covers that cold
+    //   load PLUS a long warm generation: run #13 measured 140–150s for plan
     //   JSON at ~14 tok/s, so the old 150s limit was an edge-flake. When the
     //   daemon is DOWN this fetch fails instantly (ECONNREFUSED), so no wait
     //   is added on that path.

@@ -322,13 +322,27 @@ function inferFeatureDependencies(requirements) {
     'sorting-pagination': ['data-management']
   };
   const activeKeys = new Set(requirements.map(r => r.featureKey).filter(Boolean));
-  const result = {};
+  const declared = {};
+  const missingPrerequisites = [];
   for (const [feat, deps] of Object.entries(depMap)) {
     if (activeKeys.has(feat)) {
-      result[feat] = deps.filter(d => activeKeys.has(d));
+      const satisfied = deps.filter(d => activeKeys.has(d));
+      const missing = deps.filter(d => !activeKeys.has(d));
+      declared[feat] = {
+        required: deps,
+        satisfied,
+        missing
+      };
+      if (missing.length > 0) {
+        missingPrerequisites.push({
+          feature: feat,
+          missing,
+          message: `Feature '${feat}' requires missing prerequisite feature(s): ${missing.join(', ')}.`
+        });
+      }
     }
   }
-  return result;
+  return { ...declared, declared, missingPrerequisites };
 }
 
 function inferInputOutputContracts(prompt, archetype, requirements) {
@@ -546,6 +560,13 @@ function buildAppSpecification(prompt, options = {}) {
   const featureDependencies = inferFeatureDependencies(requirements);
   const inputOutputContracts = inferInputOutputContracts(request, archetype, requirements);
   const unresolvedAssumptions = inferUnresolvedAssumptions(request, requirements, inferStack(request));
+  if (Array.isArray(featureDependencies?.missingPrerequisites)) {
+    for (const item of featureDependencies.missingPrerequisites) {
+      if (item.message && !unresolvedAssumptions.includes(item.message)) {
+        unresolvedAssumptions.push(item.message);
+      }
+    }
+  }
   const evidenceContract = inferEvidenceContract(isUi, appType, requirements);
 
   const spec = {

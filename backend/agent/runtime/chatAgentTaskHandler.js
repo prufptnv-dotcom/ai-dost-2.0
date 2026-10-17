@@ -1,5 +1,7 @@
 'use strict';
 
+const path = require('path');
+const logger = require('../../logger');
 const projectAuthorization = require('../../services/projectAuthorization');
 const { getChatTaskGateway } = require('./createChatTaskGateway');
 const { getActiveTask } = require('../../taskCancellation');
@@ -58,13 +60,43 @@ async function handleChatTaskRequest(req, res, next, dependencies = {}) {
     });
 
     const promptText = body.userPrompt || plan.intent?.originalMessage || '';
+    const preferredModel = typeof body.preferredModel === 'string' && body.preferredModel.trim()
+      ? body.preferredModel.trim()
+      : 'auto';
     const appSpecification = buildAppSpecification(promptText);
+
+    // Validate user-supplied project path against authorized workspace root
+    let authorizedDiskPath = null;
+    try {
+      const meta = dependencies.workspaceManager?.getWorkspaceMetadata?.(authorization.project.id, authorization.user.id)
+        || gateway?.runtime?.workspaceManager?.getWorkspaceMetadata?.(authorization.project.id, authorization.user.id);
+      if (meta?.diskPath) authorizedDiskPath = path.resolve(meta.diskPath);
+    } catch (_) {}
+
+    let effectiveProjectPath = authorizedDiskPath;
+    if (body.projectPath && typeof body.projectPath === 'string') {
+      const candidatePath = path.resolve(body.projectPath);
+      if (authorizedDiskPath) {
+        if (candidatePath === authorizedDiskPath || candidatePath.startsWith(authorizedDiskPath + path.sep)) {
+          effectiveProjectPath = candidatePath;
+        } else {
+          logger.warn(`[chatAgentTaskHandler] Rejected unauthorized projectPath traversal attempt: ${body.projectPath}`);
+        }
+      } else {
+        if (!body.projectPath.includes('..') && path.isAbsolute(body.projectPath)) {
+          effectiveProjectPath = candidatePath;
+        }
+      }
+    }
+
     let workspaceDirective = '';
-    if (body.projectPath) {
+    if (effectiveProjectPath) {
       try {
-        const intelligence = inspectWorkspace(body.projectPath);
+        const intelligence = inspectWorkspace(effectiveProjectPath);
         workspaceDirective = buildPromptDirective(intelligence);
-      } catch (_) {}
+      } catch (err) {
+        logger.warn(`[chatAgentTaskHandler] Workspace discovery failed for ${effectiveProjectPath}:`, err?.message || err);
+      }
     }
 
     const result = await gateway.run({
@@ -73,11 +105,12 @@ async function handleChatTaskRequest(req, res, next, dependencies = {}) {
       taskPlan: plan,
       context: {
         userPrompt: promptText,
-        projectPath: body.projectPath || null,
+        projectPath: effectiveProjectPath || null,
         projectFiles: Array.isArray(body.projectFiles) ? body.projectFiles.slice(0, 200) : [],
         sessionId: body.sessionId || null,
         specification: appSpecification,
-        workspaceDirective
+        workspaceDirective,
+        ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {})
       },
       signal,
       maxRepairs: 2,

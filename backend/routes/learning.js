@@ -120,7 +120,7 @@ router.post('/chat', async (req, res) => {
 You have "Aakh" (Vision/File Scanning capabilities) and continuously analyze user feedback, project files, and chat quality.
 
 Current Learning Memory Summary for Project "${targetProjectId}":
-- Total User Feedbacks Logged: ${stats.totalFeedback} (${stats.positiveCount} Thumbs Up ðŸ‘, ${stats.negativeCount} Thumbs Down ðŸ‘Ž)
+- Total User Feedbacks Logged: ${stats.totalFeedback} (${stats.positiveCount} Thumbs Up 👍, ${stats.negativeCount} Thumbs Down 👎)
 - Scanned Workspace Files: ${(stats.scannedFiles || []).join(', ')}
 - Accumulated Learned Rules & Corrections:
 ${learnedContext || "No custom corrections logged yet."}

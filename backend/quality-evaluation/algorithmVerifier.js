@@ -373,13 +373,13 @@ class AlgorithmVerifier {
       }
     });
 
-    // 13. Backtracking (Subsets / Combinatorial Search)
+    // 13. Backtracking (Subsets / Combinatorial Search - Falsification-Hardened)
     this.oracles.set('subsets', {
       family: 'backtracking',
       lang: 'javascript',
       spec: {
         mode: 'function',
-        names: ['subsets', 'generateSubsets'],
+        names: ['subsets', 'generateSubsets', 'powerSet'],
         cases: [
           { id: 'empty', args: [[]] },
           { id: 'single', args: [[1]] },
@@ -387,24 +387,39 @@ class AlgorithmVerifier {
         ]
       },
       verify(resultsMap) {
-        const empty = resultsMap.get('empty');
-        assert.ok(Array.isArray(empty), 'Subsets result must be an array');
-        assert.strictEqual(empty.length, 1, 'Empty array has exactly 1 subset: []');
+        const canonicalizeSubsets = (subsetsArray, expectedLength) => {
+          assert.ok(Array.isArray(subsetsArray), 'Subsets result must be an array');
+          assert.strictEqual(subsetsArray.length, expectedLength, `Must return exactly ${expectedLength} subsets`);
+          const serializedSet = new Set();
+          for (let i = 0; i < subsetsArray.length; i++) {
+            const subset = subsetsArray[i];
+            assert.ok(Array.isArray(subset), `Subset at index ${i} must be an array`);
+            const key = subset.slice().sort((a, b) => a - b).join(',');
+            assert.ok(!serializedSet.has(key), `Duplicate subset detected: [${key}]`);
+            serializedSet.add(key);
+          }
+          return serializedSet;
+        };
 
-        const single = resultsMap.get('single');
-        assert.ok(Array.isArray(single) && single.length === 2, 'Single element array has 2 subsets');
+        // Case 1: [] -> [[]]
+        const emptySet = canonicalizeSubsets(resultsMap.get('empty'), 1);
+        assert.ok(emptySet.has(''), 'Empty input must contain the empty set []');
 
-        const three = resultsMap.get('three');
-        assert.ok(Array.isArray(three) && three.length === 8, '[1,2,3] must produce 2^3 = 8 subsets');
-        // Validate each subset is valid subset of [1, 2, 3]
-        for (const s of three) {
-          assert.ok(Array.isArray(s), 'Each subset must be an array');
-          assert.ok(s.every((x) => [1, 2, 3].includes(x)), 'Elements must be from original set');
+        // Case 2: [1] -> [[], [1]]
+        const singleSet = canonicalizeSubsets(resultsMap.get('single'), 2);
+        assert.ok(singleSet.has(''), 'Must contain []');
+        assert.ok(singleSet.has('1'), 'Must contain [1]');
+
+        // Case 3: [1, 2, 3] -> 8 distinct subsets
+        const threeSet = canonicalizeSubsets(resultsMap.get('three'), 8);
+        const expectedKeys = ['', '1', '2', '3', '1,2', '1,3', '2,3', '1,2,3'];
+        for (const k of expectedKeys) {
+          assert.ok(threeSet.has(k), `Missing required subset: [${k}]`);
         }
       }
     });
 
-    // 14. Range Queries (Fenwick Tree / Binary Indexed Tree)
+    // 14. Range Queries (Fenwick Tree / Binary Indexed Tree - Hardened)
     this.oracles.set('fenwick_tree', {
       family: 'range_queries',
       lang: 'javascript',
@@ -420,7 +435,10 @@ class AlgorithmVerifier {
           { id: 'q2', op: 'query', args: [2] },
           { id: 'q3', op: 'query', args: [3] },
           { id: 'u2_add', op: 'update', args: [2, 4] },
-          { id: 'q3_after', op: 'query', args: [3] }
+          { id: 'q3_after', op: 'query', args: [3] },
+          { id: 'u1_sub', op: 'update', args: [1, -2] },
+          { id: 'q1_after_sub', op: 'query', args: [1] },
+          { id: 'q3_after_sub', op: 'query', args: [3] }
         ]
       },
       verify(resultsMap) {
@@ -428,10 +446,12 @@ class AlgorithmVerifier {
         assert.strictEqual(resultsMap.get('q2'), 8, 'Prefix sum at index 2 (3 + 5)');
         assert.strictEqual(resultsMap.get('q3'), 10, 'Prefix sum at index 3 (3 + 5 + 2)');
         assert.strictEqual(resultsMap.get('q3_after'), 14, 'Prefix sum after update (10 + 4)');
+        assert.strictEqual(resultsMap.get('q1_after_sub'), 1, 'Prefix sum at 1 after negative update (3 - 2)');
+        assert.strictEqual(resultsMap.get('q3_after_sub'), 12, 'Prefix sum at 3 after negative update (14 - 2)');
       }
     });
 
-    // 15. Greedy (Merge Intervals)
+    // 15. Greedy (Merge Intervals - Hardened with unsorted & touching cases)
     this.oracles.set('merge_intervals', {
       family: 'greedy',
       lang: 'javascript',
@@ -443,7 +463,10 @@ class AlgorithmVerifier {
           { id: 'disjoint', args: [[[1, 2], [3, 4]]] },
           { id: 'all_overlap', args: [[[1, 4], [2, 3]]] },
           { id: 'empty', args: [[]] },
-          { id: 'single', args: [[[1, 5]]] }
+          { id: 'single', args: [[[1, 5]]] },
+          { id: 'unsorted', args: [[[1, 4], [0, 4]]] },
+          { id: 'touching', args: [[[1, 4], [4, 5]]] },
+          { id: 'identical', args: [[[1, 1], [1, 1]]] }
         ]
       },
       verify(resultsMap) {
@@ -452,10 +475,13 @@ class AlgorithmVerifier {
         assert.deepStrictEqual(resultsMap.get('all_overlap'), [[1, 4]], 'Completely contained interval');
         assert.deepStrictEqual(resultsMap.get('empty'), [], 'Empty input returns empty array');
         assert.deepStrictEqual(resultsMap.get('single'), [[1, 5]], 'Single interval returns identical interval');
+        assert.deepStrictEqual(resultsMap.get('unsorted'), [[0, 4]], 'Unsorted intervals merged correctly');
+        assert.deepStrictEqual(resultsMap.get('touching'), [[1, 5]], 'Touching adjacent boundary intervals merged');
+        assert.deepStrictEqual(resultsMap.get('identical'), [[1, 1]], 'Duplicate point intervals deduplicated');
       }
     });
 
-    // 16. Concurrency & Streaming (Bounded Queue)
+    // 16. Concurrency & Streaming (Bounded Queue - Hardened)
     this.oracles.set('bounded_queue', {
       family: 'concurrency_streaming',
       lang: 'javascript',
@@ -469,9 +495,11 @@ class AlgorithmVerifier {
           { id: 'e3_overflow', op: 'enqueue', args: ['C'] },
           { id: 'size2', op: 'size', args: [] },
           { id: 'd1', op: 'dequeue', args: [] },
+          { id: 'size1', op: 'size', args: [] },
           { id: 'e4', op: 'enqueue', args: ['D'] },
           { id: 'd2', op: 'dequeue', args: [] },
           { id: 'd3', op: 'dequeue', args: [] },
+          { id: 'size0', op: 'size', args: [] },
           { id: 'd4_empty', op: 'dequeue', args: [] }
         ]
       },
@@ -481,32 +509,127 @@ class AlgorithmVerifier {
         assert.strictEqual(resultsMap.get('e3_overflow'), false, 'Overflow enqueue rejected when full');
         assert.strictEqual(resultsMap.get('size2'), 2, 'Queue size is 2');
         assert.strictEqual(resultsMap.get('d1'), 'A', 'FIFO dequeue item A');
+        assert.strictEqual(resultsMap.get('size1'), 1, 'Queue size is 1');
         assert.strictEqual(resultsMap.get('e4'), true, 'Enqueue item D after space freed');
         assert.strictEqual(resultsMap.get('d2'), 'B', 'FIFO dequeue item B');
         assert.strictEqual(resultsMap.get('d3'), 'D', 'FIFO dequeue item D');
+        assert.strictEqual(resultsMap.get('size0'), 0, 'Queue size is 0');
         assert.strictEqual(resultsMap.get('d4_empty'), null, 'Dequeue from empty queue returns null');
       }
     });
 
-    // 17. Numerical & Geometry (GCD)
+    // 17. Numerical & Geometry (GCD - Hardened with zero & negative boundaries)
     this.oracles.set('gcd_lcm', {
       family: 'numerical_geometry',
       lang: 'javascript',
       spec: {
         mode: 'function',
-        names: ['gcd', 'greatestCommonDivisor'],
+        names: ['gcd', 'greatestCommonDivisor', 'gcdLcm'],
         cases: [
           { id: 'std', args: [48, 18] },
           { id: 'prime', args: [17, 13] },
-          { id: 'zero', args: [0, 5] },
+          { id: 'zero_left', args: [0, 5] },
+          { id: 'zero_right', args: [5, 0] },
+          { id: 'both_zero', args: [0, 0] },
+          { id: 'negative', args: [-48, 18] },
           { id: 'equal', args: [24, 24] }
         ]
       },
       verify(resultsMap) {
         assert.strictEqual(resultsMap.get('std'), 6, 'gcd(48, 18) = 6');
         assert.strictEqual(resultsMap.get('prime'), 1, 'gcd(17, 13) = 1');
-        assert.strictEqual(resultsMap.get('zero'), 5, 'gcd(0, 5) = 5');
+        assert.strictEqual(resultsMap.get('zero_left'), 5, 'gcd(0, 5) = 5');
+        assert.strictEqual(resultsMap.get('zero_right'), 5, 'gcd(5, 0) = 5');
+        assert.strictEqual(resultsMap.get('both_zero'), 0, 'gcd(0, 0) = 0');
+        assert.strictEqual(Math.abs(resultsMap.get('negative')), 6, 'gcd(-48, 18) = 6');
         assert.strictEqual(resultsMap.get('equal'), 24, 'gcd(24, 24) = 24');
+      }
+    });
+
+    // 18. Dynamic Programming (Coin Change)
+    this.oracles.set('coin_change', {
+      family: 'dynamic_programming',
+      lang: 'javascript',
+      spec: {
+        mode: 'function',
+        names: ['coinChange', 'minCoins', 'computeCoinChange'],
+        cases: [
+          { id: 'std', args: [[1, 2, 5], 11] },
+          { id: 'impossible', args: [[2], 3] },
+          { id: 'zero', args: [[1], 0] },
+          { id: 'single_coin', args: [[1], 2] },
+          { id: 'large', args: [[1, 5, 10, 25], 63] }
+        ]
+      },
+      verify(resultsMap) {
+        assert.strictEqual(resultsMap.get('std'), 3, 'Coin change for 11 with [1,2,5] is 3 (5+5+1)');
+        assert.strictEqual(resultsMap.get('impossible'), -1, 'Impossible amount returns -1');
+        assert.strictEqual(resultsMap.get('zero'), 0, 'Zero amount requires 0 coins');
+        assert.strictEqual(resultsMap.get('single_coin'), 2, 'Amount 2 with [1] requires 2 coins');
+        assert.strictEqual(resultsMap.get('large'), 6, 'Amount 63 with [1,5,10,25] requires 6 coins (25*2 + 10 + 1*3)');
+      }
+    });
+
+    // 19. String Matching & Trie (Prefix Tree Class)
+    this.oracles.set('trie', {
+      family: 'string_matching',
+      lang: 'javascript',
+      spec: {
+        mode: 'class',
+        names: ['Trie', 'PrefixTree'],
+        operations: [
+          { id: 'init', op: 'new', args: [] },
+          { id: 'ins_apple', op: 'insert', args: ['apple'] },
+          { id: 'srch_apple', op: 'search', args: ['apple'] },
+          { id: 'srch_app_pre', op: 'search', args: ['app'] },
+          { id: 'starts_app', op: 'startsWith', args: ['app'] },
+          { id: 'ins_app', op: 'insert', args: ['app'] },
+          { id: 'srch_app_post', op: 'search', args: ['app'] },
+          { id: 'srch_banana', op: 'search', args: ['banana'] },
+          { id: 'starts_ban', op: 'startsWith', args: ['ban'] }
+        ]
+      },
+      verify(resultsMap) {
+        assert.strictEqual(resultsMap.get('srch_apple'), true, 'Found word "apple"');
+        assert.strictEqual(resultsMap.get('srch_app_pre'), false, '"app" is prefix only, not inserted yet');
+        assert.strictEqual(resultsMap.get('starts_app'), true, 'Prefix "app" exists in "apple"');
+        assert.strictEqual(resultsMap.get('srch_app_post'), true, 'Found word "app" after insertion');
+        assert.strictEqual(resultsMap.get('srch_banana'), false, 'Non-existent word returns false');
+        assert.strictEqual(resultsMap.get('starts_ban'), false, 'Non-existent prefix returns false');
+      }
+    });
+
+    // 20. Graphs (Topological Sort / Course Schedule)
+    this.oracles.set('topological_sort', {
+      family: 'graphs',
+      lang: 'javascript',
+      spec: {
+        mode: 'function',
+        names: ['findOrder', 'topologicalSort', 'canFinish'],
+        cases: [
+          { id: 'simple', args: [2, [[1, 0]]] },
+          { id: 'cycle', args: [2, [[1, 0], [0, 1]]] },
+          { id: 'diamond', args: [4, [[1, 0], [2, 0], [3, 1], [3, 2]]] },
+          { id: 'single', args: [1, []] }
+        ]
+      },
+      verify(resultsMap) {
+        const checkOrder = (order, numCourses, prereqs) => {
+          assert.ok(Array.isArray(order), 'Topological order must be an array');
+          assert.strictEqual(order.length, numCourses, 'Order length must equal numCourses');
+          for (const [u, v] of prereqs) {
+            const idxU = order.indexOf(u);
+            const idxV = order.indexOf(v);
+            assert.ok(idxV < idxU, `Prerequisite ${v} must precede course ${u}`);
+          }
+        };
+
+        checkOrder(resultsMap.get('simple'), 2, [[1, 0]]);
+        const cycle = resultsMap.get('cycle');
+        assert.ok(Array.isArray(cycle) && cycle.length === 0, 'Cycle must produce empty order []');
+        checkOrder(resultsMap.get('diamond'), 4, [[1, 0], [2, 0], [3, 1], [3, 2]]);
+        const single = resultsMap.get('single');
+        assert.ok(Array.isArray(single) && single.length === 1 && single[0] === 0, 'Single course order must be [0]');
       }
     });
   }
@@ -515,6 +638,14 @@ class AlgorithmVerifier {
    * Verifies an algorithm candidate implementation against independent tests and oracles.
    * Execution is fully out-of-process; assertions and expected results run strictly in parent process.
    */
+  hasOracle(name) {
+    return typeof name === 'string' && this.oracles.has(name);
+  }
+
+  getRegisteredOracleNames() {
+    return Array.from(this.oracles.keys());
+  }
+
   async verifyAlgorithm(name, candidateCode, options = {}) {
     const oracle = this.oracles.get(name);
     if (!oracle) {

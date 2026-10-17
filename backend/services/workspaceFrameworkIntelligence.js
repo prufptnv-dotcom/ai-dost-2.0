@@ -449,9 +449,37 @@ class WorkspaceFrameworkIntelligence {
       exportStyle: 'default-and-named'
     };
     try {
-      const files = fs.readdirSync(workspacePath);
+      const scanDir = (dir, depth = 0) => {
+        if (depth > 2) return [];
+        let entries = [];
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return []; }
+        let found = [];
+        for (const e of entries) {
+          if (IGNORED_DIRS.has(e.name)) continue;
+          if (e.isFile()) found.push(e.name);
+          else if (e.isDirectory() && ['src', 'app', 'pages', 'components', 'lib'].includes(e.name)) {
+            found.push(...scanDir(path.join(dir, e.name), depth + 1));
+          }
+        }
+        return found;
+      };
+      const files = scanDir(workspacePath);
       if (files.some((f) => f.endsWith('.tsx'))) conventions.jsxExtension = '.tsx';
-      if (files.includes('tsconfig.json')) conventions.style = 'typescript';
+      else if (files.some((f) => f.endsWith('.jsx'))) conventions.jsxExtension = '.jsx';
+      else if (files.some((f) => f.endsWith('.ts'))) conventions.jsxExtension = '.ts';
+      else conventions.jsxExtension = '.js';
+
+      if (fs.existsSync(path.join(workspacePath, 'tsconfig.json'))) {
+        conventions.style = 'typescript';
+      } else {
+        let pkg = null;
+        try { pkg = JSON.parse(fs.readFileSync(path.join(workspacePath, 'package.json'), 'utf8')); } catch (_) {}
+        if (pkg?.type === 'module') {
+          conventions.style = 'esm';
+        } else if (pkg?.type === 'commonjs') {
+          conventions.style = 'cjs';
+        }
+      }
     } catch (_) {}
     return conventions;
   }
@@ -512,5 +540,7 @@ const workspaceFrameworkIntelligence = new WorkspaceFrameworkIntelligence();
 
 module.exports = {
   WorkspaceFrameworkIntelligence,
-  workspaceFrameworkIntelligence
+  workspaceFrameworkIntelligence,
+  inspectWorkspace: (wsPath, opts) => workspaceFrameworkIntelligence.inspectWorkspace(wsPath, opts),
+  buildPromptDirective: (summary) => workspaceFrameworkIntelligence.buildPromptDirective(summary)
 };
