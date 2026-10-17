@@ -1181,32 +1181,91 @@ function Toolbar({
   );
 }
 
-function CodeEditorView({ activeFile, code, onChangeCode, onSaveCode, saved, onOpenDiff }) {
+function CodeEditorView({
+  activeFile,
+  code,
+  onChangeCode,
+  onSaveCode,
+  saved,
+  onOpenDiff,
+  tabs = [],
+  onSelectTab,
+  onCloseTab,
+}) {
   const lineCount = useMemo(() => (code || '').split('\n').length, [code]);
   const lang = useMemo(() => getMonacoLanguage(activeFile), [activeFile]);
 
-  // Handle Ctrl+S / Cmd+S
+  // Handle Ctrl+S / Cmd+S and Ctrl+W (close active tab)
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
         onSaveCode?.();
       }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'w' && activeFile) {
+        e.preventDefault();
+        onCloseTab?.(activeFile);
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onSaveCode]);
+  }, [onSaveCode, onCloseTab, activeFile]);
+
+  const effectiveTabs = tabs && tabs.length > 0 ? tabs : (activeFile ? [activeFile] : []);
 
   return (
     <div className="code-editor flex flex-col h-full bg-[#17181b] border border-zinc-800 rounded-lg overflow-hidden">
-      <div className="code-tab flex items-center gap-2 px-3 py-2 bg-[#1c1d20] border-b border-zinc-800 text-xs">
-        <LuFileCode2 size={14} className="text-purple-400" />
-        <span className="truncate font-mono text-zinc-200">{activeFile || 'No file selected'}</span>
-        <span className={`code-tab-dot ${saved ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-        <span className="text-[10px] text-zinc-400 ml-1">{saved ? 'Saved' : 'Modified'}</span>
-        <div className="ml-auto flex items-center gap-2">
+      {/* Multi-Tab Strip */}
+      <div className="code-tab-strip flex items-center bg-[#131418] border-b border-zinc-800 text-xs overflow-x-auto select-none min-h-[38px]">
+        <div className="flex items-center min-w-0 flex-1 overflow-x-auto">
+          {effectiveTabs.map((tabPath) => {
+            const isActive = tabPath === activeFile;
+            const fileName = tabPath.split('/').pop() || tabPath;
+            const { icon: FileIcon } = getFileIconAndType(tabPath);
+            return (
+              <div
+                key={tabPath}
+                onClick={() => onSelectTab?.(tabPath)}
+                className={`group flex items-center gap-1.5 px-3 py-2 border-r border-zinc-800/80 cursor-pointer font-mono text-xs transition-colors shrink-0 ${
+                  isActive
+                    ? 'bg-[#1c1d22] text-white border-t-2 border-t-indigo-500 font-semibold shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60'
+                }`}
+                title={tabPath}
+              >
+                <FileIcon size={13} className={isActive ? 'text-indigo-400' : 'text-zinc-500'} />
+                <span className="truncate max-w-[130px]">{fileName}</span>
+                {isActive && (
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${saved ? 'bg-emerald-400' : 'bg-amber-400'}`}
+                    title={saved ? 'Saved' : 'Modified'}
+                  />
+                )}
+                {effectiveTabs.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseTab?.(tabPath);
+                    }}
+                    className="ml-1 p-0.5 rounded text-zinc-500 hover:text-white hover:bg-zinc-700/60 opacity-50 group-hover:opacity-100 transition-opacity"
+                    title="Close tab (Ctrl+W)"
+                  >
+                    <LuX size={11} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="ml-auto flex items-center gap-2 px-3 shrink-0 bg-[#131418]">
+          <span className="text-[10px] text-zinc-500 font-mono hidden md:inline">
+            {lineCount} lines · {lang}
+          </span>
           {onOpenDiff && activeFile && (
             <button
+              type="button"
               onClick={() => onOpenDiff(activeFile)}
               className="text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium flex items-center gap-1 transition-colors border border-zinc-700/80"
               title="Compare modifications against checkpoint"
@@ -1215,6 +1274,7 @@ function CodeEditorView({ activeFile, code, onChangeCode, onSaveCode, saved, onO
             </button>
           )}
           <button
+            type="button"
             onClick={onSaveCode}
             className="text-xs px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white font-medium flex items-center gap-1 shadow-sm transition-colors"
             title="Save file (Ctrl+S)"
@@ -2797,6 +2857,7 @@ export default function ForgeCopilot({
   const [selectedElement, setSelectedElement] = useState(null);
   const [runtimeError, setRuntimeError] = useState(null);
   const [diffModalFile, setDiffModalFile] = useState(null);
+  const [openTabs, setOpenTabs] = useState([]);
 
   const abortRef = useRef(null);
   const currentTaskIdRef = useRef(null);
@@ -2898,8 +2959,20 @@ export default function ForgeCopilot({
   const handleOpenFileInEditor = useCallback((filePath) => {
     if (!filePath) return;
     setActiveFile(filePath);
+    setOpenTabs((prev) => (prev.includes(filePath) ? prev : [...prev, filePath]));
     setMode('code');
   }, []);
+
+  const handleCloseTab = useCallback((filePath) => {
+    setOpenTabs((prev) => {
+      const nextTabs = prev.filter((t) => t !== filePath);
+      if (activeFile === filePath) {
+        const nextActive = nextTabs[nextTabs.length - 1] || '';
+        setActiveFile(nextActive);
+      }
+      return nextTabs;
+    });
+  }, [activeFile]);
 
   const handleRetryRun = useCallback(() => {
     if (lastPrompt) {
@@ -3035,7 +3108,9 @@ export default function ForgeCopilot({
       setContents(newContents);
 
       if (fileList.length > 0 && !activeFile) {
-        setActiveFile(fileList[0].path);
+        const first = fileList[0].path;
+        setActiveFile(first);
+        setOpenTabs((prev) => (prev.length > 0 ? prev : [first]));
       }
       return fileList;
     } catch (err) {
@@ -3168,7 +3243,7 @@ export default function ForgeCopilot({
     try {
       await addProjectFile(currentProjectId, name, '// New file\n');
       await loadProjectData();
-      setActiveFile(name);
+      handleOpenFileInEditor(name);
       showToast(`Created ${name}`);
     } catch (err) {
       showToast(`Error creating file: ${err.message}`);
@@ -3180,7 +3255,7 @@ export default function ForgeCopilot({
     try {
       await deleteProjectFile(currentProjectId, pathToDelete);
       await loadProjectData();
-      if (activeFile === pathToDelete) setActiveFile('');
+      handleCloseTab(pathToDelete);
       showToast(`Deleted ${pathToDelete}`);
     } catch (err) {
       showToast(`Error deleting file: ${err.message}`);
@@ -3867,7 +3942,7 @@ export default function ForgeCopilot({
         open={filesOpen}
         files={files}
         activeFile={activeFile}
-        setActiveFile={setActiveFile}
+        setActiveFile={handleOpenFileInEditor}
         activeTab={activeTab}
         onSelectTab={setActiveTab}
         onNewProject={() => {
@@ -4055,6 +4130,9 @@ export default function ForgeCopilot({
                       onSaveCode={handleExplicitSave}
                       saved={saved}
                       onOpenDiff={handleOpenDiff}
+                      tabs={openTabs}
+                      onSelectTab={handleOpenFileInEditor}
+                      onCloseTab={handleCloseTab}
                     />
                   ) : (
                     <RealTerminalView

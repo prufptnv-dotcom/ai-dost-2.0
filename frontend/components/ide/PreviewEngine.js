@@ -397,9 +397,24 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
     .filter(([local]) => !declaredNames.has(local) && !reactBuiltins.has(local))
     .map(([local, meta]) => {
       const fromReact = /(^|\/)react($|\/)/.test(meta.source) && !/react-router|react-dom/.test(meta.source);
-      const expr = fromReact
-        ? `(typeof React !== 'undefined' && React[${JSON.stringify(meta.imported)}])`
-        : `(typeof window !== 'undefined' && window[${JSON.stringify(meta.imported)}])`;
+      let expr;
+      if (fromReact) {
+        expr = `(typeof React !== 'undefined' && React[${JSON.stringify(meta.imported)}])`;
+      } else if (/framer-motion/.test(meta.source)) {
+        expr = `(typeof window !== 'undefined' && (window[${JSON.stringify(meta.imported)}] || window.motion))`;
+      } else if (/axios/.test(meta.source)) {
+        expr = `(typeof window !== 'undefined' && window.axios)`;
+      } else if (/date-fns/.test(meta.source)) {
+        expr = `(typeof window !== 'undefined' && (window[${JSON.stringify(meta.imported)}] || window.format))`;
+      } else if (/zustand/.test(meta.source)) {
+        expr = `(typeof window !== 'undefined' && window.create)`;
+      } else if (/canvas-confetti/.test(meta.source)) {
+        expr = `(typeof window !== 'undefined' && window.confetti)`;
+      } else if (/clsx|tailwind-merge/.test(meta.source)) {
+        expr = `(typeof window !== 'undefined' && (window[${JSON.stringify(meta.imported)}] || window.cn))`;
+      } else {
+        expr = `(typeof window !== 'undefined' && (window[${JSON.stringify(meta.imported)}] !== undefined ? window[${JSON.stringify(meta.imported)}] : (typeof window.__createStub === 'function' ? window.__createStub(${JSON.stringify(meta.imported)}) : undefined)))`;
+      }
       return `var ${local} = ${expr};`;
     })
     .join('\n');
@@ -820,25 +835,82 @@ export function generateLiveAppHtml(files = [], contents = {}, inspectorActive =
       const { initial, animate, exit, transition, whileHover, whileTap, whileInView, variants, ...rest } = props;
       return React.createElement(tag, { ref, ...rest });
     });
-    window.motion = {
-      div: _createMotionComponent('div'),
-      span: _createMotionComponent('span'),
-      button: _createMotionComponent('button'),
-      a: _createMotionComponent('a'),
-      p: _createMotionComponent('p'),
-      section: _createMotionComponent('section'),
-      main: _createMotionComponent('main'),
-      header: _createMotionComponent('header'),
-      footer: _createMotionComponent('footer'),
-      nav: _createMotionComponent('nav'),
-      ul: _createMotionComponent('ul'),
-      li: _createMotionComponent('li'),
-      h1: _createMotionComponent('h1'),
-      h2: _createMotionComponent('h2'),
-      h3: _createMotionComponent('h3'),
-      article: _createMotionComponent('article')
-    };
+    window.motion = new Proxy({}, {
+      get: (target, tag) => {
+        if (!target[tag]) {
+          target[tag] = _createMotionComponent(tag === 'default' ? 'div' : tag);
+        }
+        return target[tag];
+      }
+    });
     window.AnimatePresence = ({ children }) => children;
+
+    // ── Universal Auto-Dependency Stubs (Zero-Crash for Third-Party Libs) ───
+    window.axios = window.axios || {
+      get: function(url, opts) {
+        return fetch(url, opts).then(function(r) { return r.json(); }).then(function(data) { return { data: data, status: 200 }; });
+      },
+      post: function(url, body, opts) {
+        return fetch(url, Object.assign({}, opts, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
+          .then(function(r) { return r.json(); }).then(function(data) { return { data: data, status: 200 }; });
+      },
+      put: function(url, body, opts) {
+        return fetch(url, Object.assign({}, opts, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
+          .then(function(r) { return r.json(); }).then(function(data) { return { data: data, status: 200 }; });
+      },
+      delete: function(url, opts) {
+        return fetch(url, Object.assign({}, opts, { method: 'DELETE' }))
+          .then(function(r) { return r.json(); }).then(function(data) { return { data: data, status: 200 }; });
+      }
+    };
+
+    window.twMerge = window.twMerge || window.cn;
+
+    window.format = window.format || function(d) {
+      try { return new Date(d || Date.now()).toLocaleDateString(); } catch(_) { return String(d); }
+    };
+    window.formatDistanceToNow = window.formatDistanceToNow || function() { return 'just now'; };
+
+    window.create = window.create || function(initializer) {
+      var state = {};
+      var listeners = new Set();
+      var set = function(partial) {
+        var next = typeof partial === 'function' ? partial(state) : partial;
+        state = Object.assign({}, state, next);
+        listeners.forEach(function(fn) { fn(state); });
+      };
+      var get = function() { return state; };
+      state = typeof initializer === 'function' ? initializer(set, get, { getState: get, setState: set }) : (initializer || {});
+      return function useStore(selector) {
+        var sel = selector || function(s) { return s; };
+        var forceState = useState(0);
+        var force = forceState[1];
+        useEffect(function() {
+          var handler = function() { force(function(n) { return n + 1; }); };
+          listeners.add(handler);
+          return function() { listeners.delete(handler); };
+        }, []);
+        return sel(state);
+      };
+    };
+
+    window.__createStub = function(name) {
+      var fn = function StubComponent(props) {
+        return React.createElement('div', {
+          className: 'p-1.5 text-[11px] rounded border border-indigo-500/30 bg-indigo-950/20 text-indigo-300 inline-block',
+          title: 'Component: ' + name
+        }, props?.children || name);
+      };
+      return new Proxy(fn, {
+        get: function(target, prop) {
+          if (prop === 'default') return target;
+          if (typeof prop === 'string' && prop.startsWith('use')) {
+            return function() { return {}; };
+          }
+          return target;
+        }
+      });
+    };
 
     // ── In-Memory React Router DOM Polyfill (Multi-page Apps) ───────────────
     const RouterContext = createContext({ pathname: '/', navigate: () => {}, params: {} });
