@@ -11,13 +11,14 @@ import {
   LuPalette, LuSearch, LuSend, LuSettings2, LuShieldCheck, LuSmartphone, LuSparkles,
   LuSquareTerminal, LuTerminal, LuThumbsUp, LuWandSparkles, LuX, LuZap, LuSliders,
   LuPlug, LuBookOpen, LuCheckCircle2, LuTrash2, LuSquare, LuRotateCcw,
-  LuUpload, LuFolderPlus, LuPen, LuSave, LuShieldAlert
+  LuUpload, LuFolderPlus, LuPen, LuSave, LuShieldAlert, LuDownload
 } from 'react-icons/lu';
 import { fetchProject, fetchProjects, saveProjectFile, addProjectFile, deleteProjectFile, createProject, deleteProject } from '../../services/api';
 import { generateLiveAppHtml } from '../ide/PreviewEngine';
 import { cancelAgentRun } from '../../lib/copilotStop';
 import { diffLines, diffStats } from '../../lib/lineDiff';
 import CopilotMarkdown from '../ide/CopilotMarkdown';
+import { CommandPalette } from '../views/IDEOverlays';
 import { MCP_REGISTRY, SKILLS_MANIFEST, PROVIDERS_SUPPORT } from './forgePlatformData';
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
@@ -271,6 +272,8 @@ function FileSidebar({
   onSelectProject,
   onDeleteProject,
   currentProjectId,
+  onExportZip,
+  onOpenCommandPalette,
 }) {
   const [query, setQuery] = useState('');
   const [openFolders, setOpenFolders] = useState({ src: true, components: true });
@@ -358,9 +361,13 @@ function FileSidebar({
           <LuChevronDown size={14} className="muted-icon" />
         </div>
 
-        <button className="new-project" onClick={onNewProject}>
-          <LuPlus size={15} />
-          <span>New project</span>
+        <button
+          className="new-project"
+          onClick={onOpenCommandPalette || onNewProject}
+          title="Command Palette & Quick Actions (⌘ K / Ctrl+K)"
+        >
+          <LuCommand size={15} />
+          <span>Command Menu</span>
           <span className="shortcut">⌘ K</span>
         </button>
 
@@ -516,6 +523,11 @@ function FileSidebar({
             <IconButton title="Add file" onClick={onNewFile}>
               <LuPlus size={14} />
             </IconButton>
+            {onExportZip && (
+              <IconButton title="Export project ZIP archive" onClick={onExportZip}>
+                <LuDownload size={14} />
+              </IconButton>
+            )}
           </div>
         </div>
 
@@ -635,11 +647,20 @@ function GitSnapshotsModal({ open, onClose, onToast, projectId, projectName }) {
   const [commitMsg, setCommitMsg] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
+  const [activeGitTab, setActiveGitTab] = useState('snapshots');
+  const [remoteUrl, setRemoteUrl] = useState('');
+  const [remoteBranch, setRemoteBranch] = useState('main');
+  const [githubToken, setGithubToken] = useState('');
+  const [pushResult, setPushResult] = useState(null);
+  const [pushing, setPushing] = useState(false);
 
   const fetchLogs = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${BACKEND}/api/git/log`);
+      const url = projectId
+        ? `${BACKEND}/api/git/log?projectId=${encodeURIComponent(projectId)}`
+        : `${BACKEND}/api/git/log`;
+      const res = await fetch(url);
       const data = await res.json();
       if (data?.success && Array.isArray(data.commits)) {
         setCommits(data.commits);
@@ -649,7 +670,7 @@ function GitSnapshotsModal({ open, onClose, onToast, projectId, projectName }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [projectId]);
 
   useEffect(() => {
     if (!open) return;
@@ -665,7 +686,7 @@ function GitSnapshotsModal({ open, onClose, onToast, projectId, projectName }) {
       const res = await fetch(`${BACKEND}/api/git/commit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: commitMsg.trim() }),
+        body: JSON.stringify({ message: commitMsg.trim(), projectId }),
       });
       const data = await res.json();
       if (data?.success) {
@@ -691,7 +712,7 @@ function GitSnapshotsModal({ open, onClose, onToast, projectId, projectName }) {
       const res = await fetch(`${BACKEND}/api/git/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hash }),
+        body: JSON.stringify({ hash, projectId }),
       });
       const data = await res.json();
       if (data?.success) {
@@ -707,6 +728,47 @@ function GitSnapshotsModal({ open, onClose, onToast, projectId, projectName }) {
     }
   };
 
+  const handlePushRemote = async (e) => {
+    e?.preventDefault();
+    const trimmedUrl = remoteUrl.trim();
+    if (!trimmedUrl) {
+      setStatus('Remote URL is required (e.g. https://github.com/user/repo.git)');
+      return;
+    }
+    let urlToPush = trimmedUrl;
+    if (githubToken.trim() && urlToPush.startsWith('https://')) {
+      const token = encodeURIComponent(githubToken.trim());
+      urlToPush = urlToPush.replace('https://', `https://${token}@`);
+    }
+
+    try {
+      setPushing(true);
+      setPushResult(null);
+      setStatus('');
+      const res = await fetch(`${BACKEND}/api/git/push-remote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          remoteUrl: urlToPush,
+          branch: remoteBranch.trim() || 'main',
+          projectId,
+        }),
+      });
+      const data = await res.json();
+      if (data?.success) {
+        setPushResult({ success: true, message: data.message || `Successfully pushed branch [${remoteBranch || 'main'}] to remote!` });
+        onToast?.(`Pushed ${projectName} to remote repository!`);
+        fetchLogs();
+      } else {
+        setPushResult({ success: false, error: data?.error || 'Push failed. Please verify repository URL and access token.' });
+      }
+    } catch (err) {
+      setPushResult({ success: false, error: err.message });
+    } finally {
+      setPushing(false);
+    }
+  };
+
   if (!open) return null;
 
   return (
@@ -718,8 +780,8 @@ function GitSnapshotsModal({ open, onClose, onToast, projectId, projectName }) {
               <LuGitBranch size={16} />
             </span>
             <div>
-              <h2 className="text-sm font-bold text-white">Git Snapshots &amp; Local Commits</h2>
-              <p className="text-[11px] text-zinc-400">Offline repository version control for {projectName}</p>
+              <h2 className="text-sm font-bold text-white">Git Snapshots &amp; Remote Sync</h2>
+              <p className="text-[11px] text-zinc-400">Version control &amp; GitHub integration for {projectName}</p>
             </div>
           </div>
           <button
@@ -730,82 +792,389 @@ function GitSnapshotsModal({ open, onClose, onToast, projectId, projectName }) {
           </button>
         </div>
 
+        {/* Modal Tab Switcher */}
+        <div className="flex border-b border-zinc-800 bg-[#141518] px-5 pt-2.5 gap-4 text-xs select-none">
+          <button
+            onClick={() => setActiveGitTab('snapshots')}
+            className={`pb-2.5 font-medium flex items-center gap-1.5 border-b-2 transition-colors ${
+              activeGitTab === 'snapshots'
+                ? 'border-purple-500 text-white font-semibold'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <LuHistory size={13} />
+            <span>Local Snapshots ({commits.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveGitTab('remote')}
+            className={`pb-2.5 font-medium flex items-center gap-1.5 border-b-2 transition-colors ${
+              activeGitTab === 'remote'
+                ? 'border-purple-500 text-white font-semibold'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <LuUpload size={13} />
+            <span>Push to GitHub</span>
+          </button>
+        </div>
+
         <div className="p-5 flex-1 overflow-y-auto space-y-4">
-          <form onSubmit={handleCreateCommit} className="space-y-2">
-            <label className="text-xs font-semibold text-zinc-300 block">Create New Snapshot</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={commitMsg}
-                onChange={(e) => setCommitMsg(e.target.value)}
-                placeholder="Commit message (e.g. Added dark navbar and icons)..."
-                className="flex-1 bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-purple-500"
-              />
-              <button
-                type="submit"
-                disabled={loading || !commitMsg.trim()}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
-              >
-                <LuSave size={13} /> Commit
-              </button>
-            </div>
-            {status && <div className="text-xs text-amber-400">{status}</div>}
-          </form>
-
-          <div>
-            <div className="flex items-center justify-between text-xs font-semibold text-zinc-400 mb-2">
-              <span>COMMIT HISTORY ({commits.length})</span>
-              <button
-                onClick={fetchLogs}
-                disabled={loading}
-                className="text-purple-400 hover:text-purple-300 flex items-center gap-1"
-              >
-                <LuRefreshCw size={11} className={loading ? 'spin' : ''} /> Refresh
-              </button>
-            </div>
-
-            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-              {commits.length > 0 ? (
-                commits.map((c) => (
-                  <div
-                    key={c.hash}
-                    className="p-3 rounded-xl bg-zinc-900 border border-zinc-800/80 flex items-center justify-between hover:border-zinc-700 transition-colors"
+          {activeGitTab === 'snapshots' ? (
+            <>
+              <form onSubmit={handleCreateCommit} className="space-y-2">
+                <label className="text-xs font-semibold text-zinc-300 block">Create New Snapshot</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={commitMsg}
+                    onChange={(e) => setCommitMsg(e.target.value)}
+                    placeholder="Commit message (e.g. Added dark navbar and icons)..."
+                    className="flex-1 bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-purple-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={loading || !commitMsg.trim()}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <div className="min-w-0 pr-3">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800">
-                          {c.hash}
-                        </span>
-                        <span className="text-xs font-medium text-zinc-200 truncate">{c.message}</span>
+                    <LuSave size={13} /> Commit
+                  </button>
+                </div>
+                {status && <div className="text-xs text-amber-400">{status}</div>}
+              </form>
+
+              <div>
+                <div className="flex items-center justify-between text-xs font-semibold text-zinc-400 mb-2">
+                  <span>COMMIT HISTORY ({commits.length})</span>
+                  <button
+                    onClick={fetchLogs}
+                    disabled={loading}
+                    className="text-purple-400 hover:text-purple-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    <LuRefreshCw size={11} className={loading ? 'spin' : ''} /> Refresh
+                  </button>
+                </div>
+
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {commits.length > 0 ? (
+                    commits.map((c) => (
+                      <div
+                        key={c.hash}
+                        className="p-3 rounded-xl bg-zinc-900 border border-zinc-800/80 flex items-center justify-between hover:border-zinc-700 transition-colors"
+                      >
+                        <div className="min-w-0 pr-3">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800">
+                              {c.hash}
+                            </span>
+                            <span className="text-xs font-medium text-zinc-200 truncate">{c.message}</span>
+                          </div>
+                          <div className="text-[10px] text-zinc-500 mt-1">
+                            {c.author} · {c.date}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRollback(c.hash)}
+                          className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded text-xs flex items-center gap-1 shrink-0 transition-colors cursor-pointer"
+                          title="Rollback workspace to this commit"
+                        >
+                          <LuRotateCcw size={11} /> Rollback
+                        </button>
                       </div>
-                      <div className="text-[10px] text-zinc-500 mt-1">
-                        {c.author} · {c.date}
-                      </div>
+                    ))
+                  ) : (
+                    <div className="p-4 rounded-xl bg-zinc-900/50 border border-zinc-800 text-center text-xs text-zinc-500">
+                      No local commits yet. Create your first snapshot above.
                     </div>
-                    <button
-                      onClick={() => handleRollback(c.hash)}
-                      className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded text-xs flex items-center gap-1 shrink-0 transition-colors"
-                      title="Rollback workspace to this commit"
-                    >
-                      <LuRotateCcw size={11} /> Rollback
-                    </button>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+            <form onSubmit={handlePushRemote} className="space-y-4">
+              <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-xs text-purple-200 flex items-start gap-2">
+                <LuRocket size={15} className="text-purple-400 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-semibold text-white">Direct GitHub Synchronization</div>
+                  <div className="text-[11px] text-zinc-400 mt-0.5">
+                    Push your generated Forge workspace directly into your GitHub, GitLab, or Bitbucket repository.
                   </div>
-                ))
-              ) : (
-                <div className="p-4 rounded-xl bg-zinc-900/50 border border-zinc-800 text-center text-xs text-zinc-500">
-                  No local commits yet. Create your first snapshot above.
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-zinc-300 block">Repository Remote URL *</label>
+                <input
+                  type="text"
+                  value={remoteUrl}
+                  onChange={(e) => setRemoteUrl(e.target.value)}
+                  placeholder="https://github.com/your-username/my-awesome-app.git"
+                  className="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-purple-500 font-mono"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-zinc-300 block">Target Branch</label>
+                  <input
+                    type="text"
+                    value={remoteBranch}
+                    onChange={(e) => setRemoteBranch(e.target.value)}
+                    placeholder="main"
+                    className="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-purple-500 font-mono"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-zinc-300 block">Personal Access Token (PAT)</label>
+                  <input
+                    type="password"
+                    value={githubToken}
+                    onChange={(e) => setGithubToken(e.target.value)}
+                    placeholder="ghp_xxxxxxxxxxxx"
+                    className="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-purple-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="text-[10px] text-zinc-500 leading-relaxed">
+                💡 <b>Tip:</b> If your repository is private or requires authentication, paste a GitHub Token with <code>repo</code> write scope.
+              </div>
+
+              {pushResult && (
+                <div
+                  className={`p-3 rounded-xl border text-xs ${
+                    pushResult.success
+                      ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
+                      : 'bg-red-950/60 border-red-800 text-red-300'
+                  }`}
+                >
+                  <div className="font-semibold flex items-center gap-1.5">
+                    {pushResult.success ? <LuCheck size={14} /> : <LuShieldAlert size={14} />}
+                    {pushResult.success ? 'Push Successful' : 'Push Error'}
+                  </div>
+                  <div className="mt-1 font-mono text-[11px] break-all">
+                    {pushResult.message || pushResult.error}
+                  </div>
                 </div>
               )}
-            </div>
-          </div>
+
+              {status && <div className="text-xs text-amber-400">{status}</div>}
+
+              <button
+                type="submit"
+                disabled={pushing || !remoteUrl.trim()}
+                className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-lg shadow-purple-600/20"
+              >
+                {pushing ? (
+                  <>
+                    <LuLoaderCircle size={14} className="spin" /> Pushing to Remote Repository...
+                  </>
+                ) : (
+                  <>
+                    <LuUpload size={14} /> Push to Remote ({remoteBranch || 'main'})
+                  </>
+                )}
+              </button>
+            </form>
+          )}
         </div>
 
         <div className="px-5 py-3 border-t border-zinc-800 bg-[#1c1d22] flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 font-medium transition-colors"
+            className="px-4 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 font-medium transition-colors cursor-pointer"
           >
             Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+function FileDiffModal({
+  open,
+  onClose,
+  diffData,
+  onRevert,
+  onOpenInEditor,
+}) {
+  const [viewMode, setViewMode] = useState('unified');
+  const [copied, setCopied] = useState(false);
+
+  if (!open || !diffData) return null;
+
+  const { filePath = '', oldContent = '', newContent = '', summary = '' } = diffData;
+  const ops = diffLines(oldContent, newContent);
+  const stats = diffStats(ops);
+
+  const handleCopyNew = () => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(newContent);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 sm:p-6 animate-in fade-in duration-150">
+      <div className="bg-[#121318] border border-zinc-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden text-zinc-200">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-800/80 bg-[#17181f]">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+              <LuCode size={16} />
+            </span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-bold text-white truncate font-mono">{filePath}</h2>
+                <div className="flex items-center gap-1.5 text-[10px] font-mono px-2 py-0.5 rounded-full bg-zinc-800/80 border border-zinc-700/60">
+                  <span className="text-emerald-400 font-semibold">+{stats.added}</span>
+                  <span className="text-rose-400 font-semibold">−{stats.removed}</span>
+                </div>
+              </div>
+              <p className="text-[11px] text-zinc-400 truncate">
+                {summary || 'Reviewing modifications vs previous checkpoint'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center rounded-lg bg-zinc-800/70 p-0.5 border border-zinc-700/60 text-xs">
+              <button
+                type="button"
+                onClick={() => setViewMode('unified')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                  viewMode === 'unified'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                Unified
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('split')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                  viewMode === 'split'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                Split
+              </button>
+            </div>
+
+            {oldContent ? (
+              <button
+                type="button"
+                onClick={() => onRevert?.(filePath)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-semibold transition-colors"
+                title="Roll back this file to previous content"
+              >
+                <LuRotateCcw size={13} />
+                <span>Revert File</span>
+              </button>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => {
+                onOpenInEditor?.(filePath);
+                onClose?.();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 text-xs font-medium transition-colors"
+            >
+              <LuExternalLink size={13} />
+              <span>Editor</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+            >
+              <LuX size={16} />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-auto bg-[#0a0b0e] font-mono text-[12px] leading-relaxed p-0">
+          {viewMode === 'unified' ? (
+            <div className="divide-y divide-zinc-800/30">
+              {ops.map((op, idx) => {
+                const isAdd = op.type === 'add';
+                const isDel = op.type === 'del';
+                return (
+                  <div
+                    key={idx}
+                    className={`flex items-start px-4 py-0.5 select-text ${
+                      isAdd
+                        ? 'bg-emerald-950/25 text-emerald-200 border-l-2 border-emerald-500'
+                        : isDel
+                        ? 'bg-rose-950/25 text-rose-300 border-l-2 border-rose-500'
+                        : 'text-zinc-400 hover:bg-zinc-900/40'
+                    }`}
+                  >
+                    <span className="w-6 shrink-0 text-center select-none text-[10px] font-bold opacity-60">
+                      {isAdd ? '+' : isDel ? '−' : ' '}
+                    </span>
+                    <span className="w-10 shrink-0 text-right pr-3 select-none text-[10px] opacity-35">
+                      {idx + 1}
+                    </span>
+                    <pre className="flex-1 overflow-x-auto whitespace-pre font-mono m-0 py-0.5">
+                      {op.text || ' '}
+                    </pre>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 divide-x divide-zinc-800 min-h-full">
+              <div className="flex flex-col">
+                <div className="px-4 py-1.5 text-[10px] font-semibold text-zinc-400 bg-zinc-900/80 border-b border-zinc-800 sticky top-0 flex items-center justify-between">
+                  <span>PREVIOUS CHECKPOINT</span>
+                  <span>{oldContent ? oldContent.split('\n').length + ' lines' : 'Empty'}</span>
+                </div>
+                <div className="p-3 font-mono text-[11px] leading-relaxed overflow-x-auto">
+                  {oldContent ? (
+                    oldContent.split('\n').map((line, idx) => (
+                      <div key={idx} className="flex hover:bg-zinc-900/40">
+                        <span className="w-8 shrink-0 text-right pr-3 select-none text-zinc-600 text-[10px]">{idx + 1}</span>
+                        <pre className="whitespace-pre text-zinc-400 m-0">{line || ' '}</pre>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-zinc-600 italic py-8 text-center text-xs">No previous revision recorded (New file)</div>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-col">
+                <div className="px-4 py-1.5 text-[10px] font-semibold text-emerald-400 bg-zinc-900/80 border-b border-zinc-800 sticky top-0 flex items-center justify-between">
+                  <span>CURRENT AI REVISION</span>
+                  <span>{newContent ? newContent.split('\n').length + ' lines' : 'Empty'}</span>
+                </div>
+                <div className="p-3 font-mono text-[11px] leading-relaxed overflow-x-auto">
+                  {newContent.split('\n').map((line, idx) => (
+                    <div key={idx} className="flex hover:bg-zinc-900/40">
+                      <span className="w-8 shrink-0 text-right pr-3 select-none text-zinc-600 text-[10px]">{idx + 1}</span>
+                      <pre className="whitespace-pre text-zinc-200 m-0">{line || ' '}</pre>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between px-5 py-2.5 border-t border-zinc-800 bg-[#17181f] text-xs text-zinc-400">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>Diff generated from working tree memory</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleCopyNew}
+            className="flex items-center gap-1 text-xs text-zinc-400 hover:text-white transition-colors"
+          >
+            {copied ? <LuCheck size={12} className="text-emerald-400" /> : <LuCopy size={12} />}
+            <span>{copied ? 'Copied Content!' : 'Copy Current Code'}</span>
           </button>
         </div>
       </div>
@@ -827,6 +1196,7 @@ function Topbar({
   projectName = 'Workspace',
   activeTab,
   saved,
+  onExportZip,
 }) {
   return (
     <header className="topbar">
@@ -861,6 +1231,16 @@ function Topbar({
           <LuBell size={16} />
           <i />
         </IconButton>
+        {onExportZip && (
+          <button
+            className="export-button px-2.5 py-1 text-xs font-medium rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white flex items-center gap-1.5 transition-colors border border-zinc-700/60"
+            onClick={onExportZip}
+            title="Export project ZIP archive with 1-click launcher scripts"
+          >
+            <LuDownload size={13} />
+            <span>Export</span>
+          </button>
+        )}
         <button className="share-button" onClick={onShare}>
           <LuExternalLink size={14} />
           <span>Share</span>
@@ -892,6 +1272,10 @@ function Toolbar({
   onRun,
   isRunning,
   onToggleAssistant,
+  inspectorActive = false,
+  onToggleInspector,
+  onOpenDiff,
+  onExportZip,
   mobile,
 }) {
   return (
@@ -939,7 +1323,33 @@ function Toolbar({
             >
               <LuSmartphone size={15} />
             </IconButton>
+            <IconButton
+              title={inspectorActive ? 'Deactivate visual inspector' : 'Click to Inspect & Edit with AI (Lovable Mode)'}
+              active={inspectorActive}
+              onClick={onToggleInspector}
+              className={inspectorActive ? 'active !text-indigo-400 !border-indigo-500' : ''}
+            >
+              <LuSearch size={15} />
+            </IconButton>
           </div>
+        )}
+        {onOpenDiff && (
+          <IconButton
+            title="Inspect latest changes & diffs (Unified / Split)"
+            onClick={onOpenDiff}
+            className="hover:!text-indigo-400"
+          >
+            <LuSliders size={15} />
+          </IconButton>
+        )}
+        {onExportZip && (
+          <IconButton
+            title="Export project ZIP archive"
+            onClick={onExportZip}
+            className="hover:!text-emerald-400"
+          >
+            <LuDownload size={15} />
+          </IconButton>
         )}
         <span className="toolbar-separator" />
         <IconButton title="Refresh preview" onClick={onRefresh}>
@@ -970,36 +1380,107 @@ function Toolbar({
   );
 }
 
-function CodeEditorView({ activeFile, code, onChangeCode, onSaveCode, saved }) {
+function CodeEditorView({
+  activeFile,
+  code,
+  onChangeCode,
+  onSaveCode,
+  saved,
+  onOpenDiff,
+  tabs = [],
+  onSelectTab,
+  onCloseTab,
+}) {
   const lineCount = useMemo(() => (code || '').split('\n').length, [code]);
   const lang = useMemo(() => getMonacoLanguage(activeFile), [activeFile]);
 
-  // Handle Ctrl+S / Cmd+S
+  // Handle Ctrl+S / Cmd+S and Ctrl+W (close active tab)
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
         onSaveCode?.();
       }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'w' && activeFile) {
+        e.preventDefault();
+        onCloseTab?.(activeFile);
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onSaveCode]);
+  }, [onSaveCode, onCloseTab, activeFile]);
+
+  const effectiveTabs = tabs && tabs.length > 0 ? tabs : (activeFile ? [activeFile] : []);
 
   return (
     <div className="code-editor flex flex-col h-full bg-[#17181b] border border-zinc-800 rounded-lg overflow-hidden">
-      <div className="code-tab flex items-center gap-2 px-3 py-2 bg-[#1c1d20] border-b border-zinc-800 text-xs">
-        <LuFileCode2 size={14} className="text-purple-400" />
-        <span className="truncate font-mono text-zinc-200">{activeFile || 'No file selected'}</span>
-        <span className={`code-tab-dot ${saved ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-        <span className="text-[10px] text-zinc-400 ml-1">{saved ? 'Saved' : 'Modified'}</span>
-        <button
-          onClick={onSaveCode}
-          className="ml-auto text-xs px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white font-medium flex items-center gap-1 shadow-sm transition-colors"
-          title="Save file (Ctrl+S)"
-        >
-          <LuSave size={12} /> Save
-        </button>
+      {/* Multi-Tab Strip */}
+      <div className="code-tab-strip flex items-center bg-[#131418] border-b border-zinc-800 text-xs overflow-x-auto select-none min-h-[38px]">
+        <div className="flex items-center min-w-0 flex-1 overflow-x-auto">
+          {effectiveTabs.map((tabPath) => {
+            const isActive = tabPath === activeFile;
+            const fileName = tabPath.split('/').pop() || tabPath;
+            const { icon: FileIcon } = getFileIconAndType(tabPath);
+            return (
+              <div
+                key={tabPath}
+                onClick={() => onSelectTab?.(tabPath)}
+                className={`group flex items-center gap-1.5 px-3 py-2 border-r border-zinc-800/80 cursor-pointer font-mono text-xs transition-colors shrink-0 ${
+                  isActive
+                    ? 'bg-[#1c1d22] text-white border-t-2 border-t-indigo-500 font-semibold shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60'
+                }`}
+                title={tabPath}
+              >
+                <FileIcon size={13} className={isActive ? 'text-indigo-400' : 'text-zinc-500'} />
+                <span className="truncate max-w-[130px]">{fileName}</span>
+                {isActive && (
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${saved ? 'bg-emerald-400' : 'bg-amber-400'}`}
+                    title={saved ? 'Saved' : 'Modified'}
+                  />
+                )}
+                {effectiveTabs.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseTab?.(tabPath);
+                    }}
+                    className="ml-1 p-0.5 rounded text-zinc-500 hover:text-white hover:bg-zinc-700/60 opacity-50 group-hover:opacity-100 transition-opacity"
+                    title="Close tab (Ctrl+W)"
+                  >
+                    <LuX size={11} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="ml-auto flex items-center gap-2 px-3 shrink-0 bg-[#131418]">
+          <span className="text-[10px] text-zinc-500 font-mono hidden md:inline">
+            {lineCount} lines · {lang}
+          </span>
+          {onOpenDiff && activeFile && (
+            <button
+              type="button"
+              onClick={() => onOpenDiff(activeFile)}
+              className="text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium flex items-center gap-1 transition-colors border border-zinc-700/80"
+              title="Compare modifications against checkpoint"
+            >
+              <LuSliders size={12} /> Diff
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onSaveCode}
+            className="text-xs px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white font-medium flex items-center gap-1 shadow-sm transition-colors"
+            title="Save file (Ctrl+S)"
+          >
+            <LuSave size={12} /> Save
+          </button>
+        </div>
       </div>
       <div className="code-scroll relative flex-1 min-h-0 bg-[#151619]">
         {typeof window !== 'undefined' && process.env.NODE_ENV !== 'test' ? (
@@ -1124,9 +1605,11 @@ function RealTerminalView({ logs = [], projectName, onExecuteCommand, onClearLog
         <span className="text-zinc-500 font-medium shrink-0">Quick:</span>
         {[
           { label: 'npm test', cmd: 'npm test' },
-          { label: 'git status', cmd: 'git status' },
-          { label: 'ls -la', cmd: 'ls' },
+          { label: 'npm run build', cmd: 'npm run build' },
           { label: 'npm run dev', cmd: 'npm run dev' },
+          { label: 'git status', cmd: 'git status' },
+          { label: 'git diff', cmd: 'git diff' },
+          { label: 'ls -la', cmd: 'ls -la' },
           { label: 'node -v', cmd: 'node -v' },
         ].map((pill) => (
           <button
@@ -1192,6 +1675,7 @@ function WorkingActivityCard({
   sessionFilesWritten = [],
   elapsedSeconds = 0,
   onOpenFile,
+  onOpenDiff,
   onRetry,
   lastError,
 }) {
@@ -1351,7 +1835,7 @@ function WorkingActivityCard({
         </div>
       )}
 
-      {/* Files Modified Tray (Click to Inspect) */}
+      {/* Files Modified Tray (Click to Inspect / Diff) */}
       {sessionFilesWritten && sessionFilesWritten.length > 0 && (
         <div className="live-modified-tray mt-2 rounded bg-zinc-900/60 border border-zinc-800 p-1.5">
           <span className="text-[7.5px] font-semibold text-zinc-400 mr-1 flex items-center gap-1">
@@ -1360,17 +1844,27 @@ function WorkingActivityCard({
           </span>
           <div className="flex flex-wrap gap-1">
             {sessionFilesWritten.map((f, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => onOpenFile?.(f.path)}
-                className="live-file-btn"
-                title={`Open ${f.path}`}
-              >
-                <span>{f.path.split('/').pop() || f.path}</span>
-                {f.added !== undefined && <span className="diff-tag-add">+{f.added}</span>}
-                {f.removed !== undefined && <span className="diff-tag-sub">−{f.removed}</span>}
-              </button>
+              <div key={i} className="inline-flex items-center rounded overflow-hidden border border-zinc-700/60 bg-zinc-800/80 text-[9px]">
+                <button
+                  type="button"
+                  onClick={() => onOpenFile?.(f.path)}
+                  className="px-2 py-0.5 hover:bg-zinc-700 text-zinc-300 flex items-center gap-1"
+                  title={`Open ${f.path} in editor`}
+                >
+                  <span>{f.path.split('/').pop() || f.path}</span>
+                </button>
+                {onOpenDiff && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenDiff(f.path)}
+                    className="px-1.5 py-0.5 border-l border-zinc-700/80 hover:bg-indigo-600/30 text-indigo-300 flex items-center gap-0.5 font-mono text-[8px]"
+                    title={`Review Diff & Rollback for ${f.path}`}
+                  >
+                    {f.added !== undefined && <span className="text-emerald-400 font-semibold">+{f.added}</span>}
+                    {f.removed !== undefined && <span className="text-rose-400 font-semibold">−{f.removed}</span>}
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         </div>
@@ -1436,7 +1930,12 @@ function AssistantPanel({
   pendingApproval = null,
   onApprove,
   onOpenFile,
+  onOpenDiff,
   onRetry,
+  selectedElement = null,
+  onClearSelectedElement,
+  runtimeError = null,
+  onAutoFixRuntimeError,
 }) {
   const listRef = useRef(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
@@ -1560,7 +2059,11 @@ function AssistantPanel({
 
               {/* Real Last Action Card */}
               {lastAction && (
-                <div className="agent-action-card">
+                <div
+                  className="agent-action-card cursor-pointer hover:border-indigo-500/50 transition-colors"
+                  onClick={() => onOpenDiff?.(lastAction.file)}
+                  title="Click to inspect diff and rollback"
+                >
                   <div className="agent-action-top">
                     <span className="agent-action-icon">
                       <LuCode size={12} />
@@ -1577,6 +2080,11 @@ function AssistantPanel({
                     <span className="diff-added">+{lastAction.added || 0}</span>
                     <span className="diff-removed">−{lastAction.removed || 0}</span>
                     <span className="truncate">{lastAction.summary || 'Code modifications verified'}</span>
+                    {onOpenDiff && (
+                      <span className="ml-auto text-[9px] text-indigo-400 flex items-center gap-0.5 underline">
+                        Diff
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
@@ -1603,18 +2111,32 @@ function AssistantPanel({
                       {message.files && message.files.length > 0 && (
                         <div className="mt-2 pt-2 border-t border-zinc-700/40 flex flex-wrap gap-1">
                           <span className="text-[7.5px] text-zinc-400 font-semibold w-full">Modified Files:</span>
-                          {message.files.map((fp, fi) => (
-                            <button
-                              key={fi}
-                              type="button"
-                              onClick={() => onOpenFile?.(typeof fp === 'string' ? fp : fp.path)}
-                              className="live-file-btn"
-                              title="Open in editor"
-                            >
-                              <LuCode size={9} />
-                              <span>{typeof fp === 'string' ? fp.split('/').pop() : fp.path}</span>
-                            </button>
-                          ))}
+                          {message.files.map((fp, fi) => {
+                            const filePath = typeof fp === 'string' ? fp : fp.path;
+                            return (
+                              <div key={fi} className="inline-flex items-center rounded bg-zinc-800/90 border border-zinc-700/60 overflow-hidden text-[10px]">
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenFile?.(filePath)}
+                                  className="px-2 py-0.5 hover:bg-zinc-700 text-zinc-300 flex items-center gap-1"
+                                  title="Open in editor"
+                                >
+                                  <LuCode size={9} />
+                                  <span>{filePath.split('/').pop()}</span>
+                                </button>
+                                {onOpenDiff && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onOpenDiff(filePath)}
+                                    className="px-1.5 py-0.5 border-l border-zinc-700 hover:bg-indigo-600/30 text-indigo-300"
+                                    title="Inspect changes & rollback"
+                                  >
+                                    <LuSliders size={9} />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                       {message.error && onRetry && (
@@ -1652,6 +2174,7 @@ function AssistantPanel({
                 sessionFilesWritten={sessionFilesWritten}
                 elapsedSeconds={elapsedSeconds}
                 onOpenFile={onOpenFile}
+                onOpenDiff={onOpenDiff}
                 onRetry={onRetry}
                 lastError={lastError}
               />
@@ -1679,6 +2202,40 @@ function AssistantPanel({
               <LuPalette size={12} /> CSS variables
             </button>
           </div>
+
+          {selectedElement && (
+            <div className="flex items-center gap-2 px-3 py-1.5 mb-2 rounded-lg bg-indigo-950/70 border border-indigo-500/50 text-xs text-indigo-200">
+              <LuSearch size={13} className="text-indigo-400 shrink-0" />
+              <span className="font-mono text-[11px] truncate flex-1">
+                Target: &lt;{selectedElement.tag}{selectedElement.className ? '.' + String(selectedElement.className).split(' ')[0] : ''}&gt;
+                {selectedElement.text ? ` "${selectedElement.text.slice(0, 24)}"` : ''}
+              </span>
+              <button
+                type="button"
+                onClick={onClearSelectedElement}
+                className="p-1 hover:text-white text-indigo-400 cursor-pointer"
+                title="Clear targeted element"
+              >
+                <LuX size={12} />
+              </button>
+            </div>
+          )}
+
+          {runtimeError && (
+            <div className="flex items-center justify-between gap-2 px-3 py-2 mb-2 rounded-lg bg-red-950/70 border border-red-500/50 text-xs text-red-200">
+              <div className="flex items-center gap-2 truncate">
+                <LuShieldAlert size={14} className="text-red-400 shrink-0" />
+                <span className="truncate font-mono text-[11px]">{runtimeError.error || 'Preview runtime error'}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onAutoFixRuntimeError?.(runtimeError.error)}
+                className="px-2.5 py-1 bg-red-600 hover:bg-red-500 text-white font-semibold text-[11px] rounded-md shrink-0 transition shadow-sm cursor-pointer"
+              >
+                ⚡ Auto-Fix
+              </button>
+            </div>
+          )}
 
           <form className="prompt-composer" onSubmit={onSubmit}>
             <textarea
@@ -2497,9 +3054,105 @@ export default function ForgeCopilot({
   const [gitOpen, setGitOpen] = useState(false);
   const [user, setUser] = useState({ name: 'Developer', initials: 'AI', role: 'Local Workspace' });
 
+  const [inspectorActive, setInspectorActive] = useState(false);
+  const [selectedElement, setSelectedElement] = useState(null);
+  const [runtimeError, setRuntimeError] = useState(null);
+  const [diffModalFile, setDiffModalFile] = useState(null);
+  const [openTabs, setOpenTabs] = useState([]);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+
+  // Global shortcut: Ctrl+K / Cmd+K opens Command Palette
+  useEffect(() => {
+    const handleGlobalKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setCommandPaletteOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKey);
+    return () => window.removeEventListener('keydown', handleGlobalKey);
+  }, []);
+
   const abortRef = useRef(null);
   const currentTaskIdRef = useRef(null);
   const saveTimeoutRef = useRef(null);
+  const iframeRef = useRef(null);
+  const previousContentsRef = useRef({});
+
+  const toggleInspector = useCallback(() => {
+    setInspectorActive((prev) => {
+      const next = !prev;
+      try {
+        iframeRef.current?.contentWindow?.postMessage({
+          type: 'SET_INSPECTOR_ACTIVE',
+          active: next,
+        }, '*');
+      } catch (_) {}
+      return next;
+    });
+  }, []);
+
+  const submitPromptRef = useRef(null);
+  const autoFixCountRef = useRef(0);
+  const autoFixTimerRef = useRef(null);
+
+  const handleAutoFixRuntimeError = useCallback((errText, triggerRun = false) => {
+    const errorMsg = errText || runtimeError;
+    if (!errorMsg) return;
+    const fixPrompt = `Fix the preview runtime error: "${String(errorMsg).slice(0, 300)}". Check for undefined variables, missing imports, or unhandled null checks in the active components.`;
+    setRuntimeError(null);
+    if (triggerRun && !isAssistantWorking && submitPromptRef.current) {
+      autoFixCountRef.current += 1;
+      setToast(`⚡ Autopilot: Auto-fixing preview runtime error (attempt ${autoFixCountRef.current}/2)...`);
+      submitPromptRef.current(null, { prompt: fixPrompt });
+    } else {
+      setPrompt(fixPrompt);
+      setToast('Auto-Fix prompt loaded. Submit to apply fix.');
+    }
+  }, [runtimeError, isAssistantWorking]);
+
+  useEffect(() => {
+    const handleWindowMessage = (event) => {
+      const data = event?.data;
+      if (!data) return;
+
+      if (data.type === 'INSPECT_ELEMENT' && data.element) {
+        setSelectedElement(data.element);
+        setInspectorActive(false);
+        setToast(`Selected <${data.element.tag}> to edit with AI`);
+      }
+
+      if (data.type === 'AUTO_FIX_ERROR' || (data.channel === 'ai-dost-preview' && data.type === 'RUNTIME_ERROR')) {
+        const err = data.error || data.message || 'Unknown preview error';
+        setRuntimeError(err);
+        if (autopilot && !isAssistantWorking && autoFixCountRef.current < 2) {
+          if (autoFixTimerRef.current) clearTimeout(autoFixTimerRef.current);
+          autoFixTimerRef.current = setTimeout(() => {
+            handleAutoFixRuntimeError(err, true);
+          }, 1200);
+        }
+      }
+
+      if (data.channel === 'ai-dost-preview' && data.type === 'PREVIEW_READY') {
+        setRuntimeError(null);
+        autoFixCountRef.current = 0;
+      }
+
+      if (data.channel === 'ai-dost-preview' && data.type === 'CONSOLE') {
+        const prefix = data.level === 'error' ? '[browser-error] ' : data.level === 'warn' ? '[browser-warn] ' : '[browser-log] ';
+        setTerminalLogs((prev) => {
+          const next = [...prev, `${prefix}${data.text || ''}`];
+          return next.slice(-200);
+        });
+      }
+    };
+
+    window.addEventListener('message', handleWindowMessage);
+    return () => {
+      window.removeEventListener('message', handleWindowMessage);
+      if (autoFixTimerRef.current) clearTimeout(autoFixTimerRef.current);
+    };
+  }, [autopilot, isAssistantWorking, handleAutoFixRuntimeError]);
 
   // Live timer for autonomous run execution
   useEffect(() => {
@@ -2520,8 +3173,20 @@ export default function ForgeCopilot({
   const handleOpenFileInEditor = useCallback((filePath) => {
     if (!filePath) return;
     setActiveFile(filePath);
+    setOpenTabs((prev) => (prev.includes(filePath) ? prev : [...prev, filePath]));
     setMode('code');
   }, []);
+
+  const handleCloseTab = useCallback((filePath) => {
+    setOpenTabs((prev) => {
+      const nextTabs = prev.filter((t) => t !== filePath);
+      if (activeFile === filePath) {
+        const nextActive = nextTabs[nextTabs.length - 1] || '';
+        setActiveFile(nextActive);
+      }
+      return nextTabs;
+    });
+  }, [activeFile]);
 
   const handleRetryRun = useCallback(() => {
     if (lastPrompt) {
@@ -2534,6 +3199,55 @@ export default function ForgeCopilot({
     setToast(message);
     externalToast?.(message);
   }, [externalToast]);
+
+  const handleOpenDiff = useCallback((filePath) => {
+    const targetPath = filePath || lastAction?.file || activeFile;
+    if (!targetPath) {
+      showToast('No file selected to compare');
+      return;
+    }
+    const oldCode = previousContentsRef.current[targetPath] ?? '';
+    const newCode = contents[targetPath] ?? '';
+    setDiffModalFile({
+      filePath: targetPath,
+      oldContent: oldCode,
+      newContent: newCode,
+      summary: lastAction?.file === targetPath ? lastAction.summary : `Modifications in ${targetPath}`,
+    });
+  }, [lastAction, activeFile, contents, showToast]);
+
+  const handleRevertFile = useCallback(async (filePath) => {
+    if (!filePath) return;
+    const oldCode = previousContentsRef.current[filePath];
+    if (oldCode === undefined) {
+      showToast(`No prior checkpoint recorded for ${filePath}`);
+      return;
+    }
+    try {
+      if (currentProjectId) {
+        await saveProjectFile(currentProjectId, filePath, oldCode);
+      }
+      setContents((c) => ({ ...c, [filePath]: oldCode }));
+      const currentCode = contents[filePath] || '';
+      previousContentsRef.current[filePath] = currentCode;
+      showToast(`Reverted ${filePath} to prior checkpoint`);
+      setDiffModalFile(null);
+    } catch (err) {
+      showToast(`Revert failed: ${err.message}`);
+    }
+  }, [currentProjectId, contents, showToast]);
+
+  const handleExportZip = useCallback(() => {
+    if (!currentProjectId) {
+      showToast('No active project to export');
+      return;
+    }
+    const url = `${BACKEND}/api/preview/${encodeURIComponent(currentProjectId)}/zip`;
+    if (typeof window !== 'undefined') {
+      window.open(url, '_blank');
+      showToast(`Exporting ${projectName} workspace as ZIP...`);
+    }
+  }, [currentProjectId, projectName, showToast]);
 
   useEffect(() => {
     setCurrentProjectId(projectId);
@@ -2620,7 +3334,9 @@ export default function ForgeCopilot({
       setContents(newContents);
 
       if (fileList.length > 0 && !activeFile) {
-        setActiveFile(fileList[0].path);
+        const first = fileList[0].path;
+        setActiveFile(first);
+        setOpenTabs((prev) => (prev.length > 0 ? prev : [first]));
       }
       return fileList;
     } catch (err) {
@@ -2753,7 +3469,7 @@ export default function ForgeCopilot({
     try {
       await addProjectFile(currentProjectId, name, '// New file\n');
       await loadProjectData();
-      setActiveFile(name);
+      handleOpenFileInEditor(name);
       showToast(`Created ${name}`);
     } catch (err) {
       showToast(`Error creating file: ${err.message}`);
@@ -2765,7 +3481,7 @@ export default function ForgeCopilot({
     try {
       await deleteProjectFile(currentProjectId, pathToDelete);
       await loadProjectData();
-      if (activeFile === pathToDelete) setActiveFile('');
+      handleCloseTab(pathToDelete);
       showToast(`Deleted ${pathToDelete}`);
     } catch (err) {
       showToast(`Error deleting file: ${err.message}`);
@@ -2894,6 +3610,114 @@ export default function ForgeCopilot({
     }
   };
 
+  const commandList = useMemo(() => [
+    {
+      label: 'New Project...',
+      key: '⌘N',
+      icon: <LuPlus size={14} className="text-purple-400" />,
+      action: () => {
+        const name = typeof window !== 'undefined' ? window.prompt('New Project Name:') : null;
+        if (name) {
+          createProject(name, '', 'default').then((res) => {
+            showToast(`Created ${name}`);
+            loadProjects();
+            if (res?.project_id || res?.id) {
+              setCurrentProjectId(res.project_id || res.id);
+              setProjectName(name);
+            }
+          });
+        }
+      },
+    },
+    {
+      label: 'New File...',
+      key: 'Alt+N',
+      icon: <LuFileCode2 size={14} className="text-blue-400" />,
+      action: handleCreateFile,
+    },
+    {
+      label: 'New Folder...',
+      icon: <LuFolderPlus size={14} className="text-amber-400" />,
+      action: handleNewFolder,
+    },
+    {
+      label: 'Export Project (ZIP)',
+      key: '⌘E',
+      icon: <LuDownload size={14} className="text-emerald-400" />,
+      action: handleExportZip,
+    },
+    {
+      label: 'Inspect Diffs (Unified / Split)',
+      key: '⌘D',
+      icon: <LuSliders size={14} className="text-indigo-400" />,
+      action: () => handleOpenDiff(),
+    },
+    {
+      label: 'Switch to Live Preview',
+      key: 'Alt+1',
+      icon: <LuGlobe size={14} className="text-sky-400" />,
+      action: () => setMode('preview'),
+    },
+    {
+      label: 'Switch to Code Editor',
+      key: 'Alt+2',
+      icon: <LuCode size={14} className="text-violet-400" />,
+      action: () => setMode('code'),
+    },
+    {
+      label: 'Switch to Terminal',
+      key: 'Alt+3',
+      icon: <LuTerminal size={14} className="text-rose-400" />,
+      action: () => setMode('terminal'),
+    },
+    {
+      label: 'Toggle Visual Inspector (Lovable Mode)',
+      icon: <LuSearch size={14} className="text-indigo-400" />,
+      action: toggleInspector,
+    },
+    {
+      label: 'Start / Rebuild Dev Server',
+      key: '⌘R',
+      icon: <LuPlay size={14} className="text-emerald-400" />,
+      action: runBuild,
+    },
+    {
+      label: 'Git Snapshots & Commit Log',
+      icon: <LuGitBranch size={14} className="text-orange-400" />,
+      action: () => setGitOpen(true),
+    },
+    {
+      label: 'Push to GitHub / Remote...',
+      key: '⌘G',
+      icon: <LuUpload size={14} className="text-purple-400" />,
+      action: () => setGitOpen(true),
+    },
+    {
+      label: 'Go to Deployments',
+      icon: <LuRocket size={14} className="text-pink-400" />,
+      action: () => setActiveTab('deployments'),
+    },
+    {
+      label: 'Go to MCP Integrations',
+      icon: <LuPlug size={14} className="text-cyan-400" />,
+      action: () => setActiveTab('integrations'),
+    },
+    {
+      label: 'Go to Skills Library',
+      icon: <LuBookOpen size={14} className="text-yellow-400" />,
+      action: () => setActiveTab('skills'),
+    },
+  ], [
+    handleCreateFile,
+    handleNewFolder,
+    handleExportZip,
+    handleOpenDiff,
+    toggleInspector,
+    runBuild,
+    showToast,
+    loadProjects,
+  ]);
+
   // Real Autonomous Agent Run Execution (POST /api/agent/run SSE stream)
   const submitPrompt = async (event, resumeOptions = {}) => {
     event?.preventDefault();
@@ -2901,8 +3725,35 @@ export default function ForgeCopilot({
     const approvalToken = resumeOptions.approvalToken || null;
     if (!text || (isAssistantWorking && !approvalToken)) return;
 
+    if (!resumeOptions.prompt) {
+      autoFixCountRef.current = 0;
+    }
+
+    let effectivePrompt = text;
+    if (selectedElement && !approvalToken) {
+      effectivePrompt = `[TARGET ELEMENT TO EDIT: <${selectedElement.tag || 'element'} class="${selectedElement.className || ''}"> text="${(selectedElement.text || '').slice(0, 100)}"]\n${text}`;
+      setSelectedElement(null);
+      setInspectorActive(false);
+      try {
+        iframeRef.current?.contentWindow?.postMessage({
+          type: 'SET_INSPECTOR_ACTIVE',
+          active: false,
+        }, '*');
+      } catch (_) {}
+    }
+
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const prevHistory = messages.slice(-8).map((m) => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: String(m.text || '').slice(0, 500),
+    }));
+    const prevFiles = sessionFilesWritten.slice(-10).map((f) => ({
+      path: f.path,
+      summary: f.summary || `Modified ${f.path}`,
+    }));
+
     if (!approvalToken) {
+      previousContentsRef.current = { ...contents };
       setMessages((prev) => [...prev, { role: 'user', text, time }]);
       setLastPrompt(text);
       setPrompt('');
@@ -2934,12 +3785,14 @@ export default function ForgeCopilot({
           'x-ai-dost-task-id': taskId,
         },
         body: JSON.stringify({
-          userPrompt: text,
+          userPrompt: effectivePrompt,
           projectId: currentProjectId,
           taskId,
           copilotDirector: true,
           permissionLevel: resumeOptions.permissionLevel || (autopilot ? 'auto' : 'ask'),
           preferredModel,
+          conversationHistory: prevHistory,
+          recentFilesWritten: prevFiles,
           ...(approvalToken ? { approvalToken } : {}),
         }),
         signal: controller.signal,
@@ -3117,15 +3970,21 @@ export default function ForgeCopilot({
               if (filePath) {
                 if (data.type !== 'director_file_diff') terminalChangedPaths.add(String(filePath));
                 if (data.type === 'file_written' && typeof data.content === 'string') terminalExpectedContent.set(String(filePath), data.content);
+                const prior = previousContentsRef.current[filePath] ?? contents[filePath] ?? '';
+                if (previousContentsRef.current[filePath] === undefined) {
+                  previousContentsRef.current[filePath] = prior;
+                }
                 if (content) {
                   setContents((c) => ({ ...c, [filePath]: content }));
                 }
-                const stats = content ? diffStats(diffLines(contents[filePath] || '', content)) : { added: data.added || 1, removed: data.removed || 0 };
+                const stats = content ? diffStats(diffLines(prior, content)) : { added: data.added || 1, removed: data.removed || 0 };
                 setLastAction({
                   file: filePath,
                   added: stats.added,
                   removed: stats.removed,
                   summary: data.summary || `Updated ${filePath}`,
+                  oldContent: prior,
+                  newContent: content,
                 });
                 setSessionFilesWritten((prev) => [
                   ...prev.filter((f) => f.path !== filePath),
@@ -3168,9 +4027,13 @@ export default function ForgeCopilot({
               ]);
             }
 
-            // 7. Terminal output event
-            if (data.type === 'terminal_output' && data.text) {
-              setTerminalLogs((prev) => [...prev, data.text]);
+            // 7. Terminal output event & command execution logs
+            if (
+              (data.type === 'terminal_output' || data.type === 'terminal_stream' || data.type === 'command_output') &&
+              (data.text || data.stdout || data.stderr || data.line)
+            ) {
+              const streamLine = data.text || data.stdout || (data.stderr ? `[stderr] ${data.stderr}` : '') || data.line;
+              if (streamLine) setTerminalLogs((prev) => [...prev, streamLine]);
             }
 
             // Explicit terminal events only. A single successful worker is not the end of a multi-task run.
@@ -3350,6 +4213,10 @@ export default function ForgeCopilot({
     }
   };
 
+  useEffect(() => {
+    submitPromptRef.current = submitPrompt;
+  });
+
   const handleApprove = () => {
     const approval = pendingApproval;
     if (!approval?.token || isAssistantWorking) return;
@@ -3391,8 +4258,8 @@ export default function ForgeCopilot({
       };
     });
 
-    return generateLiveAppHtml(mergedFiles, contents, false, activeFile);
-  }, [files, contents, devServer, activeFile]);
+    return generateLiveAppHtml(mergedFiles, contents, inspectorActive, activeFile);
+  }, [files, contents, devServer, activeFile, inspectorActive]);
 
   return (
     <div
@@ -3409,7 +4276,7 @@ export default function ForgeCopilot({
         open={filesOpen}
         files={files}
         activeFile={activeFile}
-        setActiveFile={setActiveFile}
+        setActiveFile={handleOpenFileInEditor}
         activeTab={activeTab}
         onSelectTab={setActiveTab}
         onNewProject={() => {
@@ -3437,6 +4304,8 @@ export default function ForgeCopilot({
         onSelectProject={handleSelectProject}
         onDeleteProject={handleDeleteProject}
         currentProjectId={currentProjectId}
+        onExportZip={handleExportZip}
+        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
       />
       <div className="workspace-main">
         <Topbar
@@ -3444,6 +4313,7 @@ export default function ForgeCopilot({
           onToggleAssistant={() => setAssistantOpen(!assistantOpen)}
           onDeploy={() => setActiveTab('deployments')}
           onOpenGit={() => setGitOpen(true)}
+          onExportZip={handleExportZip}
           onShare={() => {
             if (typeof window !== 'undefined') {
               navigator.clipboard?.writeText(window.location.href);
@@ -3488,6 +4358,10 @@ export default function ForgeCopilot({
                   isRunning={isRunning}
                   onToggleAssistant={() => setAssistantOpen(!assistantOpen)}
                   mobile={mobile}
+                  inspectorActive={inspectorActive}
+                  onToggleInspector={toggleInspector}
+                  onOpenDiff={() => handleOpenDiff()}
+                  onExportZip={handleExportZip}
                 />
                 <div className={`workspace-canvas ${mode === 'preview' ? 'preview-canvas' : ''}`}>
                   {mode === 'preview' ? (
@@ -3512,8 +4386,15 @@ export default function ForgeCopilot({
                             title="Open in new tab"
                             onClick={() => {
                               const url = devServer.url || (devServer.hostPort ? `http://localhost:${devServer.hostPort}` : null);
-                              if (url) window.open(url, '_blank');
-                              else showToast('Preview compiles live inside stage');
+                              if (url) {
+                                window.open(url, '_blank');
+                              } else if (livePreviewHtml && typeof window !== 'undefined') {
+                                const blob = new Blob([livePreviewHtml], { type: 'text/html' });
+                                const blobUrl = URL.createObjectURL(blob);
+                                window.open(blobUrl, '_blank');
+                              } else {
+                                showToast('Preview compiles live inside stage');
+                              }
                             }}
                           >
                             <LuExternalLink size={14} />
@@ -3528,12 +4409,14 @@ export default function ForgeCopilot({
                         >
                           {devServer.state === 'READY' && (devServer.url || devServer.hostPort) ? (
                             <iframe
+                              ref={iframeRef}
                               src={devServer.url || `http://localhost:${devServer.hostPort}`}
                               className="w-full h-full border-0 bg-white"
                               title="Live Preview Server"
                             />
                           ) : Boolean(livePreviewHtml) ? (
                             <iframe
+                              ref={iframeRef}
                               srcDoc={livePreviewHtml}
                               className="w-full h-full border-0 bg-white"
                               title="Instant Compiled Preview"
@@ -3591,6 +4474,10 @@ export default function ForgeCopilot({
                       onChangeCode={handleCodeChange}
                       onSaveCode={handleExplicitSave}
                       saved={saved}
+                      onOpenDiff={handleOpenDiff}
+                      tabs={openTabs}
+                      onSelectTab={handleOpenFileInEditor}
+                      onCloseTab={handleCloseTab}
                     />
                   ) : (
                     <RealTerminalView
@@ -3632,7 +4519,12 @@ export default function ForgeCopilot({
             pendingApproval={pendingApproval}
             onApprove={handleApprove}
             onOpenFile={handleOpenFileInEditor}
+            onOpenDiff={handleOpenDiff}
             onRetry={handleRetryRun}
+            selectedElement={selectedElement}
+            onClearSelectedElement={() => setSelectedElement(null)}
+            runtimeError={runtimeError}
+            onAutoFixRuntimeError={handleAutoFixRuntimeError}
           />
         </div>
       </div>
@@ -3643,6 +4535,26 @@ export default function ForgeCopilot({
         projectId={currentProjectId}
         projectName={projectName}
       />
+      <FileDiffModal
+        open={Boolean(diffModalFile)}
+        onClose={() => setDiffModalFile(null)}
+        diffData={diffModalFile}
+        onRevert={handleRevertFile}
+        onOpenInEditor={(fp) => {
+          handleOpenFileInEditor(fp);
+          setMode('code');
+        }}
+      />
+      {commandPaletteOpen && (
+        <CommandPalette
+          commands={commandList}
+          onRun={(cmd) => {
+            setCommandPaletteOpen(false);
+            cmd.action?.();
+          }}
+          onClose={() => setCommandPaletteOpen(false)}
+        />
+      )}
       {toast && (
         <div className="toast">
           <LuCircleCheck size={15} />

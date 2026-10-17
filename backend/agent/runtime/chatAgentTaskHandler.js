@@ -1,8 +1,12 @@
 'use strict';
 
+const path = require('node:path');
+const logger = require('../../logger');
 const projectAuthorization = require('../../services/projectAuthorization');
 const { getChatTaskGateway } = require('./createChatTaskGateway');
 const { getActiveTask } = require('../../taskCancellation');
+const { buildAppSpecification, formatAppSpecificationForPrompt } = require('../../services/appSpecificationService');
+const { inspectWorkspace, buildPromptDirective } = require('../../services/workspaceFrameworkIntelligence');
 
 function writeSse(res, event) {
   if (res.writableEnded) return;
@@ -12,6 +16,67 @@ function writeSse(res, event) {
 function resolveProjectId(body) {
   const projectId = body?.projectId || body?.project_id;
   return typeof projectId === 'string' && projectId.trim() ? projectId.trim() : 'default';
+}
+
+function resolveAuthorizedDiskPath(dependencies, authorization, gateway) {
+  try {
+    const meta = dependencies.workspaceManager?.getWorkspaceMetadata?.(authorization.project.id, authorization.user.id)
+      || gateway?.runtime?.workspaceManager?.getWorkspaceMetadata?.(authorization.project.id, authorization.user.id);
+    if (meta?.diskPath) return path.resolve(meta.diskPath);
+  } catch (_err) {
+    // Ignore workspace metadata lookup failure when manager is uninitialized
+  }
+  return null;
+}
+
+function resolveEffectiveProjectPath(bodyProjectPath, authorizedDiskPath) {
+  if (!bodyProjectPath || typeof bodyProjectPath !== 'string') {
+    return authorizedDiskPath;
+  }
+  const candidatePath = path.resolve(bodyProjectPath);
+  if (authorizedDiskPath) {
+    if (candidatePath === authorizedDiskPath || candidatePath.startsWith(authorizedDiskPath + path.sep)) {
+      return candidatePath;
+    }
+    logger.warn(`[chatAgentTaskHandler] Rejected unauthorized projectPath traversal attempt: ${bodyProjectPath}`);
+    return authorizedDiskPath;
+  }
+  if (!bodyProjectPath.includes('..') && path.isAbsolute(bodyProjectPath)) {
+    return candidatePath;
+  }
+  return authorizedDiskPath;
+}
+
+function resolveWorkspaceDirective(effectiveProjectPath) {
+  if (!effectiveProjectPath) return '';
+  try {
+    const intelligence = inspectWorkspace(effectiveProjectPath);
+    return buildPromptDirective(intelligence);
+  } catch (err) {
+    logger.warn(`[chatAgentTaskHandler] Workspace discovery failed for ${effectiveProjectPath}:`, err?.message || err);
+    return '';
+  }
+}
+
+function initChatTaskSse(res, taskId) {
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-AI-Dost-Task-Id', taskId);
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+  writeSse(res, { type: 'task_start', phase: 'queued', taskId, status: 'Canonical agent task accepted' });
+}
+
+function handleChatTaskError(res, taskId, error, signal) {
+  const canceled = Boolean(signal?.aborted) || error?.code === 'TASK_CANCELED';
+  writeSse(res, {
+    type: canceled ? 'task_canceled' : 'task_error',
+    taskId,
+    status: canceled ? 'CANCELLED' : 'FAILED',
+    error: canceled ? 'Task canceled by user' : (error?.message || 'Agent task failed'),
+  });
+  return res.end();
 }
 
 async function handleChatTaskRequest(req, res, next, dependencies = {}) {
@@ -37,16 +102,10 @@ async function handleChatTaskRequest(req, res, next, dependencies = {}) {
     return next();
   }
 
-  res.statusCode = 200;
-  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-AI-Dost-Task-Id', taskId);
-  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+  initChatTaskSse(res, taskId);
 
   const activeTask = getActiveTask(taskId);
   const signal = activeTask?.controller?.signal;
-  writeSse(res, { type: 'task_start', phase: 'queued', taskId, status: 'Canonical agent task accepted' });
 
   try {
     const gateway = dependencies.gateway || await getChatTaskGateway({
@@ -55,15 +114,29 @@ async function handleChatTaskRequest(req, res, next, dependencies = {}) {
       runtime: dependencies.runtime,
     });
 
+    const promptText = body.userPrompt || plan.intent?.originalMessage || '';
+    const preferredModel = typeof body.preferredModel === 'string' && body.preferredModel.trim()
+      ? body.preferredModel.trim()
+      : 'auto';
+    const appSpecification = buildAppSpecification(promptText);
+
+    // Validate user-supplied project path against authorized workspace root
+    const authorizedDiskPath = resolveAuthorizedDiskPath(dependencies, authorization, gateway);
+    const effectiveProjectPath = resolveEffectiveProjectPath(body.projectPath, authorizedDiskPath);
+    const workspaceDirective = resolveWorkspaceDirective(effectiveProjectPath);
+
     const result = await gateway.run({
       projectId,
       userId: authorization.user.id,
       taskPlan: plan,
       context: {
-        userPrompt: body.userPrompt || plan.intent.originalMessage || '',
-        projectPath: body.projectPath || null,
+        userPrompt: promptText,
+        projectPath: effectiveProjectPath || null,
         projectFiles: Array.isArray(body.projectFiles) ? body.projectFiles.slice(0, 200) : [],
         sessionId: body.sessionId || null,
+        specification: appSpecification,
+        workspaceDirective,
+        ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {})
       },
       signal,
       maxRepairs: 2,
@@ -75,17 +148,15 @@ async function handleChatTaskRequest(req, res, next, dependencies = {}) {
       taskId,
       status: result?.status || 'FAILED',
       result,
+      specification: appSpecification ? {
+        applicationType: appSpecification.applicationType,
+        unresolvedAssumptions: appSpecification.unresolvedAssumptions,
+        evidenceContract: appSpecification.evidenceContract
+      } : null
     });
     return res.end();
   } catch (error) {
-    const canceled = Boolean(signal?.aborted) || error?.code === 'TASK_CANCELED';
-    writeSse(res, {
-      type: canceled ? 'task_canceled' : 'task_error',
-      taskId,
-      status: canceled ? 'CANCELLED' : 'FAILED',
-      error: canceled ? 'Task canceled by user' : (error?.message || 'Agent task failed'),
-    });
-    return res.end();
+    return handleChatTaskError(res, taskId, error, signal);
   }
 }
 

@@ -80,10 +80,10 @@ class PlannerExecutionLoop {
     // P12.3: same options→context wiring as ChatPlannerExecutionLoop (signature
     // parity) — approvalState is a LIVE proxy so ExecutionController's token
     // rotation crosses worker contexts instead of dying on the first one.
-    if (options && typeof options.onEvent === 'function') context.onEvent = options.onEvent;
-    if (options && options.permissionLevel) context.permissionLevel = options.permissionLevel;
-    if (options && options.preferredModel && options.preferredModel !== 'auto') context.preferredModel = options.preferredModel;
-    if (options && options.approvalState && typeof options.approvalState === 'object') {
+    if (typeof options?.onEvent === 'function') context.onEvent = options.onEvent;
+    if (options?.permissionLevel) context.permissionLevel = options.permissionLevel;
+    if (options?.preferredModel && options.preferredModel !== 'auto') context.preferredModel = options.preferredModel;
+    if (options?.approvalState && typeof options.approvalState === 'object') {
       delete context.approvalToken;
       Object.defineProperty(context, 'approvalToken', {
         configurable: true,
@@ -91,7 +91,7 @@ class PlannerExecutionLoop {
         get() { return options.approvalState.token; },
         set(value) { options.approvalState.token = value; },
       });
-    } else if (options && options.approvalToken) {
+    } else if (options?.approvalToken) {
       context.approvalToken = options.approvalToken;
     }
     const taskId = this.executionController.generateId('task');
@@ -123,7 +123,9 @@ class PlannerExecutionLoop {
     return { ...result, taskId, runId };
   }
 
-  async executeQueueWithCancellation(runId, taskId, context, stepQueue, repairAttempts, goal, maxRepairs, isCanceled) {
+  async executeQueueWithCancellation(runId, taskId, context, stepQueue, repairAttempts, goal, ...rest) {
+    const maxRepairs = typeof rest[0] === 'number' ? rest[0] : (typeof rest[0]?.maxRepairs === 'number' ? rest[0].maxRepairs : 3);
+    const isCanceled = typeof rest[1] === 'function' ? rest[1] : (typeof rest[0]?.isCanceled === 'function' ? rest[0].isCanceled : () => false);
     const cancelGuard = () => {
       if (isCanceled()) {
         throw Object.assign(new Error('Chat task canceled by user'), { code: 'TASK_CANCELED' });

@@ -47,7 +47,14 @@ function assertWorkspaceCwd(cwd) {
 
 // Resolve per-request cwd (body.cwd or query.cwd), defaulting to the workspace.
 function resolveReqCwd(req, { create = false } = {}) {
-    const raw = (req.body && req.body.cwd) || req.query.cwd;
+    let raw = (req.body && req.body.cwd) || req.query.cwd;
+    const pId = (req.body && req.body.projectId) || req.query.projectId;
+    if (!raw && pId) {
+        try {
+            const workspaceManager = require('../services/workspaceManager');
+            raw = workspaceManager.getWorkspacePath(pId);
+        } catch (_) {}
+    }
     const cwd = assertWorkspaceCwd(raw);
     if (create) {
         try { fs.mkdirSync(cwd, { recursive: true }); } catch (_) {}
@@ -163,7 +170,7 @@ router.post('/checkout', async (req, res) => {
 // 5. Remote Push (GitHub / GitLab / Bitbucket)
 router.post('/push-remote', async (req, res) => {
     try {
-        const { remoteUrl, branch = 'main', cwd } = req.body;
+        const { remoteUrl, branch = 'main', cwd, projectId } = req.body;
         if (!remoteUrl || typeof remoteUrl !== 'string') {
             return res.status(400).json({ success: false, error: 'remoteUrl is required' });
         }
@@ -177,9 +184,23 @@ router.post('/push-remote', async (req, res) => {
         if (!safeBranch || safeBranch.startsWith('-')) {
             return res.status(400).json({ success: false, error: 'Invalid branch name' });
         }
-        const workDir = assertWorkspaceCwd(cwd);
-        // Point origin at the new URL if it exists, otherwise add it —
-        // (previously `remote remove origin` destroyed existing config, #34)
+        let targetCwd = cwd;
+        if (!targetCwd && projectId) {
+            try {
+                const workspaceManager = require('../services/workspaceManager');
+                targetCwd = workspaceManager.getWorkspacePath(projectId);
+            } catch (_) {}
+        }
+        const workDir = assertWorkspaceCwd(targetCwd);
+
+        // Auto-initialize if repository not yet initialized in this workspace
+        if (!fs.existsSync(path.join(workDir, '.git'))) {
+            await runGit(['init'], workDir);
+            await runGit(['add', '.'], workDir);
+            await runGit(['commit', '-m', 'Initial commit by Forge Studio'], workDir);
+        }
+
+        // Point origin at the new URL if it exists, otherwise add it
         const setUrl = await runGit(['remote', 'set-url', 'origin', remoteUrl], workDir);
         if (!setUrl.success) {
             await runGit(['remote', 'add', 'origin', remoteUrl], workDir);

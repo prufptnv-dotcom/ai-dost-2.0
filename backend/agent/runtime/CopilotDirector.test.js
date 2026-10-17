@@ -478,9 +478,14 @@ test('run fails closed when a required planned task is skipped after delegation 
   });
 
   assert.equal(result.status, 'FAILED');
-  assert.equal(result.verification_status, 'PASSED');
+  assert.equal(result.verification_status, 'FAILED', 'incomplete plan cannot report verification_status PASSED');
   assert.match(result.summary, /1 planned task\(s\) did not succeed: required \(SKIPPED\)/);
   assert.equal(result.errors[0].code, 'INCOMPLETE_PLAN');
+
+  const failedCompletion = streamEvents.find((event) => event.type === 'director_complete' && event.status === 'FAILED');
+  assert.ok(failedCompletion, 'failed terminal event emitted');
+  assert.equal(failedCompletion.verification.status, 'FAILED');
+  assert.equal(failedCompletion.verification.verifierStatus, 'SUCCEEDED');
 
   assert.equal(
     streamEvents.some((event) => event.type === 'director_task' && event.status === 'SKIPPED' && event.taskId === 'required'),
@@ -560,3 +565,318 @@ test('worker receives framework guidance from an existing nested workspace manif
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('run without execution evidence returns UNVERIFIED verification_status and STATIC_INSPECTION_ONLY mode', async () => {
+  const plan = {
+    summary: 'static only plan',
+    tasks: [{ id: 'task-1', specialty: 'frontend', role: 'CODER', objective: 'write doc', dependsOn: [], expectedOutput: 'Doc' }]
+  };
+  const coordinator = {
+    async createSupervisorTask() { return { task: { id: 'sup-1' }, run: { id: 'run-1' } }; },
+    async delegate() { return { workerRun: { id: 'worker-1' } }; },
+    async startWorker(workerRunId, options = {}) {
+      if (options.runner) return options.runner();
+      return { status: 'SUCCEEDED' };
+    }
+  };
+  const events = [];
+  const director = new CopilotDirector({
+    coordinator,
+    taskPlanner: {
+      generatePlan: async () => ({ steps: [] }),
+      generateVerificationPlan: async () => ({ steps: [] })
+    },
+    plannerExecutionLoop: {
+      runWithPlan: async (...args) => {
+        if (String(args[5] || '').startsWith('copilot_verify_')) {
+          // Verifier passes code review statically but has NO execution evidence/receipts
+          return {
+            status: 'SUCCEEDED',
+            summary: 'Code reviewed statically; syntax looks clean',
+            artifact_refs: ['static-lint:pass']
+          };
+        }
+        return { status: 'SUCCEEDED', result: { artifact_refs: [] } };
+      }
+    },
+    agentTaskDao: { updateStatus: () => {} },
+    agentRunDao: { updateStatus: () => {} }
+  });
+  director.createPlan = async () => plan;
+
+  const result = await director.run({
+    userId: 'u1',
+    projectId: 'p1',
+    request: 'Refactor helper functions',
+    onEvent: (event) => events.push(event)
+  });
+
+  const completion = events.find((e) => e.type === 'director_complete');
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(result.verification_status, 'UNVERIFIED', 'Static review alone must never claim PASSED');
+  assert.equal(completion.verificationMode, 'STATIC_INSPECTION_ONLY');
+  assert.equal(completion.executionVerified, false);
+  assert.equal(completion.verification.status, 'UNVERIFIED');
+});
+
+test('run with STATIC_DIAGNOSTIC_PASS quality gate returns UNVERIFIED verification_status and STATIC_INSPECTION_ONLY', async () => {
+  const plan = {
+    summary: 'static diagnostic pass plan',
+    tasks: [{ id: 'task-1', specialty: 'frontend', role: 'CODER', objective: 'build UI', dependsOn: [], expectedOutput: 'UI' }]
+  };
+  const coordinator = {
+    async createSupervisorTask() { return { task: { id: 'sup-2' }, run: { id: 'run-2' } }; },
+    async delegate() { return { workerRun: { id: 'worker-2' } }; },
+    async startWorker(workerRunId, options = {}) {
+      if (options.runner) return options.runner();
+      return { status: 'SUCCEEDED' };
+    }
+  };
+  const events = [];
+  const director = new CopilotDirector({
+    coordinator,
+    taskPlanner: {
+      generatePlan: async () => ({ steps: [] }),
+      generateVerificationPlan: async () => ({ steps: [] })
+    },
+    plannerExecutionLoop: {
+      runWithPlan: async () => ({ status: 'SUCCEEDED', summary: 'Verifier done' })
+    },
+    qualityGate: {
+      evaluate: async () => ({
+        status: 'STATIC_DIAGNOSTIC_PASS',
+        score: 85,
+        defects: []
+      })
+    },
+    trustedRunner: {
+      execute: async () => null // No execution evidence
+    },
+    agentTaskDao: { updateStatus: () => {} },
+    agentRunDao: { updateStatus: () => {} }
+  });
+  director.createPlan = async () => plan;
+
+  const result = await director.run({
+    userId: 'u1',
+    projectId: 'p1',
+    request: 'Create a modern landing page for an AI product with hero section',
+    onEvent: (event) => events.push(event)
+  });
+
+  const completion = events.find((e) => e.type === 'director_complete');
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(result.verification_status, 'UNVERIFIED', 'STATIC_DIAGNOSTIC_PASS must yield UNVERIFIED');
+  assert.equal(completion.verificationMode, 'STATIC_INSPECTION_ONLY');
+  assert.equal(completion.executionVerified, false);
+  assert.equal(completion.verification.status, 'UNVERIFIED');
+});
+
+test('fallbackPlan adapts task-1 specialty based on database or client-only request', () => {
+  const backendPlan = fallbackPlan('Build a full-stack dashboard with express API and postgres database');
+  assert.equal(backendPlan.tasks[0].specialty, 'backend');
+  assert.match(backendPlan.contract.requirements.find((r) => r.id === 'REQ-APP-02').description, /backend API and database/i);
+
+  const clientPlan = fallbackPlan('Create a client-side calculator app with reactive UI');
+  assert.equal(clientPlan.tasks[0].specialty, 'frontend');
+  assert.match(clientPlan.contract.requirements.find((r) => r.id === 'REQ-APP-02').description, /browser storage|client-side persistence/i);
+});
+
+test('run with genuine execution receipt (VERIFIED_PASS) returns PASSED verification_status and EXECUTION_VERIFIED mode', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'director-verif-pass-'));
+  fs.writeFileSync(path.join(tempDir, 'package.json'), JSON.stringify({ name: 'landing-page', scripts: { build: 'exit 0' } }));
+  fs.writeFileSync(path.join(tempDir, 'App.jsx'), 'export default function App() { return <div>Landing Page</div>; }');
+
+  try {
+    const plan = {
+      summary: 'verified pass plan',
+      tasks: [{ id: 'task-1', specialty: 'frontend', role: 'CODER', objective: 'build UI', dependsOn: [], expectedOutput: 'UI' }]
+    };
+    const coordinator = {
+      async createSupervisorTask() { return { task: { id: 'sup-3' }, run: { id: 'run-3' } }; },
+      async delegate() { return { workerRun: { id: 'worker-3' } }; },
+      async startWorker(workerRunId, options = {}) {
+        if (options.runner) return options.runner();
+        return { status: 'SUCCEEDED' };
+      }
+    };
+    const events = [];
+    const director = new CopilotDirector({
+      coordinator,
+      workspaceManager: { getWorkspaceMetadata: () => ({ diskPath: tempDir }) },
+      taskPlanner: {
+        generatePlan: async () => ({ steps: [] }),
+        generateVerificationPlan: async () => ({ steps: [] })
+      },
+      plannerExecutionLoop: {
+        runWithPlan: async () => ({ status: 'SUCCEEDED', summary: 'Verifier confirmed tests pass' })
+      },
+      qualityGate: {
+        evaluate: async () => ({
+          status: 'VERIFIED_PASS',
+          score: 100,
+          defects: []
+        })
+      },
+      trustedRunner: {
+        execute: async () => ({
+          receipt: { runId: 'run-3', build: { status: 'PASSED' }, tests: { countsMeasured: true, testsRun: 5, testsPassed: 5, testsFailed: 0 } }
+        })
+      },
+      agentTaskDao: { updateStatus: () => {} },
+      agentRunDao: { updateStatus: () => {} }
+    });
+    director.createPlan = async () => plan;
+
+    const result = await director.run({
+      userId: 'u1',
+      projectId: 'p1',
+      request: 'Create a modern landing page for an AI product with hero section',
+      onEvent: (event) => events.push(event)
+    });
+
+    const completion = events.find((e) => e.type === 'director_complete');
+    assert.equal(result.status, 'COMPLETED');
+    assert.equal(result.verification_status, 'PASSED', 'VERIFIED_PASS quality gate must yield PASSED');
+    assert.equal(completion.verificationMode, 'EXECUTION_VERIFIED');
+    assert.equal(completion.executionVerified, true);
+    assert.equal(completion.verification.status, 'SUCCEEDED');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('run with failed quality gate (STATUS.FAILED) fails closed and rejects execution', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'director-qg-fail-'));
+  fs.writeFileSync(path.join(tempDir, 'package.json'), JSON.stringify({ name: 'landing-page', scripts: { build: 'exit 1' } }));
+  fs.writeFileSync(path.join(tempDir, 'App.jsx'), 'export default function App() { return <button>TODO: implement pricing</button>; }');
+
+  try {
+    const plan = {
+      summary: 'failing quality gate plan',
+      tasks: [{ id: 'task-1', specialty: 'frontend', role: 'CODER', objective: 'build UI', dependsOn: [], expectedOutput: 'UI' }]
+    };
+    const coordinator = {
+      async createSupervisorTask() { return { task: { id: 'sup-4' }, run: { id: 'run-4' } }; },
+      async delegate() { return { workerRun: { id: 'worker-4' } }; },
+      async startWorker(workerRunId, options = {}) {
+        if (options.runner) return options.runner();
+        return { status: 'SUCCEEDED' };
+      }
+    };
+    const events = [];
+    const director = new CopilotDirector({
+      coordinator,
+      workspaceManager: { getWorkspaceMetadata: () => ({ diskPath: tempDir }) },
+      taskPlanner: {
+        generatePlan: async () => ({ steps: [] }),
+        generateVerificationPlan: async () => ({ steps: [] })
+      },
+      plannerExecutionLoop: {
+        runWithPlan: async () => ({ status: 'SUCCEEDED', summary: 'Verifier' })
+      },
+      qualityGate: {
+        evaluate: async () => ({
+          status: 'FAILED',
+          score: 20,
+          defects: [{ detail: 'Forbidden placeholder detected in code' }]
+        })
+      },
+      trustedRunner: {
+        execute: async () => ({ receipt: { runId: 'run-4' } })
+      },
+      agentTaskDao: { updateStatus: () => {} },
+      agentRunDao: { updateStatus: () => {} }
+    });
+    director.createPlan = async () => plan;
+
+    await assert.rejects(
+      () => director.run({
+        userId: 'u1',
+        projectId: 'p1',
+        request: 'Create a modern landing page for an AI product with hero section',
+        onEvent: (event) => events.push(event)
+      }),
+      /Generated app quality gate failed: Forbidden placeholder detected in code/
+    );
+
+    const qgEvent = events.find((e) => e.type === 'quality_gate_evaluation' && e.status === 'FAILED');
+    assert.ok(qgEvent, 'FAILED quality gate event must be emitted');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('executeWorker refreshes workspace state on disk and provides surgical repair context on retry', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const os = require('node:os');
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-worker-repair-'));
+  try {
+    const plansGenerated = [];
+    const director = new CopilotDirector({
+      aiService: { chat: async () => '{}' },
+      coordinator: {
+        createSupervisorTask: async () => ({ task: { id: 's1' }, run: { id: 'r1' } }),
+        delegate: async () => ({ workerRun: { id: 'w1' } }),
+        startWorker: async () => ({ status: 'SUCCEEDED' })
+      },
+      workspaceManager: {
+        getWorkspaceMetadata: () => ({ diskPath: tempDir, fileCount: fs.readdirSync(tempDir).length })
+      },
+      taskPlanner: {
+        generatePlan: async (objective, context) => {
+          plansGenerated.push({ objective, context });
+          return { steps: [] };
+        }
+      },
+      plannerExecutionLoop: {
+        runWithPlan: async (projectId, userId, plan, maxRepairs, isAborted, runKey) => {
+          // Attempt 1: write a component with a broken import
+          if (runKey.includes('att1')) {
+            fs.writeFileSync(path.join(tempDir, 'package.json'), JSON.stringify({ name: 'test-app', dependencies: { react: '^18.0.0' } }));
+            fs.writeFileSync(path.join(tempDir, 'src', 'App.jsx'), 'import { MissingComp } from "./MissingComp"; export default function App() { return <MissingComp />; }');
+            return { status: 'SUCCEEDED' };
+          }
+          // Attempt 2: repair provides the missing component
+          fs.writeFileSync(path.join(tempDir, 'src', 'MissingComp.jsx'), 'export function MissingComp() { return <div>Resolved</div>; }');
+          return { status: 'SUCCEEDED' };
+        }
+      },
+      agentTaskDao: { updateStatus: () => {} },
+      agentRunDao: { updateStatus: () => {} }
+    });
+
+    fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+
+    const workerResult = await director.executeWorker({
+      task: { id: 'task-ui', specialty: 'frontend', role: 'CODER', objective: 'Create app UI' },
+      delegated: { workerRun: { id: 'run-w1' } },
+      projectId: 'p1',
+      userId: 'u1',
+      request: 'Create modular app',
+      maxRepairs: 2
+    });
+
+    assert.equal(workerResult.status, 'SUCCEEDED');
+    assert.equal(plansGenerated.length, 2, 'Should plan attempt 1 and repair attempt 2');
+    
+    // In attempt 2, existingFiles should be populated from disk
+    const attempt2Context = plansGenerated[1].context;
+    assert.ok(attempt2Context.existingFiles, 'Attempt 2 context must include refreshed existing files');
+    assert.ok(attempt2Context.existingFiles.includes('src/App.jsx'), 'Refreshed files must include src/App.jsx');
+    assert.ok(plansGenerated[1].objective.includes('REPAIR ATTEMPT 2'), 'Repair objective must specify REPAIR ATTEMPT 2');
+    assert.ok(plansGenerated[1].objective.includes('TARGETED REPAIR: Only inspect and fix the affected files'), 'Repair objective must target affected files');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+
+

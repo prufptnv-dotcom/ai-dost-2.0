@@ -75,10 +75,37 @@ function isErrorResponse(text) {
 
 class AgentCascadeAiService {
   static async chat(prompt, history = [], mode = 'agent', customKeys = null, preferredModel = 'auto') {
-    // 1. Try preferred model first if explicitly requested
+    // 1. Try preferred model or adaptive route first
     if (preferredModel && preferredModel !== 'auto') {
       try {
-        if (preferredModel === 'gemini') {
+        if (preferredModel === 'reasoning') {
+          // Adaptive reasoning route: prioritize DeepSeek / Gemini reasoning capabilities
+          if (process.env.DEEPSEEK_API_KEY || customKeys?.deepseek) {
+            try {
+              const resp = await DeepSeekService.chat(prompt, history, customKeys?.deepseek);
+              if (!isErrorResponse(resp)) {
+                logger.info('[AgentCascade] Handled by DeepSeek (adaptive reasoning route)');
+                return resp;
+              }
+            } catch (_) {}
+          }
+          try {
+            const resp = await GeminiService.chat(prompt, history, null, mode, customKeys?.gemini);
+            if (!isErrorResponse(resp)) {
+              logger.info('[AgentCascade] Handled by Gemini (adaptive reasoning route)');
+              return resp;
+            }
+          } catch (_) {}
+        } else if (preferredModel === 'fast') {
+          // Adaptive fast route: prioritize Groq ultra-low-latency provider
+          try {
+            const resp = await GroqService.chat(prompt, history, mode, customKeys?.groq);
+            if (!isErrorResponse(resp)) {
+              logger.info('[AgentCascade] Handled by Groq (adaptive fast route)');
+              return resp;
+            }
+          } catch (_) {}
+        } else if (preferredModel === 'gemini') {
           const resp = await GeminiService.chat(prompt, history, null, mode, customKeys?.gemini);
           if (!isErrorResponse(resp)) return resp;
         } else if (preferredModel === 'groq') {

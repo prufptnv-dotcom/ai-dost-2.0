@@ -7,9 +7,14 @@ on:
       - master
       - 'audit/**'
       - 'feature/**'
+      - 'feat/**'
       - 'fix/**'
   pull_request:
-    branches: [main, master]
+    branches:
+      - main
+      - master
+      - 'feat/**'
+      - 'feature/**'
 
 jobs:
   frontend:
@@ -135,6 +140,8 @@ jobs:
         run: node --test agent/runtime/DurableTaskStore.test.js
       - name: Run Production Hardening Security Runtime tests
         run: node --test agent/security/ProductionExecutionGuard.test.js agent/security/ProductionHardeningRuntime.test.js agent/security/ProductionRuntimeIntegration.test.js agent/security/ResourceGuard.test.js tests/orchestratorSecurityBoundary.test.js
+      - name: Run Quality Gate and Adversarial Verification tests
+        run: node --test tests/adversarialVerification.test.js tests/generatedAppQualityGate.test.js tests/canonicalCaseResolver.test.js
 
   e2e:
     name: E2E (Playwright smoke)

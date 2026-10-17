@@ -1,0 +1,147 @@
+{
+  "version": "1.0.0",
+  "suite": "AI-Dost Canonical Generated-Application Quality Evaluation",
+  "cases": [
+    {
+      "id": "landing-page-hero-features-cta",
+      "name": "High-Converting Product Landing Page with Hero, Features & Interactive CTA",
+      "prompt": "Create a modern, high-converting product landing page for a developer AI tool. Include a striking hero section, feature highlight cards with icons, interactive pricing tier toggle (monthly/annual), testimonials carousel, FAQ accordion, and lead capture newsletter form with email validation.",
+      "requiredCapabilities": [
+        "hero_presentation",
+        "feature_grid",
+        "pricing_toggle",
+        "faq_accordion",
+        "newsletter_validation"
+      ],
+      "requiredElements": [
+        { "name": "hero_headline", "description": "Compelling H1 title with subheading and primary CTA button" },
+        { "name": "pricing_toggle_control", "description": "Toggle switch between monthly and annual pricing" },
+        { "name": "faq_accordion_items", "description": "Interactive expandable/collapsible questions and answers" },
+        { "name": "email_input_field", "description": "Input element with email validation feedback" }
+      ],
+      "antiPatterns": [
+        "onClick={() => {}}",
+        "TODO: implement pricing",
+        "TODO: implement form submit",
+        "javascript:void(0)"
+      ]
+    },
+    {
+      "id": "dashboard-search-charts-csv",
+      "name": "Interactive Analytics Dashboard with Search, Charts & CSV Export",
+      "prompt": "Build an interactive analytics dashboard featuring real-time data filtering, search across data rows, interactive charts (line/bar/pie), and CSV data export functionality with loading and error states.",
+      "requiredCapabilities": [
+        "search_filtering",
+        "data_visualization",
+        "csv_export",
+        "state_management",
+        "loading_error_states"
+      ],
+      "requiredElements": [
+        { "name": "search_input", "description": "Text input or search field filtering displayed rows" },
+        { "name": "data_table_or_grid", "description": "Table or grid displaying filtered records" },
+        { "name": "chart_component", "description": "Visual chart (SVG, canvas, or chart library) displaying metrics" },
+        { "name": "csv_export_button", "description": "Button triggering CSV export or file download" }
+      ],
+      "antiPatterns": [
+        "onClick={() => {}}",
+        "TODO: implement search",
+        "TODO: implement export",
+        "javascript:void(0)"
+      ]
+    },
+    {
+      "id": "ecommerce-cart-checkout",
+      "name": "E-Commerce Catalog with Cart Drawer, Promo Code & Validated Checkout",
+      "prompt": "Build an e-commerce catalog with category filtering, price range slider, product detail modal, add-to-cart with quantity adjustment, persistent cart state, discount promo code calculation, and checkout form with validation.",
+      "requiredCapabilities": [
+        "catalog_filtering",
+        "cart_operations",
+        "discount_calculation",
+        "form_validation",
+        "cart_persistence"
+      ],
+      "requiredElements": [
+        { "name": "catalog_grid", "description": "Products displayed with image, title, price, and add button" },
+        { "name": "category_or_price_filter", "description": "Controls to filter products by category or price" },
+        { "name": "cart_management", "description": "Cart view or drawer with quantity +/- and remove actions" },
+        { "name": "promo_code_input", "description": "Input field to apply coupons or promo discounts" },
+        { "name": "checkout_form", "description": "Form with name, email, and address inputs and validation" }
+      ],
+      "antiPatterns": [
+        "onClick={() => {}}",
+        "TODO: implement checkout",
+        "TODO: implement discount"
+      ]
+    },
+    {
+      "id": "education-quiz-progress",
+      "name": "Educational Quiz Application with Timer, Progress & High Scores",
+      "prompt": "Build an education quiz application with timed questions, category selection, instant feedback on answers, progress bar tracking, score review screen, and local persistence of high scores.",
+      "requiredCapabilities": [
+        "timer_countdown",
+        "category_selection",
+        "feedback_system",
+        "progress_tracking",
+        "score_persistence"
+      ],
+      "requiredElements": [
+        { "name": "category_selector", "description": "Option to select quiz topics or difficulties" },
+        { "name": "progress_indicator", "description": "Progress bar or counter showing current question vs total" },
+        { "name": "answer_options", "description": "Selectable answer buttons or inputs" },
+        { "name": "score_screen", "description": "Review screen summarizing final score and breakdown" },
+        { "name": "persistence_call", "description": "localStorage or store saving past scores or user stats" }
+      ],
+      "antiPatterns": [
+        "onClick={() => {}}",
+        "TODO: implement timer",
+        "TODO: implement save score"
+      ]
+    },
+    {
+      "id": "api-backed-crud",
+      "name": "Full-Stack API-Backed CRUD with Express & React",
+      "prompt": "Build a full-stack task and note management application with an Express backend REST API (GET, POST, PUT, DELETE /api/items), persistent store, input validation, and a React frontend with optimistic UI updates and error boundary.",
+      "requiredCapabilities": [
+        "rest_api_endpoints",
+        "crud_mutations",
+        "input_validation",
+        "optimistic_ui",
+        "error_handling"
+      ],
+      "requiredElements": [
+        { "name": "item_creation_form", "description": "Form sending POST request to create an item" },
+        { "name": "item_list_view", "description": "List displaying items fetched from GET /api/items" },
+        { "name": "item_delete_action", "description": "Button or action triggering DELETE /api/items/:id" },
+        { "name": "item_update_action", "description": "Inline edit or modal sending PUT /api/items/:id" }
+      ],
+      "antiPatterns": [
+        "onClick={() => {}}",
+        "TODO: implement api",
+        "TODO: implement crud"
+      ]
+    },
+    {
+      "id": "multi-step-repair",
+      "name": "Targeted Multi-Step Code Repair for Broken State & Syntax Errors",
+      "prompt": "Analyze a project workspace with an unhandled runtime exception in state updates and a missing API parameter. Identify the root causes, preserve existing architecture, apply minimal surgical diffs, and verify that the build succeeds without regressions.",
+      "requiredCapabilities": [
+        "root_cause_diagnosis",
+        "surgical_diff_application",
+        "state_immutability_fix",
+        "build_verification",
+        "regression_prevention"
+      ],
+      "requiredElements": [
+        { "name": "corrected_state_handler", "description": "Immutable state updater fixing mutation bug" },
+        { "name": "repaired_api_call", "description": "Fixed request payload with required parameters" },
+        { "name": "verification_evidence", "description": "Test or build log proving the fix resolved the error" }
+      ],
+      "antiPatterns": [
+        "TODO: fix later",
+        "catch (e) {}",
+        "// ignored error"
+      ]
+    }
+  ]
+}

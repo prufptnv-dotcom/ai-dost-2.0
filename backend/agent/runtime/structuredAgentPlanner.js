@@ -8,8 +8,7 @@ function escapeControlCharsInStrings(str) {
   let inStr = false;
   let esc = false;
   let out = '';
-  for (let i = 0; i < str.length; i++) {
-    const c = str[i];
+  for (const c of str) {
     if (c === '"' && !esc) {
       inStr = !inStr;
       out += c;
@@ -20,13 +19,13 @@ function escapeControlCharsInStrings(str) {
       } else {
         esc = false;
         if (c === '\n') {
-          out += '\\n';
+          out += String.raw`\n`;
         } else if (c === '\r') {
           // ignore
         } else if (c === '\t') {
-          out += '\\t';
-        } else if (c.charCodeAt(0) < 32) {
-          out += '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0');
+          out += String.raw`\t`;
+        } else if (c.codePointAt(0) < 32) {
+          out += String.raw`\u` + c.codePointAt(0).toString(16).padStart(4, '0');
         } else {
           out += c;
         }
@@ -48,7 +47,7 @@ function escapeControlCharsInStrings(str) {
 // classifier junk must still fail honestly).
 function repairIncompleteJson(text) {
   const source = String(text || '');
-  if (!/^[\s]*[{[]/.test(source)) return null;
+  if (!/^\s*[{[]/.test(source)) return null;
 
   let out = '';
   const stack = [];
@@ -60,7 +59,7 @@ function repairIncompleteJson(text) {
   // Inside an array a completed string is a value; inside an object it is a
   // value only if the last significant character before its opening quote is ':'.
   const stringWasValue = () => {
-    if (stack.length && stack[stack.length - 1] === '[') return true;
+    if (stack.length && stack.at(-1) === '[') return true;
     for (let j = strStart - 1; j >= 0; j--) {
       const ch = out[j];
       if (/\s/.test(ch)) continue;
@@ -85,7 +84,7 @@ function repairIncompleteJson(text) {
     if (c === '{' || c === '[') { stack.push(c); out += c; continue; }
     if (c === '}' || c === ']') {
       if (!stack.length) continue; // extra closer — drop it
-      const want = stack[stack.length - 1] === '{' ? '}' : ']';
+      const want = stack.at(-1) === '{' ? '}' : ']';
       if (c !== want) {
         // The model forgot to close the innermost value — insert the missing
         // closer and re-process this character against the new innermost.
@@ -124,7 +123,29 @@ function repairIncompleteJson(text) {
     const candidate = base.replace(/,\s*$/, '') + closersFor(stack);
     try {
       return JSON.parse(candidate);
-    } catch (_) {}
+    } catch (_) {
+      // Ignored: try next candidate repair
+    }
+  }
+  return null;
+}
+
+function extractDelimitedSlice(text, startChar, endChar) {
+  const start = text.indexOf(startChar);
+  const end = text.lastIndexOf(endChar);
+  if (start >= 0 && end > start) {
+    const slice = text.slice(start, end + 1);
+    try {
+      return JSON.parse(slice);
+    } catch (_) {
+      // Ignored: try removing trailing commas
+    }
+    try {
+      const cleaned = slice.replace(/,\s*([}\]])/g, '$1');
+      return JSON.parse(cleaned);
+    } catch (_) {
+      // Ignored: fall through
+    }
   }
   return null;
 }
@@ -139,38 +160,22 @@ function extractJson(text) {
 
   try {
     return JSON.parse(source);
-  } catch (_) {}
+  } catch (_) {
+    // Ignored: try escaping control characters
+  }
 
   const sanitized = escapeControlCharsInStrings(source);
   try {
     return JSON.parse(sanitized);
-  } catch (_) {}
-
-  const start = sanitized.indexOf('{');
-  const end = sanitized.lastIndexOf('}');
-  if (start >= 0 && end > start) {
-    const slice = sanitized.slice(start, end + 1);
-    try {
-      return JSON.parse(slice);
-    } catch (_) {}
-    try {
-      const cleaned = slice.replace(/,\s*([}\]])/g, '$1');
-      return JSON.parse(cleaned);
-    } catch (_) {}
+  } catch (_) {
+    // Ignored: try delimited slices
   }
 
-  const arrStart = sanitized.indexOf('[');
-  const arrEnd = sanitized.lastIndexOf(']');
-  if (arrStart >= 0 && arrEnd > arrStart) {
-    const arrSlice = sanitized.slice(arrStart, arrEnd + 1);
-    try {
-      return JSON.parse(arrSlice);
-    } catch (_) {}
-    try {
-      const cleaned = arrSlice.replace(/,\s*([}\]])/g, '$1');
-      return JSON.parse(cleaned);
-    } catch (_) {}
-  }
+  const objSlice = extractDelimitedSlice(sanitized, '{', '}');
+  if (objSlice !== null) return objSlice;
+
+  const arrSlice = extractDelimitedSlice(sanitized, '[', ']');
+  if (arrSlice !== null) return arrSlice;
 
   // Last resort before failing honestly: structurally-incomplete JSON.
   const repaired = repairIncompleteJson(sanitized);
@@ -200,7 +205,7 @@ function plannerPrompt(kind, intent, context, tools, extra = '') {
   const { existingFileContents, ...contextRest } = ctxIsObject ? context : {};
   const contentsBlock = existingFileContents && typeof existingFileContents === 'object' && Object.keys(existingFileContents).length
     ? [
-      'VERBATIM FILE CONTENTS (REAL newlines — copy SEARCH byte-for-byte from here; never write \\n escapes into SEARCH):',
+      String.raw`VERBATIM FILE CONTENTS (REAL newlines — copy SEARCH byte-for-byte from here; never write \n escapes into SEARCH):`,
       ...Object.entries(existingFileContents).map(([p, c]) => `--- ${p} ---\n${String(c)}\n--- end ${p} ---`),
     ].join('\n\n')
     : '';
@@ -209,7 +214,7 @@ function plannerPrompt(kind, intent, context, tools, extra = '') {
     `Planner mode: ${kind}.`,
     'Return ONLY one JSON object with this exact shape:',
     '{"goal":"string","steps":[{"id":"string","tool":"registered-tool-name","description":"string","input":{}}]}',
-    'CRITICAL: Return strictly valid JSON. Inside string values (such as "content"), properly escape all double quotes with \\" and newlines with \\n. Do not include raw newlines inside JSON string literals.',
+    String.raw`CRITICAL: Return strictly valid JSON. Inside string values (such as "content"), properly escape all double quotes with \" and newlines with \n. Do not include raw newlines inside JSON string literals.`,
     'Every tool must be selected ONLY from the supplied tool catalog. Never invent a tool name.',
     kind === 'verification'
       ? 'Verification must be read-only and must not repeat destructive or mutating actions. Prefer inspection, retrieval, status, search, or read tools.'
@@ -221,12 +226,23 @@ function plannerPrompt(kind, intent, context, tools, extra = '') {
         '- CODE-FIRST RULE: When building, modifying, or creating websites, apps, portfolios, UIs, or features, you MUST write executable code files (e.g. "src/App.jsx", "App.jsx", "index.html", "src/index.css"). NEVER write markdown blueprint/doc files (like docs/architecture.md) instead of real code!',
         '- write_file CREATES a new file only. If the file already exists, write_file is REJECTED — never plan to overwrite an existing file with write_file.',
         '- If the AUTHORIZED CONTEXT lists "existingFiles": paths IN that list ALREADY EXIST — never plan write_file for them (rejected WRITE_FORBIDDEN_ON_EXISTING; to change one, read_file it first, then apply_diff with verbatim SEARCH). Paths NOT in the list do NOT exist yet — apply_diff there fails (file not found), so create those with write_file.',
-        '- The "VERBATIM FILE CONTENTS" block (--- path --- fenced sections) shows real bytes of key existing files with REAL newlines — copy SEARCH text from it byte-for-byte (exact whitespace); never reconstruct file content from memory and never put \\n escapes in SEARCH.',
+        String.raw`- The "VERBATIM FILE CONTENTS" block (--- path --- fenced sections) shows real bytes of key existing files with REAL newlines — copy SEARCH text from it byte-for-byte (exact whitespace); never reconstruct file content from memory and never put \n escapes in SEARCH.`,
         '- write_file targets a FILE path: "src/App.jsx" is valid. Directories are created automatically as a side effect of writing a file inside them — never plan a step just to create a folder, and never target a folder with non-empty content (rejected with PATH_IS_DIRECTORY).',
         '- To modify an existing file: step 1 read_file it, step 2 apply_diff with the SEARCH string copied VERBATIM (exact whitespace, exact characters) from what you just read.',
         '- Whole-file rewrite = apply_diff where SEARCH = the ENTIRE current file content (copied byte-for-byte from read_file) and REPLACE = your new content. NEVER put your new content in SEARCH — SEARCH always describes what is in the file NOW.',
         '- Do not invent file contents for SEARCH blocks — they must match the real file byte-for-byte or the diff is rejected.',
         '- EXECUTION MODEL: the steps of ONE plan run back-to-back with NO model call between them, so this plan\'s read_file output is invisible to its own later steps. Never guess SEARCH text from memory — if apply_diff answers "SEARCH block not found", that error embeds the CURRENT file content; copy the SEARCH byte-for-byte from that feedback and retry.',
+        '- ZERO STUBS OR TODOs: Never output "// TODO", "// implement later", or empty function stubs. All components, routes, database queries, and utilities must be fully functional and implemented.',
+        '- MODULAR COMPONENT ARCHITECTURE: When generating applications, separate code into modular components (e.g. src/components/Header.jsx, src/components/DataTable.jsx, src/components/Modal.jsx) and dedicated services (e.g. src/services/storage.js) rather than writing a single monolithic file.',
+        '- CROSS-FILE IMPORT/EXPORT ALIGNMENT: Every imported component, function, or constant must be explicitly exported by the target file with matching export types (default export vs named export). Never use named import `import { X }` for a default exported `export default X`, and never import missing symbols.',
+        '- REAL FUNCTIONAL INTERACTION: Every button, input, filter, modal, and form must be fully wired with real state and handlers. Never output dead buttons with no onClick or empty placeholder handlers.',
+        '- ARCHITECTURE-APPROPRIATE PERSISTENCE: For client-only apps, implement browser storage (localStorage / IndexedDB) with robust JSON serialization and seed fallback. For API- or database-backed apps, implement real backend architecture (Express routes, database models, or repository layer); never substitute fake client localStorage or mock arrays for backend persistence.',
+        '- COMPLETE INTERFACES & REAL DATA FLOW: Every view must pass real props and callbacks matching child component interfaces. Never render components with undefined handlers or missing required props.',
+        '- PROFESSIONAL DESIGN SYSTEM: Use a cohesive design system with consistent color palette tokens, typography hierarchy, responsive flex/grid wrappers, card elevations/borders, hover transitions, and accessible focus-visible rings.',
+        '- COMPLETE ERROR & STATE HANDLING: Implement explicit loading, error, empty (with action button), and data-loaded states for all asynchronous operations and UI views.',
+        '- FRAMEWORK INTEGRITY: Match the workspace framework and dependencies. Do not import phantom libraries or invent nonexistent packages.',
+        '- SECURITY HYGIENE: Never embed plaintext secrets, tokens, or API keys in code. Use environment variables (process.env) exclusively.',
+        '- RESOURCE DISPOSAL: Clean up timers (clearInterval), subscriptions, and event listeners in useEffect cleanup functions.',
       ].join('\n'),
     // Applies to verification plans too (read_file paths). Run #9 wrote a junk
     // file literally named "proj_1791555817452" (a directory tree as text) and
@@ -244,6 +260,38 @@ function plannerPrompt(kind, intent, context, tools, extra = '') {
     ...(contentsBlock ? ['', contentsBlock] : []),
     `TOOL CATALOG:\n${JSON.stringify(tools)}`,
   ].join('\n\n');
+}
+
+function buildThemeFallbackPlan(toolRegistry) {
+  const tools = new Set(toolCatalog(toolRegistry).map((t) => t.name));
+  const steps = [];
+  if (tools.has('read_file')) {
+    steps.push({
+      id: 'step-read-theme',
+      tool: 'read_file',
+      description: 'Read current stylesheet or theme variables',
+      input: { path: 'src/styles/global.css' },
+    });
+  }
+  if (tools.has('apply_diff')) {
+    steps.push({
+      id: 'step-apply-theme',
+      tool: 'apply_diff',
+      description: 'Update color palette and theme variables in styles',
+      input: {
+        path: 'src/styles/global.css',
+        search: ':root {',
+        replace: ':root {\n  --color-primary: #6366f1;\n  --color-secondary: #8b5cf6;\n  --color-accent: #06b6d4;\n  --color-bg: #0b0f19;\n  --color-surface: #151d30;\n  --color-text: #f8fafc;\n  --color-text-muted: #94a3b8;',
+      },
+    });
+  }
+  if (steps.length > 0) {
+    return {
+      goal: 'Update application theme and styling palette',
+      steps,
+    };
+  }
+  return null;
 }
 
 function createStructuredAgentPlanner({ toolRegistry, openai = AgentCascadeAiService, customApiKey = null, retryDelayMs = 1500 } = {}) {
@@ -297,34 +345,8 @@ function createStructuredAgentPlanner({ toolRegistry, openai = AgentCascadeAiSer
         const isThemeIntent = /(theme|color|dark mode|light mode|palette|style|css|styling|design)/i.test(rawIntent);
         if (isThemeIntent) {
           logger.warn(`[structuredAgentPlanner] LLM cascade failed for theme intent (${err.message}). Generating fallback styling plan.`);
-          const tools = new Set(toolCatalog(toolRegistry).map((t) => t.name));
-          const steps = [];
-          if (tools.has('read_file')) {
-            steps.push({
-              id: 'step-read-theme',
-              tool: 'read_file',
-              description: 'Read current stylesheet or theme variables',
-              input: { path: 'src/styles/global.css' }
-            });
-          }
-          if (tools.has('apply_diff')) {
-            steps.push({
-              id: 'step-apply-theme',
-              tool: 'apply_diff',
-              description: 'Update color palette and theme variables in styles',
-              input: {
-                path: 'src/styles/global.css',
-                search: ':root {',
-                replace: ':root {\n  --color-primary: #6366f1;\n  --color-secondary: #8b5cf6;\n  --color-accent: #06b6d4;\n  --color-bg: #0b0f19;\n  --color-surface: #151d30;\n  --color-text: #f8fafc;\n  --color-text-muted: #94a3b8;'
-              }
-            });
-          }
-          if (steps.length > 0) {
-            return {
-              goal: 'Update application theme and styling palette',
-              steps
-            };
-          }
+          const fallback = buildThemeFallbackPlan(toolRegistry);
+          if (fallback) return fallback;
         }
         throw err;
       }
