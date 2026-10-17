@@ -244,9 +244,11 @@ async function dispatchRunnerExecution({
   };
 }
 
-function checkStrictIsolationAvailable(requireOsIsolation, containerAdapter) {
+function checkStrictIsolationAvailable(requireOsIsolation, containerAdapter, hasExplicitAdapter = false) {
   if (!requireOsIsolation) return null;
-  const isAvailable = containerAdapter ? containerAdapter.isAvailable() : checkOsIsolationAvailable();
+  const isAvailable = hasExplicitAdapter && containerAdapter
+    ? containerAdapter.isAvailable()
+    : checkOsIsolationAvailable();
   if (isAvailable) return null;
   return {
     status: 'SANDBOX_UNAVAILABLE',
@@ -271,7 +273,7 @@ function checkStrictIsolationAvailable(requireOsIsolation, containerAdapter) {
  */
 async function executeCandidateRunner({ code, spec, timeoutMs = DEFAULT_TIMEOUT_MS, requireOsIsolation = false, adapter = null }) {
   const containerAdapter = adapter || (requireOsIsolation ? new ContainerExecutionAdapter({ strictIsolation: true, timeoutMs }) : null);
-  const isolationBlocked = checkStrictIsolationAvailable(requireOsIsolation, containerAdapter);
+  const isolationBlocked = checkStrictIsolationAvailable(requireOsIsolation, containerAdapter, Boolean(adapter));
   if (isolationBlocked) return isolationBlocked;
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidost-eval-runner-'));
