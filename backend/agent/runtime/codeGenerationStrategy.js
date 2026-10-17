@@ -236,11 +236,11 @@ function analyzeCodeGenerationRequest(request, context = {}) {
   const explicitLanguage = firstMatch(original, STACK_SIGNALS);
   const workspaceStack = detectWorkspaceStack(context);
   const isModification = /\b(fix|debug|repair|refactor|upgrade|modify|change|existing|bug|error)\b/i.test(original);
-  const isAlgorithmic = /\b(algorithm|complexity|big.?o|optimi[sz]|dynamic programming|graph|tree|sort|search|shortest path|dijkstra|bellman.?ford|floyd.?warshall|quick.?sort|merge.?sort|heap.?sort|binary search|breadth.?first|depth.?first|\bbfs\b|\bdfs\b|knapsack|union.?find|path.?finding|scheduler|parser|compiler|constraint|backtrack|recursion|data structure|race condition|concurren|throughput|latency|greedy|priority queue|hash map|hash table|trie|segment tree|fenwick|substring search|kmp|rabin.?karp)\b|à¤à¤²à¥à¤—à¥‹à¤°à¤¿à¤¦à¤®|à¤¡à¥‡à¤Ÿà¤¾ à¤¸à¥à¤Ÿà¥à¤°à¤•à¥à¤šà¤°|à¤¸à¤®à¤¯ à¤œà¤Ÿà¤¿à¤²à¤¤à¤¾|à¤¸à¥à¤ªà¥‡à¤¸ à¤œà¤Ÿà¤¿à¤²à¤¤à¤¾|à¤²à¥‰à¤œà¤¿à¤•|à¤²à¥‰à¤œà¤¿à¤•à¤²|à¤•à¥‹à¤¡ à¤•à¥‹ à¤‘à¤ªà¥à¤Ÿà¤¿à¤®à¤¾à¤‡à¤œà¤¼|à¤à¤²à¥à¤—à¥‹à¤°à¤¿à¤¥à¤®/i.test(original);
+  const isAlgorithmic = /\b(algorithm|complexity|big.?o|optimi[sz]|dynamic programming|graph|tree|sort|search|shortest path|dijkstra|bellman.?ford|floyd.?warshall|quick.?sort|merge.?sort|heap.?sort|binary search|breadth.?first|depth.?first|\bbfs\b|\bdfs\b|knapsack|union.?find|path.?finding|scheduler|parser|compiler|constraint|backtrack|recursion|data structure|race condition|concurren|throughput|latency|greedy|priority queue|hash map|hash table|trie|segment tree|fenwick|substring search|kmp|rabin.?karp)\b|एल्गोरिदम|डेटा स्ट्रक्चर|समय जटिलता|स्पेस जटिलता|लॉजिक|लॉजिकल|कोड को ऑप्टिमाइज़|एल्गोरिथम/i.test(original);
   const isFullStack = /\b(full.?stack|frontend|backend|api|database|authentication|authorization|payment|checkout|webhook|server|deploy|integration)\b/i.test(original);
-  const isUi = /\b(app|application|website|web.?app|dashboard|landing page|portfolio|component|page|ui|ux|interface)\b|à¤à¤ª|à¤µà¥‡à¤¬à¤¸à¤¾à¤‡à¤Ÿ|à¤¡à¥ˆà¤¶à¤¬à¥‹à¤°à¥à¤¡|à¤ªà¥‡à¤œ|à¤‡à¤‚à¤Ÿà¤°à¤«à¥‡à¤¸/i.test(original);
+  const isUi = /\b(app|application|website|web.?app|dashboard|landing page|portfolio|component|page|ui|ux|interface)\b|ऐप|वेबसाइट|डैशबोर्ड|पेज|इंटरफेस/i.test(original);
   const isSecuritySensitive = /\b(auth|authentication|authorization|permission|role|secret|token|password|payment|checkout|personal data|upload|sql|injection|security)\b/i.test(original);
-  const isPerformanceSensitive = /\b(fast|ultra.?fast|performance|scale|scalable|high.?load|latency|throughput|memory|large dataset|optimi[sz]e)\b|à¤¤à¥‡à¤œ|à¤œà¤²à¥à¤¦à¥€|à¤«à¤¾à¤¸à¥à¤Ÿ|à¤•à¤® à¤¸à¤®à¤¯|à¤•à¤® à¤®à¥‡à¤®à¥‹à¤°à¥€|à¤ªà¤°à¤«à¥‰à¤°à¥à¤®à¥‡à¤‚à¤¸|à¤‘à¤ªà¥à¤Ÿà¤¿à¤®à¤¾à¤‡à¤œà¤¼/i.test(original);
+  const isPerformanceSensitive = /\b(fast|ultra.?fast|performance|scale|scalable|high.?load|latency|throughput|memory|large dataset|optimi[sz]e)\b|तेज|जल्दी|फास्ट|कम समय|कम मेमोरी|परफॉर्मेंस|ऑप्टिमाइज़/i.test(original);
 
   let complexity = 'low';
   if (isAlgorithmic || isSecuritySensitive || isFullStack) {
@@ -249,13 +249,26 @@ function analyzeCodeGenerationRequest(request, context = {}) {
     complexity = 'medium';
   }
 
-  const architectureRules = [
+  const baseArchitectureRules = [
     'Honor explicit framework/language requests; otherwise inspect the existing workspace and preserve its stack and conventions.',
     'For a new project, choose the smallest supported architecture that satisfies the explicit requirements; do not add dependencies without a concrete need.',
     'Separate domain/business logic from UI, persistence, and network I/O when the scope warrants it.',
     'Use real event handlers and data flow for interactive features; do not substitute decorative controls or fake integrations.',
     'Preserve unrelated working code and prefer small, reviewable edits when modifying an existing project.',
   ];
+
+  const uiArchitectureRules = (isUi || isFullStack)
+    ? [
+        'Design System & Visual Hierarchy: Define a cohesive color palette (primary, secondary, surface, background, border, text, muted), consistent typography scale, and responsive layout wrappers (mobile, tablet, desktop).',
+        'Component Decomposition: Structure applications into modular, cohesive components (Header/Navigation, Feature Views, Reusable Form/UI Controls, Modals/Toasts) rather than monolithic single files.',
+        'Real Functional Interactivity: Every button, input, tab, filter, and modal must be wired with real reactive state and handlers; never leave decorative dead buttons, empty stubs, or alert() popups.',
+        'View State Completeness: Explicitly implement loading states (skeleton or spinner), empty states (informative icon/text + primary call to action), error recovery states, and data-loaded states.',
+        'Client Persistence & Data Flow: When no backend is configured, implement client-side persistence via a dedicated storage utility (e.g. localStorage) with JSON serialization, seed fallback, and error handling; never lose user data on page refresh.',
+        'Accessibility & Semantics: Use semantic HTML (button, nav, header, main, dialog), proper label associations (htmlFor/id), and keyboard navigation support (Enter/Escape).',
+      ]
+    : [];
+
+  const architectureRules = [...baseArchitectureRules, ...uiArchitectureRules];
 
   const algorithmRules = isAlgorithmic
     ? [
@@ -1412,6 +1425,293 @@ function evaluateAlgorithmVerification(executionResult) {
   };
 }
 
+// =============================================================================
+// ADVANCED PRODUCT ENGINEERING: Application Archetypes & Design System Engine
+// =============================================================================
+
+const APPLICATION_ARCHETYPES = new Map();
+
+function registerApplicationArchetype(def) {
+  if (!def?.id || !def?.name) {
+    throw new Error('Application archetype definition must include id and name');
+  }
+  APPLICATION_ARCHETYPES.set(def.id, def);
+}
+
+// 1. Dashboard & Analytics Platform
+registerApplicationArchetype({
+  id: 'dashboard_analytics',
+  name: 'Dashboard & Analytics Platform',
+  matcher: (text) => /\b(dashboard|analytics|metrics|kpi|charts?|stats|monitoring|overview|reporting)\b|डैशबोर्ड|एनालिटिक्स/i.test(text),
+  components: [
+    'HeaderWithUserNav',
+    'MetricsOverviewGrid',
+    'MetricCard',
+    'ChartVisualSection',
+    'FilterableDataTable',
+    'ActivityFeed'
+  ],
+  sampleEntities: 'KPI stats (revenue, active users, conversion rate, churn), timeline events, data records',
+  storageKey: 'aidost_analytics_dashboard_data',
+  defaultViewStates: {
+    loading: 'MetricCardSkeleton and TableRowSkeleton with aria-busy',
+    empty: 'No activity found for selected date range; includes reset filter action',
+    error: 'Failed to fetch analytics metrics; includes retry button'
+  }
+});
+
+// 2. E-Commerce Storefront & Catalog
+registerApplicationArchetype({
+  id: 'ecommerce_store',
+  name: 'E-Commerce Storefront & Catalog',
+  matcher: (text) => /\b(e-?commerce|store|shop|cart|catalog|products?|checkout|inventory)\b|दुकान|स्टोर|शॉप/i.test(text),
+  components: [
+    'NavbarWithCartBadge',
+    'ProductCatalogGrid',
+    'ProductCard',
+    'CategoryFilterSidebar',
+    'CartDrawer',
+    'CheckoutModal'
+  ],
+  sampleEntities: 'Products (id, name, price, rating, category, stock, image, description), Cart items (productId, qty)',
+  storageKey: 'aidost_ecommerce_cart_items',
+  defaultViewStates: {
+    loading: 'ProductCardSkeleton grid with pulsating placeholders',
+    empty: 'Your shopping cart is empty; includes Browse Products button',
+    error: 'Unable to load catalog products; includes reload action'
+  }
+});
+
+// 3. Productivity & Kanban / Task Board
+registerApplicationArchetype({
+  id: 'productivity_kanban',
+  name: 'Productivity & Kanban Task Board',
+  matcher: (text) => /\b(kanban|todo|todos|tasks?|productivity|notes?|board|trello|project management|workflow)\b|टास्क|टू-डू|नोट्स/i.test(text),
+  components: [
+    'TaskHeader',
+    'KanbanBoard',
+    'KanbanColumn',
+    'TaskCard',
+    'CreateEditTaskModal',
+    'FilterToolbar'
+  ],
+  sampleEntities: 'Tasks (id, title, description, status [todo/in_progress/done], priority [low/medium/high], dueDate, createdAt)',
+  storageKey: 'aidost_kanban_board_tasks',
+  defaultViewStates: {
+    loading: 'ColumnSkeleton with ghost task cards',
+    empty: 'No tasks in this column; includes Add Task button',
+    error: 'Failed to save task update; includes undo and retry buttons'
+  }
+});
+
+// 4. Admin Portal & CRUD Data Table
+registerApplicationArchetype({
+  id: 'admin_crud_table',
+  name: 'Admin Portal & Data Management Table',
+  matcher: (text) => /\b(admin|crud|users? management|management portal|table|directory|records?|portal)\b|मैनेजमेंट|टेबल|एडमिन/i.test(text),
+  components: [
+    'AdminHeader',
+    'DataTable',
+    'TableHeaderCell',
+    'TableRowActions',
+    'RecordFormModal',
+    'DeleteConfirmationModal',
+    'PaginationBar'
+  ],
+  sampleEntities: 'Records (id, name, email/code, category/role, status [active/inactive/pending], createdAt, lastModified)',
+  storageKey: 'aidost_admin_crud_records',
+  defaultViewStates: {
+    loading: 'TableSkeleton rows with pulsing cells',
+    empty: 'No records found matching query; includes Clear Search and Create New buttons',
+    error: 'Failed to execute data mutation; includes dismissible error banner'
+  }
+});
+
+// 5. Portfolio & Showcase / Landing Page
+registerApplicationArchetype({
+  id: 'portfolio_showcase',
+  name: 'Portfolio, Landing Page & Showcase',
+  matcher: (text) => /\b(portfolio|showcase|landing page|resume|cv|personal site|agency|product page)\b|पोर्टफोलियो|लैंडिंग पेज/i.test(text),
+  components: [
+    'NavigationHeader',
+    'HeroSection',
+    'FeatureGrid',
+    'ProjectShowcaseGallery',
+    'ProjectCard',
+    'ContactSection',
+    'Footer'
+  ],
+  sampleEntities: 'Projects (id, title, description, tags, link), Testimonials, Contact inquiries',
+  storageKey: 'aidost_portfolio_inquiries',
+  defaultViewStates: {
+    loading: 'SectionSkeleton with layout placeholders',
+    empty: 'No projects found in this category; includes View All button',
+    error: 'Message delivery failed; includes retry button'
+  }
+});
+
+// 6. General Interactive Application (Fallback)
+registerApplicationArchetype({
+  id: 'general_app',
+  name: 'Interactive Application',
+  matcher: () => true,
+  components: [
+    'AppHeader',
+    'MainContainer',
+    'InteractiveControlsBar',
+    'ContentDisplaySection',
+    'ActionModal',
+    'ToastContainer'
+  ],
+  sampleEntities: 'App items (id, title, details, timestamp, status)',
+  storageKey: 'aidost_app_general_state',
+  defaultViewStates: {
+    loading: 'ContentSkeleton with shimmer animation',
+    empty: 'No items created yet; includes Create First Item button',
+    error: 'An unexpected error occurred; includes Reload button'
+  }
+});
+
+/**
+ * Derives an explicit, validated application contract for UI and full-stack software requests.
+ */
+function deriveApplicationTaskContract(request, classification = null, context = {}) {
+  const text = String(request || '').trim();
+  const lower = text.toLowerCase();
+
+  let selectedArchetype = APPLICATION_ARCHETYPES.get('general_app');
+  for (const [id, def] of APPLICATION_ARCHETYPES.entries()) {
+    if (id !== 'general_app' && def.matcher(lower)) {
+      selectedArchetype = def;
+      break;
+    }
+  }
+
+  const isDarkMode = /\b(dark\s*mode|dark\s*theme|dark)\b/i.test(lower);
+  const colorPalette = {
+    primary: '#4f46e5',
+    secondary: '#06b6d4',
+    accent: '#f59e0b',
+    success: '#10b981',
+    danger: '#ef4444',
+    surface: isDarkMode ? '#1e293b' : '#ffffff',
+    background: isDarkMode ? '#0f172a' : '#f8fafc',
+    text: isDarkMode ? '#f8fafc' : '#0f172a',
+    textMuted: isDarkMode ? '#94a3b8' : '#64748b',
+    border: isDarkMode ? '#334155' : '#e2e8f0',
+  };
+
+  const tasks = [
+    {
+      id: 'task-1',
+      specialty: 'frontend',
+      role: 'CODER',
+      objective: `Implement modular architecture, design system tokens, and storage persistence for ${selectedArchetype.name}: "${request}". Create reusable UI primitives and persistent storage manager (localStorage).`,
+      dependsOn: [],
+      requirements: ['REQ-APP-01', 'REQ-APP-02'],
+      expectedOutput: 'Clean modular component structure, design system styles, and storage persistence service.'
+    },
+    {
+      id: 'task-2',
+      specialty: 'integration',
+      role: 'CODER',
+      objective: `Integrate interactive views, state management, search/filter controls, and modals for ${selectedArchetype.name}: "${request}". Wire all buttons, forms, and handle empty/loading/error states.`,
+      dependsOn: ['task-1'],
+      requirements: ['REQ-APP-03', 'REQ-APP-04'],
+      expectedOutput: 'Fully interactive application with active handlers, modals, search/filtering, and complete states.'
+    },
+    {
+      id: 'task-3',
+      specialty: 'testing',
+      role: 'VERIFIER',
+      objective: `Verify the completed implementation for: "${request}". Inspect workspace files, verify cross-file contracts, and validate usability.`,
+      dependsOn: ['task-2'],
+      requirements: ['REQ-APP-05'],
+      expectedOutput: 'Verification evidence confirming complete implementation, working imports, and zero stubs.'
+    }
+  ];
+
+  return {
+    strategy: 'STRUCTURED_APPLICATION_SPEC',
+    archetype: selectedArchetype.id,
+    archetypeName: selectedArchetype.name,
+    components: selectedArchetype.components,
+    colorPalette,
+    storageKey: selectedArchetype.storageKey,
+    sampleEntities: selectedArchetype.sampleEntities,
+    defaultViewStates: selectedArchetype.defaultViewStates,
+    requirements: [
+      { id: 'REQ-APP-01', description: 'Decompose into modular components with clean imports and exports' },
+      { id: 'REQ-APP-02', description: 'Implement client-side persistence (localStorage) with seed data fallback' },
+      { id: 'REQ-APP-03', description: 'Ensure all buttons, inputs, filters, and modals have real functional state handlers' },
+      { id: 'REQ-APP-04', description: 'Provide complete loading, empty, and error states for all data views' },
+      { id: 'REQ-APP-05', description: 'Validate cross-component contracts and responsive styling' }
+    ],
+    tasks
+  };
+}
+
+/**
+ * Builds the application engineering instruction block to inject into agent/copilot prompts.
+ */
+function buildApplicationGuidanceBlock(spec) {
+  if (!spec || spec.strategy !== 'STRUCTURED_APPLICATION_SPEC') return '';
+
+  return `
+[STRUCTURED APPLICATION ENGINEERING PIPELINE: ${spec.archetypeName.toUpperCase()}]
+Follow these 8 rigorous engineering stages to construct the application:
+
+STAGE 1: COMPONENT ARCHITECTURE & MODULAR DECOMPOSITION
+- Never write a monolithic single-file application.
+- Structure files cleanly:
+  * Entry & Layout: src/App.jsx (or main entry), src/index.css (design tokens)
+  * Components: src/components/ (e.g. ${spec.components.slice(0, 4).join(', ')})
+  * Storage Service: src/services/storage.js (persistence layer with storage key "${spec.storageKey}")
+- Ensure all component exports match imports across files.
+
+STAGE 2: DESIGN SYSTEM & VISUAL POLISH
+- Cohesive color palette with CSS variables or Tailwind classes:
+  * Primary: ${spec.colorPalette.primary} | Accent: ${spec.colorPalette.accent} | Success: ${spec.colorPalette.success} | Danger: ${spec.colorPalette.danger}
+  * Background: ${spec.colorPalette.background} | Surface: ${spec.colorPalette.surface} | Text: ${spec.colorPalette.text} | Border: ${spec.colorPalette.border}
+  * Spacing & Borders: rounded-xl, subtle borders, shadow-sm to shadow-md, responsive flex/grid wrappers.
+- Typography scale: clear visual hierarchy (H1 bold, H2 semibold, body text, muted captions).
+- Responsive layouts: mobile-first flex/grid containers that adapt across mobile, tablet, and desktop breakpoints.
+
+STAGE 3: REAL FUNCTIONAL INTERACTIVITY & ZERO-STUB CONTRACT
+- ZERO STUBS: Every button, input, filter, and modal must have an operational handler.
+- Form inputs must bind to state (value + onChange); forms must validate and submit.
+- Search inputs must actively filter the displayed dataset in real time.
+- Modals, drawers, and tabs must open, close, and switch views with real state.
+- Never use alert() or empty () => {} placeholders for interactive controls.
+
+STAGE 4: STATE MANAGEMENT & DATA FLOW
+- Single source of truth for application state.
+- Keep derived values (filtered items count, active filters, computed totals) computed on the fly.
+- Avoid direct state mutation; use immutable updates (e.g. prev => [...prev, newItem]).
+
+STAGE 5: CLIENT PERSISTENCE CONTRACT (LOCALSTORAGE SYNC)
+- When no remote backend is provided, persist state in localStorage ("${spec.storageKey}") so changes survive page refreshes.
+- Provide initial realistic seed data when localStorage is empty (${spec.sampleEntities}).
+- Handle JSON parse errors safely and wrap quota limits in try/catch.
+
+STAGE 6: VIEW STATES & ERROR HANDLING
+- Loading state: ${spec.defaultViewStates.loading}.
+- Empty state: ${spec.defaultViewStates.empty}.
+- Error state: ${spec.defaultViewStates.error}.
+- Success feedback: Provide toast notifications or status badges on operations (create, update, delete).
+
+STAGE 7: ACCESSIBILITY & SECURITY HYGIENE
+- Semantic HTML: Use <button>, <nav>, <header>, <main>, <section>, <dialog>.
+- Form labels: Use <label htmlFor="..."> for all form fields.
+- Keyboard support: Support Escape key to close modals, Enter to submit forms.
+- Never commit plaintext API keys or credentials.
+
+STAGE 8: VERIFICATION EVIDENCE & USABILITY ACCEPTANCE
+- Verify all components render cleanly without console errors or unbalanced tags.
+- Confirm all user interactions (add, edit, delete, filter, sort, modal toggle) work end-to-end.
+`;
+}
+
 module.exports = {
   // Existing exports
   analyzeCodeGenerationRequest,
@@ -1428,4 +1728,9 @@ module.exports = {
   buildAlgorithmGuidanceBlock,
   validateTaskPlanSchema,
   evaluateAlgorithmVerification,
+  // Product Engineering exports
+  APPLICATION_ARCHETYPES,
+  registerApplicationArchetype,
+  deriveApplicationTaskContract,
+  buildApplicationGuidanceBlock,
 };

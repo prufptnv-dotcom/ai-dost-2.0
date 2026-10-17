@@ -105,6 +105,9 @@ function calculateQuizProgress(current, total) {
 
 function resolveFaqToggle(sym, source, ctx) {
   if (typeof sym.toggleFaq === 'function') return sym.toggleFaq;
+  if (typeof sym.setOpenIndex === 'function') {
+    return (idx = 0) => sym.setOpenIndex(sym.openIndex === idx ? null : idx);
+  }
   const inlineMatch = /onClick=\{([^}]+)\}[^>]*>[^<]*?faq/i.exec(source) ||
                       /(?:<div|<button|<summary)[^>]*onClick=\{([^}]+)\}/i.exec(source);
   if (inlineMatch?.[1]) {
@@ -249,6 +252,9 @@ function evaluateCandidateFiles(files, candidateFilePaths) {
           try {
             defaultExport();
           } catch (_) {}
+        }
+        if (context.__aidost_symbols && typeof context.__aidost_symbols === 'object') {
+          Object.assign(context, context.__aidost_symbols);
         }
       } catch (_) {}
     }

@@ -14,6 +14,8 @@ const {
   classifyRequest,
   deriveAlgorithmTaskContract,
   buildAlgorithmGuidanceBlock,
+  deriveApplicationTaskContract,
+  buildApplicationGuidanceBlock,
   validateTaskPlanSchema
 } = require('./codeGenerationStrategy');
 const { resolveCanonicalCase, CANONICAL_CASE_IDS } = require('../../quality-evaluation/canonicalCaseResolver');
@@ -219,7 +221,12 @@ Rules:
   - Map relevant AC-## acceptance checks to a dedicated verification/testing task or explicit output evidence. Do not state that checks passed before execution evidence exists.
   - For application UI tasks, include the specified design-system, responsive-width, accessibility, and functional-state requirements in implementation outputs.
   - Treat suggested pages/archetypes as optional guidance; only explicit user requirements are mandatory.
-  - If a requirement is ambiguous or impossible with the available tools/configuration, state that as a blocker in the task expectedOutput instead of silently substituting a mock.`;
+  - If a requirement is ambiguous or impossible with the available tools/configuration, state that as a blocker in the task expectedOutput instead of silently substituting a mock.
+- PROFESSIONAL APPLICATION ARCHITECTURE & FUNCTIONAL QUALITY:
+  - Plan modular component boundaries (e.g. Header, Views, Modals, Storage) instead of monolithic single-file dumps.
+  - Require real interactive handlers on all controls (buttons, inputs, filters, modals) with state mutation.
+  - Require client persistence (localStorage) with seed data fallback so user changes persist across page reloads.
+  - Enforce complete view states (loading skeletons, empty states with call-to-actions, error recovery banners).`;
 
 function escapeControlCharsInStrings(str) {
   let inStr = false;
@@ -293,6 +300,7 @@ function extractJson(text) {
 function fallbackPlan(request) {
   const strategy = analyzeCodeGenerationRequest(request);
   const classification = classifyRequest(request);
+  const text = String(request || '');
 
   if (classification.category === 'ALGORITHMIC_PROBLEM' || (strategy.intent.algorithmic && !strategy.intent.ui && !strategy.intent.fullStack)) {
     const contract = deriveAlgorithmTaskContract(request, classification);
@@ -312,11 +320,43 @@ function fallbackPlan(request) {
       };
     }
   }
-  const complex = strategy.intent.fullStack || strategy.intent.securitySensitive || /\b(full|complete|entire|platform|app|application|website|dashboard|integrat|database|backend|frontend|deploy|production|security)\b/.test(text) || /à¤ªà¥‚à¤°à¤¾ à¤à¤ª|à¤à¤ª à¤¬à¤¨à¤¾à¤“|à¤µà¥‡à¤¬à¤¸à¤¾à¤‡à¤Ÿ à¤¬à¤¨à¤¾à¤“|à¤¡à¥ˆà¤¶à¤¬à¥‹à¤°à¥à¤¡ à¤¬à¤¨à¤¾à¤“|à¤«à¥à¤².?à¤¸à¥à¤Ÿà¥ˆà¤•|à¤ªà¥à¤°à¥‹à¤œà¥‡à¤•à¥à¤Ÿ à¤¬à¤¨à¤¾à¤“|à¤¬à¥ˆà¤•.?à¤à¤‚à¤¡|à¤¡à¥‡à¤Ÿà¤¾à¤¬à¥‡à¤¸|à¤²à¥‰à¤—à¤¿à¤¨ à¤¸à¤¿à¤¸à¥à¤Ÿà¤®/i.test(String(request || ''));
+  const complex = strategy.intent.fullStack || strategy.intent.securitySensitive || /\b(full|complete|entire|platform|app|application|website|dashboard|integrat|database|backend|frontend|deploy|production|security)\b/.test(text) || /पूरा ऐप|ऐप बनाओ|वेबसाइट बनाओ|डैशबोर्ड बनाओ|फुल.?स्टैक|प्रोजेक्ट बनाओ|बैक.?एंड|डेटाबेस|लॉगिन सिस्टम/i.test(text);
   if (!complex) return {
     summary: 'Single-task adaptive execution',
     tasks: [{ id: 'task-1', specialty: strategy.intent.ui ? 'frontend' : 'integration', objective: `Implement working code for: ${request}`, dependsOn: [], expectedOutput: 'Working requested outcome with verification evidence.' }]
   };
+
+  if (classification.category === 'APPLICATION_FEATURE' || strategy.intent.ui || strategy.intent.fullStack) {
+    const appContract = deriveApplicationTaskContract(request, classification);
+    return {
+      summary: 'Adaptive multi-specialist execution',
+      contract: appContract,
+      tasks: [
+        {
+          id: 'task-1',
+          specialty: strategy.intent.ui ? 'frontend' : 'backend',
+          objective: appContract.tasks[0]?.objective || `Implement modular component architecture, design system tokens, and storage persistence for: ${request}`,
+          dependsOn: [],
+          expectedOutput: appContract.tasks[0]?.expectedOutput || 'Clean modular component structure, design system styles, and storage persistence service.'
+        },
+        {
+          id: 'task-2',
+          specialty: 'integration',
+          objective: appContract.tasks[1]?.objective || `Integrate interactive views, reactive state handlers, search/filter controls, and modals for: ${request}`,
+          dependsOn: ['task-1'],
+          expectedOutput: appContract.tasks[1]?.expectedOutput || 'Fully interactive application with active handlers, modals, search/filtering, and complete states.'
+        },
+        {
+          id: 'task-3',
+          specialty: 'testing',
+          objective: appContract.tasks[2]?.objective || `Test the completed implementation for: ${request}`,
+          dependsOn: ['task-2'],
+          expectedOutput: appContract.tasks[2]?.expectedOutput || 'Test/build/runtime evidence and actionable failures.'
+        }
+      ]
+    };
+  }
+
   return {
     summary: 'Adaptive multi-specialist execution',
     tasks: [
@@ -432,6 +472,11 @@ class CopilotDirector {
         const contract = deriveAlgorithmTaskContract(request, classification, context);
         algorithmGuidance = buildAlgorithmGuidanceBlock(contract);
       }
+      let applicationGuidance = '';
+      if (classification.category === 'APPLICATION_FEATURE' || strategy.intent.ui || strategy.intent.fullStack) {
+        const contract = deriveApplicationTaskContract(request, classification, context);
+        applicationGuidance = buildApplicationGuidanceBlock(contract);
+      }
 
       // Task-aware model selection routing
       let effectiveModel = preferredModel;
@@ -445,7 +490,8 @@ class CopilotDirector {
 
       const workspacePart = workspaceDirective ? `${workspaceDirective}\n\n` : '';
       const algoPart = algorithmGuidance ? `\n\n${algorithmGuidance}` : '';
-      const prompt = `${DIRECTOR_PLANNER_PROMPT}\n\n${workspacePart}${formatCodeGenerationStrategy(strategy)}${algoPart}\n\nREQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
+      const appPart = applicationGuidance ? `\n\n${applicationGuidance}` : '';
+      const prompt = `${DIRECTOR_PLANNER_PROMPT}\n\n${workspacePart}${formatCodeGenerationStrategy(strategy)}${algoPart}${appPart}\n\nREQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
       // P12.4: mode 'planner' (no system prompt) - 'agent' mode's FILE: format
       // instruction fights this prompt's "respond with valid JSON" contract.
       const response = effectiveModel && effectiveModel !== 'auto'
@@ -495,7 +541,16 @@ class CopilotDirector {
       ...(workspacePackageJson ? { packageJson: workspacePackageJson } : {}),
       ...(existingFileContents ? { files: existingFileContents } : {})
     });
-    const objectiveWithDirective = `${directive}\n${formatCodeGenerationStrategy(codeStrategy)}\n${task.objective}`;
+    const classification = classifyRequest(request || task.objective);
+    let extraGuidance = '';
+    if (classification.category === 'ALGORITHMIC_PROBLEM' || codeStrategy.intent.algorithmic) {
+      const contract = deriveAlgorithmTaskContract(request || task.objective, classification, { files: existingFileContents });
+      extraGuidance = `\n${buildAlgorithmGuidanceBlock(contract)}`;
+    } else if (classification.category === 'APPLICATION_FEATURE' || codeStrategy.intent.ui || codeStrategy.intent.fullStack) {
+      const contract = deriveApplicationTaskContract(request || task.objective, classification, { files: existingFileContents });
+      extraGuidance = `\n${buildApplicationGuidanceBlock(contract)}`;
+    }
+    const objectiveWithDirective = `${directive}\n${formatCodeGenerationStrategy(codeStrategy)}${extraGuidance}\n${task.objective}`;
     
     let attempt = 0;
     let lastResult = null;
@@ -1056,22 +1111,30 @@ class CopilotDirector {
 
       this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
       this.agentRunDao.updateStatus(supervisorRunId, 'SUCCEEDED');
+      const fileNames = Object.keys(finalFiles || {});
+      const fileSummary = fileNames.length > 0
+        ? ` Files: ${fileNames.slice(0, 4).join(', ')}${fileNames.length > 4 ? ` (+${fileNames.length - 4} more)` : ''}.`
+        : '';
+      const outcomeSummary = `Director completed ${plan.tasks.length} adaptive task(s).${fileSummary} Verification: ${verificationStatus}.`.slice(0, 510);
       const completion = {
         type: 'director_complete',
         status: 'SUCCEEDED',
         taskId: supervisorTaskId,
         runId: supervisorRunId,
         taskCount: plan.tasks.length,
+        files: fileNames,
         verification: {
           status: verificationStatus,
           summary: verificationSummary || 'Final verification passed.',
           artifact_refs: verificationArtifacts
-        }
+        },
+        executionVerified: Boolean(algorithmVerificationOutcome?.verified || qualityGateOutcome?.status === STATUS.PASSED),
+        staticInspection: true
       };
       onEvent(completion);
       return ResultValidator.validate({
         status: 'COMPLETED',
-        summary: `Director completed ${plan.tasks.length} adaptive task(s) and final verification.`,
+        summary: outcomeSummary,
         artifact_refs: artifactRefs,
         context_refs: [],
         verification_status: 'PASSED',

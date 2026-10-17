@@ -194,9 +194,13 @@ function extractBackendRoutes(files) {
   for (const [filePath, content] of Object.entries(files)) {
     if (!content || typeof content !== 'string') continue;
 
+    const codeWithoutComments = content
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/.*$/gm, '');
+
     const expressRegex = /(?:app|router)\.(get|post|put|delete|patch)\s*\(\s*['"](\/api\/[^'"]+)['"]/gi;
     let match;
-    while ((match = expressRegex.exec(content)) !== null) {
+    while ((match = expressRegex.exec(codeWithoutComments)) !== null) {
       routes.push({
         filePath,
         method: match[1].toUpperCase(),
@@ -391,6 +395,31 @@ function validateCrossFileContracts(files = {}, options = {}) {
   }
 
   detectCircularImports(dependencyGraph, warnings);
+
+  // Check for unreferenced components
+  const allImportedTargets = new Set();
+  for (const targets of dependencyGraph.values()) {
+    for (const t of targets) allImportedTargets.add(t);
+  }
+  for (const filePath of fileKeys) {
+    if (filePath.includes('src/components/') && /\.[jt]sx?$/i.test(filePath)) {
+      if (!allImportedTargets.has(filePath)) {
+        warnings.push(`UNREFERENCED_COMPONENT: Component '${filePath}' is defined in src/components/ but never imported in any view.`);
+      }
+    }
+  }
+
+  // Check for CSS stylesheet linkage
+  const cssFiles = Array.from(fileKeys).filter((f) => f.endsWith('.css'));
+  if (cssFiles.length > 0) {
+    const allFileContents = Object.values(files).join('\n');
+    for (const cssFile of cssFiles) {
+      const baseName = path.basename(cssFile);
+      if (!allFileContents.includes(baseName)) {
+        warnings.push(`UNLINKED_STYLESHEET: Stylesheet '${cssFile}' exists but does not appear to be imported in any JavaScript/TypeScript file.`);
+      }
+    }
+  }
 
   const frontendCalls = [];
   for (const [filePath, content] of Object.entries(files)) {

@@ -29,7 +29,9 @@ const STAGES = {
   ALGORITHMIC_PERFORMANCE: 'STAGE_6_ALGORITHMIC_PERFORMANCE',
   SECURITY_AUDIT: 'STAGE_7_SECURITY_AUDIT',
   INCOMPLETE_PLACEHOLDERS: 'STAGE_8_INCOMPLETE_PLACEHOLDERS',
-  REPAIR_PLAN_GENERATION: 'STAGE_9_REPAIR_PLAN_GENERATION'
+  REPAIR_PLAN_GENERATION: 'STAGE_9_REPAIR_PLAN_GENERATION',
+  UI_FUNCTIONAL_INTEGRITY: 'STAGE_10_UI_FUNCTIONAL_INTEGRITY',
+  DATA_PERSISTENCE_INTEGRITY: 'STAGE_11_DATA_PERSISTENCE_INTEGRITY'
 };
 
 const PLACEHOLDER_PATTERNS = [
@@ -157,9 +159,80 @@ function auditResourcePatterns(filePath, content, findings) {
   }
 }
 
+function auditInteractiveControls(filePath, content, lines, findings) {
+  if (!/\.[jt]sx?$/i.test(filePath) && !/\.html$/i.test(filePath)) return;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/onClick\s*=\s*\{\s*\(\s*\)\s*=>\s*alert\s*\(/i.test(line)) {
+      findings.push({
+        ruleId: 'UI-ALERT-PLACEHOLDER',
+        stage: STAGES.UI_FUNCTIONAL_INTEGRITY,
+        severity: SEVERITY.ERROR,
+        filePath,
+        line: i + 1,
+        message: 'Interactive button uses placeholder alert() instead of functional state or view handler.',
+        suggestion: 'Implement functional state mutation or modal trigger instead of alert().'
+      });
+    }
+
+    if (/onClick\s*=\s*\{\s*\(\s*\)\s*=>\s*\{\s*\}\s*\}/.test(line)) {
+      findings.push({
+        ruleId: 'UI-EMPTY-HANDLER',
+        stage: STAGES.UI_FUNCTIONAL_INTEGRITY,
+        severity: SEVERITY.ERROR,
+        filePath,
+        line: i + 1,
+        message: 'Interactive control has an empty no-op handler.',
+        suggestion: 'Provide operational logic to handle user action.'
+      });
+    }
+  }
+
+  const inputRegex = /<input\b([^>]*)>/g;
+  let match;
+  while ((match = inputRegex.exec(content)) !== null) {
+    const attrs = match[1];
+    if (/placeholder\s*=\s*['"][^'"]*(?:search|filter)[^'"]*['"]/i.test(attrs)) {
+      if (!/value\s*=/i.test(attrs) && !/onChange\s*=/i.test(attrs) && !/ref\s*=/i.test(attrs)) {
+        findings.push({
+          ruleId: 'UI-UNBOUND-SEARCH-INPUT',
+          stage: STAGES.UI_FUNCTIONAL_INTEGRITY,
+          severity: SEVERITY.WARNING,
+          filePath,
+          message: 'Search/filter input rendered without state binding (missing value or onChange handler).',
+          suggestion: 'Bind search input to reactive state (value={searchQuery} onChange={...}).'
+        });
+      }
+    }
+  }
+}
+
+function auditPersistenceHygiene(filePath, content, findings) {
+  if (!/\.[jt]sx?$/i.test(filePath)) return;
+
+  const pretendDbPattern = /(?:function|const)\s+(?:saveToDatabase|persistToCloud|syncWithBackend|saveRecord)\b[^{]*\{([^}]*)\}/g;
+  let match;
+  while ((match = pretendDbPattern.exec(content)) !== null) {
+    const body = match[1];
+    if (/\b(?:push|unshift)\b/.test(body) && !/(?:localStorage|indexedDB|fetch|axios|db\.|prisma|knex)/i.test(body)) {
+      findings.push({
+        ruleId: 'DATA-PRETEND-PERSISTENCE',
+        stage: STAGES.DATA_PERSISTENCE_INTEGRITY,
+        severity: SEVERITY.WARNING,
+        filePath,
+        message: 'Function implies persistent storage but only mutates an in-memory array without localStorage or network persistence.',
+        suggestion: 'Use localStorage or an explicit API endpoint to ensure data survives page reloads.'
+      });
+    }
+  }
+}
+
 function auditFilePatterns(filePath, content, lines, findings) {
   auditLinePatterns(filePath, lines, findings);
   auditResourcePatterns(filePath, content, findings);
+  auditInteractiveControls(filePath, content, lines, findings);
+  auditPersistenceHygiene(filePath, content, findings);
 }
 
 function auditSyntax(filePath, content, findings) {

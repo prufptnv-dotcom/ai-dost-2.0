@@ -88,54 +88,6 @@ function computeSnapshotHash(fileMap = {}) {
   return hash.digest('hex');
 }
 
-/**
- * Recursively scans directory or processes an in-memory file map into an authoritative snapshot.
- * Enforces file size limits and manifest limits. Fails closed if limits are exceeded.
- */
-function createWorkspaceSnapshot(source, options = {}) {
-  const limits = { ...DEFAULT_LIMITS, ...options.limits };
-  const fileMap = {};
-  let totalBytes = 0;
-  let fileCount = 0;
-
-  function addFile(normalizedPath, content) {
-    if (fileMap[normalizedPath] !== undefined) {
-      throw new Error(`MANIFEST_DUPLICATE_FILE: File "${normalizedPath}" appears more than once in snapshot.`);
-    }
-
-    if (typeof content !== 'string') {
-      content = String(content || '');
-    }
-    const byteLength = Buffer.byteLength(content, 'utf8');
-
-    if (byteLength > limits.maxSingleFileBytes) {
-      throw new Error(
-        `MANIFEST_LIMIT_EXCEEDED: File "${normalizedPath}" (${byteLength} bytes) exceeds maximum allowed size of ${limits.maxSingleFileBytes} bytes.`
-      );
-    }
-
-    fileCount += 1;
-    if (fileCount > limits.maxTotalFiles) {
-      throw new Error(
-        `MANIFEST_LIMIT_EXCEEDED: Workspace exceeds maximum allowed file count of ${limits.maxTotalFiles} files.`
-      );
-    }
-
-    totalBytes += byteLength;
-    if (totalBytes > limits.maxTotalBytes) {
-      throw new Error(
-        `MANIFEST_LIMIT_EXCEEDED: Workspace total size (${totalBytes} bytes) exceeds maximum allowed limit of ${limits.maxTotalBytes} bytes.`
-      );
-    }
-
-    fileMap[normalizedPath] = content;
-  }
-
-  if (typeof source === 'string') {
-    // Directory path
-    if (fs.existsSync(source)) {
-      const rootResolved = fs.realpathSync(source);
-
 function processSymlinkEntry(ent, full, rootResolved, scanDir, addFile, rootDir) {
   let targetReal;
   try {
@@ -185,6 +137,54 @@ function computeSnapshotDifferences(initialFiles, postFiles) {
 
   return { added, deleted, modified };
 }
+
+/**
+ * Recursively scans directory or processes an in-memory file map into an authoritative snapshot.
+ * Enforces file size limits and manifest limits. Fails closed if limits are exceeded.
+ */
+function createWorkspaceSnapshot(source, options = {}) {
+  const limits = { ...DEFAULT_LIMITS, ...options.limits };
+  const fileMap = {};
+  let totalBytes = 0;
+  let fileCount = 0;
+
+  function addFile(normalizedPath, content) {
+    if (fileMap[normalizedPath] !== undefined) {
+      throw new Error(`MANIFEST_DUPLICATE_FILE: File "${normalizedPath}" appears more than once in snapshot.`);
+    }
+
+    if (typeof content !== 'string') {
+      content = String(content || '');
+    }
+    const byteLength = Buffer.byteLength(content, 'utf8');
+
+    if (byteLength > limits.maxSingleFileBytes) {
+      throw new Error(
+        `MANIFEST_LIMIT_EXCEEDED: File "${normalizedPath}" (${byteLength} bytes) exceeds maximum allowed size of ${limits.maxSingleFileBytes} bytes.`
+      );
+    }
+
+    fileCount += 1;
+    if (fileCount > limits.maxTotalFiles) {
+      throw new Error(
+        `MANIFEST_LIMIT_EXCEEDED: Workspace exceeds maximum allowed file count of ${limits.maxTotalFiles} files.`
+      );
+    }
+
+    totalBytes += byteLength;
+    if (totalBytes > limits.maxTotalBytes) {
+      throw new Error(
+        `MANIFEST_LIMIT_EXCEEDED: Workspace total size (${totalBytes} bytes) exceeds maximum allowed limit of ${limits.maxTotalBytes} bytes.`
+      );
+    }
+
+    fileMap[normalizedPath] = content;
+  }
+
+  if (typeof source === 'string') {
+    // Directory path
+    if (fs.existsSync(source)) {
+      const rootResolved = fs.realpathSync(source);
 
       function scanDir(currentDir, rootDir) {
         const entries = fs.readdirSync(currentDir, { withFileTypes: true });
