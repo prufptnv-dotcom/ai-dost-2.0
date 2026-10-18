@@ -84,7 +84,11 @@ test.describe('Forge Studio workspace', () => {
     await navButton(page, 'Forge Studio').click();
 
     await expect(page.getByLabel('Workspace navigation')).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole('button', { name: 'New project' })).toBeVisible();
+    const commandMenu = page.getByRole('button', { name: /Command Menu/i });
+    await expect(commandMenu).toBeVisible();
+    await commandMenu.click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByRole('button', { name: /New Project\.\.\./i })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Current project' })).toBeVisible();
     await expect(page.getByText('Builder', { exact: true }).first()).toBeVisible();
   });
