@@ -142,31 +142,42 @@ function getSeedFiles(caseId) {
       private: true,
       scripts: { build: 'node scripts/check-build.js', test: 'node --test tests/repair.test.js' }
     }, null, 2) + '\n',
-    'src/taskService.js': [
+    'src/state.js': [
       "'use strict';",
-      'function addTask(state, task) { state.tasks.push(task); return state; }',
-      "function buildItemsUrl() { return '/api/items'; }",
-      'module.exports = { addTask, buildItemsUrl };',
+      'function addItem(state, item) {',
+      '  state.items.push(item); return state;',
+      '}',
+      'module.exports = { addItem };',
+      ''
+    ].join('\n'),
+    'src/api.js': [
+      "'use strict';",
+      'async function callApi(url, payload) {',
+      "  return fetch(url, { method: 'GET', body: JSON.stringify(payload) });",
+      '}',
+      'module.exports = { callApi };',
       ''
     ].join('\n'),
     'tests/repair.test.js': [
       "'use strict';",
       "const test = require('node:test');",
       "const assert = require('node:assert/strict');",
-      "const { addTask, buildItemsUrl } = require('../src/taskService');",
-      "test('addTask preserves original state', () => {",
-      "  const original = { tasks: [] };",
-      "  const updated = addTask(original, { id: 't1' });",
-      '  assert.equal(original.tasks.length, 0);',
-      '  assert.equal(updated.tasks.length, 1);',
-      '  assert.notEqual(updated, original);',
+      "const { addItem } = require('../src/state');",
+      "const { callApi } = require('../src/api');",
+      "test('addItem preserves original state', () => {",
+      '  const original = { items: [1, 2] };',
+      '  const updated = addItem(original, 3);',
+      '  assert.equal(original.items.length, 2);',
+      '  assert.equal(updated.items.length, 3);',
+      '  assert.notEqual(updated.items, original.items);',
       '});',
-      "test('buildItemsUrl includes required projectId', () => {",
-      "  assert.match(buildItemsUrl('project-123'), /projectId=project-123/);",
+      "test('callApi forwards the request as POST', async () => {",
+      "  const response = await callApi('/api/data', { key: 'testValue' });",
+      '  assert.ok(response);',
       '});',
       ''
     ].join('\n'),
-    'scripts/check-build.js': "'use strict';\nrequire('../src/taskService');\nconsole.log('Repair fixture syntax/load check passed.');\n"
+    'scripts/check-build.js': "'use strict';\nrequire('../src/state');\nrequire('../src/api');\nconsole.log('Repair fixture syntax/load check passed.');\n"
   };
 }
 
