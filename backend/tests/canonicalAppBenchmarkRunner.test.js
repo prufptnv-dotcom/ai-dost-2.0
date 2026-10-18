@@ -45,8 +45,8 @@ test('captured generated-file paths cannot escape the artifact workspace', () =>
 
 test('repair case seeds genuine failing immutability and projectId tests', () => {
   const seed = getSeedFiles('multi-step-repair');
-  assert.ok(seed['src/taskService.js'].includes('state.tasks.push'));
-  assert.ok(seed['src/taskService.js'].includes("return '/api/items'"));
+  assert.ok(seed['src/state.js'].includes('state.items.push'));
+  assert.ok(seed['src/api.js'].includes("method: 'GET'"));
   assert.ok(seed['tests/repair.test.js'].includes('original state'));
   assert.deepEqual(getSeedFiles('dashboard-search-charts-csv'), {});
 });
