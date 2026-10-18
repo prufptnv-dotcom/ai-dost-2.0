@@ -1,14 +1,23 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const fs = require('fs');
+const os = require('os');
 const deployService = require('../services/deployService');
 const settingsStore = require('../services/settingsStore');
+const workspaceManager = require('../services/workspaceManager');
 const logger = require('../logger');
 
 router.post('/deploy', async (req, res) => {
   try {
-    const { projectPath, target, options } = req.body;
+    let { projectPath, projectId, target, options } = req.body;
+    if (!projectPath && projectId) {
+      try {
+        projectPath = workspaceManager.getWorkspacePath(projectId);
+      } catch (_) {}
+    }
     if (!projectPath || !target) {
-      return res.status(400).json({ success: false, error: 'projectPath and target are required' });
+      return res.status(400).json({ success: false, error: 'projectPath (or projectId) and target are required' });
     }
 
     // Deploy tokens no longer live in browser localStorage (#101): if the
@@ -20,7 +29,6 @@ router.post('/deploy', async (req, res) => {
 
     // Containment: projectPath must live under tmp workspace or repo — otherwise
     // `npm run build` (via adapter) executes package.json scripts from arbitrary dirs.
-    const os = require('os');
     const resolved = path.resolve(projectPath);
     const allowed = [
       path.resolve(os.tmpdir()),
@@ -76,24 +84,26 @@ router.post('/validate', async (req, res) => {
   }
 });
 
-const fs = require('fs');
-const path = require('path');
 const { ZipArchive } = require('archiver');
 
 // ── 1-Click ZIP Project Exporter with Launcher ─────────────────────────────────
 router.post('/export-zip', async (req, res) => {
   try {
-    const { projectPath, projectName = 'ai-dost-project' } = req.body;
+    let { projectPath, projectId, projectName = 'ai-dost-project' } = req.body;
+    if (!projectPath && projectId) {
+      try {
+        projectPath = workspaceManager.getWorkspacePath(projectId);
+      } catch (_) {}
+    }
     if (!projectPath || !fs.existsSync(projectPath)) {
-      return res.status(400).json({ success: false, error: 'Valid projectPath is required' });
+      return res.status(400).json({ success: false, error: 'Valid projectPath or projectId is required' });
     }
 
     const safeName = projectName.replace(/[^a-zA-Z0-9_-]/g, '_');
     // Containment (same as /deploy)
-    const osMod = require('os');
     const resolvedPath = path.resolve(projectPath);
     const allowedRoots = [
-      path.resolve(osMod.tmpdir()),
+      path.resolve(os.tmpdir()),
       path.resolve(path.join(__dirname, '../..')),
       path.resolve(process.cwd()),
     ];

@@ -2783,7 +2783,7 @@ function DeploymentsPage({ onToast, projectName, projectId }) {
       const res = await fetch(`${BACKEND}/api/deploy/deploy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectPath: '.', target }),
+        body: JSON.stringify({ projectPath: '.', projectId, target }),
       });
       const data = await res.json();
       if (data?.success && data?.result?.url) {
