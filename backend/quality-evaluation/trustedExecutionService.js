@@ -265,10 +265,11 @@ function validateRegistryUrl(rawUrl, label) {
 
 function inspectLockfileResolvedUrls(node, label = 'package-lock.json') {
   if (!node || typeof node !== 'object') return;
-  if (typeof node.resolved === 'string' && /^https?:\/\//i.test(node.resolved)) {
+  if (typeof node.resolved === 'string') {
+    if (!/^https?:\/\//i.test(node.resolved)) {
+      throw new Error('UNTRUSTED_DEPENDENCY_SOURCE: Unsupported resolved URL scheme in ' + label);
+    }
     validateRegistryUrl(node.resolved, label + ' resolved URL');
-  } else if (typeof node.resolved === 'string' && !node.resolved.startsWith('file:')) {
-    throw new Error('UNTRUSTED_DEPENDENCY_SOURCE: Unsupported resolved URL scheme in ' + label);
   }
   for (const value of Object.values(node)) {
     if (value && typeof value === 'object') inspectLockfileResolvedUrls(value, label);
