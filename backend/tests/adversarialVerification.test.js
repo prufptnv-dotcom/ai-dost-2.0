@@ -37,7 +37,8 @@ const {
 
 const {
   ContainerExecutionAdapter,
-  FakeContainerExecutionAdapter
+  FakeContainerExecutionAdapter,
+  resolveContainerUser
 } = require('../quality-evaluation/containerExecutionAdapter');
 
 const {
@@ -1275,6 +1276,7 @@ export function callApi(endpoint, payload) {
       });
 
       const args = adapter.lastArgs || [];
+      assert.ok(args.includes('--user=' + resolveContainerUser(tmpStaged)), 'Must run as the staged workspace owner so private directory permissions remain intact');
       assert.ok(args.includes('--read-only'), 'Must make container root filesystem read-only');
       const sourceMountIndex = args.indexOf('-v');
       assert.ok(sourceMountIndex >= 0 && String(args[sourceMountIndex + 1]).endsWith(':/source:ro'),
