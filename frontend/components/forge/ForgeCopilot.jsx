@@ -3818,7 +3818,7 @@ export default function ForgeCopilot({
     }
   };
 
-  const handleCreateFile = async () => {
+  const handleCreateFile = useCallback(async () => {
     const name = window.prompt('Enter file path (e.g. src/Button.jsx):');
     if (!name) return;
     try {
@@ -3829,7 +3829,7 @@ export default function ForgeCopilot({
     } catch (err) {
       showToast(`Error creating file: ${err.message}`);
     }
-  };
+  }, [currentProjectId, loadProjectData, handleOpenFileInEditor, showToast]);
 
   const handleDeleteFile = async (pathToDelete) => {
     if (!window.confirm(`Delete ${pathToDelete}?`)) return;
@@ -3843,7 +3843,7 @@ export default function ForgeCopilot({
     }
   };
 
-  const handleNewFolder = async () => {
+  const handleNewFolder = useCallback(async () => {
     const name = window.prompt('Enter folder name (e.g. components, utils):');
     if (!name || !name.trim()) return;
     const clean = name.trim().replace(/^\/+|\/+$/g, '');
@@ -3855,7 +3855,7 @@ export default function ForgeCopilot({
     } catch (err) {
       showToast(`Error creating folder: ${err.message}`);
     }
-  };
+  }, [currentProjectId, loadProjectData, showToast]);
 
   const handleUploadFile = async (fileName, fileContent) => {
     if (!fileName) return;
@@ -3924,7 +3924,7 @@ export default function ForgeCopilot({
   };
 
   // Real Run / Dev Server Trigger
-  const runBuild = async (options = {}) => {
+  const runBuild = useCallback(async (options = {}) => {
     const silent = options?.silent === true;
     setIsRunning(true);
     setTerminalLogs((prev) => [...prev, '> Starting dev server in sandbox container...']);
@@ -3963,7 +3963,7 @@ export default function ForgeCopilot({
       setIsRunning(false);
       setRefreshCount((c) => c + 1);
     }
-  };
+  }, [currentProjectId, showToast]);
 
   const commandList = useMemo(() => [
     {
