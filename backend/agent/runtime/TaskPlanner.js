@@ -9,7 +9,7 @@ class TaskPlanner {
       maxGoalChars: Number.isInteger(limits.maxGoalChars) ? limits.maxGoalChars : 4000,
       maxDescriptionChars: Number.isInteger(limits.maxDescriptionChars) ? limits.maxDescriptionChars : 2000,
       maxInputKeys: Number.isInteger(limits.maxInputKeys) ? limits.maxInputKeys : 40,
-      maxInputStringChars: Number.isInteger(limits.maxInputStringChars) ? limits.maxInputStringChars : 12000,
+      maxInputStringChars: Number.isInteger(limits.maxInputStringChars) ? limits.maxInputStringChars : 100000,
     };
     if (!this.toolRegistry || typeof this.toolRegistry.get !== 'function') throw new Error('TaskPlanner requires a valid ToolRegistry');
   }
@@ -53,6 +53,29 @@ class TaskPlanner {
         dropped.push(step.tool);
         continue;
       }
+      if (step.tool === 'read_file') {
+        const reqPath = String(step.input?.path || '').replace(/^[./\\]+/, '');
+        let fileExists = false;
+        if (context?.workspaceManager && typeof context.workspaceManager.resolvePath === 'function') {
+          try {
+            const resolved = context.workspaceManager.resolvePath(context.projectId, step.input?.path || '', context.userId);
+            const fs = require('fs');
+            if (fs.existsSync(resolved)) {
+              fileExists = true;
+            }
+          } catch (_) {}
+        }
+        if (!fileExists && Array.isArray(context?.existingFiles)) {
+          fileExists = context.existingFiles.some((f) => {
+            const normF = String(f).replace(/^[./\\]+/, '');
+            return normF === reqPath || normF.endsWith('/' + reqPath) || reqPath.endsWith('/' + normF);
+          });
+        }
+        if (!fileExists) {
+          dropped.push(`read_file (${step.input?.path || 'unknown'} does not exist)`);
+          continue;
+        }
+      }
       validSteps.push(step);
     }
     if (dropped.length) {
@@ -90,78 +113,108 @@ class TaskPlanner {
       return;
     }
     if (value && typeof value === 'object') {
-      const keys = Object.keys(value);
-      if (keys.length > this.limits.maxInputKeys) throw new Error(`Invalid plan: too many input keys at '${path}'`);
-      for (const key of keys) {
-        if (key.length > 200) throw new Error(`Invalid plan: input key too long at '${path}'`);
-        this._validateValue(value[key], `${path}.${key}`, depth + 1);
+      this._validateObjectKeys(value, path, depth);
+    }
+  }
+
+  _validateObjectKeys(obj, path, depth) {
+    const keys = Object.keys(obj);
+    if (keys.length > this.limits.maxInputKeys) throw new Error(`Invalid plan: too many input keys at '${path}'`);
+    for (const key of keys) {
+      if (key.length > 200) throw new Error(`Invalid plan: input key too long at '${path}'`);
+      this._validateValue(obj[key], `${path}.${key}`, depth + 1);
+    }
+  }
+
+  _normalizeRawPlan(rawPlan) {
+    if (!rawPlan) throw new Error('Invalid plan structure: Plan must be an object');
+
+    let plan = rawPlan;
+    if (Array.isArray(plan)) {
+      plan = { goal: 'Autonomous execution plan', steps: plan };
+    }
+    if (typeof plan !== 'object') throw new Error('Invalid plan structure: Plan must be an object');
+
+    if (plan.error) {
+      const msg = typeof plan.error === 'string' ? plan.error : (plan.error.message || JSON.stringify(plan.error));
+      throw new Error(`AI plan generation error: ${msg}`);
+    }
+
+    if (!plan.steps && !plan.goal) {
+      if (plan.plan && typeof plan.plan === 'object' && !Array.isArray(plan.plan)) plan = plan.plan;
+      else if (plan.data && typeof plan.data === 'object' && !Array.isArray(plan.data)) plan = plan.data;
+      else if (plan.result && typeof plan.result === 'object' && !Array.isArray(plan.result)) plan = plan.result;
+    }
+
+    if (typeof plan.goal !== 'string' || !plan.goal.trim()) {
+      const altGoal = plan.objective || plan.summary || plan.task || plan.title || plan.intent;
+      if (typeof altGoal === 'string' && altGoal.trim()) {
+        plan.goal = altGoal.trim();
       }
+    }
+
+    if (!Array.isArray(plan.steps)) {
+      const altSteps = plan.tasks || plan.actions || plan.items;
+      if (Array.isArray(altSteps)) {
+        plan.steps = altSteps;
+      }
+    }
+    return plan;
+  }
+
+  _validateSingleStep(step, stepIds) {
+    if (!step || typeof step !== 'object' || Array.isArray(step)) {
+      throw new Error('Invalid plan structure: Each step must be an object');
+    }
+    const hasValidFields = typeof step.id === 'string' && step.id.trim() &&
+      typeof step.tool === 'string' && step.tool.trim() &&
+      typeof step.description === 'string' && step.description.trim() &&
+      step.input && typeof step.input === 'object' && !Array.isArray(step.input);
+    if (!hasValidFields) {
+      throw new Error('Invalid plan structure: Step must contain string id, tool, description, and an object input');
+    }
+    if (step.id.length > 200) throw new Error(`Invalid plan: step ID '${step.id}' is too long`);
+    if (step.description.length > this.limits.maxDescriptionChars) {
+      throw new Error(`Invalid plan: step '${step.id}' description exceeds maximum length`);
+    }
+    if (stepIds.has(step.id)) throw new Error(`Invalid plan: Duplicate step ID '${step.id}'`);
+    stepIds.add(step.id);
+
+    const tool = this.toolRegistry.get(step.tool);
+    if (!tool) throw new Error(`Invalid plan: Unknown tool '${step.tool}' requested`);
+    this._validateValue(step.input, `step.${step.id}.input`);
+    try {
+      tool.validateInput(step.input);
+    } catch (err) {
+      throw new Error(`Invalid plan: Step '${step.id}' provided invalid input for tool '${step.tool}': ${err.message}`);
     }
   }
 
   validateAndSanitizePlan(rawPlan) {
-    if (!rawPlan) throw new Error('Invalid plan structure: Plan must be an object');
+    const plan = this._normalizeRawPlan(rawPlan);
 
-    // Handle plans returned as arrays of steps
-    if (Array.isArray(rawPlan)) {
-      rawPlan = { goal: 'Autonomous execution plan', steps: rawPlan };
+    if (typeof plan.goal !== 'string' || !plan.goal.trim()) {
+      throw new Error('Invalid plan structure: Missing or invalid goal string');
+    }
+    if (plan.goal.length > this.limits.maxGoalChars) {
+      throw new Error('Invalid plan: goal exceeds maximum length');
     }
 
-    if (typeof rawPlan !== 'object') throw new Error('Invalid plan structure: Plan must be an object');
-
-    // Surface explicit AI error payloads clearly
-    if (rawPlan.error) {
-      const msg = typeof rawPlan.error === 'string' ? rawPlan.error : (rawPlan.error.message || JSON.stringify(rawPlan.error));
-      throw new Error(`AI plan generation error: ${msg}`);
+    if (!Array.isArray(plan.steps) || plan.steps.length === 0) {
+      throw new Error('Invalid plan structure: Steps must be a non-empty array');
     }
-
-    // Unwrap nested objects if wrapped by LLM (e.g. { plan: { goal, steps } })
-    if (!rawPlan.steps && !rawPlan.goal) {
-      if (rawPlan.plan && typeof rawPlan.plan === 'object' && !Array.isArray(rawPlan.plan)) rawPlan = rawPlan.plan;
-      else if (rawPlan.data && typeof rawPlan.data === 'object' && !Array.isArray(rawPlan.data)) rawPlan = rawPlan.data;
-      else if (rawPlan.result && typeof rawPlan.result === 'object' && !Array.isArray(rawPlan.result)) rawPlan = rawPlan.result;
+    if (plan.steps.length > this.limits.maxSteps) {
+      throw new Error(`Invalid plan: step count exceeds maximum of ${this.limits.maxSteps}`);
     }
-
-    // Fallback goal from objective, summary, task, or title if goal key is missing
-    if (typeof rawPlan.goal !== 'string' || !rawPlan.goal.trim()) {
-      const altGoal = rawPlan.objective || rawPlan.summary || rawPlan.task || rawPlan.title || rawPlan.intent;
-      if (typeof altGoal === 'string' && altGoal.trim()) {
-        rawPlan.goal = altGoal.trim();
-      }
-    }
-
-    if (typeof rawPlan.goal !== 'string' || !rawPlan.goal.trim()) throw new Error('Invalid plan structure: Missing or invalid goal string');
-    if (rawPlan.goal.length > this.limits.maxGoalChars) throw new Error('Invalid plan: goal exceeds maximum length');
-
-    // Fallback steps from tasks, actions, items if steps key is missing
-    if (!Array.isArray(rawPlan.steps)) {
-      const altSteps = rawPlan.tasks || rawPlan.actions || rawPlan.items;
-      if (Array.isArray(altSteps)) {
-        rawPlan.steps = altSteps;
-      }
-    }
-
-    if (!Array.isArray(rawPlan.steps) || rawPlan.steps.length === 0) throw new Error('Invalid plan structure: Steps must be a non-empty array');
-    if (rawPlan.steps.length > this.limits.maxSteps) throw new Error(`Invalid plan: step count exceeds maximum of ${this.limits.maxSteps}`);
 
     const stepIds = new Set();
-    for (const step of rawPlan.steps) {
-      if (!step || typeof step !== 'object' || Array.isArray(step)) throw new Error('Invalid plan structure: Each step must be an object');
-      if (typeof step.id !== 'string' || !step.id.trim() || typeof step.tool !== 'string' || !step.tool.trim() || typeof step.description !== 'string' || !step.description.trim() || !step.input || typeof step.input !== 'object' || Array.isArray(step.input)) throw new Error('Invalid plan structure: Step must contain string id, tool, description, and an object input');
-      if (step.id.length > 200) throw new Error(`Invalid plan: step ID '${step.id}' is too long`);
-      if (step.description.length > this.limits.maxDescriptionChars) throw new Error(`Invalid plan: step '${step.id}' description exceeds maximum length`);
-      if (stepIds.has(step.id)) throw new Error(`Invalid plan: Duplicate step ID '${step.id}'`);
-      stepIds.add(step.id);
-
-      const tool = this.toolRegistry.get(step.tool);
-      if (!tool) throw new Error(`Invalid plan: Unknown tool '${step.tool}' requested`);
-      this._validateValue(step.input, `step.${step.id}.input`);
-      try { tool.validateInput(step.input); } catch (err) { throw new Error(`Invalid plan: Step '${step.id}' provided invalid input for tool '${step.tool}': ${err.message}`); }
+    for (const step of plan.steps) {
+      this._validateSingleStep(step, stepIds);
     }
 
     return {
-      goal: rawPlan.goal.trim(),
-      steps: rawPlan.steps.map((step) => ({ id: step.id.trim(), tool: step.tool.trim(), description: step.description.trim(), input: step.input })),
+      goal: plan.goal.trim(),
+      steps: plan.steps.map((step) => ({ id: step.id.trim(), tool: step.tool.trim(), description: step.description.trim(), input: step.input })),
     };
   }
 }

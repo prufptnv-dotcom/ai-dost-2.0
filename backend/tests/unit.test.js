@@ -2036,7 +2036,7 @@ describe('E2E-driven director fixes (P12.3)', () => {
         onEvent: (e) => h.events.push(e),
       });
       assert.equal(result.status, 'FAILED', 'the overall plan must not report success when required tasks were skipped');
-      assert.equal(result.verification_status, 'PASSED', 'final verification still runs and reports its own result');
+      assert.equal(result.verification_status, 'FAILED', 'incomplete plan must not claim verification PASSED');
       assert.equal(result.errors[0].code, 'INCOMPLETE_PLAN');
       const skipped = h.events.filter((e) => e.type === 'director_task' && e.status === 'SKIPPED');
       assert.equal(skipped.length, 2, 'the failed task AND its blocked dependent are reported SKIPPED');

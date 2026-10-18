@@ -242,8 +242,8 @@ class CapabilityGatekeeper {
    * @returns {object} Machine-readable gate decision contract
    */
   evaluateWithLevel(capabilitiesInput, context = {}, permissionLevel = 'auto') {
-    const level = permissionLevel === 'ask' || permissionLevel === 'turbo'
-      ? permissionLevel
+    const level = (permissionLevel === 'ask' || permissionLevel === 'turbo' || permissionLevel === 'full')
+      ? (permissionLevel === 'full' ? 'turbo' : permissionLevel)
       : 'auto';
     const gate = this.evaluate(capabilitiesInput, context);
 

@@ -10,9 +10,9 @@ class GeminiService {
         this.client = new RobustApiClient({
             baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
             serviceName: 'Gemini',
-            timeout: 15000,
-            maxRetries: 1,
-            maxTotalTime: 20000,
+            timeout: 25000,
+            maxRetries: 0,
+            maxTotalTime: 35000,
             retryDelay: 1000,
             rateLimiter: {
                 maxRequests: 500, // Increased for personal unlimited use
@@ -130,6 +130,9 @@ Here is what you can do and what features are available to the user on this plat
             }
 
             const bodyPayload = { contents };
+            if (mode === 'planner') {
+                bodyPayload.generationConfig = { responseMimeType: 'application/json' };
+            }
             if (systemPrompt) {
                 bodyPayload.systemInstruction = { parts: [{ text: withQualityStandard(systemPrompt) }] };
             }
@@ -139,7 +142,16 @@ Here is what you can do and what features are available to the user on this plat
             // "not found") — every cascade wasted two dead hops on them.
             // Google's own 404 message points to gemini-3.8-flash, which is
             // live (verified: 429-rate-limited when quota spent, not 404).
-            const models = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3.8-flash'];
+            const models = [
+                'gemini-3.1-flash-lite',
+                'gemini-flash-lite-latest',
+                'gemini-3.5-flash-lite',
+                'gemini-3.5-flash',
+                'gemini-3.6-flash',
+                'gemini-2.5-flash',
+                'gemini-flash-latest',
+                'gemini-3.8-flash'
+            ];
             let lastError = null;
 
             for (const model of models) {
@@ -159,12 +171,12 @@ Here is what you can do and what features are available to the user on this plat
                     }
                 } catch (error) {
                     lastError = error;
-                    if (error.status === 429) {
-                        logger.warn(`⚠️ Gemini model ${model} rate limited, trying next model...`);
+                    if (error.status === 429 || error.status === 503 || error.status === 500 || error.status === 502 || error.status === 408) {
+                        logger.warn(`⚠️ Gemini model ${model} temporarily unavailable (${error.status}), trying next model...`);
                         continue;
                     }
                     if (error.status === 404) {
-                        logger.warn(`⚠️ Gemini model ${model} not available, trying next model...`);
+                        logger.warn(`⚠️ Gemini model ${model} not available (404), trying next model...`);
                         continue;
                     }
                     // Non-retryable error — break and report

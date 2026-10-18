@@ -14,10 +14,28 @@ DATASET_FILE = "benchmark_300_dataset.json"
 RESULTS_FILE = "benchmark_300_results.json"
 SUMMARY_REPORT = "benchmark_300_summary_sheet.md"
 
-def evaluate_response(item, reply, latency):
+def check_category_penalties(cat, prompt, reply, has_code):
+    notes = []
+    penalty = 0
+    prompt_lower = prompt.lower()
+    code_prompts = ("implement", "write a python", "write a javascript", "function")
+
+    if ("Algorithm" in cat or "Web Development" in cat) and any(w in prompt_lower for w in code_prompts):
+        if not has_code:
+            penalty += 3
+            notes.append("Missing code block")
+        else:
+            notes.append("Code provided")
+
+    if "Database" in cat and "write sql" in prompt_lower and not ("select" in reply.lower() or "with" in reply.lower()):
+        penalty += 2
+        notes.append("Missing SQL query")
+
+    return penalty, notes
+
+def evaluate_response(item, reply):
     prompt = item["prompt"]
     cat = item["cat"]
-    diff = item["diff"]
 
     refusal_patterns = [
         r"I'm sorry, but I can't assist",
@@ -42,17 +60,9 @@ def evaluate_response(item, reply, latency):
     elif length > 250:
         notes.append("Detailed response")
 
-    if "Algorithm" in cat or "Web Development" in cat:
-        if "implement" in prompt.lower() or "write a python" in prompt.lower() or "write a javascript" in prompt.lower() or "function" in prompt.lower():
-            if not has_code:
-                score -= 3
-                notes.append("Missing code block")
-            else:
-                notes.append("Code provided")
-
-    if "Database" in cat and "write sql" in prompt.lower() and not ("select" in reply.lower() or "with" in reply.lower()):
-        score -= 2
-        notes.append("Missing SQL query")
+    penalty, cat_notes = check_category_penalties(cat, prompt, reply, has_code)
+    score -= penalty
+    notes.extend(cat_notes)
 
     score = max(1, min(10, score))
     pass_fail = "PASS" if score >= 6 else "FAIL"
@@ -66,17 +76,9 @@ def evaluate_response(item, reply, latency):
         "eval_note": eval_note
     }
 
-def run_benchmark():
-    if not os.path.exists(DATASET_FILE):
-        print(f"Error: {DATASET_FILE} not found!")
-        sys.exit(1)
-
-    with open(DATASET_FILE, "r", encoding="utf-8") as f:
-        questions = json.load(f)
-
+def load_existing_results():
     results = []
     done_qids = set()
-
     if os.path.exists(RESULTS_FILE):
         try:
             with open(RESULTS_FILE, "r", encoding="utf-8") as f:
@@ -87,6 +89,85 @@ def run_benchmark():
                     print(f"Resuming benchmark: loaded {len(done_qids)} previously completed questions.")
         except Exception as e:
             print(f"Could not load previous results: {e}")
+    return results, done_qids
+
+def send_chat_prompt(prompt):
+    t0 = time.time()
+    success = False
+    reply = ""
+    last_err = ""
+    for _ in range(2):
+        try:
+            resp = requests.post(API_URL, json={"prompt": prompt, "max_tokens": 700}, timeout=90)
+            if resp.status_code == 200:
+                data = resp.json()
+                reply = data.get("response", "").strip()
+                success = True
+                break
+            last_err = f"HTTP {resp.status_code}: {resp.text[:80]}"
+            time.sleep(1)
+        except Exception as e:
+            last_err = str(e)
+            time.sleep(1)
+    dt = time.time() - t0
+    return success, reply, last_err, dt
+
+def create_result_record(item, success, reply, last_err, dt):
+    qid = item["qid"]
+    cat = item["cat"]
+    diff = item["diff"]
+    prompt = item["prompt"]
+
+    if success:
+        eval_data = evaluate_response(item, reply)
+        tokens = eval_data["tokens_est"]
+        tps = round(tokens / dt, 1) if dt > 0 else 0
+        score = eval_data["score"]
+        pf = eval_data["pass_fail"]
+        note = eval_data["eval_note"]
+
+        record = {
+            "qid": qid,
+            "cat": cat,
+            "diff": diff,
+            "prompt": prompt,
+            "model_answer": reply,
+            "latency_s": round(dt, 2),
+            "generated_tokens": tokens,
+            "tokens_per_sec": tps,
+            "score": score,
+            "pass_fail": pf,
+            "evaluator_note": note,
+            "success": True
+        }
+        print(f"-> {pf} ({score}/10, {dt:.1f}s, {tokens} tok, {tps} tok/s) [{note}]", flush=True)
+    else:
+        record = {
+            "qid": qid,
+            "cat": cat,
+            "diff": diff,
+            "prompt": prompt,
+            "error": last_err,
+            "latency_s": round(dt, 2),
+            "generated_tokens": 0,
+            "tokens_per_sec": 0,
+            "score": 0,
+            "pass_fail": "FAIL",
+            "evaluator_note": f"Error: {last_err}",
+            "success": False
+        }
+        print(f"-> FAIL ({last_err})", flush=True)
+    return record
+
+def run_benchmark():
+    if not os.path.exists(DATASET_FILE):
+        print(f"Error: {DATASET_FILE} not found!")
+        sys.exit(1)
+
+    with open(DATASET_FILE, "r", encoding="utf-8") as f:
+        questions = json.load(f)
+
+    results, done_qids = load_existing_results()
 
     print("=" * 75)
     print("VKP-Omni-2B: Real Benchmark Test Set (300 Blind Evaluation Questions)")
@@ -102,77 +183,15 @@ def run_benchmark():
             continue
 
         prompt = item["prompt"]
-        cat = item["cat"]
         diff = item["diff"]
-
         print(f"[{idx}/300] [{qid} | {diff}] {prompt[:50]}...", end=" ", flush=True)
 
-        t0 = time.time()
-        success = False
-        reply = ""
-        last_err = ""
-
-        for attempt in range(2):
-            try:
-                resp = requests.post(API_URL, json={"prompt": prompt, "max_tokens": 700}, timeout=90)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    reply = data.get("response", "").strip()
-                    success = True
-                    break
-                else:
-                    last_err = f"HTTP {resp.status_code}: {resp.text[:80]}"
-                    time.sleep(1)
-            except Exception as e:
-                last_err = str(e)
-                time.sleep(1)
-
-        dt = time.time() - t0
-
-        if success:
-            eval_data = evaluate_response(item, reply, dt)
-            tokens = eval_data["tokens_est"]
-            tps = round(tokens / dt, 1) if dt > 0 else 0
-            score = eval_data["score"]
-            pf = eval_data["pass_fail"]
-            note = eval_data["eval_note"]
-
-            record = {
-                "qid": qid,
-                "cat": cat,
-                "diff": diff,
-                "prompt": prompt,
-                "model_answer": reply,
-                "latency_s": round(dt, 2),
-                "generated_tokens": tokens,
-                "tokens_per_sec": tps,
-                "score": score,
-                "pass_fail": pf,
-                "evaluator_note": note,
-                "success": True
-            }
-            print(f"-> {pf} ({score}/10, {dt:.1f}s, {tokens} tok, {tps} tok/s) [{note}]", flush=True)
-        else:
-            record = {
-                "qid": qid,
-                "cat": cat,
-                "diff": diff,
-                "prompt": prompt,
-                "error": last_err,
-                "latency_s": round(dt, 2),
-                "generated_tokens": 0,
-                "tokens_per_sec": 0,
-                "score": 0,
-                "pass_fail": "FAIL",
-                "evaluator_note": f"Error: {last_err}",
-                "success": False
-            }
-            print(f"-> FAIL ({last_err})", flush=True)
+        success, reply, last_err, dt = send_chat_prompt(prompt)
+        record = create_result_record(item, success, reply, last_err, dt)
 
         results.append(record)
         done_qids.add(qid)
 
-        # Save incrementally
         with open(RESULTS_FILE, "w", encoding="utf-8") as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
 

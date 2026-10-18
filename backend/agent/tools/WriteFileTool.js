@@ -63,26 +63,23 @@ class WriteFileTool extends Tool {
     // may enable overwrite; full replacement of existing files always goes
     // through apply_diff.
     if (fs.existsSync(resolvedPath)) {
-      // P12.8 (E2E run #14): the model READ the file and still sent an
-      // apply_diff SEARCH from its imagination (its own earlier write content,
-      // search == replace no-op!) — "read_file it first" alone is not enough
-      // for a 7b model. Embed the REAL bytes in the rejection (same P12.5
-      // pattern that fixed the SEARCH-not-found ×7 loop) so the repair planner
-      // copies SEARCH verbatim instead of guessing.
-      let currentExcerpt = '';
+      let current = '';
       try {
-        const current = fs.readFileSync(resolvedPath, 'utf-8');
+        current = fs.readFileSync(resolvedPath, 'utf-8');
+      } catch (_) {}
+      if (current.length > 0) {
+        let currentExcerpt = '';
         const MAXC = 8000;
         currentExcerpt = current.length > MAXC
           ? `${current.slice(0, 6000)}\n… [truncated — file is ${current.length} chars — use a SMALLER unique SEARCH block] …\n${current.slice(-400)}`
           : current;
-      } catch (_) {}
-      return {
-        success: false,
-        code: 'WRITE_FORBIDDEN_ON_EXISTING',
-        error: `Full-file replacement is forbidden for existing project files. Use apply_diff with a validated SEARCH/REPLACE patch on ${relativePath}. read_file it first: SEARCH must be text that is ACTUALLY in the file (for a whole-file rewrite, SEARCH = the file's entire current content), REPLACE = your new text.` +
-          (currentExcerpt ? `\n--- CURRENT FILE CONTENT ---\n${currentExcerpt}\n--- END FILE CONTENT ---` : '')
-      };
+        return {
+          success: false,
+          code: 'WRITE_FORBIDDEN_ON_EXISTING',
+          error: `Full-file replacement is forbidden for existing project files. Use apply_diff with a validated SEARCH/REPLACE patch on ${relativePath}. read_file it first: SEARCH must be text that is ACTUALLY in the file (for a whole-file rewrite, SEARCH = the file's entire current content), REPLACE = your new text.` +
+            (currentExcerpt ? `\n--- CURRENT FILE CONTENT ---\n${currentExcerpt}\n--- END FILE CONTENT ---` : '')
+        };
+      }
     }
 
     // P12.3: accept single-unescape of escaped model blobs (guard-normalized);

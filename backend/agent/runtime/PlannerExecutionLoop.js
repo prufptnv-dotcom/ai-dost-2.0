@@ -80,10 +80,10 @@ class PlannerExecutionLoop {
     // P12.3: same options→context wiring as ChatPlannerExecutionLoop (signature
     // parity) — approvalState is a LIVE proxy so ExecutionController's token
     // rotation crosses worker contexts instead of dying on the first one.
-    if (options && typeof options.onEvent === 'function') context.onEvent = options.onEvent;
-    if (options && options.permissionLevel) context.permissionLevel = options.permissionLevel;
-    if (options && options.preferredModel && options.preferredModel !== 'auto') context.preferredModel = options.preferredModel;
-    if (options && options.approvalState && typeof options.approvalState === 'object') {
+    if (typeof options?.onEvent === 'function') context.onEvent = options.onEvent;
+    if (options?.permissionLevel) context.permissionLevel = options.permissionLevel;
+    if (options?.preferredModel && options.preferredModel !== 'auto') context.preferredModel = options.preferredModel;
+    if (options?.approvalState && typeof options.approvalState === 'object') {
       delete context.approvalToken;
       Object.defineProperty(context, 'approvalToken', {
         configurable: true,
@@ -91,7 +91,7 @@ class PlannerExecutionLoop {
         get() { return options.approvalState.token; },
         set(value) { options.approvalState.token = value; },
       });
-    } else if (options && options.approvalToken) {
+    } else if (options?.approvalToken) {
       context.approvalToken = options.approvalToken;
     }
     const taskId = this.executionController.generateId('task');
@@ -123,7 +123,9 @@ class PlannerExecutionLoop {
     return { ...result, taskId, runId };
   }
 
-  async executeQueueWithCancellation(runId, taskId, context, stepQueue, repairAttempts, goal, maxRepairs, isCanceled) {
+  async executeQueueWithCancellation(runId, taskId, context, stepQueue, repairAttempts, goal, ...rest) {
+    const maxRepairs = typeof rest[0] === 'number' ? rest[0] : (typeof rest[0]?.maxRepairs === 'number' ? rest[0].maxRepairs : 3);
+    const isCanceled = typeof rest[1] === 'function' ? rest[1] : (typeof rest[0]?.isCanceled === 'function' ? rest[0].isCanceled : () => false);
     const cancelGuard = () => {
       if (isCanceled()) {
         throw Object.assign(new Error('Chat task canceled by user'), { code: 'TASK_CANCELED' });
@@ -227,6 +229,27 @@ await this.executionController.recordObservation(step.id, 'TOOL_OUTPUT', output)
       // the run with the real reason; cancellation still maps to CANCELLED.
       let verificationError = null;
       try {
+        if (context?.workspaceManager && typeof context.workspaceManager.resolvePath === 'function') {
+          try {
+            const root = context.workspaceManager.resolvePath(projectId, '', userId);
+            const fs = require('fs');
+            if (fs.existsSync(root)) {
+              const diskFiles = [];
+              const walk = (dir, rel = '') => {
+                const entries = fs.readdirSync(dir, { withFileTypes: true });
+                for (const e of entries) {
+                  if (e.name.startsWith('.') || e.name === 'node_modules') continue;
+                  const full = require('path').join(dir, e.name);
+                  const subRel = rel ? `${rel}/${e.name}` : e.name;
+                  if (e.isDirectory()) walk(full, subRel);
+                  else diskFiles.push(subRel);
+                }
+              };
+              walk(root);
+              context.existingFiles = diskFiles;
+            }
+          } catch (_) {}
+        }
         const verifyPlan = await this.taskPlanner.generateVerificationPlan(goal, context);
         if (verifyPlan && Array.isArray(verifyPlan.steps) && verifyPlan.steps.length > 0) {
           for (const vStep of verifyPlan.steps) {
@@ -240,7 +263,7 @@ await this.executionController.recordObservation(step.id, 'TOOL_OUTPUT', output)
               cancelGuard();
               await this.executionController.recordObservation(step.id, 'VERIFICATION_OUTPUT', output);
               if (output && typeof output === 'object' && output.success === false) {
-                const reason = `${vStep.tool} did not confirm: ${output.error || output.code || 'verification evidence check failed'}`;
+                const reason = `${vStep.tool} did not confirm: ${output.error || output.message || output.code || 'verification evidence check failed'}`;
                 await this.executionController.recordVerificationResult(step.id, 'FAILED', reason, output).catch(() => {});
                 await this.executionController.completeStep(step.id, 'FAILED', null, reason).catch(() => {});
                 verificationError = reason;

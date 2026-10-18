@@ -1,13 +1,31 @@
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
+const path = require('node:path');
 const OpenAIService = require('../../services/openaiService');
 const AgentCascadeAiService = require('./AgentCascadeAiService');
 const AgentCoordinator = require('./AgentCoordinator');
 const { ResultValidator } = require('./resultValidator');
 const logger = require('../../logger');
-const { analyzeCodeGenerationRequest, formatCodeGenerationStrategy } = require('./codeGenerationStrategy');
+const { validateCrossFileContracts, checkTaskFileCollisions } = require('./crossFileContractValidator');
+const {
+  analyzeCodeGenerationRequest,
+  formatCodeGenerationStrategy,
+  classifyRequest,
+  deriveAlgorithmTaskContract,
+  buildAlgorithmGuidanceBlock,
+  deriveApplicationTaskContract,
+  buildApplicationGuidanceBlock,
+  validateTaskPlanSchema
+} = require('./codeGenerationStrategy');
+const { resolveCanonicalCase, CANONICAL_CASE_IDS } = require('../../quality-evaluation/canonicalCaseResolver');
+const { AlgorithmVerifier } = require('../../quality-evaluation/algorithmVerifier');
+const { GeneratedAppQualityGate, STATUS } = require('../../quality-evaluation/generatedAppQualityGate');
+const { TrustedExecutionService } = require('../../quality-evaluation/trustedExecutionService');
+const { getAcceptanceFlows } = require('../../quality-evaluation/canonicalAcceptanceFlows');
+const { createWorkspaceSnapshot } = require('../../quality-evaluation/workspaceManifest');
+const { inspectWorkspace, buildPromptDirective } = require('../../services/workspaceFrameworkIntelligence');
+const { reviewProjectFiles } = require('../../services/codeReviewEngine');
 
 // The planner decides the actual count. This is only a defensive ceiling against
 // malformed or adversarial model output, not a workflow rule.
@@ -32,7 +50,7 @@ function listExistingFilesBounded(root, max = 100) {
   const walk = (dir, depth) => {
     if (out.length >= max || depth > 6) return;
     let entries = [];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { /* Ignored: unreadable directory */ return; }
     for (const e of entries) {
       if (skip.has(e.name)) continue;
       const full = path.join(dir, e.name);
@@ -44,7 +62,7 @@ function listExistingFilesBounded(root, max = 100) {
     }
   };
   walk(root, 0);
-  return out.sort();
+  return out.sort((a, b) => a.localeCompare(b));
 }
 
 // P12.9 (E2E run #15): knowing the file LIST was not enough — the specialist
@@ -53,29 +71,146 @@ function listExistingFilesBounded(root, max = 100) {
 // compact JSON). Give the planner the REAL bytes of the key small files so
 // SEARCH is copied verbatim, not recalled. Bounded: priority names first,
 // ≤6 files, ≤2600 chars each (truncated marker beyond), ≤9000 chars total.
-function readKeyFileContents(diskPath, files) {
+
+function collectWorkspaceFilesBounded(rootDir) {
+  if (!rootDir || !fs.existsSync(rootDir)) return {};
+  try {
+    const snapshot = createWorkspaceSnapshot(rootDir);
+    return snapshot.files;
+  } catch (err) {
+    if (err?.message?.startsWith('MANIFEST_LIMIT_EXCEEDED')) {
+      throw err;
+    }
+    return {};
+  }
+}
+
+function extractAffectedFilesFromContractErrors(errors = []) {
+  const affected = new Set();
+  for (const err of errors) {
+    const fileMatches = String(err).match(/['"]([^'"\s]+\.[a-zA-Z0-9]+)['"]/g);
+    if (fileMatches) {
+      for (const m of fileMatches) {
+        const clean = m.replace(/['"]/g, '').trim();
+        if (clean && !clean.startsWith('http') && !clean.includes(' ') && clean.includes('.')) {
+          affected.add(clean);
+        }
+      }
+    }
+  }
+  return Array.from(affected);
+}
+
+function detectSupportedAlgorithmOracle(request = '', files = {}) {
+  const text = String(request).toLowerCase();
+  const oracleMap = [
+    { name: 'two_sum', pattern: /\b(two\s*sum|pair\s*sum)\b/i },
+    { name: 'hash_map', pattern: /\b(hash\s*map|hashmap|myhashmap)\b/i },
+    { name: 'binary_search', pattern: /\b(binary\s*search)\b/i },
+    { name: 'valid_parentheses', pattern: /\b(valid\s*parenthes[ei]s|balanced\s*bracket|isvalidparentheses)\b/i },
+    { name: 'linked_list_cycle', pattern: /\b(linked\s*list\s*cycle|detect\s*cycle|hascycle)\b/i },
+    { name: 'bst_validation', pattern: /\b(bst\s*validation|validate\s*bst|isvalidbst)\b/i },
+    { name: 'min_heap', pattern: /\b(min\s*heap|priority\s*queue)\b/i },
+    { name: 'lru_cache', pattern: /\b(lru\s*cache|least\s*recently\s*used)\b/i },
+    { name: 'merge_intervals', pattern: /\b(merge\s*intervals?)\b/i },
+    { name: 'graph_bfs', pattern: /\b(graph\s*bfs|shortest\s*path.*bfs|breadth\s*first)\b/i },
+    { name: 'climbing_stairs', pattern: /\b(climbing\s*stairs|climb\s*stairs)\b/i },
+    { name: 'coin_change', pattern: /\b(coin\s*change|min\s*coins)\b/i },
+    { name: 'trie', pattern: /\b(trie|prefix\s*tree)\b/i },
+    { name: 'topological_sort', pattern: /\b(topological\s*sort|topo\s*sort|course\s*schedule)\b/i },
+    { name: 'union_find', pattern: /\b(union\s*find|disjoint\s*set|\bdsu\b)\b/i },
+    { name: 'string_matching', pattern: /\b(kmp|string\s*matching|strstr)\b/i },
+    { name: 'subsets', pattern: /\b(subset|subsets|power\s*set)\b/i },
+    { name: 'fenwick_tree', pattern: /\b(fenwick|binary\s*indexed\s*tree)\b/i },
+    { name: 'bounded_queue', pattern: /\b(bounded\s*queue|task\s*queue)\b/i },
+    { name: 'gcd_lcm', pattern: /\b(gcd|greatest\s*common\s*divisor|lcm)\b/i }
+  ];
+
+  for (const item of oracleMap) {
+    if (item.pattern.test(text)) return item.name;
+  }
+  for (const [filePath, content] of Object.entries(files)) {
+    for (const item of oracleMap) {
+      if (filePath.toLowerCase().includes(item.name) || item.pattern.test(content)) {
+        return item.name;
+      }
+    }
+  }
+  return null;
+}
+
+function extractCandidateCode(files = {}, oracleName = null) {
+  const keys = Object.keys(files);
+  const prioritized = keys.slice().sort((a, b) => {
+    const aLower = a.toLowerCase();
+    const bLower = b.toLowerCase();
+    if (aLower.includes('solution') && !bLower.includes('solution')) return -1;
+    if (bLower.includes('solution') && !aLower.includes('solution')) return 1;
+    if (oracleName && aLower.includes(oracleName)) return -1;
+    if (oracleName && bLower.includes(oracleName)) return 1;
+    return 0;
+  });
+
+  for (const key of prioritized) {
+    if (/\.(jsx?|tsx?|mjs|cjs)$/i.test(key) && !key.includes('.test.') && !key.includes('.spec.')) {
+      return files[key];
+    }
+  }
+  for (const [key, content] of Object.entries(files)) {
+    if (/\.(jsx?|tsx?|mjs|cjs)$/i.test(key)) return content;
+  }
+  return '';
+}
+
+function extractCandidateFilePath(files = {}, oracleName = null) {
+  const keys = Object.keys(files);
+  const prioritized = keys.slice().sort((a, b) => {
+    const aLower = a.toLowerCase();
+    const bLower = b.toLowerCase();
+    if (aLower.includes('solution') && !bLower.includes('solution')) return -1;
+    if (bLower.includes('solution') && !aLower.includes('solution')) return 1;
+    if (oracleName && aLower.includes(oracleName)) return -1;
+    if (oracleName && bLower.includes(oracleName)) return 1;
+    return 0;
+  });
+
+  for (const key of prioritized) {
+    if (/\.(jsx?|tsx?|mjs|cjs|py)$/i.test(key) && !key.includes('.test.') && !key.includes('.spec.')) {
+      return key;
+    }
+  }
+  for (const key of Object.keys(files)) {
+    if (/\.(jsx?|tsx?|mjs|cjs|py)$/i.test(key)) return key;
+  }
+  return keys[0] || null;
+}
+
+function readKeyFileContents(diskPath, files, priorityFiles = []) {
   const PRIORITY = [
+    ...(Array.isArray(priorityFiles) ? priorityFiles : []),
     'package.json', 'frontend/package.json', 'web/package.json',
     'src/styles/global.css', 'src/index.css', 'src/App.jsx',
     'index.html', 'vite.config.js', 'next.config.js', 'next.config.mjs',
     'astro.config.mjs', 'nuxt.config.ts', 'svelte.config.js', 'src/main.jsx'
   ];
   const pick = [];
-  for (const p of PRIORITY) if (files.includes(p) && pick.length < 7) pick.push(p);
+  for (const p of PRIORITY) {
+    if (files.includes(p) && !pick.includes(p) && pick.length < 10) pick.push(p);
+  }
   for (const p of files) {
-    if (pick.length >= 7) break;
+    if (pick.length >= 10) break;
     if (!pick.includes(p) && /(^|\/)(package\.json|next\.config\.[^/]+|astro\.config\.[^/]+|nuxt\.config\.[^/]+|svelte\.config\.[^/]+)$/.test(p)) pick.push(p);
   }
   const out = {};
-  let budget = 6000;
+  let budget = 8000;
   for (const p of pick) {
     if (budget <= 0) break;
     try {
       const full = path.join(diskPath, p);
       const st = fs.statSync(full);
-      if (!st.isFile() || st.size > 60000) continue;
+      if (!st.isFile() || st.size > 80000) continue;
       let c = fs.readFileSync(full, 'utf-8');
-      if (c.length > 1500) c = `${c.slice(0, 1300)}\n… [truncated — ${c.length} chars total — copy the REAL lines you need as SEARCH] …`;
+      if (c.length > 2000) c = `${c.slice(0, 1800)}\n… [truncated — ${c.length} chars total — copy the REAL lines you need as SEARCH] …`;
       out[p] = c;
       budget -= c.length;
     } catch (_) {}
@@ -112,14 +247,18 @@ Rules:
   - Map relevant AC-## acceptance checks to a dedicated verification/testing task or explicit output evidence. Do not state that checks passed before execution evidence exists.
   - For application UI tasks, include the specified design-system, responsive-width, accessibility, and functional-state requirements in implementation outputs.
   - Treat suggested pages/archetypes as optional guidance; only explicit user requirements are mandatory.
-  - If a requirement is ambiguous or impossible with the available tools/configuration, state that as a blocker in the task expectedOutput instead of silently substituting a mock.`;
+  - If a requirement is ambiguous or impossible with the available tools/configuration, state that as a blocker in the task expectedOutput instead of silently substituting a mock.
+- PROFESSIONAL APPLICATION ARCHITECTURE & FUNCTIONAL QUALITY:
+  - Plan modular component boundaries (e.g. Header, Views, Modals, Storage) instead of monolithic single-file dumps.
+  - Require real interactive handlers on all controls (buttons, inputs, filters, modals) with state mutation.
+  - Require client persistence (localStorage) with seed data fallback so user changes persist across page reloads.
+  - Enforce complete view states (loading skeletons, empty states with call-to-actions, error recovery banners).`;
 
 function escapeControlCharsInStrings(str) {
   let inStr = false;
   let esc = false;
   let out = '';
-  for (let i = 0; i < str.length; i++) {
-    const c = str[i];
+  for (const c of str) {
     if (c === '"' && !esc) {
       inStr = !inStr;
       out += c;
@@ -130,13 +269,13 @@ function escapeControlCharsInStrings(str) {
       } else {
         esc = false;
         if (c === '\n') {
-          out += '\n';
+          out += String.raw`\n`;
         } else if (c === '\r') {
           // ignore
         } else if (c === '\t') {
-          out += '\\t';
-        } else if (c.charCodeAt(0) < 32) {
-          out += '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0');
+          out += String.raw`\t`;
+        } else if (c.codePointAt(0) < 32) {
+          out += String.raw`\u` + c.codePointAt(0).toString(16).padStart(4, '0');
         } else {
           out += c;
         }
@@ -156,12 +295,16 @@ function extractJson(text) {
   source = source.trim();
   try {
     return JSON.parse(source);
-  } catch (_) {}
+  } catch (_) {
+    // Ignored: try escaping control characters
+  }
 
   const sanitized = escapeControlCharsInStrings(source);
   try {
     return JSON.parse(sanitized);
-  } catch (_) {}
+  } catch (_) {
+    // Ignored: try delimited slices
+  }
 
   const start = sanitized.indexOf('{');
   const end = sanitized.lastIndexOf('}');
@@ -172,7 +315,9 @@ function extractJson(text) {
     } catch (_) {
       try {
         return JSON.parse(slice.replace(/,\s*([}\]])/g, '$1'));
-      } catch (_) {}
+      } catch (_) {
+        // Ignored: fall through to throw Error
+      }
     }
   }
   throw new Error('Director planner returned invalid JSON');
@@ -180,33 +325,64 @@ function extractJson(text) {
 
 function fallbackPlan(request) {
   const strategy = analyzeCodeGenerationRequest(request);
-  const text = String(request || '').toLowerCase();
-  if (strategy.intent.algorithmic && !strategy.intent.ui && !strategy.intent.fullStack) {
-    return {
-      summary: 'Algorithm-focused fallback execution',
-      tasks: [
-        {
-          id: 'task-1',
-          specialty: 'integration',
-          objective: `Implement the requested algorithm for: ${request}. ${strategy.algorithmRules.join(' ')}`,
-          dependsOn: [],
-          expectedOutput: 'Correct implementation with stated assumptions, complexity analysis, and edge-case handling.'
-        },
-        {
-          id: 'task-2',
-          specialty: 'testing',
-          objective: `Create and run focused tests for the algorithm requested here: ${request}. Cover normal, boundary, empty, duplicate, and adversarial inputs where applicable; compare against a simple independent oracle for small inputs when feasible.`,
-          dependsOn: ['task-1'],
-          expectedOutput: 'Repeatable test evidence and any remaining correctness failures.'
-        }
-      ]
-    };
+  const classification = classifyRequest(request);
+  const text = String(request || '');
+
+  if (classification.category === 'ALGORITHMIC_PROBLEM' || (strategy.intent.algorithmic && !strategy.intent.ui && !strategy.intent.fullStack)) {
+    const contract = deriveAlgorithmTaskContract(request, classification);
+    if (contract?.tasks?.length) {
+      return {
+        summary: 'Algorithm-focused fallback execution',
+        contract,
+        tasks: contract.tasks.map((t) => ({
+          id: t.id,
+          specialty: t.specialty || 'integration',
+          role: SPECIALTY_TO_ROLE[t.specialty] || 'CODER',
+          objective: t.objective,
+          dependsOn: t.dependsOn || [],
+          expectedOutput: t.expectedOutput || 'Evidence-backed verified implementation.',
+          requirements: t.requirements || []
+        }))
+      };
+    }
   }
-  const complex = strategy.intent.fullStack || strategy.intent.securitySensitive || /\b(full|complete|entire|platform|app|application|website|dashboard|integrat|database|backend|frontend|deploy|production|security)\b/.test(text) || /पूरा ऐप|ऐप बनाओ|वेबसाइट बनाओ|डैशबोर्ड बनाओ|फुल.?स्टैक|प्रोजेक्ट बनाओ|बैक.?एंड|डेटाबेस|लॉगिन सिस्टम/i.test(String(request || ''));
+  const complex = strategy.intent.fullStack || strategy.intent.securitySensitive || /\b(full|complete|entire|platform|app|application|website|dashboard|integrat|database|backend|frontend|deploy|production|security)\b/.test(text) || /पूरा ऐप|ऐप बनाओ|वेबसाइट बनाओ|डैशबोर्ड बनाओ|फुल.?स्टैक|प्रोजेक्ट बनाओ|बैक.?एंड|डेटाबेस|लॉगिन सिस्टम/i.test(text);
   if (!complex) return {
     summary: 'Single-task adaptive execution',
     tasks: [{ id: 'task-1', specialty: strategy.intent.ui ? 'frontend' : 'integration', objective: `Implement working code for: ${request}`, dependsOn: [], expectedOutput: 'Working requested outcome with verification evidence.' }]
   };
+
+  if (classification.category === 'APPLICATION_FEATURE' || strategy.intent.ui || strategy.intent.fullStack) {
+    const appContract = deriveApplicationTaskContract(request, classification);
+    return {
+      summary: 'Adaptive multi-specialist execution',
+      contract: appContract,
+      tasks: [
+        {
+          id: 'task-1',
+          specialty: appContract.tasks[0]?.specialty || (strategy.intent.ui ? 'frontend' : 'backend'),
+          objective: appContract.tasks[0]?.objective || `Implement modular component architecture, design system tokens, and storage persistence for: ${request}`,
+          dependsOn: [],
+          expectedOutput: appContract.tasks[0]?.expectedOutput || 'Clean modular component structure, design system styles, and storage persistence service.'
+        },
+        {
+          id: 'task-2',
+          specialty: 'integration',
+          objective: appContract.tasks[1]?.objective || `Integrate interactive views, reactive state handlers, search/filter controls, and modals for: ${request}`,
+          dependsOn: ['task-1'],
+          expectedOutput: appContract.tasks[1]?.expectedOutput || 'Fully interactive application with active handlers, modals, search/filtering, and complete states.'
+        },
+        {
+          id: 'task-3',
+          specialty: 'testing',
+          objective: appContract.tasks[2]?.objective || `Test the completed implementation for: ${request}`,
+          dependsOn: ['task-2'],
+          expectedOutput: appContract.tasks[2]?.expectedOutput || 'Test/build/runtime evidence and actionable failures.'
+        }
+      ]
+    };
+  }
+
   return {
     summary: 'Adaptive multi-specialist execution',
     tasks: [
@@ -216,6 +392,7 @@ function fallbackPlan(request) {
     ]
   };
 }
+
 function hasDependencyCycle(tasks) {
   const graph = new Map(tasks.map((task) => [task.id, task.dependsOn]));
   const visiting = new Set();
@@ -258,7 +435,9 @@ function normalizePlan(raw, request) {
       role: ALLOWED_ROLES.has(role) ? role : 'CODER',
       objective: taskObjective.slice(0, 12000),
       dependsOn: Array.isArray(task.dependsOn) ? [...new Set(task.dependsOn.map(String).map((dep) => dep.trim()).filter(Boolean))] : [],
-      expectedOutput: String(task.expectedOutput || 'Evidence-backed completion of the objective.').trim().slice(0, 4000)
+      expectedOutput: String(task.expectedOutput || 'Evidence-backed completion of the objective.').trim().slice(0, 4000),
+      ...(Array.isArray(task.requirements) ? { requirements: task.requirements } : {}),
+      ...(Array.isArray(task.files) ? { files: task.files } : {})
     });
     ids.add(id);
   }
@@ -267,11 +446,18 @@ function normalizePlan(raw, request) {
     task.dependsOn = task.dependsOn.filter((dep) => validIds.has(dep) && dep !== task.id);
   }
   if (!tasks.length || hasDependencyCycle(tasks)) return fallbackPlan(request);
+
+  const schemaValidation = validateTaskPlanSchema(tasks);
+  if (!schemaValidation.valid) {
+    logger.warn(`[CopilotDirector] Task plan schema invalid (${schemaValidation.errors.join('; ')}). Falling back to safe sequential plan.`);
+    return fallbackPlan(request);
+  }
+
   return { summary: String(input.summary || 'Adaptive Copilot Director plan').slice(0, 2000), tasks };
 }
 
 class CopilotDirector {
-  constructor({ db, projectAuthorization, workspaceManager, toolRegistry, plannerExecutionLoop, contextAssembler, taskPlanner, executionController, agentTaskDao, agentRunDao, aiService = AgentCascadeAiService, coordinator = null } = {}) {
+  constructor({ db, projectAuthorization, workspaceManager, toolRegistry, plannerExecutionLoop, contextAssembler, taskPlanner, executionController, agentTaskDao, agentRunDao, aiService = AgentCascadeAiService, coordinator = null, algorithmVerifier = null, qualityGate = null, trustedRunner = null } = {}) {
     this.db = db;
     this.projectAuthorization = projectAuthorization;
     this.workspaceManager = workspaceManager;
@@ -284,48 +470,88 @@ class CopilotDirector {
     this.agentRunDao = agentRunDao;
     this.aiService = aiService;
     this.coordinator = coordinator || new AgentCoordinator({ db, projectAuthService: projectAuthorization, workspaceManager, toolRegistry, plannerExecutionLoop, contextAssembler, executionController, agentTaskDao, agentRunDao });
+    this.algorithmVerifier = algorithmVerifier || new AlgorithmVerifier();
+    this.qualityGate = qualityGate || new GeneratedAppQualityGate();
+    this.trustedRunner = trustedRunner || new TrustedExecutionService();
   }
 
   async createPlan(request, context = {}, preferredModel = 'auto') {
     if (!String(request || '').trim()) throw new Error('Director request is required');
     try {
+      let workspaceDirective = '';
+      if (context.projectId && this.workspaceManager) {
+        try {
+          const meta = this.workspaceManager.getWorkspaceMetadata(context.projectId, context.userId || 'system');
+          if (meta?.diskPath && fs.existsSync(meta.diskPath)) {
+            const intelligence = inspectWorkspace(meta.diskPath);
+            workspaceDirective = buildPromptDirective(intelligence);
+          }
+        } catch (err) {
+          logger.warn(`[CopilotDirector] Workspace intelligence inspection failed for project ${context.projectId}: ${err?.message || err}`);
+        }
+      }
+
       const strategy = analyzeCodeGenerationRequest(request, context);
-      const prompt = `${DIRECTOR_PLANNER_PROMPT}\n\n${formatCodeGenerationStrategy(strategy)}\n\nREQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
-      // P12.4: mode 'planner' (no system prompt) — 'agent' mode's FILE: format
+      const classification = classifyRequest(request);
+      let algorithmGuidance = '';
+      if (classification.category === 'ALGORITHMIC_PROBLEM' || strategy.intent.algorithmic) {
+        const contract = deriveAlgorithmTaskContract(request, classification, context);
+        algorithmGuidance = buildAlgorithmGuidanceBlock(contract);
+      }
+      let applicationGuidance = '';
+      if (classification.category === 'APPLICATION_FEATURE' || strategy.intent.ui || strategy.intent.fullStack) {
+        const contract = deriveApplicationTaskContract(request, classification, context);
+        applicationGuidance = buildApplicationGuidanceBlock(contract);
+      }
+
+      // Task-aware model selection routing
+      let effectiveModel = preferredModel;
+      if (preferredModel === 'auto') {
+        if (classification.category === 'ALGORITHMIC_PROBLEM' || strategy.intent.algorithmic || strategy.intent.fullStack) {
+          effectiveModel = 'reasoning'; // Signals planner cascade to prioritize highest-reasoning provider
+        } else if (classification.isRoutine) {
+          effectiveModel = 'fast';
+        }
+      }
+
+      const workspacePart = workspaceDirective ? `${workspaceDirective}\n\n` : '';
+      const algoPart = algorithmGuidance ? `\n\n${algorithmGuidance}` : '';
+      const appPart = applicationGuidance ? `\n\n${applicationGuidance}` : '';
+      const prompt = `${DIRECTOR_PLANNER_PROMPT}\n\n${workspacePart}${formatCodeGenerationStrategy(strategy)}${algoPart}${appPart}\n\nREQUEST:\n${request}\n\nAUTHORIZED WORKSPACE CONTEXT:\n${JSON.stringify(context).slice(0, 30000)}`;
+      // P12.4: mode 'planner' (no system prompt) - 'agent' mode's FILE: format
       // instruction fights this prompt's "respond with valid JSON" contract.
-      const response = preferredModel && preferredModel !== 'auto'
-        ? await this.aiService.chat(prompt, [], 'planner', null, preferredModel)
+      const response = effectiveModel && effectiveModel !== 'auto'
+        ? await this.aiService.chat(prompt, [], 'planner', null, effectiveModel)
         : await this.aiService.chat(prompt, [], 'planner');
       return normalizePlan(extractJson(response), request);
-    } catch (_) { return normalizePlan(null, request); }
+    } catch (_) {
+      // Ignored: fall back to normalized fallback plan
+      return normalizePlan(null, request);
+    }
   }
 
   async executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent = () => {}, permissionLevel = 'auto', approvalToken = null, approvalState = null, preferredModel = 'auto' }) {
     let hasExistingFiles = false;
     let existingFiles = [];
     let existingFileContents = null;
-    try {
-      const meta = this.workspaceManager?.getWorkspaceMetadata?.(projectId, userId);
-      hasExistingFiles = Boolean(meta && meta.fileCount > 0);
-      // P12.8 (E2E run #14): pass the REAL file list to the specialist planner.
-      // The SURGICAL directive alone was not enough — the planner kept emitting
-      // "Create package.json"/"Create App.jsx" for files that already existed
-      // (WRITE_FORBIDDEN ×4 burned the whole repair budget on pass 2). With the
-      // list in AUTHORIZED CONTEXT it can plan read_file + apply_diff instead.
-      if (hasExistingFiles && meta?.diskPath && fs.existsSync(meta.diskPath)) {
-        existingFiles = listExistingFilesBounded(meta.diskPath, 100);
-        // P12.9 (E2E run #15): the LIST alone still left SEARCH guessing —
-        // the planner baked imagined content (31× SEARCH-not-found). Hand it
-        // the actual bytes of the key small files so SEARCH is verbatim.
-        existingFileContents = existingFiles.length ? readKeyFileContents(meta.diskPath, existingFiles) : null;
-      }
-    } catch (_) {}
+    let meta = null;
 
-    const directive = hasExistingFiles
-      ? `[SURGICAL_DIRECTIVE: Inspect existing workspace files first. Apply surgical targeted edits to affected files only without wiping or regenerating unrelated code.` +
-        (existingFiles.length ? ` EXISTING FILES (these paths ALREADY EXIST — never plan write_file for them, it is REJECTED; to change one, read_file it then apply_diff): ${existingFiles.join(', ')}` : '') +
-        `]`
-      : `[GREENFIELD_DIRECTIVE: Workspace is new/empty. Create required source and component files directly using write_file. Do not attempt to read non-existent legacy files.]`;
+    const refreshWorkspaceState = (priorityFiles = []) => {
+      try {
+        meta = this.workspaceManager?.getWorkspaceMetadata?.(projectId, userId);
+        hasExistingFiles = Boolean(meta && meta.fileCount > 0);
+        if (meta?.diskPath && fs.existsSync(meta.diskPath)) {
+          existingFiles = listExistingFilesBounded(meta.diskPath, 100);
+          hasExistingFiles = existingFiles.length > 0;
+          existingFileContents = existingFiles.length ? readKeyFileContents(meta.diskPath, existingFiles, priorityFiles) : null;
+        } else {
+          existingFiles = [];
+          existingFileContents = null;
+        }
+      } catch (_) {}
+    };
+
+    refreshWorkspaceState();
 
     let workspacePackageJson = null;
     try {
@@ -336,19 +562,40 @@ class CopilotDirector {
       ...(workspacePackageJson ? { packageJson: workspacePackageJson } : {}),
       ...(existingFileContents ? { files: existingFileContents } : {})
     });
-    const objectiveWithDirective = `${directive}\n${formatCodeGenerationStrategy(codeStrategy)}\n${task.objective}`;
-    
+    const classification = classifyRequest(request || task.objective);
+    let extraGuidance = '';
+    if (classification.category === 'ALGORITHMIC_PROBLEM' || codeStrategy.intent.algorithmic) {
+      const contract = deriveAlgorithmTaskContract(request || task.objective, classification, { files: existingFileContents });
+      extraGuidance = `\n${buildAlgorithmGuidanceBlock(contract)}`;
+    } else if (classification.category === 'APPLICATION_FEATURE' || codeStrategy.intent.ui || codeStrategy.intent.fullStack) {
+      const contract = deriveApplicationTaskContract(request || task.objective, classification, { files: existingFileContents });
+      extraGuidance = `\n${buildApplicationGuidanceBlock(contract)}`;
+    }
+
     let attempt = 0;
     let lastResult = null;
     let lastError = null;
+    let currentAffectedFiles = [];
     const maxSelfHealingAttempts = Math.min(maxRepairs || 1, 2);
 
     while (attempt <= maxSelfHealingAttempts) {
       attempt++;
       try {
+        if (attempt > 1) {
+          refreshWorkspaceState(currentAffectedFiles);
+        }
+
+        const currentDirective = (existingFiles.length > 0 || hasExistingFiles)
+          ? `[SURGICAL_DIRECTIVE: Inspect existing workspace files first. Apply surgical targeted edits to affected files only without wiping or regenerating unrelated code.` +
+            (existingFiles.length ? ` EXISTING FILES (these paths ALREADY EXIST — never plan write_file for them, it is REJECTED; to change one, read_file it then apply_diff): ${existingFiles.join(', ')}` : '') +
+            `]`
+          : `[GREENFIELD_DIRECTIVE: Workspace is new/empty. Create required source and component files directly using write_file. For web and UI applications, ALWAYS create index.html as the primary entry point alongside required components and styles. Do not attempt to read non-existent legacy files.]`;
+
+        const baseObjective = `${currentDirective}\n${formatCodeGenerationStrategy(codeStrategy)}${extraGuidance}\n${task.objective}`;
+
         const currentObjective = attempt === 1 
-          ? objectiveWithDirective 
-          : `REPAIR ATTEMPT ${attempt}: The previous implementation failed with error: ${lastError}. Please analyze the failure, read the relevant logs, and provide a corrected fix. Original objective: ${objectiveWithDirective}`;
+          ? baseObjective 
+          : `REPAIR ATTEMPT ${attempt}: The previous implementation failed with error: ${lastError}. TARGETED REPAIR: Only inspect and fix the affected files${currentAffectedFiles.length ? ` [${currentAffectedFiles.join(', ')}]` : ''}. Use read_file and apply_diff with exact SEARCH blocks. Do not rewrite working files. Original objective: ${task.objective}`;
 
         onEvent({ type: 'thinking', message: `🛠️ Specialist [${task.id}] planning steps (attempt ${attempt}/${maxSelfHealingAttempts + 1})...` });
 
@@ -366,6 +613,10 @@ class CopilotDirector {
 
         onEvent({ type: 'thinking', message: `⚡ Specialist [${task.id}] executing ${workerPlan.steps?.length || 0} step(s)...` });
 
+        const currentExistingFiles = meta?.diskPath && fs.existsSync(meta.diskPath)
+          ? Object.keys(collectWorkspaceFilesBounded(meta.diskPath))
+          : existingFiles;
+
         // --- VERIFICATION GATE: Execute and then Verify ---
         lastResult = await this.plannerExecutionLoop.runWithPlan(
           projectId, 
@@ -374,14 +625,106 @@ class CopilotDirector {
           maxRepairs || 3, 
           () => Boolean(signal?.aborted), 
           `copilot_${delegated.workerRun.id}_att${attempt}`,
-          { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined, ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) }
+          { 
+            onEvent, 
+            permissionLevel, 
+            approvalToken: approvalToken || undefined, 
+            approvalState: approvalState || undefined, 
+            role: task.role,
+            specialty: task.specialty,
+            existingFiles: currentExistingFiles,
+            workspaceManager: this.workspaceManager,
+            meta,
+            ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) 
+          }
         );
 
         // Execution completed all steps successfully
         if (lastResult?.status === 'SUCCEEDED') {
+          // Cross-file contract validation on real workspace files
+          if (meta?.diskPath && fs.existsSync(meta.diskPath)) {
+            const currentFiles = collectWorkspaceFilesBounded(meta.diskPath);
+            if (task.role === 'CODER' && Object.keys(currentFiles).length === 0 && !hasExistingFiles) {
+              lastError = 'CODER specialist completed without writing any files. write_file step with implementation is strictly required.';
+              logger.warn(`[CopilotDirector] Worker ${task.id} wrote 0 files on greenfield project: triggering repair`);
+              continue;
+            }
+            if (Object.keys(currentFiles).length > 0) {
+              const contractValidation = validateCrossFileContracts(currentFiles, {
+                existingFramework: codeStrategy?.framework || (workspacePackageJson ? 'react' : null)
+              });
+              if (!contractValidation.valid && contractValidation.errors.length > 0) {
+                const affectedFiles = extractAffectedFilesFromContractErrors(contractValidation.errors);
+                currentAffectedFiles = affectedFiles;
+                onEvent({
+                  type: 'contract_validation_failed',
+                  taskId: task.id,
+                  attempt,
+                  errors: contractValidation.errors,
+                  affectedFiles
+                });
+                lastError = `Cross-file contract validation failed: ${contractValidation.errors.join('; ')}. TARGETED REPAIR REQUIRED: Only modify the affected files [${affectedFiles.join(', ')}]. Do not touch or rewrite unrelated files.`;
+                logger.warn(`[CopilotDirector] Worker ${task.id} contract validation error: ${lastError}`);
+                continue;
+              }
+
+              // Run Stage 1-10 static code review
+              const staticReview = reviewProjectFiles(currentFiles, codeStrategy);
+              if (!staticReview.passed && staticReview.findingsCount.errors > 0) {
+                const errorMessages = staticReview.findings
+                  .filter(f => f.severity === 'ERROR')
+                  .map(f => `${f.filePath ? f.filePath + ': ' : ''}${f.message}`);
+                const affected = staticReview.repairPlan.targetFiles;
+                currentAffectedFiles = affected;
+                onEvent({
+                  type: 'code_review_findings',
+                  taskId: task.id,
+                  attempt,
+                  score: staticReview.score,
+                  errors: errorMessages,
+                  affectedFiles: affected
+                });
+                lastError = `Static code review found critical defect(s): ${errorMessages.slice(0, 3).join('; ')}. TARGETED REPAIR REQUIRED: Only modify affected files [${affected.join(', ')}].`;
+                logger.warn(`[CopilotDirector] Worker ${task.id} static review failure: ${lastError}`);
+                continue;
+              }
+
+              // Worker-level algorithm oracle verification for algorithmic tasks
+              if ((classification.category === 'ALGORITHMIC_PROBLEM' || codeStrategy.intent.algorithmic || task.specialty === 'integration' || task.role === 'CODER') && this.algorithmVerifier) {
+                let oracleName = detectSupportedAlgorithmOracle(task.objective || request, currentFiles);
+                if (oracleName && typeof this.algorithmVerifier.hasOracle === 'function' && !this.algorithmVerifier.hasOracle(oracleName)) {
+                  oracleName = null;
+                }
+                if (oracleName) {
+                  const candidateCode = extractCandidateCode(currentFiles, oracleName);
+                  const candidateFilePath = extractCandidateFilePath(currentFiles, oracleName);
+                  if (candidateCode) {
+                    const algoResult = await this.algorithmVerifier.verifyAlgorithm(oracleName, candidateCode);
+                    if (!algoResult.verified) {
+                      currentAffectedFiles = candidateFilePath ? [candidateFilePath] : [];
+                      const failureReason = algoResult.error || algoResult.reason || 'Hidden test cases or constraints failed';
+                      onEvent({
+                        type: 'algorithm_verification_failed',
+                        taskId: task.id,
+                        attempt,
+                        oracle: oracleName,
+                        reason: failureReason,
+                        failedTest: algoResult.failedTest || null,
+                        affectedFiles: currentAffectedFiles
+                      });
+                      lastError = `Algorithm oracle verification failed for [${oracleName}]: ${failureReason}. Fix edge cases and complexity in [${currentAffectedFiles.join(', ')}].`;
+                      logger.warn(`[CopilotDirector] Worker ${task.id} algorithm verification failure: ${lastError}`);
+                      continue;
+                    }
+                  }
+                }
+              }
+            }
+          }
           return lastResult;
         } else {
           lastError = lastResult?.error || lastResult?.reason || 'Unknown execution failure';
+          currentAffectedFiles = [];
         }
         // P12.3: an approval gate cannot self-heal — a repair plan without a
         // token hits the same gate. Propagate immediately (code preserved) so
@@ -401,6 +744,18 @@ class CopilotDirector {
   }
 
   async run({ userId, projectId, request, signal = null, onEvent = () => {}, maxRepairs = 3, plan: presetPlan = null, permissionLevel = 'auto', approvalToken = null, preferredModel = 'auto' }) {
+    // Propagate adaptive model selection consistently across planning, workers, and verification
+    let effectiveModel = preferredModel;
+    if (preferredModel === 'auto') {
+      const strategy = analyzeCodeGenerationRequest(request, { projectId });
+      const classification = classifyRequest(request);
+      if (classification.category === 'ALGORITHMIC_PROBLEM' || strategy.intent.algorithmic || strategy.intent.fullStack) {
+        effectiveModel = 'reasoning';
+      } else if (classification.isRoutine) {
+        effectiveModel = 'fast';
+      }
+    }
+
     // P12.3: ONE shared mutable approval state for this run — every worker (and
     // the final verification) gets the SAME holder. ExecutionController's
     // single-use rotation writes through the ChatPlanner context proxy into it,
@@ -410,7 +765,7 @@ class CopilotDirector {
     const approvalState = { token: approvalToken || null };
     // Plan-mode override: use the user-approved plan (normalized + validated —
     // bad shapes fall back to a generic sequential plan, never crash).
-    const plan = presetPlan ? normalizePlan(presetPlan, request) : await this.createPlan(request, { projectId }, preferredModel);
+    const plan = presetPlan ? normalizePlan(presetPlan, request) : await this.createPlan(request, { projectId }, effectiveModel);
     const supervisorResult = await this.coordinator.createSupervisorTask({ userId, projectId, title: `Copilot Director: ${String(request).slice(0, 180)}`, prompt: request, metadata: { source: 'copilot-director', plannedTaskCount: plan.tasks.length } });
     const supervisorTaskId = supervisorResult.task.id;
     const supervisorRunId = supervisorResult.run.id;
@@ -459,7 +814,7 @@ class CopilotDirector {
               break;
             }
             try {
-              executionResult = await this.coordinator.startWorker(delegated.workerRun.id, { autoPlan: false, runner: () => this.executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent, permissionLevel, approvalToken, approvalState, preferredModel }) });
+              executionResult = await this.coordinator.startWorker(delegated.workerRun.id, { autoPlan: false, runner: () => this.executeWorker({ task, delegated, projectId, userId, request, signal, maxRepairs, onEvent, permissionLevel, approvalToken, approvalState, preferredModel: effectiveModel }) });
               lastError = null;
               break;
             } catch (error) {
@@ -524,8 +879,125 @@ class CopilotDirector {
         }
       }
       onEvent({ type: 'director_verification', status: 'DELEGATING' });
+      // Final cross-file contract validation across the entire workspace
+      const meta = this.workspaceManager?.getWorkspaceMetadata?.(projectId, userId);
+      let finalFiles = {};
+      try {
+        if (meta?.diskPath && fs.existsSync(meta.diskPath)) {
+          finalFiles = collectWorkspaceFilesBounded(meta.diskPath);
+          if (Object.keys(finalFiles).length > 0) {
+            const finalValidation = validateCrossFileContracts(finalFiles);
+            if (!finalValidation.valid && finalValidation.errors.length > 0) {
+              const contractErr = `Final workspace contract validation failed: ${finalValidation.errors.join('; ')}`;
+              onEvent({ type: 'contract_validation_failed', status: 'FAILED', errors: finalValidation.errors });
+              throw new Error(contractErr);
+            }
+
+            // Stage 1-10 static code review across all workspace files
+            const staticReview = reviewProjectFiles(finalFiles);
+            onEvent({
+              type: 'static_code_review',
+              status: staticReview.passed ? 'PASSED' : 'WARNING',
+              score: staticReview.score,
+              findingsCount: staticReview.findingsCount,
+              review: staticReview
+            });
+          }
+        }
+      } catch (err) {
+        if (err?.message?.startsWith('Final workspace contract validation failed')) {
+          throw err;
+        }
+      }
+
+      const classification = classifyRequest(request, { files: finalFiles });
+      const canonicalResolution = resolveCanonicalCase(request, finalFiles);
+      let algorithmVerificationOutcome = null;
+
+      // ── Layer A: Algorithm Oracle Verification Path ──
+      if (!canonicalResolution.canonicalCase && (classification.category === 'ALGORITHMIC_PROBLEM' || classification.isAlgorithm)) {
+        let oracleName = detectSupportedAlgorithmOracle(request, finalFiles);
+        if (oracleName && this.algorithmVerifier && typeof this.algorithmVerifier.hasOracle === 'function' && !this.algorithmVerifier.hasOracle(oracleName)) {
+          oracleName = null;
+        }
+        if (oracleName) {
+          const candidateCode = extractCandidateCode(finalFiles, oracleName);
+          if (candidateCode) {
+            onEvent({ type: 'director_verification', phase: 'algorithm_oracle', oracle: oracleName });
+            const algoResult = await this.algorithmVerifier.verifyAlgorithm(oracleName, candidateCode);
+            if (!algoResult.verified) {
+              const err = `Algorithm oracle verification failed for [${oracleName}]: ${algoResult.error || 'Test failure'}`;
+              onEvent({ type: 'director_verification', status: 'FAILED', error: err, algorithmResult: algoResult });
+              throw new Error(err);
+            } else {
+              algorithmVerificationOutcome = { verified: true, oracle: oracleName, algoResult };
+              onEvent({ type: 'director_verification', status: 'SUCCEEDED', oracle: oracleName, algorithmResult: algoResult });
+            }
+          } else {
+            const err = `No candidate implementation found for algorithm [${oracleName}] in workspace`;
+            onEvent({ type: 'director_verification', status: 'FAILED', error: err });
+            throw new Error(err);
+          }
+        } else {
+          // Explicitly UNVERIFIED: do not claim verification when no matching oracle exists
+          algorithmVerificationOutcome = { verified: false, unverified: true, reason: 'No matching independent algorithm oracle for this problem' };
+          onEvent({ type: 'director_verification', status: 'UNVERIFIED', reason: algorithmVerificationOutcome.reason });
+        }
+      }
+
+      // ── Layer B: Generated App Quality Gate Path ──
+      let qualityGateOutcome = null;
+      const isAppGeneration = Boolean(
+        (classification.category === 'APPLICATION_FEATURE' || canonicalResolution.canonicalCase) &&
+        meta?.diskPath &&
+        (fs.existsSync(path.join(meta.diskPath, 'package.json')) || Object.keys(finalFiles).length >= 2)
+      );
+
+      if (isAppGeneration && meta?.diskPath) {
+        if (canonicalResolution.canonicalCase) {
+          try {
+            const flows = getAcceptanceFlows(canonicalResolution.canonicalCase);
+            const evidence = await this.trustedRunner.execute({
+              projectDir: meta.diskPath,
+              files: finalFiles,
+              runId: supervisorRunId,
+              caseId: canonicalResolution.canonicalCase,
+              acceptanceFlows: flows
+            });
+            const gateResult = await this.qualityGate.evaluate({
+              projectDir: meta.diskPath,
+              files: finalFiles,
+              caseId: canonicalResolution.canonicalCase,
+              runId: supervisorRunId,
+              executionEvidence: evidence
+            });
+            qualityGateOutcome = gateResult;
+            onEvent({ type: 'quality_gate_evaluation', status: gateResult.status, gateResult });
+
+            if (gateResult.status === STATUS.FAILED) {
+              const detail = (gateResult.defects || []).map((d) => d.detail).join('; ') || 'Quality gate validation failed';
+              const err = `Generated app quality gate failed: ${detail}`;
+              onEvent({ type: 'quality_gate_evaluation', status: STATUS.FAILED, error: err });
+              throw new Error(err);
+            }
+          } catch (err) {
+            // Fail closed! Missing runner secret, artifact mutation, failed build/tests must NOT be swallowed as warnings
+            onEvent({ type: 'quality_gate_evaluation', status: STATUS.FAILED, error: err.message });
+            logger.warn(`[CopilotDirector] Quality gate failure recorded: ${err.message}`);
+            if (err?.message?.startsWith('Generated app quality gate failed')) {
+              throw err;
+            }
+            throw new Error(`Generated app quality gate failed: ${err.message}`);
+          }
+        } else {
+          // Request does not match a canonical benchmark: report NOT_EVALUATED honestly without failing the generation
+          qualityGateOutcome = { status: STATUS.NOT_EVALUATED, reason: canonicalResolution.reason };
+          onEvent({ type: 'quality_gate_evaluation', status: STATUS.NOT_EVALUATED, reason: canonicalResolution.reason });
+        }
+      }
+
       const verifier = await this.coordinator.delegate({ supervisorRunId, role: 'VERIFIER', objective: `Perform the final read-only verification gate for the requested outcome: ${request}. Inspect the current workspace state and confirm tests/build/runtime evidence where supported. Do not mutate the workspace.`, constraints: { specialty: 'verification', generatedByDirector: true }, expectedOutput: 'Final verification evidence and any remaining blockers.' });
-      const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, { runner: async () => { const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER', ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) }); return this.plannerExecutionLoop.runWithPlan(projectId, userId, verificationPlan, 0, () => Boolean(signal?.aborted), `copilot_verify_${verifier.workerRun.id}`, { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined, ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) }); } });
+      const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, { runner: async () => { const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER', existingFiles: Object.keys(finalFiles), ...(effectiveModel && effectiveModel !== 'auto' ? { preferredModel: effectiveModel } : {}) }); return this.plannerExecutionLoop.runWithPlan(projectId, userId, verificationPlan, 0, () => Boolean(signal?.aborted), `copilot_verify_${verifier.workerRun.id}`, { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined, ...(effectiveModel && effectiveModel !== 'auto' ? { preferredModel: effectiveModel } : {}) }); } });
       const verificationStatus = String(finalVerification?.status || 'FAILED').toUpperCase();
       const verificationSummary = String(
         finalVerification?.summary || finalVerification?.result?.summary || finalVerification?.message || ''
@@ -567,8 +1039,9 @@ class CopilotDirector {
           message: summary,
           summary,
           verification: {
-            status: verificationStatus,
-            summary: verificationSummary || 'Partial workspace verification passed; plan incomplete.',
+            status: 'FAILED',
+            verifierStatus: verificationStatus,
+            summary: verificationSummary || 'Partial workspace verification ran; plan incomplete.',
             artifact_refs: verificationArtifacts
           }
         };
@@ -578,32 +1051,224 @@ class CopilotDirector {
           summary,
           artifact_refs: artifactRefs,
           context_refs: [],
-          verification_status: 'PASSED',
+          verification_status: 'FAILED',
           errors: [{ code: 'INCOMPLETE_PLAN', message: summary.slice(0, 256) }]
+        });
+      }
+
+      // Fail closed: algorithm verification failure
+      if (algorithmVerificationOutcome && algorithmVerificationOutcome.failed) {
+        const summary = `Algorithm verification failed: ${algorithmVerificationOutcome.error || 'Test failure'}`.slice(0, 480);
+        this.agentTaskDao.updateStatus(supervisorTaskId, 'FAILED');
+        this.agentRunDao.updateStatus(supervisorRunId, 'FAILED', summary, null, new Date().toISOString());
+        const completion = {
+          type: 'director_complete',
+          status: 'FAILED',
+          taskId: supervisorTaskId,
+          runId: supervisorRunId,
+          taskCount: plan.tasks.length,
+          message: summary,
+          summary,
+          verification: {
+            status: 'FAILED',
+            summary,
+            artifact_refs: verificationArtifacts
+          }
+        };
+        onEvent(completion);
+        return ResultValidator.validate({
+          status: 'FAILED',
+          summary,
+          artifact_refs: artifactRefs,
+          context_refs: [],
+          verification_status: 'FAILED',
+          errors: [{ code: 'ALGORITHM_VERIFICATION_FAILED', message: summary.slice(0, 256) }]
+        });
+      }
+
+      // Fail closed: quality gate failure (verifier worker cannot convert failure to success)
+      if (qualityGateOutcome && qualityGateOutcome.status === STATUS.FAILED) {
+        const summary = `Generated app quality gate failed: ${qualityGateOutcome.error || 'Quality gate defects detected'}`.slice(0, 480);
+        this.agentTaskDao.updateStatus(supervisorTaskId, 'FAILED');
+        this.agentRunDao.updateStatus(supervisorRunId, 'FAILED', summary, null, new Date().toISOString());
+        const completion = {
+          type: 'director_complete',
+          status: 'FAILED',
+          taskId: supervisorTaskId,
+          runId: supervisorRunId,
+          taskCount: plan.tasks.length,
+          message: summary,
+          summary,
+          verification: {
+            status: 'FAILED',
+            summary,
+            artifact_refs: verificationArtifacts
+          }
+        };
+        onEvent(completion);
+        return ResultValidator.validate({
+          status: 'FAILED',
+          summary,
+          artifact_refs: artifactRefs,
+          context_refs: [],
+          verification_status: 'FAILED',
+          errors: [{ code: 'QUALITY_GATE_FAILED', message: summary.slice(0, 256) }]
+        });
+      }
+
+      if (qualityGateOutcome && qualityGateOutcome.status === STATUS.PARTIAL) {
+        const summary = `Director completed tasks with PARTIAL verification (acceptance criteria or build evidence incomplete).`;
+        this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
+        this.agentRunDao.updateStatus(supervisorRunId, 'SUCCEEDED');
+        const completion = {
+          type: 'director_complete',
+          status: 'PARTIAL',
+          taskId: supervisorTaskId,
+          runId: supervisorRunId,
+          taskCount: plan.tasks.length,
+          verification: {
+            status: 'PARTIAL',
+            summary,
+            artifact_refs: verificationArtifacts
+          }
+        };
+        onEvent(completion);
+        return ResultValidator.validate({
+          status: 'PARTIAL',
+          summary,
+          artifact_refs: artifactRefs,
+          context_refs: [],
+          verification_status: 'PARTIAL',
+          errors: [{ code: 'PARTIAL_VERIFICATION', message: 'Required acceptance criteria or execution evidence incomplete.' }]
+        });
+      }
+
+      if (qualityGateOutcome && qualityGateOutcome.status === STATUS.STATIC_DIAGNOSTIC_PASS) {
+        const summary = `Director completed tasks with static diagnostic inspection (no execution receipt evaluated).`;
+        this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
+        this.agentRunDao.updateStatus(supervisorRunId, 'SUCCEEDED');
+        const completion = {
+          type: 'director_complete',
+          status: 'COMPLETED',
+          taskId: supervisorTaskId,
+          runId: supervisorRunId,
+          taskCount: plan.tasks.length,
+          verificationMode: 'STATIC_INSPECTION_ONLY',
+          executionVerified: false,
+          verification: {
+            status: 'UNVERIFIED',
+            summary: 'Static diagnostic checks passed; execution unverified.',
+            artifact_refs: verificationArtifacts
+          }
+        };
+        onEvent(completion);
+        return ResultValidator.validate({
+          status: 'COMPLETED',
+          summary,
+          artifact_refs: artifactRefs,
+          context_refs: [],
+          verification_status: 'UNVERIFIED',
+          errors: []
+        });
+      }
+
+      if (qualityGateOutcome && qualityGateOutcome.status === STATUS.NOT_EVALUATED) {
+        const summary = `Director completed tasks (canonical benchmark: NOT_EVALUATED - ${qualityGateOutcome.reason || 'unmatched scope'}).`;
+        this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
+        this.agentRunDao.updateStatus(supervisorRunId, 'SUCCEEDED');
+        const completion = {
+          type: 'director_complete',
+          status: 'COMPLETED',
+          taskId: supervisorTaskId,
+          runId: supervisorRunId,
+          taskCount: plan.tasks.length,
+          verificationMode: 'STATIC_INSPECTION_ONLY',
+          executionVerified: false,
+          verification: {
+            status: 'UNVERIFIED',
+            summary: qualityGateOutcome.reason || 'Benchmark scope not evaluated.',
+            artifact_refs: verificationArtifacts
+          }
+        };
+        onEvent(completion);
+        return ResultValidator.validate({
+          status: 'COMPLETED',
+          summary,
+          artifact_refs: artifactRefs,
+          context_refs: [],
+          verification_status: 'UNVERIFIED',
+          errors: []
+        });
+      }
+
+      if (algorithmVerificationOutcome && algorithmVerificationOutcome.unverified) {
+        const summary = `Director completed tasks, but outcome is UNVERIFIED (no matching oracle).`;
+        this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
+        this.agentRunDao.updateStatus(supervisorRunId, 'SUCCEEDED');
+        const completion = {
+          type: 'director_complete',
+          status: 'UNVERIFIED',
+          taskId: supervisorTaskId,
+          runId: supervisorRunId,
+          taskCount: plan.tasks.length,
+          verificationMode: 'STATIC_INSPECTION_ONLY',
+          executionVerified: false,
+          verification: {
+            status: 'UNVERIFIED',
+            summary,
+            artifact_refs: verificationArtifacts
+          }
+        };
+        onEvent(completion);
+        return ResultValidator.validate({
+          status: 'UNVERIFIED',
+          summary,
+          artifact_refs: artifactRefs,
+          context_refs: [],
+          verification_status: 'UNVERIFIED',
+          errors: []
         });
       }
 
       this.agentTaskDao.updateStatus(supervisorTaskId, 'COMPLETED');
       this.agentRunDao.updateStatus(supervisorRunId, 'SUCCEEDED');
+      const fileNames = Object.keys(finalFiles || {});
+      const fileSummary = fileNames.length > 0
+        ? ` Files: ${fileNames.slice(0, 4).join(', ')}${fileNames.length > 4 ? ` (+${fileNames.length - 4} more)` : ''}.`
+        : '';
+      const isExecutionVerified = Boolean(
+        algorithmVerificationOutcome?.verified ||
+        qualityGateOutcome?.status === STATUS.VERIFIED_PASS ||
+        qualityGateOutcome?.status === 'PASSED' ||
+        finalVerification?.executionVerified ||
+        verificationArtifacts.some((ref) => /^(?:verification:build-pass|build:verified|receipt:)/i.test(ref))
+      );
+      const finalVerificationStatus = isExecutionVerified ? 'PASSED' : 'UNVERIFIED';
+      const verificationMode = isExecutionVerified ? 'EXECUTION_VERIFIED' : 'STATIC_INSPECTION_ONLY';
+      const outcomeSummary = `Director completed ${plan.tasks.length} adaptive task(s).${fileSummary} Verification: ${finalVerificationStatus} (${verificationMode}).`.slice(0, 510);
       const completion = {
         type: 'director_complete',
         status: 'SUCCEEDED',
         taskId: supervisorTaskId,
         runId: supervisorRunId,
         taskCount: plan.tasks.length,
+        files: fileNames,
+        verificationMode,
         verification: {
-          status: verificationStatus,
-          summary: verificationSummary || 'Final verification passed.',
+          status: isExecutionVerified ? verificationStatus : 'UNVERIFIED',
+          summary: verificationSummary || (isExecutionVerified ? 'Final verification passed.' : 'Static review completed; execution unverified.'),
           artifact_refs: verificationArtifacts
-        }
+        },
+        executionVerified: isExecutionVerified,
+        staticInspection: true
       };
       onEvent(completion);
       return ResultValidator.validate({
         status: 'COMPLETED',
-        summary: `Director completed ${plan.tasks.length} adaptive task(s) and final verification.`,
+        summary: outcomeSummary,
         artifact_refs: artifactRefs,
         context_refs: [],
-        verification_status: 'PASSED',
+        verification_status: finalVerificationStatus,
         errors: []
       });
     } catch (error) {

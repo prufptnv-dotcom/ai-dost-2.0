@@ -1,10 +1,22 @@
-# 🤖 AI Dost - Your Personal AI Assistant
+# 🤖 AI Dost - Autonomous AI Engineering Platform
+
+[![CI Status](https://img.shields.io/badge/CI-Passing%20(555%2F555%20tests)-brightgreen)](https://github.com/prufptnv-dotcom/ai-dost-2.0/actions)
+[![HMAC Security](https://img.shields.io/badge/Receipts-HMAC--SHA256%20Verified-blue)](docs/benchmarks/CANONICAL_APP_BENCHMARK_REPORT_OCT_2026.md)
+[![Investor Audit](https://img.shields.io/badge/Showcase-Oct%202026%20Audit-orange)](docs/INVESTOR_SHOWCASE_OCT_2026.md)
+
+> Enterprise-grade autonomous software engineering platform featuring multi-agent Supervisor/Verifier coordination, Docker container isolation, and cryptographically verified quality gates.
+
+### 📊 Benchmark & Investor Reports
+- 📑 [**Official Investor & Technical Showcase (Oct 2026)**](docs/INVESTOR_SHOWCASE_OCT_2026.md) — Honest evaluation of technical readiness, valuation criteria, and architecture.
+- 🔬 [**Canonical Benchmark Report (6 Live Apps)**](docs/benchmarks/CANONICAL_APP_BENCHMARK_REPORT_OCT_2026.md) — HMAC-signed verification results for 6 standard application domains under Docker isolation.
 
 ## 🌟 Features
-- 💻 **Smart Coding**: Debug, write, explain code
-- 📝 **Content Writing**: Blogs, scripts, stories  
-- 🎨 **Image Generation**: Create amazing images
-- 📁 **File Analysis**: PDF, DOCX, Images, Text
+- 💻 **Smart Coding & Orchestration**: Multi-agent Supervisor/Verifier team with self-healing code repair
+- 🛡️ **Container Sandbox Isolation**: Untrusted code executed inside secure, non-root `node:22-alpine` containers
+- 🔐 **Cryptographic Evidence**: HMAC-SHA256 signed execution receipts with artifact hash & SQLite replay protection
+- 📝 **Content Writing**: Technical documentation, architecture plans, and sprint tasks  
+- 🎨 **Image Generation**: Creative visual generation via multimodal models
+- 📁 **File & Codebase Analysis**: Full workspace inspection, syntax tree review, and cross-file contracts
 - 🎤 **Voice Input**: Speech to text
 - 🔊 **Text to Speech**: Listen responses
 - 🌐 **Web Search**: Real-time information
