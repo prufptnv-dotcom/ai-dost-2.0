@@ -142,7 +142,8 @@ class ContainerExecutionAdapter {
         ...args
       ];
     } else {
-      dockerArgs.push('-v', normalizedMountPath + ':/workspace:rw');
+      // Only the staged workspace is writable; keep the container root filesystem read-only.
+      dockerArgs.push('-v', normalizedMountPath + ':/workspace:rw', '--read-only');
       executionArgs = [command, ...args];
     }
 
