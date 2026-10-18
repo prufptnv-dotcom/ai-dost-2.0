@@ -22,7 +22,7 @@ const crypto = require('node:crypto');
 function resolveContainerUser(stagedDir, requestedUser = null) {
   const configured = requestedUser || process.env.AIDOST_CONTAINER_USER;
   if (configured) {
-    if (!/^\\d+:\\d+$/.test(String(configured))) {
+    if (!/^\d+:\d+$/.test(String(configured))) {
       throw new Error('INVALID_CONTAINER_USER: AIDOST_CONTAINER_USER must be a numeric uid:gid pair.');
     }
     return String(configured);
