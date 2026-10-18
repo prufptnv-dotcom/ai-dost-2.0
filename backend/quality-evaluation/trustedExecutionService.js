@@ -546,7 +546,9 @@ class TrustedExecutionService {
           testResult = testStep.testResult;
           if (testStep.exitCode !== 0) finalExitCode = testStep.exitCode;
         }
-      }      // ── Executable Acceptance Flows ──
+      }
+
+      // ── Executable Acceptance Flows ──
       acceptanceResult = await executeAcceptanceFlowsStep({
         acceptanceFlows,
         caseId,
