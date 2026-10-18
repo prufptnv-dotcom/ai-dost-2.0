@@ -253,11 +253,150 @@ async function executeTestStep({ testCommand, pkg, strictIsolation, effectiveAda
   };
 }
 
+function validateRegistryUrl(rawUrl, label) {
+  let parsed;
+  try { parsed = new URL(rawUrl); } catch (_) {
+    throw new Error('UNTRUSTED_DEPENDENCY_SOURCE: Invalid URL in ' + label);
+  }
+  if (parsed.protocol !== 'https:' || parsed.hostname !== 'registry.npmjs.org') {
+    throw new Error('UNTRUSTED_DEPENDENCY_SOURCE: ' + label + ' must resolve through https://registry.npmjs.org.');
+  }
+}
+
+function inspectLockfileResolvedUrls(node, label = 'package-lock.json') {
+  if (!node || typeof node !== 'object') return;
+  if (typeof node.resolved === 'string' && /^https?:\/\//i.test(node.resolved)) {
+    validateRegistryUrl(node.resolved, label + ' resolved URL');
+  } else if (typeof node.resolved === 'string' && !node.resolved.startsWith('file:')) {
+    throw new Error('UNTRUSTED_DEPENDENCY_SOURCE: Unsupported resolved URL scheme in ' + label);
+  }
+  for (const value of Object.values(node)) {
+    if (value && typeof value === 'object') inspectLockfileResolvedUrls(value, label);
+  }
+}
+
+function getNpmDependencyInstallPlan(stagedDir, pkg) {
+  const dependencies = {
+    ...(pkg?.dependencies || {}),
+    ...(pkg?.devDependencies || {}),
+    ...(pkg?.optionalDependencies || {})
+  };
+  if (Object.keys(dependencies).length === 0) {
+    return { needed: false, command: null, args: [], reason: 'NO_DECLARED_DEPENDENCIES' };
+  }
+
+  for (const configFile of ['.npmrc', '.yarnrc', '.yarnrc.yml']) {
+    if (fs.existsSync(path.join(stagedDir, configFile))) {
+      throw new Error('UNTRUSTED_DEPENDENCY_SOURCE: Custom package-manager configuration is not allowed: ' + configFile);
+    }
+  }
+  for (const lockFile of ['yarn.lock', 'pnpm-lock.yaml', 'bun.lock', 'bun.lockb']) {
+    if (fs.existsSync(path.join(stagedDir, lockFile))) {
+      throw new Error('UNSUPPORTED_PACKAGE_MANAGER: npm verifier cannot install a project that declares ' + lockFile);
+    }
+  }
+
+  for (const [name, rawSpec] of Object.entries(dependencies)) {
+    const spec = String(rawSpec || '').trim();
+    if (!spec) throw new Error('INVALID_DEPENDENCY_SPEC: Empty version spec for ' + name);
+    if (/^(git\+|git:|github:|file:|link:|workspace:|portal:|patch:)/i.test(spec)) {
+      throw new Error('UNTRUSTED_DEPENDENCY_SOURCE: Non-registry dependency spec rejected for ' + name);
+    }
+    if (/^https?:\/\//i.test(spec)) {
+      validateRegistryUrl(spec, 'dependency spec for ' + name);
+      continue;
+    }
+    if (!/^(?:npm:|[~^<>=*v\d|])/.test(spec) &&
+        !['latest', 'next', 'canary', 'beta', 'stable'].includes(spec.toLowerCase())) {
+      throw new Error('UNTRUSTED_DEPENDENCY_SOURCE: Unsupported dependency spec for ' + name);
+    }
+  }
+
+  const lockPath = path.join(stagedDir, 'package-lock.json');
+  if (fs.existsSync(lockPath)) {
+    let lock;
+    try { lock = JSON.parse(fs.readFileSync(lockPath, 'utf8')); }
+    catch (_) { throw new Error('INVALID_NPM_LOCKFILE: package-lock.json is not valid JSON.'); }
+    inspectLockfileResolvedUrls(lock);
+    return { needed: true, command: 'npm', args: ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], reason: 'LOCKFILE_PRESENT' };
+  }
+  return {
+    needed: true,
+    command: 'npm',
+    args: ['install', '--ignore-scripts', '--package-lock=false', '--no-audit', '--no-fund'],
+    reason: 'LOCKFILE_ABSENT'
+  };
+}
+
+async function installNpmDependencies({
+  stagedDir,
+  pkg,
+  adapter,
+  allowNetworkedDependencyInstall,
+  timeoutMs
+}) {
+  const dependencyCount = Object.keys({
+    ...(pkg?.dependencies || {}),
+    ...(pkg?.devDependencies || {}),
+    ...(pkg?.optionalDependencies || {})
+  }).length;
+  if (!Boolean(pkg?.scripts?.build || pkg?.scripts?.test) || dependencyCount === 0) {
+    return { needed: false, attempted: false, success: true, status: 'NOT_REQUIRED', command: null, args: [], exitCode: null, output: 'No dependency bootstrap required.' };
+  }
+  if (!allowNetworkedDependencyInstall) {
+    return {
+      needed: true, attempted: false, success: false, status: 'BLOCKED', command: null, args: [], exitCode: null,
+      output: 'NETWORKED_DEPENDENCY_INSTALL_DISABLED: Set AIDOST_ALLOW_NETWORKED_DEP_INSTALL=true on the trusted backend to allow registry-only npm install in an isolated container. No install was attempted.'
+    };
+  }
+
+  let plan;
+  try { plan = getNpmDependencyInstallPlan(stagedDir, pkg); }
+  catch (error) {
+    return { needed: true, attempted: false, success: false, status: 'REJECTED', command: null, args: [], exitCode: null, output: error.message };
+  }
+  if (!plan.needed) {
+    return { needed: false, attempted: false, success: true, status: 'NOT_REQUIRED', command: null, args: [], exitCode: null, output: plan.reason };
+  }
+
+  try {
+    const result = await adapter.execute({
+      stagedDir,
+      command: plan.command,
+      args: plan.args,
+      timeoutMs,
+      network: 'bridge',
+      readOnly: false,
+      memoryLimit: '512m',
+      cpus: '1',
+      pidsLimit: '128'
+    });
+    const success = result.exitCode === 0 && result.status !== 'SANDBOX_UNAVAILABLE';
+    return {
+      needed: true, attempted: true, success, status: success ? 'PASSED' : 'FAILED',
+      command: plan.command, args: plan.args, exitCode: result.exitCode,
+      output: (String(result.stdout || '') + '\n' + String(result.stderr || '')).slice(0, 2500)
+    };
+  } catch (error) {
+    return {
+      needed: true, attempted: true, success: false, status: 'FAILED',
+      command: plan.command, args: plan.args, exitCode: null,
+      output: String(error?.message || error).slice(0, 2500)
+    };
+  }
+}
+
 class TrustedExecutionService {
   constructor(options = {}) {
     this.secret = options.secret || getRunnerSecret();
-    this.timeoutMs = options.timeoutMs || 15000;
+    const configuredTimeout = Number(options.timeoutMs ?? process.env.AIDOST_TRUSTED_EXECUTION_TIMEOUT_MS ?? 120000);
+    this.timeoutMs = Number.isInteger(configuredTimeout) && configuredTimeout >= 1000
+      ? Math.min(configuredTimeout, 600000)
+      : 120000;
     this.strictIsolation = options.strictIsolation ?? false;
+    const networkedInstallSetting = options.allowNetworkedDependencyInstall ?? process.env.AIDOST_ALLOW_NETWORKED_DEP_INSTALL;
+    this.allowNetworkedDependencyInstall = networkedInstallSetting === true ||
+      String(networkedInstallSetting || '').trim().toLowerCase() === 'true';
     this.adapter = options.adapter || new ContainerExecutionAdapter({
       timeoutMs: this.timeoutMs,
       strictIsolation: this.strictIsolation
@@ -349,43 +488,79 @@ class TrustedExecutionService {
         }
       }
 
-      // ── Build Execution ──
-      const buildStep = await executeBuildStep({
-        buildCommand,
-        pkg,
-        strictIsolation: this.strictIsolation,
-        effectiveAdapter,
+      // ── Dependency Bootstrap (explicit opt-in; lifecycle scripts are disabled) ──
+      const dependencyInstall = await installNpmDependencies({
         stagedDir,
-        timeoutMs: this.timeoutMs
+        pkg,
+        adapter: effectiveAdapter,
+        allowNetworkedDependencyInstall: this.allowNetworkedDependencyInstall,
+        timeoutMs: Math.max(this.timeoutMs, 180000)
       });
-      if (buildStep.executed) {
-        executedCommand = buildStep.command;
-        buildResult = buildStep.buildResult;
-        if (buildStep.exitCode !== 0) finalExitCode = buildStep.exitCode;
+      const skipBuildAndTest = dependencyInstall.needed && !dependencyInstall.success;
+      if (dependencyInstall.attempted && dependencyInstall.success) {
+        const installCommand = dependencyInstall.command + ' ' + dependencyInstall.args.join(' ');
+        executedCommand = executedCommand !== 'evaluation_gate' ? executedCommand + '; ' + installCommand : installCommand;
+      }
+      if (skipBuildAndTest) {
+        const setupFailure = String(dependencyInstall.output || ('Dependency install status: ' + dependencyInstall.status));
+        if (buildCommand || pkg?.scripts?.build) {
+          buildResult = { status: 'FAILED', executed: false, success: false, exitCode: 1, output: setupFailure };
+        }
+        if (testCommand || pkg?.scripts?.test) {
+          testResult = {
+            executed: false, commandPassed: false, countsMeasured: false,
+            testsRun: null, testsPassed: null, testsFailed: null
+          };
+        }
+        finalExitCode = dependencyInstall.exitCode || 1;
       }
 
-      // ── Test Execution ──
-      const testStep = await executeTestStep({
-        testCommand,
-        pkg,
-        strictIsolation: this.strictIsolation,
-        effectiveAdapter,
-        stagedDir,
-        timeoutMs: this.timeoutMs
-      });
-      if (testStep.executed) {
-        executedCommand = executedCommand !== 'evaluation_gate' ? `${executedCommand}; ${testStep.command}` : testStep.command;
-        testResult = testStep.testResult;
-        if (testStep.exitCode !== 0) finalExitCode = testStep.exitCode;
-      }
+      if (!skipBuildAndTest) {
+        // ── Build Execution ──
+        const buildStep = await executeBuildStep({
+          buildCommand,
+          pkg,
+          strictIsolation: this.strictIsolation,
+          effectiveAdapter,
+          stagedDir,
+          timeoutMs: this.timeoutMs
+        });
+        if (buildStep.executed) {
+          executedCommand = executedCommand !== 'evaluation_gate' ? executedCommand + '; ' + buildStep.command : buildStep.command;
+          buildResult = buildStep.buildResult;
+          if (buildStep.exitCode !== 0) finalExitCode = buildStep.exitCode;
+        }
 
-      // ── Executable Acceptance Flows ──
+        // ── Test Execution ──
+        const testStep = await executeTestStep({
+          testCommand,
+          pkg,
+          strictIsolation: this.strictIsolation,
+          effectiveAdapter,
+          stagedDir,
+          timeoutMs: this.timeoutMs
+        });
+        if (testStep.executed) {
+          executedCommand = executedCommand !== 'evaluation_gate' ? executedCommand + '; ' + testStep.command : testStep.command;
+          testResult = testStep.testResult;
+          if (testStep.exitCode !== 0) finalExitCode = testStep.exitCode;
+        }
+      }      // ── Executable Acceptance Flows ──
       acceptanceResult = await executeAcceptanceFlowsStep({
         acceptanceFlows,
         caseId,
         snapshot,
         stagedDir
       });
+
+      // Include dependency setup provenance in the HMAC-signed build payload.
+      if (dependencyInstall.status !== 'NOT_REQUIRED') {
+        const installSummary = 'DEPENDENCY_INSTALL_STATUS=' + dependencyInstall.status +
+          '; command=' + (dependencyInstall.command ? dependencyInstall.command + ' ' + dependencyInstall.args.join(' ') : 'none') +
+          '; exitCode=' + (dependencyInstall.exitCode == null ? 'n/a' : dependencyInstall.exitCode) +
+          '\n' + String(dependencyInstall.output || '');
+        buildResult.output = (installSummary + '\n' + String(buildResult.output || '')).slice(0, 4000);
+      }
 
       // ── Immutability Validation ──
       verifyWorkspaceImmutability(snapshot, stagedDir);
@@ -427,5 +602,7 @@ class TrustedExecutionService {
 
 module.exports = {
   TrustedExecutionService,
-  getRunnerSecret
+  getRunnerSecret,
+  getNpmDependencyInstallPlan,
+  installNpmDependencies
 };
