@@ -88,7 +88,7 @@ test.describe('Forge Studio workspace', () => {
     await expect(commandMenu).toBeVisible();
     await commandMenu.click();
     await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.getByRole('button', { name: /New Project\.\.\./i })).toBeVisible();
+    await expect(page.getByRole('option', { name: /New Project\.\.\./i })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Current project' })).toBeVisible();
     await expect(page.getByText('Builder', { exact: true }).first()).toBeVisible();
   });
