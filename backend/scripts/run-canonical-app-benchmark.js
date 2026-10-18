@@ -618,5 +618,6 @@ if (require.main === module) {
 
 module.exports = {
   parseArgs, ensureLocalUrl, parseSseFrame, safeProjectFilePath,
-  loadCanonicalCases, getSeedFiles, getGateEvidence, deriveRunResult, markdownSummary
+  loadCanonicalCases, getSeedFiles, getGateEvidence, deriveRunResult, markdownSummary,
+  createBenchmarkWorkspace, deleteBenchmarkWorkspace
 };
