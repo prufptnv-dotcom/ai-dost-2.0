@@ -496,6 +496,7 @@ async function runOne(config) {
     httpStatus,
     requestError,
     terminalError,
+    workspaceCleanupError: cleanupError,
     directorStarted: events.some((e) => e && e.type === 'director_start'),
     directorCompleteEvents: events.filter((e) => e && e.type === 'director_complete').map((e) => ({ status: e.status || null, message: e.message || null })),
     qualityGate: derived.gate,
