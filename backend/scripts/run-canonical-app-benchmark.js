@@ -10,6 +10,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { ContainerExecutionAdapter } = require('../quality-evaluation/containerExecutionAdapter');
 
 const CASES_PATH = path.join(__dirname, '..', 'quality-evaluation', 'canonicalCases.json');
 const REPO_ROOT = path.resolve(__dirname, '../..');
@@ -109,6 +110,15 @@ function writeCapturedFile(projectDir, rawPath, fileContent) {
   if (fs.existsSync(destination) && fs.lstatSync(destination).isSymbolicLink()) throw new Error('Generated file targets a symlink.');
   fs.writeFileSync(destination, fileContent, 'utf8');
   return true;
+}
+
+function assertContainerRuntimeAvailable() {
+  const adapter = new ContainerExecutionAdapter({ strictIsolation: true });
+  const probe = adapter.probeRuntime();
+  if (!probe.available) {
+    throw new Error('Benchmark requires an active Docker or Podman daemon. Start the container runtime before generating any model outputs.');
+  }
+  return probe.runtime;
 }
 
 function loadCanonicalCases() {
@@ -352,6 +362,7 @@ async function runOne(config) {
       baseUrl: config.baseUrl,
       preferredModel: config.preferredModel,
       timeoutMs: config.timeoutMs,
+      containerRuntime: config.containerRuntime,
       authConfigured: Boolean(config.authToken),
       userIdHeaderConfigured: Boolean(config.userId),
       actualProviderModelObservations: providerModelObservations,
@@ -421,13 +432,14 @@ async function main() {
   assertOutsideRepo(artifactsDir);
   fs.mkdirSync(artifactsDir, { recursive: true });
 
+  const containerRuntime = assertContainerRuntimeAvailable();
   const allCases = loadCanonicalCases();
   const selectedCases = args.case ? allCases.filter((c) => c.id === args.case) : allCases;
   if (!selectedCases.length) throw new Error('Unknown --case ' + args.case + '. Valid: ' + allCases.map((c) => c.id).join(', '));
   const benchmarkRunId = crypto.randomUUID();
   const startedAt = new Date().toISOString();
   const config = {
-    benchmarkRunId, baseUrl, preferredModel, revision, timeoutMs, artifactsDir,
+    benchmarkRunId, baseUrl, preferredModel, revision, timeoutMs, artifactsDir, containerRuntime,
     authToken: process.env.AI_DOST_BENCHMARK_TOKEN || null,
     userId: process.env.AI_DOST_BENCHMARK_USER_ID || null
   };
@@ -448,7 +460,7 @@ async function main() {
     schemaVersion: '1.0',
     evaluator: 'canonical-live-generation-and-quality-gate',
     benchmarkRunId, revision, preferredModel, baseUrl, startedAt, finishedAt: new Date().toISOString(),
-    runsPerCase: runs, caseCount: selectedCases.length, totalCanonicalCases: allCases.length,
+    containerRuntime, runsPerCase: runs, caseCount: selectedCases.length, totalCanonicalCases: allCases.length,
     expectedRuns: selectedCases.length * runs, totalRuns: results.length,
     completedGenerations: results.filter((r) => r.generationCompleted).length,
     verifiedPassCount, fullSuite,
