@@ -220,36 +220,44 @@ async function benchmarkApiRequest(config, route, options = {}) {
 }
 
 async function createBenchmarkWorkspace(config, projectId, seedFiles) {
-  const createResult = await benchmarkApiRequest(config, '/api/v1/memory/project', {
-    method: 'POST',
-    body: JSON.stringify({
-      project_id: projectId,
-      project_name: 'Benchmark ' + projectId,
-      description: 'Disposable AI Dost canonical benchmark project'
-    })
-  });
-  if (createResult?.project_id !== projectId) {
-    throw new Error('Workspace creation did not return the requested project ID.');
-  }
-
-  const workspaceDir = path.join(os.tmpdir(), 'agent-ws-' + projectId);
-  if (!fs.existsSync(workspaceDir) || !fs.statSync(workspaceDir).isDirectory()) {
-    throw new Error('WorkspaceManager workspace was not created at expected path: ' + workspaceDir);
-  }
-
-  for (const [relativePath, content] of Object.entries(seedFiles)) {
-    await benchmarkApiRequest(config, '/api/v1/memory/project/' + encodeURIComponent(projectId) + '/file', {
+  let createdOrFound = false;
+  try {
+    const createResult = await benchmarkApiRequest(config, '/api/v1/memory/project', {
       method: 'POST',
-      body: JSON.stringify({ path: relativePath, content })
+      body: JSON.stringify({
+        project_id: projectId,
+        project_name: 'Benchmark ' + projectId,
+        description: 'Disposable AI Dost canonical benchmark project'
+      })
     });
-    const target = safeProjectFilePath(workspaceDir, relativePath);
-    if (!fs.existsSync(target) || fs.readFileSync(target, 'utf8') !== content) {
-      throw new Error('Seed file could not be verified in the actual WorkspaceManager path: ' + relativePath);
+    if (createResult?.project_id !== projectId) {
+      throw new Error('Workspace creation did not return the requested project ID.');
     }
-  }
-  return workspaceDir;
-}
+    createdOrFound = true;
 
+    const workspaceDir = path.join(os.tmpdir(), 'agent-ws-' + projectId);
+    if (!fs.existsSync(workspaceDir) || !fs.statSync(workspaceDir).isDirectory()) {
+      throw new Error('WorkspaceManager workspace was not created at expected path: ' + workspaceDir);
+    }
+
+    for (const [relativePath, content] of Object.entries(seedFiles)) {
+      await benchmarkApiRequest(config, '/api/v1/memory/project/' + encodeURIComponent(projectId) + '/file', {
+        method: 'POST',
+        body: JSON.stringify({ path: relativePath, content })
+      });
+      const target = safeProjectFilePath(workspaceDir, relativePath);
+      if (!fs.existsSync(target) || fs.readFileSync(target, 'utf8') !== content) {
+        throw new Error('Seed file could not be verified in the actual WorkspaceManager path: ' + relativePath);
+      }
+    }
+    return workspaceDir;
+  } catch (error) {
+    if (createdOrFound) {
+      try { await deleteBenchmarkWorkspace(config, projectId); } catch (_) {}
+    }
+    throw error;
+  }
+}
 async function deleteBenchmarkWorkspace(config, projectId) {
   await benchmarkApiRequest(config, '/api/v1/memory/project/' + encodeURIComponent(projectId), { method: 'DELETE' });
 }
