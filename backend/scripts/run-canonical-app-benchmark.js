@@ -196,11 +196,92 @@ function writeSeedFiles(projectDir, seedFiles) {
   }
 }
 
+
+function benchmarkApiHeaders(config, json = true) {
+  return {
+    ...(json ? { 'Content-Type': 'application/json' } : {}),
+    ...(config.authToken ? { Authorization: 'Bearer ' + config.authToken } : {}),
+    'x-user-id': config.userId || 'local-user'
+  };
+}
+
+async function benchmarkApiRequest(config, route, options = {}) {
+  const response = await fetch(config.baseUrl + route, {
+    ...options,
+    headers: { ...benchmarkApiHeaders(config, options.body !== undefined), ...(options.headers || {}) }
+  });
+  const textBody = await response.text();
+  let body = null;
+  try { body = textBody ? JSON.parse(textBody) : null; } catch (_) {}
+  if (!response.ok || body?.success === false) {
+    throw new Error('Benchmark workspace API ' + route + ' failed with HTTP ' + response.status + ': ' + String(textBody).slice(0, 1000));
+  }
+  return body;
+}
+
+async function createBenchmarkWorkspace(config, projectId, seedFiles) {
+  const createResult = await benchmarkApiRequest(config, '/api/v1/memory/project', {
+    method: 'POST',
+    body: JSON.stringify({
+      project_id: projectId,
+      project_name: 'Benchmark ' + projectId,
+      description: 'Disposable AI Dost canonical benchmark project'
+    })
+  });
+  if (createResult?.project_id !== projectId) {
+    throw new Error('Workspace creation did not return the requested project ID.');
+  }
+
+  const workspaceDir = path.join(os.tmpdir(), 'agent-ws-' + projectId);
+  if (!fs.existsSync(workspaceDir) || !fs.statSync(workspaceDir).isDirectory()) {
+    throw new Error('WorkspaceManager workspace was not created at expected path: ' + workspaceDir);
+  }
+
+  for (const [relativePath, content] of Object.entries(seedFiles)) {
+    await benchmarkApiRequest(config, '/api/v1/memory/project/' + encodeURIComponent(projectId) + '/file', {
+      method: 'POST',
+      body: JSON.stringify({ path: relativePath, content })
+    });
+    const target = safeProjectFilePath(workspaceDir, relativePath);
+    if (!fs.existsSync(target) || fs.readFileSync(target, 'utf8') !== content) {
+      throw new Error('Seed file could not be verified in the actual WorkspaceManager path: ' + relativePath);
+    }
+  }
+  return workspaceDir;
+}
+
+async function deleteBenchmarkWorkspace(config, projectId) {
+  await benchmarkApiRequest(config, '/api/v1/memory/project/' + encodeURIComponent(projectId), { method: 'DELETE' });
+}
+
+function copyWorkspaceToArtifacts(sourceDir, artifactDir) {
+  const sourceRoot = fs.realpathSync(sourceDir);
+  fs.mkdirSync(artifactDir, { recursive: true });
+  const excluded = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.turbo', '.cache']);
+  const walk = (source, relative) => {
+    for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+      if (entry.isSymbolicLink() || (entry.isDirectory() && excluded.has(entry.name))) continue;
+      const sourcePath = path.join(source, entry.name);
+      const rel = relative ? relative + '/' + entry.name : entry.name;
+      const targetPath = safeProjectFilePath(artifactDir, rel);
+      if (entry.isDirectory()) {
+        fs.mkdirSync(targetPath, { recursive: true });
+        walk(sourcePath, rel);
+      } else if (entry.isFile()) {
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        fs.copyFileSync(sourcePath, targetPath);
+      }
+    }
+  };
+  walk(sourceRoot, '');
+}
+
 function listProjectFiles(projectDir) {
   const result = [];
   const walk = (current, relative) => {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
       if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory() && ['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.turbo', '.cache'].includes(entry.name)) continue;
       const abs = path.join(current, entry.name);
       const rel = relative ? relative + '/' + entry.name : entry.name;
       if (entry.isDirectory()) walk(abs, rel);
@@ -301,10 +382,10 @@ async function runOne(config) {
   const runId = crypto.randomUUID();
   const runDir = path.join(config.artifactsDir, c.id, 'run-' + runNumber);
   if (fs.existsSync(runDir)) throw new Error('Refusing to overwrite run artifacts: ' + runDir);
-  const projectDir = path.join(runDir, 'project');
-  fs.mkdirSync(projectDir, { recursive: true });
+  fs.mkdirSync(runDir, { recursive: true });
+  const projectId = 'aidost-benchmark-' + c.id + '-run-' + runNumber + '-' + runId;
+  const artifactProjectDir = path.join(runDir, 'project');
   const seedFiles = getSeedFiles(c.id);
-  writeSeedFiles(projectDir, seedFiles);
   const projectFiles = Object.entries(seedFiles).map(([p, content]) => ({ path: p, content }));
   const eventsPath = path.join(runDir, 'events.ndjson');
   const events = [];
@@ -321,7 +402,7 @@ async function runOne(config) {
     if (event && ['file_written', 'file_changed'].includes(String(event.type || '').toLowerCase())) {
       const p = event.path || event.file;
       if (typeof p === 'string' && typeof event.content === 'string') {
-        try { writeCapturedFile(projectDir, p, event.content); }
+        try { writeCapturedFile(workspaceDir, p, event.content); }
         catch (error) { captureErrors.push({ path: p, error: error.message }); }
       }
     }
@@ -330,19 +411,22 @@ async function runOne(config) {
     }
   };
 
+  let workspaceDir = null;
+  let cleanupError = null;
   try {
+    workspaceDir = await createBenchmarkWorkspace(config, projectId, seedFiles);
     const response = await fetch(config.baseUrl + '/api/agent/run', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'text/event-stream',
-        ...(config.authToken ? { Authorization: 'Bearer ' + config.authToken } : {}),
-        ...(config.userId ? { 'x-user-id': config.userId } : {})
+        'x-user-id': config.userId || 'local-user',
+        ...(config.authToken ? { Authorization: 'Bearer ' + config.authToken } : {})
       },
       body: JSON.stringify({
         userPrompt: c.prompt,
-        projectPath: projectDir,
-        projectId: 'canonical-' + c.id + '-' + runNumber + '-' + runId,
+        projectPath: workspaceDir,
+        projectId,
         chatHistory: [],
         projectFiles,
         copilotDirector: true,
@@ -358,8 +442,19 @@ async function runOne(config) {
     requestError = error.message;
   }
 
+  let files = [];
+  if (workspaceDir && fs.existsSync(workspaceDir)) {
+    files = listProjectFiles(workspaceDir);
+    try { copyWorkspaceToArtifacts(workspaceDir, artifactProjectDir); }
+    catch (error) { captureErrors.push({ path: '<artifact-copy>', error: error.message }); }
+  }
+  try {
+    if (workspaceDir) await deleteBenchmarkWorkspace(config, projectId);
+  } catch (error) {
+    cleanupError = error.message;
+  }
+
   const elapsedMs = Date.now() - start;
-  const files = listProjectFiles(projectDir);
   const providerModelObservations = events.filter((e) => e && (e.provider || e.model || e.providerName)).map((e) => ({
     provider: e.provider || null, providerName: e.providerName || null, model: e.model || null, type: e.type || null, phase: e.phase || null
   }));
@@ -402,7 +497,7 @@ async function runOne(config) {
     caseStatus: derived.caseStatus,
     acceptanceStatus: derived.acceptanceStatus,
     elapsedMs,
-    project: { directory: projectDir, fileCount: files.length, files, captureErrors },
+    project: { directory: artifactProjectDir, fileCount: files.length, files, captureErrors },
     evidence: {
       eventsPath,
       qualityGateEventCount: derived.gate.eventCount,
