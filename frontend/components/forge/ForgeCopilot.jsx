@@ -9,7 +9,7 @@ import {
   LuLoaderCircle, LuLockKeyhole, LuMenu, LuMessageCircle, LuMonitor,
   LuPanelLeft, LuPanelRight, LuPaperclip, LuPlay, LuPlus, LuRefreshCw, LuRocket,
   LuPalette, LuSearch, LuSend, LuSettings2, LuShieldCheck, LuSmartphone, LuSparkles,
-  LuSquareTerminal, LuTerminal, LuThumbsUp, LuWandSparkles, LuX, LuZap, LuSliders,
+  LuSquareTerminal, LuTerminal, LuThumbsUp, LuWandSparkles, LuX, LuZap, LuSlidersHorizontal,
   LuPlug, LuBookOpen, LuCheckCircle2, LuTrash2, LuSquare, LuRotateCcw,
   LuUpload, LuFolderPlus, LuPen, LuSave, LuShieldAlert, LuDownload,
   LuMic, LuMicOff, LuShoppingCart, LuKanban, LuLayers, LuBriefcase
@@ -1609,7 +1609,7 @@ function Toolbar({
             onClick={onOpenDiff}
             className="hover:!text-indigo-400"
           >
-            <LuSliders size={15} />
+            <LuSlidersHorizontal size={15} />
           </IconButton>
         )}
         {onExportZip && (
@@ -1739,7 +1739,7 @@ function CodeEditorView({
               className="text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium flex items-center gap-1 transition-colors border border-zinc-700/80"
               title="Compare modifications against checkpoint"
             >
-              <LuSliders size={12} /> Diff
+              <LuSlidersHorizontal size={12} /> Diff
             </button>
           )}
           <button
@@ -2464,7 +2464,7 @@ function AssistantPanel({
                                     className="px-1.5 py-0.5 border-l border-zinc-700 hover:bg-indigo-600/30 text-indigo-300"
                                     title="Inspect changes & rollback"
                                   >
-                                    <LuSliders size={9} />
+                                    <LuSlidersHorizontal size={9} />
                                   </button>
                                 )}
                               </div>
@@ -4004,7 +4004,7 @@ export default function ForgeCopilot({
     {
       label: 'Inspect Diffs (Unified / Split)',
       key: '⌘D',
-      icon: <LuSliders size={14} className="text-indigo-400" />,
+      icon: <LuSlidersHorizontal size={14} className="text-indigo-400" />,
       action: () => handleOpenDiff(),
     },
     {
