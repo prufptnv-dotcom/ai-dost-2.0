@@ -23,6 +23,8 @@ import { CommandPalette } from '../views/IDEOverlays';
 import { MCP_REGISTRY, SKILLS_MANIFEST, PROVIDERS_SUPPORT } from './forgePlatformData';
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
+// Fall back to a known-exported icon if an older react-icons bundle omits LuDownload.
+const DownloadActionIcon = LuDownload || LuSave;
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || '';
 
@@ -541,7 +543,7 @@ function FileSidebar({
             </IconButton>
             {onExportZip && (
               <IconButton title="Export project ZIP archive" onClick={onExportZip}>
-                <LuDownload size={14} />
+                <DownloadActionIcon size={14} />
               </IconButton>
             )}
           </div>
@@ -1505,7 +1507,7 @@ function Topbar({
             onClick={onExportZip}
             title="Export project ZIP archive with 1-click launcher scripts"
           >
-            <LuDownload size={13} />
+            <DownloadActionIcon size={13} />
             <span>Export</span>
           </button>
         )}
@@ -1616,7 +1618,7 @@ function Toolbar({
             onClick={onExportZip}
             className="hover:!text-emerald-400"
           >
-            <LuDownload size={15} />
+            <DownloadActionIcon size={15} />
           </IconButton>
         )}
         <span className="toolbar-separator" />
@@ -3996,7 +3998,7 @@ export default function ForgeCopilot({
     {
       label: 'Export Project (ZIP)',
       key: '⌘E',
-      icon: <LuDownload size={14} className="text-emerald-400" />,
+      icon: <DownloadActionIcon size={14} className="text-emerald-400" />,
       action: handleExportZip,
     },
     {
