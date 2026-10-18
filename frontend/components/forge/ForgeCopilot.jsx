@@ -798,8 +798,8 @@ function GitSnapshotsModal({ open, onClose, onToast, projectId, projectName }) {
               <LuGitBranch size={16} />
             </span>
             <div>
-              <h2 className="text-sm font-bold text-white">Git Snapshots &amp; Remote Sync</h2>
-              <p className="text-[11px] text-zinc-400">Version control &amp; GitHub integration for {projectName}</p>
+              <h2 className="text-sm font-bold text-white">Git Snapshots &amp; Local Commits</h2>
+              <p className="text-[11px] text-zinc-400">Version control &amp; GitHub remote sync for {projectName}</p>
             </div>
           </div>
           <button
