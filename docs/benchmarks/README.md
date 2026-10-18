@@ -7,6 +7,9 @@ This runbook describes how to execute the six canonical generated-application ca
 - Run the code from the same machine as the backend. The runner deliberately accepts loopback URLs only and preserves generated projects locally.
 - Start the Docker or Podman daemon before running the benchmark. The runner checks for an operational container runtime and aborts before model calls if none is available.
 - Start the backend with a valid model/provider credential and the configured `AIDOST_RUNNER_SECRET` (at least 16 characters) in `backend/.env`.
+- For projects that declare npm dependencies and build/test scripts, explicitly enable dependency bootstrap in the trusted backend environment: `AIDOST_ALLOW_NETWORKED_DEP_INSTALL=true`. Set this before starting the backend; do not commit the secret or opt-in setting.
+- The opt-in install runs in an isolated container, disables npm lifecycle scripts, rejects custom package-manager config and non-registry dependency URLs in manifests/lockfiles, and then runs build/tests offline. Use it only with dependency sources you trust. Without the opt-in, dependency-backed cases are marked blocked/failed rather than passed.
+- `AIDOST_TRUSTED_EXECUTION_TIMEOUT_MS` can raise the isolated build/test timeout (default 120000 ms; capped at 600000 ms). For the initial benchmark, `180000` is a reasonable starting value.
 - Use the same model route and comparable settings when comparing baseline and candidate revisions.
 - Keep API tokens and runner secrets out of the report. The runner does not print them.
 
@@ -15,6 +18,9 @@ This runbook describes how to execute the six canonical generated-application ca
 From the repository root:
 
 ```powershell
+# These must also be set in the environment used to start the backend.
+$env:AIDOST_ALLOW_NETWORKED_DEP_INSTALL = 'true'
+$env:AIDOST_TRUSTED_EXECUTION_TIMEOUT_MS = '180000'
 $revision = (git rev-parse HEAD).Trim()
 cd backend
 npm run benchmark:canonical -- --base-url http://127.0.0.1:5000 --preferred-model auto --revision $revision --runs 1
