@@ -24,7 +24,7 @@ test('loopback endpoint is accepted and remote backend URLs are rejected', () =>
   assert.equal(ensureLocalUrl('http://127.0.0.1:5000/'), 'http://127.0.0.1:5000');
   assert.equal(ensureLocalUrl('http://localhost:5000'), 'http://localhost:5000');
   assert.throws(() => ensureLocalUrl('https://example.com'), /loopback/);
-  assert.throws(() => ensureLocalUrl('file:///tmp/backend'), /Invalid URL|HTTP/);
+  assert.throws(() => ensureLocalUrl('file:///tmp/backend'), /loopback/);
 });
 
 test('SSE event parser preserves type and JSON payload', () => {
