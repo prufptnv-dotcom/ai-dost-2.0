@@ -19,6 +19,28 @@ const os = require('node:os');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 
+function resolveContainerUser(stagedDir, requestedUser = null) {
+  const configured = requestedUser || process.env.AIDOST_CONTAINER_USER;
+  if (configured) {
+    if (!/^\\d+:\\d+$/.test(String(configured))) {
+      throw new Error('INVALID_CONTAINER_USER: AIDOST_CONTAINER_USER must be a numeric uid:gid pair.');
+    }
+    return String(configured);
+  }
+
+  // Docker bind mounts enforce host filesystem ownership. Match the staged
+  // directory owner on POSIX so private mkdtemp snapshots remain readable
+  // without broadening host-side file permissions. Docker Desktop translates
+  // Windows ACLs separately, so retain the Node image's unprivileged default.
+  if (process.platform !== 'win32') {
+    const stat = fs.statSync(stagedDir);
+    if (Number.isInteger(stat.uid) && Number.isInteger(stat.gid)) {
+      return String(stat.uid) + ':' + String(stat.gid);
+    }
+  }
+  return '1000:1000';
+}
+
 class ContainerExecutionAdapter {
   constructor(options = {}) {
     this.runtime = options.runtime || null; // 'docker' | 'podman' | null
@@ -82,7 +104,7 @@ class ContainerExecutionAdapter {
     cpus = '1',
     pidsLimit = '64',
     readOnly = true,
-    user = '1000:1000'
+    user = null
   }) {
     const probe = this.probeRuntime();
 
@@ -104,6 +126,8 @@ class ContainerExecutionAdapter {
     if (!stagedDir || !fs.existsSync(stagedDir)) {
       throw new Error(`INVALID_WORKSPACE: Staged workspace directory "${stagedDir}" does not exist.`);
     }
+
+    const containerUser = resolveContainerUser(stagedDir, user);
 
     // Convert Windows paths to forward slashes for container volume mounting if needed
     const normalizedMountPath = path.resolve(stagedDir).replaceAll('\\', '/');
@@ -149,7 +173,7 @@ class ContainerExecutionAdapter {
 
     dockerArgs.push(
       '-w', readOnly ? '/tmp' : '/workspace',
-      '--user=' + user,
+      '--user=' + containerUser,
       // Sanitize environment: NO host secrets!
       '-e', 'NODE_ENV=test',
       '-e', 'HOME=/tmp',
@@ -299,5 +323,6 @@ class FakeContainerExecutionAdapter {
 
 module.exports = {
   ContainerExecutionAdapter,
-  FakeContainerExecutionAdapter
+  FakeContainerExecutionAdapter,
+  resolveContainerUser
 };
