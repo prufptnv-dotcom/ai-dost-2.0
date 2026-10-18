@@ -1275,9 +1275,15 @@ export function callApi(endpoint, payload) {
       });
 
       const args = adapter.lastArgs || [];
-      assert.ok(args.includes('--read-only'), 'Must include --read-only flag when readOnly is true');
-      assert.ok(args.some(a => a.startsWith('-v') || a.includes(':/workspace:ro')), 'Must mount workspace as :ro when readOnly is true');
-      assert.ok(args.includes('--network=none'), 'Must disable container network');
+      assert.ok(args.includes('--read-only'), 'Must make container root filesystem read-only');
+      const sourceMountIndex = args.indexOf('-v');
+      assert.ok(sourceMountIndex >= 0 && String(args[sourceMountIndex + 1]).endsWith(':/source:ro'),
+        'Must keep the authoritative staged source mounted read-only');
+      assert.ok(args.some(a => a.startsWith('--tmpfs=/workspace:rw')),
+        'Must provide a disposable writable tmpfs for build output');
+      assert.ok(args.includes('cp -R /source/. /workspace/ && cd /workspace && exec "$@"'),
+        'Must copy source to disposable workspace before executing a build/test command');
+      assert.ok(args.includes('--network=none'), 'Must disable container network by default');
       assert.ok(args.includes('--security-opt=no-new-privileges'), 'Must drop privileges');
       assert.ok(args.includes('--cap-drop=ALL'), 'Must drop all capabilities');
       assert.ok(args.some(a => a.startsWith('--name=aidost-exec-')), 'Must assign unique aidost-exec container name');
