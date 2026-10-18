@@ -11,7 +11,8 @@ import {
   LuPalette, LuSearch, LuSend, LuSettings2, LuShieldCheck, LuSmartphone, LuSparkles,
   LuSquareTerminal, LuTerminal, LuThumbsUp, LuWandSparkles, LuX, LuZap, LuSliders,
   LuPlug, LuBookOpen, LuCheckCircle2, LuTrash2, LuSquare, LuRotateCcw,
-  LuUpload, LuFolderPlus, LuPen, LuSave, LuShieldAlert, LuDownload
+  LuUpload, LuFolderPlus, LuPen, LuSave, LuShieldAlert, LuDownload,
+  LuMic, LuMicOff, LuShoppingCart, LuKanban, LuLayers, LuBriefcase
 } from 'react-icons/lu';
 import { fetchProject, fetchProjects, saveProjectFile, addProjectFile, deleteProjectFile, createProject, deleteProject } from '../../services/api';
 import { generateLiveAppHtml } from '../ide/PreviewEngine';
@@ -274,6 +275,7 @@ function FileSidebar({
   currentProjectId,
   onExportZip,
   onOpenCommandPalette,
+  onOpenTemplates,
 }) {
   const [query, setQuery] = useState('');
   const [openFolders, setOpenFolders] = useState({ src: true, components: true });
@@ -480,9 +482,18 @@ function FileSidebar({
               <button
                 onClick={() => {
                   setProjectMenuOpen(false);
+                  onOpenTemplates?.();
+                }}
+                className="w-full text-left px-2 py-1.5 rounded flex items-center gap-2 hover:bg-zinc-800 text-amber-400 font-medium cursor-pointer"
+              >
+                <LuSparkles size={14} /> Starter templates
+              </button>
+              <button
+                onClick={() => {
+                  setProjectMenuOpen(false);
                   onNewProject?.();
                 }}
-                className="w-full text-left px-2 py-1.5 rounded flex items-center gap-2 hover:bg-zinc-800 text-purple-400 font-medium"
+                className="w-full text-left px-2 py-1.5 rounded flex items-center gap-2 hover:bg-zinc-800 text-purple-400 font-medium cursor-pointer"
               >
                 <LuPlus size={14} /> New project
               </button>
@@ -493,6 +504,11 @@ function FileSidebar({
         <div className="files-label-row">
           <span>FILES ({files.length})</span>
           <div className="file-actions">
+            {onOpenTemplates && (
+              <IconButton title="Starter templates gallery" onClick={onOpenTemplates}>
+                <LuSparkles size={14} />
+              </IconButton>
+            )}
             <IconButton title="Search files" onClick={() => searchInputRef.current?.focus()}>
               <LuSearch size={14} />
             </IconButton>
@@ -989,6 +1005,250 @@ function GitSnapshotsModal({ open, onClose, onToast, projectId, projectName }) {
       </div>
     </div>
   );
+}
+
+const STARTER_TEMPLATES = [
+  {
+    id: 'nextjs-saas',
+    title: 'Next.js SaaS Landing & Pricing',
+    category: 'SaaS',
+    icon: LuRocket,
+    badge: 'Popular',
+    description: 'High-converting dark SaaS landing with animated gradients, tiered pricing comparison table, customer reviews, and auth modal.',
+    tags: ['Next.js', 'Tailwind', 'SaaS', 'Framer Motion'],
+    prompt: 'Build a production-ready SaaS landing page with a hero section featuring animated gradients and trust badges, an interactive pricing toggle (monthly/annual with 20% discount), a comparison table of features across Free, Pro, and Enterprise tiers, customer testimonials carousel, FAQ accordion, and an interactive login/sign-up modal with form validation.',
+  },
+  {
+    id: 'analytics-dashboard',
+    title: 'Real-Time Analytics Dashboard',
+    category: 'Analytics',
+    icon: LuLayers,
+    badge: 'Trending',
+    description: 'Executive metrics dashboard with real-time KPI cards, interactive revenue and churn trend charts, acquisition breakdown, and transactions feed.',
+    tags: ['Dashboard', 'Charts', 'Data Viz', 'KPIs'],
+    prompt: 'Build a sleek, high-performance executive analytics dashboard with a dark theme. Include 4 KPI metric cards with sparkline trends (+12.4% MoM), interactive revenue and churn line/bar charts with time-range selector (7d, 30d, 90d), a user acquisition breakdown donut chart, a searchable real-time transactions table with status pills, and an export CSV report action.',
+  },
+  {
+    id: 'kanban-crm',
+    title: 'Kanban CRM & Task Pipeline',
+    category: 'Productivity',
+    icon: LuKanban,
+    badge: 'Essential',
+    description: 'Drag-and-drop Kanban workflow board with lead management, priority tags, search & filter bar, and detailed deal inspector modal.',
+    tags: ['Kanban', 'CRM', 'Drag & Drop', 'Productivity'],
+    prompt: 'Create a full-featured Kanban CRM and project task board. Implement columns for Backlog, In Progress, Review, and Done. Each card should show priority pill (Low, Medium, High, Urgent), assignee avatar, due date badge, and tags. Add a search bar, column filter, "New Task" modal with rich inputs, and drag-and-drop reordering between columns with persistent state.',
+  },
+  {
+    id: 'ecommerce-store',
+    title: 'Modern E-Commerce Storefront',
+    category: 'E-Commerce',
+    icon: LuShoppingCart,
+    badge: 'Featured',
+    description: 'Complete online store with product category filter, sorting, dynamic cart drawer, checkout modal with address & coupon codes.',
+    tags: ['Store', 'Shopping Cart', 'Checkout', 'Filter'],
+    prompt: 'Build a modern, responsive e-commerce storefront with a sticky navigation bar, category filter sidebar (Electronics, Apparel, Accessories), price range slider, product grid with star ratings, quick-view modal, slide-out cart drawer with item quantity controls and subtotal calculation, and a multi-step checkout dialog with shipping and dummy payment processing.',
+  },
+  {
+    id: 'ai-chat-studio',
+    title: 'AI Multi-Model Chat Studio',
+    category: 'AI',
+    icon: LuSparkles,
+    badge: 'AI-Powered',
+    description: 'Conversational AI workspace with model switcher, markdown code highlighting, token counter, and prompt presets.',
+    tags: ['AI Chat', 'Markdown', 'Prompts', 'Agents'],
+    prompt: 'Build an enterprise-grade AI Chat Studio. Include a sidebar with conversation history and new chat creation, a model selector dropdown (Claude 3.7 Sonnet, GPT-4o, Gemini 2.0 Flash), a message feed supporting markdown and syntax-highlighted code blocks with 1-click copy, token usage counter, customizable system prompt drawer, and quick prompt suggestion chips.',
+  },
+  {
+    id: 'portfolio-blog',
+    title: 'Engineer Portfolio & Tech Blog',
+    category: 'Portfolio',
+    icon: LuBriefcase,
+    badge: 'Personal',
+    description: 'High-impact personal developer portfolio with interactive project showcase, tech stack radar, reading-time blog, and contact form.',
+    tags: ['Portfolio', 'Blog', 'Showcase', 'Clean'],
+    prompt: 'Build a modern, developer portfolio and engineering blog. Include an interactive hero section with terminal bio typing animation, a featured projects showcase with live demo and GitHub links, interactive skills badge grid grouped by category (Frontend, Backend, DevOps, AI), a tech blog section with tag filtering and reading-time estimates, and a clean contact form with validation.',
+  },
+];
+
+function StarterTemplatesModal({ open, onClose, onSelectTemplate }) {
+  const [search, setSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [copiedId, setCopiedId] = useState(null);
+
+  if (!open) return null;
+
+  const categories = ['All', 'SaaS', 'Analytics', 'Productivity', 'E-Commerce', 'AI', 'Portfolio'];
+
+  const filteredTemplates = STARTER_TEMPLATES.filter((tpl) => {
+    const matchesCat = selectedCategory === 'All' || tpl.category === selectedCategory;
+    const query = search.toLowerCase();
+    const matchesSearch = !query ||
+      tpl.title.toLowerCase().includes(query) ||
+      tpl.description.toLowerCase().includes(query) ||
+      tpl.tags.some((t) => t.toLowerCase().includes(query));
+    return matchesCat && matchesSearch;
+  });
+
+  const handleCopyPrompt = (e, tpl) => {
+    e.stopPropagation();
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(tpl.prompt);
+      setCopiedId(tpl.id);
+      setTimeout(() => setCopiedId(null), 2000);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 sm:p-6 animate-in fade-in duration-150">
+      <div className="bg-[#121318] border border-zinc-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden text-zinc-200">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800/80 bg-[#17181f]">
+          <div className="flex items-center gap-3">
+            <span className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
+              <LuSparkles size={18} />
+            </span>
+            <div>
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                Starter Templates Gallery
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                  Curated Starters
+                </span>
+              </h2>
+              <p className="text-[11px] text-zinc-400 mt-0.5">
+                Launch production-ready applications with instant scaffolding and automated Forge prompt blueprints
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+            title="Close"
+          >
+            <LuX size={17} />
+          </button>
+        </div>
+
+        {/* Filter bar */}
+        <div className="px-6 py-3 border-b border-zinc-800/60 bg-[#14151b] flex flex-col sm:flex-row items-center justify-between gap-3">
+          {/* Categories */}
+          <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto scrollbar-none pb-1 sm:pb-0">
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer shrink-0 ${
+                  selectedCategory === cat
+                    ? 'bg-purple-600 text-white shadow-sm shadow-purple-900/40'
+                    : 'bg-zinc-800/70 hover:bg-zinc-700/80 text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
+          {/* Search */}
+          <div className="relative w-full sm:w-64">
+            <LuSearch size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search templates or tech..."
+              className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-zinc-900/90 border border-zinc-700/70 text-xs text-zinc-200 placeholder-zinc-500 outline-none focus:border-purple-500"
+            />
+          </div>
+        </div>
+
+        {/* Grid Body */}
+        <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          {filteredTemplates.map((tpl) => {
+            const Icon = tpl.icon;
+            return (
+              <div
+                key={tpl.id}
+                className="group p-4 rounded-xl border border-zinc-800/90 bg-[#16171e] hover:border-purple-500/50 hover:bg-[#191b24] transition-all flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2.5">
+                      <span className="p-2 rounded-lg bg-zinc-800 text-purple-400 group-hover:bg-purple-500/10 group-hover:text-purple-300 transition-colors">
+                        <Icon size={18} />
+                      </span>
+                      <h3 className="text-xs font-semibold text-zinc-100 group-hover:text-white">
+                        {tpl.title}
+                      </h3>
+                    </div>
+                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-zinc-800 text-zinc-400 border border-zinc-700/60">
+                      {tpl.badge}
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-zinc-400 leading-relaxed mb-3">
+                    {tpl.description}
+                  </p>
+
+                  <div className="flex flex-wrap gap-1.5 mb-4">
+                    {tpl.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="text-[10px] px-2 py-0.5 rounded-md bg-zinc-900 text-zinc-400 border border-zinc-800"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-3 border-t border-zinc-800/70">
+                  <button
+                    type="button"
+                    onClick={(e) => handleCopyPrompt(e, tpl)}
+                    className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[11px] text-zinc-300 font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                    title="Copy prompt blueprint to clipboard"
+                  >
+                    {copiedId === tpl.id ? (
+                      <>
+                        <LuCheck size={12} className="text-emerald-400" />
+                        <span className="text-emerald-400">Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <LuCopy size={12} />
+                        <span>Prompt</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onSelectTemplate(tpl)}
+                    className="px-3.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-[11px] font-semibold text-white flex items-center gap-1.5 shadow-md shadow-purple-900/30 transition-all cursor-pointer"
+                  >
+                    <LuSparkles size={12} />
+                    <span>Use Template</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-3 border-t border-zinc-800 bg-[#17181f] flex items-center justify-between text-xs text-zinc-500">
+          <span>{filteredTemplates.length} templates available</span>
+          <button
+            onClick={onClose}
+            className="px-4 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 font-medium transition-colors cursor-pointer"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FileDiffModal({
   open,
   onClose,
@@ -1188,6 +1448,7 @@ function Topbar({
   onDeploy,
   onShare,
   onOpenGit,
+  onOpenTemplates,
   mobile,
   theme,
   setTheme,
@@ -1215,6 +1476,13 @@ function Topbar({
           title="Git Snapshots & Local Commits"
         >
           <LuGitBranch size={12} /> main
+        </button>
+        <button
+          className="topbar-branch hover:bg-zinc-800/80 px-2 py-0.5 rounded cursor-pointer transition-colors border-0 bg-transparent text-amber-300/90 hover:text-amber-200"
+          onClick={onOpenTemplates}
+          title="Browse Curated Starter Templates Gallery"
+        >
+          <LuSparkles size={12} className="text-amber-400" /> Templates
         </button>
       </div>
       <div className="topbar-right">
@@ -1967,6 +2235,69 @@ function AssistantPanel({
     setAttachMenuOpen(false);
   };
 
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef(null);
+
+  const toggleVoiceInput = () => {
+    if (isListening) {
+      try {
+        recognitionRef.current?.stop();
+      } catch (_) {}
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognition =
+      typeof window !== 'undefined' &&
+      (window.SpeechRecognition || window.webkitSpeechRecognition);
+
+    if (!SpeechRecognition) {
+      onToast?.('Speech recognition not supported in this browser');
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        onToast?.('Listening... Speak your prompt');
+      };
+
+      recognition.onresult = (event) => {
+        const transcript = Array.from(event.results)
+          .map((r) => r[0].transcript)
+          .join('');
+        if (transcript) {
+          setPrompt((prev) => {
+            const trimmed = (prev || '').trim();
+            return trimmed ? `${trimmed} ${transcript}` : transcript;
+          });
+        }
+      };
+
+      recognition.onerror = (err) => {
+        setIsListening(false);
+        if (err.error !== 'no-speech') {
+          onToast?.(`Voice input notice: ${err.error}`);
+        }
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err) {
+      setIsListening(false);
+      onToast?.('Could not activate microphone');
+    }
+  };
+
   return (
     <>
       {open && <div className="mobile-scrim assistant-scrim" onClick={onClose} />}
@@ -2302,6 +2633,19 @@ function AssistantPanel({
                   </div>
                 )}
               </div>
+
+              <button
+                type="button"
+                className={`composer-tool transition-colors ${
+                  isListening
+                    ? '!text-red-400 !bg-red-500/20 border border-red-500/40 animate-pulse'
+                    : ''
+                }`}
+                title={isListening ? 'Stop listening (Mic active)' : 'Voice input (Speech to Text)'}
+                onClick={toggleVoiceInput}
+              >
+                {isListening ? <LuMicOff size={15} /> : <LuMic size={15} />}
+              </button>
 
               <span className="composer-hint">
                 {isAssistantWorking ? (
@@ -3052,6 +3396,7 @@ export default function ForgeCopilot({
   const [devServer, setDevServer] = useState({ state: null, url: null, hostPort: null });
   const [terminalLogs, setTerminalLogs] = useState([]);
   const [gitOpen, setGitOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const [user, setUser] = useState({ name: 'Developer', initials: 'AI', role: 'Local Workspace' });
 
   const [inspectorActive, setInspectorActive] = useState(false);
@@ -3199,6 +3544,14 @@ export default function ForgeCopilot({
     setToast(message);
     externalToast?.(message);
   }, [externalToast]);
+
+  const handleSelectTemplate = useCallback((template) => {
+    setTemplatesOpen(false);
+    if (!template?.prompt) return;
+    setPrompt(template.prompt);
+    setAssistantOpen(true);
+    showToast(`Loaded "${template.title}" template blueprint into assistant`);
+  }, [showToast]);
 
   const handleOpenDiff = useCallback((filePath) => {
     const targetPath = filePath || lastAction?.file || activeFile;
@@ -3680,6 +4033,12 @@ export default function ForgeCopilot({
       key: '⌘R',
       icon: <LuPlay size={14} className="text-emerald-400" />,
       action: runBuild,
+    },
+    {
+      label: 'Browse Starter Templates Gallery...',
+      key: '⌘T',
+      icon: <LuSparkles size={14} className="text-amber-400" />,
+      action: () => setTemplatesOpen(true),
     },
     {
       label: 'Git Snapshots & Commit Log',
@@ -4306,6 +4665,7 @@ export default function ForgeCopilot({
         currentProjectId={currentProjectId}
         onExportZip={handleExportZip}
         onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+        onOpenTemplates={() => setTemplatesOpen(true)}
       />
       <div className="workspace-main">
         <Topbar
@@ -4313,6 +4673,7 @@ export default function ForgeCopilot({
           onToggleAssistant={() => setAssistantOpen(!assistantOpen)}
           onDeploy={() => setActiveTab('deployments')}
           onOpenGit={() => setGitOpen(true)}
+          onOpenTemplates={() => setTemplatesOpen(true)}
           onExportZip={handleExportZip}
           onShare={() => {
             if (typeof window !== 'undefined') {
@@ -4432,6 +4793,13 @@ export default function ForgeCopilot({
                               </p>
                               <div className="flex flex-wrap gap-2 justify-center">
                                 <button
+                                  type="button"
+                                  onClick={() => setTemplatesOpen(true)}
+                                  className="px-3.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-xs font-semibold text-white flex items-center gap-1.5 shadow-lg shadow-purple-900/30 transition-all cursor-pointer"
+                                >
+                                  <LuSparkles size={14} /> Browse Starter Templates
+                                </button>
+                                <button
                                   onClick={() => setPrompt('Create a modern SaaS landing page with dark theme, pricing table, and feature cards')}
                                   className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200 border border-zinc-700"
                                 >
@@ -4534,6 +4902,11 @@ export default function ForgeCopilot({
         onToast={showToast}
         projectId={currentProjectId}
         projectName={projectName}
+      />
+      <StarterTemplatesModal
+        open={templatesOpen}
+        onClose={() => setTemplatesOpen(false)}
+        onSelectTemplate={handleSelectTemplate}
       />
       <FileDiffModal
         open={Boolean(diffModalFile)}
