@@ -124,21 +124,40 @@ class ContainerExecutionAdapter {
       '--tmpfs=/tmp:rw,noexec,nosuid,size=64m'
     ];
 
+    let executionArgs;
     if (readOnly) {
-      dockerArgs.push('-v', `${normalizedMountPath}:/workspace:ro`, '--read-only');
+      // The authoritative source remains read-only; build/test writes go to a
+      // disposable tmpfs copy so artifacts cannot be modified in place.
+      dockerArgs.push(
+        '-v', normalizedMountPath + ':/source:ro',
+        '--tmpfs=/workspace:rw,nosuid,size=768m,mode=1777',
+        '--read-only'
+      );
+      executionArgs = [
+        '/bin/sh',
+        '-lc',
+        'cp -R /source/. /workspace/ && cd /workspace && exec "$@"',
+        'aidost-exec',
+        command,
+        ...args
+      ];
     } else {
-      dockerArgs.push('-v', `${normalizedMountPath}:/workspace:rw`);
+      dockerArgs.push('-v', normalizedMountPath + ':/workspace:rw');
+      executionArgs = [command, ...args];
     }
 
     dockerArgs.push(
-      `-w`, `/workspace`,
-      `--user=${user}`,
+      '-w', readOnly ? '/tmp' : '/workspace',
+      '--user=' + user,
       // Sanitize environment: NO host secrets!
-      `-e`, `NODE_ENV=test`,
-      `-e`, `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+      '-e', 'NODE_ENV=test',
+      '-e', 'HOME=/tmp',
+      '-e', 'TMPDIR=/tmp',
+      '-e', 'npm_config_cache=/tmp/npm-cache',
+      '-e', 'NPM_CONFIG_CACHE=/tmp/npm-cache',
+      '-e', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
       this.image,
-      command,
-      ...args
+      ...executionArgs
     );
 
     this.lastArgs = dockerArgs;
