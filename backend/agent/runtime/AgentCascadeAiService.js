@@ -142,18 +142,7 @@ class AgentCascadeAiService {
       }
     }
 
-    // 2. Cascade Tier 1: Groq (ultra fast, high rate limits)
-    try {
-      const resp = await GroqService.chat(prompt, history, mode, customKeys?.groq);
-      if (!isErrorResponse(resp)) {
-        logger.info('[AgentCascade] Handled by Groq');
-        return resp;
-      }
-    } catch (e) {
-      logger.info(`[AgentCascade] Groq failed: ${e.message}`);
-    }
-
-    // 3. Cascade Tier 2: Gemini (1500 req/day free, smart reasoning)
+    // 2. Priority Cloud Tier: Gemini (verified fast, live quota)
     try {
       const resp = await GeminiService.chat(prompt, history, null, mode, customKeys?.gemini);
       if (!isErrorResponse(resp)) {
@@ -162,6 +151,17 @@ class AgentCascadeAiService {
       }
     } catch (e) {
       logger.info(`[AgentCascade] Gemini failed: ${e.message}`);
+    }
+
+    // 3. Cascade Tier 1: Groq
+    try {
+      const resp = await GroqService.chat(prompt, history, mode, customKeys?.groq);
+      if (!isErrorResponse(resp)) {
+        logger.info('[AgentCascade] Handled by Groq');
+        return resp;
+      }
+    } catch (e) {
+      logger.info(`[AgentCascade] Groq failed: ${e.message}`);
     }
 
     // 4. Cascade Tier 3: NVIDIA NIM

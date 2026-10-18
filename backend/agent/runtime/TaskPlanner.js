@@ -9,7 +9,7 @@ class TaskPlanner {
       maxGoalChars: Number.isInteger(limits.maxGoalChars) ? limits.maxGoalChars : 4000,
       maxDescriptionChars: Number.isInteger(limits.maxDescriptionChars) ? limits.maxDescriptionChars : 2000,
       maxInputKeys: Number.isInteger(limits.maxInputKeys) ? limits.maxInputKeys : 40,
-      maxInputStringChars: Number.isInteger(limits.maxInputStringChars) ? limits.maxInputStringChars : 12000,
+      maxInputStringChars: Number.isInteger(limits.maxInputStringChars) ? limits.maxInputStringChars : 100000,
     };
     if (!this.toolRegistry || typeof this.toolRegistry.get !== 'function') throw new Error('TaskPlanner requires a valid ToolRegistry');
   }
@@ -52,6 +52,29 @@ class TaskPlanner {
       if (mutates || obviouslyMutating.test(step.tool) || !readOnlyClassified) {
         dropped.push(step.tool);
         continue;
+      }
+      if (step.tool === 'read_file') {
+        const reqPath = String(step.input?.path || '').replace(/^[./\\]+/, '');
+        let fileExists = false;
+        if (context?.workspaceManager && typeof context.workspaceManager.resolvePath === 'function') {
+          try {
+            const resolved = context.workspaceManager.resolvePath(context.projectId, step.input?.path || '', context.userId);
+            const fs = require('fs');
+            if (fs.existsSync(resolved)) {
+              fileExists = true;
+            }
+          } catch (_) {}
+        }
+        if (!fileExists && Array.isArray(context?.existingFiles)) {
+          fileExists = context.existingFiles.some((f) => {
+            const normF = String(f).replace(/^[./\\]+/, '');
+            return normF === reqPath || normF.endsWith('/' + reqPath) || reqPath.endsWith('/' + normF);
+          });
+        }
+        if (!fileExists) {
+          dropped.push(`read_file (${step.input?.path || 'unknown'} does not exist)`);
+          continue;
+        }
       }
       validSteps.push(step);
     }

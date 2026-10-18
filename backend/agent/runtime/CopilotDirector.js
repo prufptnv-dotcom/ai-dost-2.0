@@ -589,7 +589,7 @@ class CopilotDirector {
           ? `[SURGICAL_DIRECTIVE: Inspect existing workspace files first. Apply surgical targeted edits to affected files only without wiping or regenerating unrelated code.` +
             (existingFiles.length ? ` EXISTING FILES (these paths ALREADY EXIST — never plan write_file for them, it is REJECTED; to change one, read_file it then apply_diff): ${existingFiles.join(', ')}` : '') +
             `]`
-          : `[GREENFIELD_DIRECTIVE: Workspace is new/empty. Create required source and component files directly using write_file. Do not attempt to read non-existent legacy files.]`;
+          : `[GREENFIELD_DIRECTIVE: Workspace is new/empty. Create required source and component files directly using write_file. For web and UI applications, ALWAYS create index.html as the primary entry point alongside required components and styles. Do not attempt to read non-existent legacy files.]`;
 
         const baseObjective = `${currentDirective}\n${formatCodeGenerationStrategy(codeStrategy)}${extraGuidance}\n${task.objective}`;
 
@@ -613,6 +613,10 @@ class CopilotDirector {
 
         onEvent({ type: 'thinking', message: `⚡ Specialist [${task.id}] executing ${workerPlan.steps?.length || 0} step(s)...` });
 
+        const currentExistingFiles = meta?.diskPath && fs.existsSync(meta.diskPath)
+          ? Object.keys(collectWorkspaceFilesBounded(meta.diskPath))
+          : existingFiles;
+
         // --- VERIFICATION GATE: Execute and then Verify ---
         lastResult = await this.plannerExecutionLoop.runWithPlan(
           projectId, 
@@ -621,7 +625,18 @@ class CopilotDirector {
           maxRepairs || 3, 
           () => Boolean(signal?.aborted), 
           `copilot_${delegated.workerRun.id}_att${attempt}`,
-          { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined, ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) }
+          { 
+            onEvent, 
+            permissionLevel, 
+            approvalToken: approvalToken || undefined, 
+            approvalState: approvalState || undefined, 
+            role: task.role,
+            specialty: task.specialty,
+            existingFiles: currentExistingFiles,
+            workspaceManager: this.workspaceManager,
+            meta,
+            ...(preferredModel && preferredModel !== 'auto' ? { preferredModel } : {}) 
+          }
         );
 
         // Execution completed all steps successfully
@@ -629,6 +644,11 @@ class CopilotDirector {
           // Cross-file contract validation on real workspace files
           if (meta?.diskPath && fs.existsSync(meta.diskPath)) {
             const currentFiles = collectWorkspaceFilesBounded(meta.diskPath);
+            if (task.role === 'CODER' && Object.keys(currentFiles).length === 0 && !hasExistingFiles) {
+              lastError = 'CODER specialist completed without writing any files. write_file step with implementation is strictly required.';
+              logger.warn(`[CopilotDirector] Worker ${task.id} wrote 0 files on greenfield project: triggering repair`);
+              continue;
+            }
             if (Object.keys(currentFiles).length > 0) {
               const contractValidation = validateCrossFileContracts(currentFiles, {
                 existingFramework: codeStrategy?.framework || (workspacePackageJson ? 'react' : null)
@@ -895,7 +915,7 @@ class CopilotDirector {
       let algorithmVerificationOutcome = null;
 
       // ── Layer A: Algorithm Oracle Verification Path ──
-      if (classification.category === 'ALGORITHMIC_PROBLEM' || classification.isAlgorithm) {
+      if (!canonicalResolution.canonicalCase && (classification.category === 'ALGORITHMIC_PROBLEM' || classification.isAlgorithm)) {
         let oracleName = detectSupportedAlgorithmOracle(request, finalFiles);
         if (oracleName && this.algorithmVerifier && typeof this.algorithmVerifier.hasOracle === 'function' && !this.algorithmVerifier.hasOracle(oracleName)) {
           oracleName = null;
@@ -928,7 +948,7 @@ class CopilotDirector {
       // ── Layer B: Generated App Quality Gate Path ──
       let qualityGateOutcome = null;
       const isAppGeneration = Boolean(
-        classification.category === 'APPLICATION_FEATURE' &&
+        (classification.category === 'APPLICATION_FEATURE' || canonicalResolution.canonicalCase) &&
         meta?.diskPath &&
         (fs.existsSync(path.join(meta.diskPath, 'package.json')) || Object.keys(finalFiles).length >= 2)
       );
@@ -977,7 +997,7 @@ class CopilotDirector {
       }
 
       const verifier = await this.coordinator.delegate({ supervisorRunId, role: 'VERIFIER', objective: `Perform the final read-only verification gate for the requested outcome: ${request}. Inspect the current workspace state and confirm tests/build/runtime evidence where supported. Do not mutate the workspace.`, constraints: { specialty: 'verification', generatedByDirector: true }, expectedOutput: 'Final verification evidence and any remaining blockers.' });
-      const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, { runner: async () => { const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER', ...(effectiveModel && effectiveModel !== 'auto' ? { preferredModel: effectiveModel } : {}) }); return this.plannerExecutionLoop.runWithPlan(projectId, userId, verificationPlan, 0, () => Boolean(signal?.aborted), `copilot_verify_${verifier.workerRun.id}`, { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined, ...(effectiveModel && effectiveModel !== 'auto' ? { preferredModel: effectiveModel } : {}) }); } });
+      const finalVerification = await this.coordinator.startWorker(verifier.workerRun.id, { runner: async () => { const verificationPlan = await this.taskPlanner.generateVerificationPlan(request, { projectId, request, role: 'VERIFIER', existingFiles: Object.keys(finalFiles), ...(effectiveModel && effectiveModel !== 'auto' ? { preferredModel: effectiveModel } : {}) }); return this.plannerExecutionLoop.runWithPlan(projectId, userId, verificationPlan, 0, () => Boolean(signal?.aborted), `copilot_verify_${verifier.workerRun.id}`, { onEvent, permissionLevel, approvalToken: approvalToken || undefined, approvalState: approvalState || undefined, ...(effectiveModel && effectiveModel !== 'auto' ? { preferredModel: effectiveModel } : {}) }); } });
       const verificationStatus = String(finalVerification?.status || 'FAILED').toUpperCase();
       const verificationSummary = String(
         finalVerification?.summary || finalVerification?.result?.summary || finalVerification?.message || ''

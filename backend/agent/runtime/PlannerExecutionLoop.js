@@ -229,6 +229,27 @@ await this.executionController.recordObservation(step.id, 'TOOL_OUTPUT', output)
       // the run with the real reason; cancellation still maps to CANCELLED.
       let verificationError = null;
       try {
+        if (context?.workspaceManager && typeof context.workspaceManager.resolvePath === 'function') {
+          try {
+            const root = context.workspaceManager.resolvePath(projectId, '', userId);
+            const fs = require('fs');
+            if (fs.existsSync(root)) {
+              const diskFiles = [];
+              const walk = (dir, rel = '') => {
+                const entries = fs.readdirSync(dir, { withFileTypes: true });
+                for (const e of entries) {
+                  if (e.name.startsWith('.') || e.name === 'node_modules') continue;
+                  const full = require('path').join(dir, e.name);
+                  const subRel = rel ? `${rel}/${e.name}` : e.name;
+                  if (e.isDirectory()) walk(full, subRel);
+                  else diskFiles.push(subRel);
+                }
+              };
+              walk(root);
+              context.existingFiles = diskFiles;
+            }
+          } catch (_) {}
+        }
         const verifyPlan = await this.taskPlanner.generateVerificationPlan(goal, context);
         if (verifyPlan && Array.isArray(verifyPlan.steps) && verifyPlan.steps.length > 0) {
           for (const vStep of verifyPlan.steps) {
@@ -242,7 +263,7 @@ await this.executionController.recordObservation(step.id, 'TOOL_OUTPUT', output)
               cancelGuard();
               await this.executionController.recordObservation(step.id, 'VERIFICATION_OUTPUT', output);
               if (output && typeof output === 'object' && output.success === false) {
-                const reason = `${vStep.tool} did not confirm: ${output.error || output.code || 'verification evidence check failed'}`;
+                const reason = `${vStep.tool} did not confirm: ${output.error || output.message || output.code || 'verification evidence check failed'}`;
                 await this.executionController.recordVerificationResult(step.id, 'FAILED', reason, output).catch(() => {});
                 await this.executionController.completeStep(step.id, 'FAILED', null, reason).catch(() => {});
                 verificationError = reason;

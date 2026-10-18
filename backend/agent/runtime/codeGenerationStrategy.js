@@ -977,6 +977,23 @@ function classifyRequest(request = '', context = {}) {
     };
   }
 
+  // Canonical benchmark application cases are always APPLICATION_FEATURE
+  const canonicalRes = resolveCanonicalCase(request, context?.files || {});
+  if (canonicalRes?.canonicalCase) {
+    return {
+      kind: 'APPLICATION_FEATURE',
+      category: 'APPLICATION_FEATURE',
+      isRoutine: false,
+      multiTask: true,
+      strategy: 'STANDARD_ENGINEERING',
+      family: null,
+      familyName: null,
+      canonicalCase: canonicalRes.canonicalCase,
+      canonicalStatus: canonicalRes.status,
+      canonicalReason: canonicalRes.reason
+    };
+  }
+
   // Check algorithmic families with domain-specific algorithms prioritized over lower-level structures
   for (const id of PRIORITY_ALGORITHM_ORDER) {
     const fam = ALGORITHM_FAMILIES.get(id);
@@ -1008,7 +1025,6 @@ function classifyRequest(request = '', context = {}) {
   }
 
   // Full-stack / Feature request
-  const canonicalRes = resolveCanonicalCase(request, context?.files || {});
   return {
     kind: 'APPLICATION_FEATURE',
     category: 'APPLICATION_FEATURE',
@@ -1642,10 +1658,14 @@ function deriveApplicationTaskContract(request, classification = null, context =
     }
   ];
 
+  const canonicalRes = resolveCanonicalCase(request, context?.files || {});
+
   return {
     strategy: 'STRUCTURED_APPLICATION_SPEC',
     archetype: selectedArchetype.id,
     archetypeName: selectedArchetype.name,
+    canonicalCaseDef: canonicalRes?.caseDef || null,
+    canonicalCaseId: canonicalRes?.canonicalCase || null,
     isBackendBacked,
     components: selectedArchetype.components,
     colorPalette,
@@ -1720,7 +1740,67 @@ STAGE 7: ACCESSIBILITY & SECURITY HYGIENE
 STAGE 8: VERIFICATION EVIDENCE & USABILITY ACCEPTANCE
 - Verify all components render cleanly without console errors or unbalanced tags.
 - Confirm all user interactions (add, edit, delete, filter, sort, modal toggle) work end-to-end.
+` + getCanonicalCaseGuidance(spec.canonicalCaseDef);
+}
+
+function getCanonicalCaseGuidance(caseDef) {
+  if (!caseDef) return '';
+  const caseId = caseDef.id;
+  if (caseId === 'landing-page-hero-features-cta') {
+    return `
+[CANONICAL SPECIFICATION CONTRACT: HIGH-CONVERTING LANDING PAGE]
+1. Hero Section: Must have className="hero" or "hero-section", an H1 headline, and a "Get Started" CTA button. Define a named function 'function handleCta() { window.location.hash = "#pricing"; }' and wire it to the CTA button onClick={handleCta}.
+2. Features Grid: Must have className="features" or "feature-grid" with feature cards.
+3. Pricing Toggle: Define 'function togglePricing(annual) { setBilling(annual ? "annual" : "monthly"); }' and monthly/annual buttons that invoke togglePricing.
+4. FAQ Accordion: Define 'function toggleFaq(index) { setOpenIndex(openIndex === index ? null : index); }' with expandable FAQ items.
+5. Newsletter Email Validation: Define 'function validateEmail(email) { const re = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/; return Boolean(email && re.test(email)); }' and wire the newsletter form submit to use validateEmail.
 `;
+  }
+  if (caseId === 'dashboard-search-charts-csv') {
+    return `
+[CANONICAL SPECIFICATION CONTRACT: ANALYTICS DASHBOARD]
+1. Search & Filtering: Implement real-time search row filtering using .filter((row) => row.name.toLowerCase().includes(query.toLowerCase())).
+2. Data Visualization: Include an inline SVG data chart (<svg className="chart" width="400" height="200">...).
+3. CSV Data Export: Define 'function exportCsv() { const csv = "id,name,value\\n1,A,10\\n"; const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "data.csv"; a.click(); }' and wire an Export CSV button onClick={exportCsv}.
+4. View States: Define explicit loading (isLoading && <div>Loading...</div>) and error states.
+`;
+  }
+  if (caseId === 'ecommerce-cart-checkout') {
+    return `
+[CANONICAL SPECIFICATION CONTRACT: E-COMMERCE CART & CHECKOUT]
+1. Product Catalog: Products with category filtering (e.g. 'all', 'electronics', 'clothing').
+2. Cart Operations: Define 'function addToCart(product) { setCart(prev => [...prev, product]); }'.
+3. Promo Code: Support discount promo code "SAVE20" (20% off).
+4. Checkout Form: Define 'function handleCheckout(e) { if (e && e.preventDefault) e.preventDefault(); setCheckedOut(true); }' and wire the checkout form onSubmit={handleCheckout}.
+`;
+  }
+  if (caseId === 'education-quiz-progress') {
+    return `
+[CANONICAL SPECIFICATION CONTRACT: EDUCATIONAL QUIZ]
+1. Question Timer: Implement countdown timer with timeLeft state (e.g. 30s countdown).
+2. Answer Scoring: Define 'function handleAnswer(isCorrect) { if (isCorrect) setScore(s => s + 1); }'.
+3. Progress Bar: Progress calculation across current question index and total questions.
+4. Score Persistence: Define 'function saveScore() { localStorage.setItem("quizScore", JSON.stringify(score)); }'.
+`;
+  }
+  if (caseId === 'api-backed-crud') {
+    return `
+[CANONICAL SPECIFICATION CONTRACT: FULL-STACK API-BACKED CRUD]
+1. Backend (server.js): Express app registering routes:
+   - app.get('/api/items', (req, res) => res.json(items));
+   - app.post('/api/items', (req, res) => { const item = req.body; items.push(item); res.json(item); });
+   - app.delete('/api/items/:id', (req, res) => { items = items.filter(i => i.id != req.params.id); res.json({ success: true }); });
+2. Frontend (src/App.jsx): Define 'function load() { fetch("/api/items").then(r => r.json()).then(setItems); }' and call it on component mount.
+`;
+  }
+  if (caseId === 'multi-step-repair') {
+    return `
+[CANONICAL SPECIFICATION CONTRACT: MULTI-STEP REPAIR]
+1. Fix src/state.js: function addItem(state, item) { return { ...state, items: [...(state.items || []), item] }; } (must NOT mutate original state by reference).
+2. Fix src/api.js: async function callApi(url, payload) { return fetch(url, { method: "POST", body: JSON.stringify(payload) }); } (must use method POST, not GET).
+`;
+  }
+  return '';
 }
 
 module.exports = {

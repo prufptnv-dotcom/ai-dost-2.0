@@ -64,7 +64,9 @@ class ApplyDiffTool extends Tool {
         message: `Successfully applied diff to ${relativePath} (${diffResult.strategy})`,
         strategy: diffResult.strategy,
         confidence: diffResult.confidence,
-        changedFile: relativePath
+        changedFile: relativePath,
+        newContent,
+        content: newContent
       };
     } catch (e) {
       try {

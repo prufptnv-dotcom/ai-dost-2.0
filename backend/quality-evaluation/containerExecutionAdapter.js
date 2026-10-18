@@ -63,7 +63,7 @@ class ContainerExecutionAdapter {
     for (const bin of candidates) {
       try {
         const res = spawnSync(bin, ['info'], {
-          timeout: 2500,
+          timeout: 10000,
           stdio: 'pipe',
           windowsHide: true
         });

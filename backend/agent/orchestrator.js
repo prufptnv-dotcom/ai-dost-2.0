@@ -350,28 +350,24 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   // Phase 1: Existing-file write enforcement
   // P2 #59: parameters.allowOverwrite was LLM-controlled (bypassable) — removed.
   if (exists) {
-            // P12.8 (E2E run #14): model read the file and still sent an
-            // apply_diff SEARCH from its imagination — embed the REAL bytes
-            // (disk first, else in-mem) so the repair planner copies SEARCH
-            // verbatim instead of guessing (same P12.5 pattern as diffEngine).
-            let currentExcerpt = '';
+            let current = null;
             try {
-              const MAXC = 8000;
-              let current = null;
               if (existsOnDisk) current = fs.readFileSync(filePath, 'utf-8');
               else if (inMem && typeof inMem.content === 'string') current = inMem.content;
-              if (current !== null) {
-                currentExcerpt = current.length > MAXC
-                  ? `${current.slice(0, 6000)}\n… [truncated — file is ${current.length} chars — use a SMALLER unique SEARCH block] …\n${current.slice(-400)}`
-                  : current;
-              }
             } catch (_) {}
-            return {
-              success: false,
-              code: 'WRITE_FORBIDDEN_ON_EXISTING',
-              error: `Full-file replacement is forbidden for existing project files. Use apply_diff with a validated SEARCH/REPLACE patch on ${parameters.path}. read_file it first: SEARCH must be text that is ACTUALLY in the file (for a whole-file rewrite, SEARCH = the file's entire current content), REPLACE = your new text.` +
-                (currentExcerpt ? `\n--- CURRENT FILE CONTENT ---\n${currentExcerpt}\n--- END FILE CONTENT ---` : '')
-            };
+            if (current !== null && current.length > 0) {
+              let currentExcerpt = '';
+              const MAXC = 8000;
+              currentExcerpt = current.length > MAXC
+                ? `${current.slice(0, 6000)}\n… [truncated — file is ${current.length} chars — use a SMALLER unique SEARCH block] …\n${current.slice(-400)}`
+                : current;
+              return {
+                success: false,
+                code: 'WRITE_FORBIDDEN_ON_EXISTING',
+                error: `Full-file replacement is forbidden for existing project files. Use apply_diff with a validated SEARCH/REPLACE patch on ${parameters.path}. read_file it first: SEARCH must be text that is ACTUALLY in the file (for a whole-file rewrite, SEARCH = the file's entire current content), REPLACE = your new text.` +
+                  (currentExcerpt ? `\n--- CURRENT FILE CONTENT ---\n${currentExcerpt}\n--- END FILE CONTENT ---` : '')
+              };
+            }
           }
 
           const guard = deterministicCodeGuard.guard(parameters.path, parameters.content || '');

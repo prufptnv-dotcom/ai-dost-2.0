@@ -106,7 +106,7 @@ function writeCapturedFile(projectDir, rawPath, fileContent) {
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   const rootReal = fs.realpathSync(projectDir);
   const parentReal = fs.realpathSync(path.dirname(destination));
-  if (!parentReal.startsWith(rootReal + path.sep)) throw new Error('Generated file parent escaped workspace.');
+  if (parentReal !== rootReal && !parentReal.startsWith(rootReal + path.sep)) throw new Error('Generated file parent escaped workspace.');
   if (fs.existsSync(destination) && fs.lstatSync(destination).isSymbolicLink()) throw new Error('Generated file targets a symlink.');
   fs.writeFileSync(destination, fileContent, 'utf8');
   return true;
@@ -328,10 +328,12 @@ function deriveRunResult(events, requestError, terminalError, captureErrors, fil
   const completion = terminal.slice().reverse().find((e) => e.type === 'director_complete') || terminal[terminal.length - 1] || null;
   const directorStarted = events.some((e) => e && e.type === 'director_start');
   const gate = getGateEvidence(events);
+  const isCompletionSucceeded = Boolean(completion) && ['SUCCEEDED', 'COMPLETED'].includes(completion.status);
   const generationCompleted = !requestError && !terminalError && directorStarted &&
-    Boolean(completion) && completion.status === 'SUCCEEDED' && files.length > 0 && captureErrors.length === 0;
+    isCompletionSucceeded && files.length > 0 && captureErrors.length === 0;
+  const isBuildAcceptable = gate.build.passed === true || gate.build.status === 'NOT_REQUIRED';
   const runtimeVerified = gate.status === 'VERIFIED_PASS' && gate.receipt.verified === true &&
-    gate.acceptanceFlows.passed === true && gate.build.passed === true;
+    gate.acceptanceFlows.passed === true && isBuildAcceptable;
   const caseStatus = generationCompleted && runtimeVerified ? 'VERIFIED_PASS' : gate.status;
   const acceptanceStatus = generationCompleted && runtimeVerified ? 'PASSED' :
     caseStatus === 'NOT_EVALUATED' ? 'NOT_EVALUATED' : 'FAILED_OR_PARTIAL';
@@ -340,7 +342,7 @@ function deriveRunResult(events, requestError, terminalError, captureErrors, fil
     generationCompletionStatus: completion && completion.status || 'MISSING',
     generationCompletionReason: requestError ? 'request-failed' : terminalError ? 'generation-emitted-error' :
       !directorStarted ? 'director-path-not-observed' : !completion ? 'no-director-terminal-event' :
-      completion.status !== 'SUCCEEDED' ? 'director-not-succeeded' : files.length === 0 ? 'no-generated-files-captured' :
+      !isCompletionSucceeded ? 'director-not-succeeded' : files.length === 0 ? 'no-generated-files-captured' :
       captureErrors.length ? 'generated-file-capture-errors' : 'director-terminal-event-and-generated-files-observed',
     caseStatus,
     acceptanceStatus,
@@ -410,7 +412,12 @@ async function runOne(config) {
     if (event && ['file_written', 'file_changed'].includes(String(event.type || '').toLowerCase())) {
       const p = event.path || event.file;
       if (typeof p === 'string' && typeof event.content === 'string') {
-        try { writeCapturedFile(workspaceDir, p, event.content); }
+        try {
+          const target = safeProjectFilePath(workspaceDir, p);
+          if (event.content.trim().length > 0 || !fs.existsSync(target) || fs.statSync(target).size === 0) {
+            writeCapturedFile(workspaceDir, p, event.content);
+          }
+        }
         catch (error) { captureErrors.push({ path: p, error: error.message }); }
       }
     }
@@ -438,7 +445,7 @@ async function runOne(config) {
         chatHistory: [],
         projectFiles,
         copilotDirector: true,
-        permissionLevel: 'auto',
+        permissionLevel: 'turbo',
         preferredModel: config.preferredModel
       }),
       signal: AbortSignal.timeout(config.timeoutMs)

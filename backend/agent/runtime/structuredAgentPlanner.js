@@ -217,12 +217,17 @@ function plannerPrompt(kind, intent, context, tools, extra = '') {
     String.raw`CRITICAL: Return strictly valid JSON. Inside string values (such as "content"), properly escape all double quotes with \" and newlines with \n. Do not include raw newlines inside JSON string literals.`,
     'Every tool must be selected ONLY from the supplied tool catalog. Never invent a tool name.',
     kind === 'verification'
-      ? 'Verification must be read-only and must not repeat destructive or mutating actions. Prefer inspection, retrieval, status, search, or read tools.'
+      ? [
+        'VERIFICATION RULES (strict):',
+        'Verification must be read-only and must not repeat destructive or mutating actions. Prefer inspection, retrieval, status, search, or read tools.',
+        'CRITICAL FILE BOUNDARY: When planning read_file, you must ONLY read files that are explicitly listed in the AUTHORIZED CONTEXT "existingFiles". If a file is NOT in "existingFiles", it does NOT exist — NEVER plan read_file for it, as reading a non-existent file causes verification to fail immediately. To check directory structure, use list_directory.'
+      ].join('\n')
       : 'Plan the minimum safe sequence needed to fulfill the user objective.',
     kind === 'verification'
       ? ''
       : [
         'FILE RULES (strict):',
+        '- DIRECT IMPLEMENTATION MANDATE: When the objective asks to build, create, or implement an application, UI, or feature, you MUST generate "write_file" steps containing the complete, working source code for all required files immediately. NEVER return only inspection steps (like list_directory or read_file) for coding tasks.',
         '- CODE-FIRST RULE: When building, modifying, or creating websites, apps, portfolios, UIs, or features, you MUST write executable code files (e.g. "src/App.jsx", "App.jsx", "index.html", "src/index.css"). NEVER write markdown blueprint/doc files (like docs/architecture.md) instead of real code!',
         '- write_file CREATES a new file only. If the file already exists, write_file is REJECTED — never plan to overwrite an existing file with write_file.',
         '- If the AUTHORIZED CONTEXT lists "existingFiles": paths IN that list ALREADY EXIST — never plan write_file for them (rejected WRITE_FORBIDDEN_ON_EXISTING; to change one, read_file it first, then apply_diff with verbatim SEARCH). Paths NOT in the list do NOT exist yet — apply_diff there fails (file not found), so create those with write_file.',
